@@ -8,21 +8,6 @@ import {
   makeQualifiedDecorator,
 } from "./fixtures/symbol"
 
-/**
- * What the file's import edges say about a decorator's written name, and what the
- * classifier does with it.
- *
- * Two directions are at stake and they pull opposite ways. A decorator renamed on import
- * (`import { Controller as Ctrl }`) is a NestJS boundary written under a name that is not
- * in any table, and matching the written name alone loses it. A decorator that shares a
- * name with NestJS vocabulary but came from a competing library is not a NestJS boundary
- * at all, and matching the written name alone claims it.
- *
- * The classification is keyed on the name the binding was **imported** under; the
- * `decoratorBoundaries` map is keyed on the name the source **wrote**, because that is what
- * the core matches against `Decorator.name` when it folds the result back in.
- */
-
 const NEST = "@nestjs/common"
 
 describe("aliased decorators resolve through the import edge", () => {
@@ -85,8 +70,6 @@ describe("aliased decorators resolve through the import edge", () => {
   })
 
   it("takes a method's classification away the same way", () => {
-    // The class case above pins the loss on the class side. `Controller` is not method
-    // vocabulary, so resolving `@Get` to it drops the route rather than renaming it.
     const result = classifyNestjsSymbol(
       makeCandidate({ kind: "method", name: "C.list", decorators: [makeDecorator("Get")] }),
       makeCtx({ imports: [makeImport(NEST, ["Controller as Get"])] }),
@@ -194,9 +177,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("reads a namespace import through the decorator's own receiver", () => {
-    // `import * as nest from "@nestjs/common"` + `@nest.Controller()`. The edge binds the
-    // module object rather than any name on it, and `Decorator.qualifier` is what ties the
-    // leaf back to it. Right answer, and now for the reason rather than by default.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -254,8 +234,6 @@ describe("provenance decides how far the classification is trusted", () => {
       undefined,
     ],
   ] as const)("takes a method's confidence from the route slot, not the handler slot (%s)", (_label, decorators, imports, confidence) => {
-    // `classifyMethod` fills two winner slots and the route one decides the answer, so the
-    // handler's provenance must not reach the result in either direction.
     const result = classifyNestjsSymbol(
       makeCandidate({ kind: "method", name: "C.list", decorators: [...decorators] }),
       makeCtx({ imports: [...imports] }),
@@ -267,9 +245,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("downgrades a namespace import from a competing library, as the named form does", () => {
-    // `import * as rc from "routing-controllers"` + `@rc.Controller()`. This was the reported
-    // bug: with no qualifier to read, the decorator fell into the unbound tier and a competing
-    // library was trusted further than a named import of the same decorator.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -285,9 +260,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("reads the receiver rather than a same-named binding from somewhere else", () => {
-    // `import { Controller } from "@nestjs/common"` alongside `import * as tsed from
-    // "@tsed/common"`, with `@tsed.Controller()` written. The leaf is a property of the
-    // module object, not the local binding, so the NestJS named import says nothing about it.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -306,8 +278,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("resolves a nested receiver on its first segment, which is the part in scope", () => {
-    // `@ns.deep.Controller()` reaches scope as `ns`; the rest addresses properties of the
-    // module object, which no edge describes.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -322,8 +292,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("leaves a receiver no edge mentions in the unbound tier", () => {
-    // `@decorators.Controller()` off a locally built object, or a file scanned without its
-    // imports. Nothing says where it came from, which is the tier that reads the written name.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -358,9 +326,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("ignores a namespace edge that binds nothing in scope", () => {
-    // `import "@nestjs/common"` for its side effects, or `export * from` — `symbols` is `"*"`
-    // with no `namespaceBinding`, so there is no receiver any decorator could be written
-    // through and the edge must not bind the empty string.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -374,9 +339,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("reads a receiver bound by a default import, as it reads a namespace one", () => {
-    // `import nest from "@nestjs/common"` binds the module object too, and the language
-    // plugin reports it as `symbols: ["nest"]` with no `namespaceBinding`. Reading only the
-    // namespace index would leave the same disclosure in the unbound tier one spelling over.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -390,8 +352,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("downgrades a receiver a competing library's default import bound", () => {
-    // The half of the inversion a namespace-only lookup left open: this used to come back
-    // `high`, above the `medium` the same decorator gets when imported by name.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -405,9 +365,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("prefers the namespace binding when both kinds of edge bind the receiver", () => {
-    // A file that binds `nest` twice does not compile, but re-exports reach the edge list
-    // without binding, so the two indexes can disagree. The namespace edge is consulted
-    // first, which keeps the answer independent of which map a given spelling landed in.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -425,9 +382,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("does not read a qualified decorator's leaf through the named-import index", () => {
-    // The file imports `Controller` by name from NestJS and writes `@tsed.Controller()`.
-    // Resolving the leaf would call that a NestJS decorator; only the receiver may be read,
-    // and nothing binds `tsed`, so the written name stands.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -441,8 +395,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("throws on a namespace edge whose binding is present but empty", () => {
-    // Absent means the edge binds nothing; empty is not a name at all, and skipping it would
-    // hand the decorator to the most trusting tier with nothing recording the skip.
     expect(() =>
       classifyNestjsSymbol(
         makeCandidate({
@@ -459,8 +411,6 @@ describe("provenance decides how far the classification is trusted", () => {
     ["", "empty"],
     [".a", "leading dot"],
   ])("throws on a qualifier of %s (%s), which the schema forbids", (qualifier) => {
-    // Both would fall through to a lookup that misses every key and answers `high`: the
-    // empty one by taking the bare-name path, the dotted one because its head segment is "".
     expect(() =>
       classifyNestjsSymbol(
         makeCandidate({
@@ -474,9 +424,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("keys a boundary on the written form, so a shared leaf does not flag both decorators", () => {
-    // `@Ctrl()` resolves through the alias and classifies; `@x.Ctrl()` resolves on its
-    // receiver, canonicalises to `Ctrl` and matches nothing. They share a leaf, so a
-    // leaf-keyed record would put `boundary: true` on the one that was never classified.
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -490,9 +437,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("takes a method's confidence from the slot that decided it, across the two forms", () => {
-    // One qualified and one bare decorator landing in different tiers. The route is decided
-    // by the first recognized HTTP verb in source order, and the confidence follows it —
-    // not the handler decorator that resolved differently.
     const imports = [
       { ...makeImport("@tsed/common", "*", 1), namespaceBinding: "tsed" },
       makeImport(NEST, ["UseGuards"], 2),
@@ -530,8 +474,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("resolves each file against its own edges when one plugin classifies many files", () => {
-    // The index is derived from `ctx.imports`; deriving it once per file must not let one
-    // file's answer stand in for another's.
     const candidate = makeCandidate({
       kind: "class",
       name: "C",
@@ -557,8 +499,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("refuses a broken edge sitting behind one that would have answered", () => {
-    // The whole list is indexed before any name is resolved, so the throw cannot depend on
-    // where the broken edge sits relative to the one that satisfies the lookup.
     expect(() =>
       classifyNestjsSymbol(
         makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Controller")] }),
@@ -571,9 +511,6 @@ describe("provenance decides how far the classification is trusted", () => {
     [" as Ctrl", "an empty exported half"],
     ["Controller as ", "an empty local half"],
   ])("refuses a symbols entry with %s", (entry) => {
-    // Either half empty means a canonical name that matches no table, which would drop the
-    // classification silently — the failure `assertDecoratorName` already refuses to allow
-    // from the written-name side.
     expect(() =>
       classifyNestjsSymbol(
         makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Ctrl")] }),
@@ -583,8 +520,6 @@ describe("provenance decides how far the classification is trusted", () => {
   })
 
   it("does not read the import list for a Symbol that carries no decorators", () => {
-    // The empty-source guard is the observable proxy: a broken edge is only reached when
-    // there is a name to resolve, so a decorator-less Symbol must pass through it untouched.
     const result = classifyNestjsSymbol(
       makeCandidate({ kind: "class", name: "Plain", decorators: [] }),
       makeCtx({ imports: [makeImport("", ["Controller"])] }),

@@ -35,8 +35,6 @@ export {
   fitsInline,
   INLINE_CODE_MAX_LENGTH,
   inlineCode,
-  inlineCodePath,
-  inlineCodeValue,
   isSymbolIdEndpoint,
   orderFilesAscending,
   orderSymbolsWithinFile,

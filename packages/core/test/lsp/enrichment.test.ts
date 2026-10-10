@@ -68,9 +68,6 @@ describe("LSP enrichment", () => {
   })
 
   it("opens the file by the name on disk, not by the Document's spelling of it", async () => {
-    // A `file://` URI is a filesystem address. `didOpen` pushes the content, but a server is
-    // free to read the project itself, and one told about a URI nothing resolves to answers
-    // about a document it invented — or drops the file and takes the language down with it.
     const documentPath = "src/caf\u00e9.ts"
     const onDisk = "src/caf\u0065\u0301.ts"
     const cls = makeClassSymbol(documentPath, "C", 1)
@@ -121,10 +118,6 @@ describe("LSP enrichment", () => {
     expect(hint?.kind).toBe("super")
     expect(hint?.targetSymbolId).toBe("ts:src/a.ts#Base.foo")
 
-    // Round-trip through the consumer, as the `this` case above does. The
-    // resolver gained a `kind` gate, and a producer that files `super` under a
-    // key the resolver reads as `this` would otherwise show up as nothing at
-    // all: no edge, no diagnostic saying why.
     const result = resolveCallGraph({
       symbols: enrichment.symbols,
       importsByFile: new Map(),

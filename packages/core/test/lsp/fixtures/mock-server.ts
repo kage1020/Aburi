@@ -6,20 +6,8 @@ export type MockHandler = (
   params: unknown,
 ) => unknown | LspFailure | typeof LSP_TIMEOUT | Promise<unknown | LspFailure | typeof LSP_TIMEOUT>
 
-/**
- * Outcome of a `didOpen` / `didClose` notification, decided per file. Returning
- * a failure models a write that timed out or was rejected; the callback also
- * doubles as the place to spend an injected clock (`EnrichmentInput.now`) the
- * way a slow real notification would spend wall time, without sleeping.
- */
 export type MockNotificationOutcome = (uri: string) => LspFailure | null
 
-/**
- * In-memory `LspClient` mock. Tests register handlers per LSP method and the
- * mock records every request it received so callers can assert on request
- * counts, order, and per-call params. No child process is spawned — perfect
- * for deterministic tests that must run identically in CI.
- */
 export class MockLspClient implements LspClient {
   readonly requests: Array<{ method: string; params: unknown }> = []
   readonly openFiles: string[] = []
@@ -125,11 +113,6 @@ export class MockLspClient implements LspClient {
   }
 }
 
-/**
- * Factory that returns a fresh `MockLspClient` per language. Tests may capture
- * the returned clients via the `onClient` callback to inspect / configure them
- * further after they are handed to `enrichWithLsp`.
- */
 export function mockServerFactory(
   onClient: (language: LanguageId, client: MockLspClient) => void,
 ): ServerFactory {
@@ -140,9 +123,6 @@ export function mockServerFactory(
   }
 }
 
-/**
- * Factory that always returns null — simulates server-missing scenario.
- */
 export function nullServerFactory(): ServerFactory {
   return () => null
 }

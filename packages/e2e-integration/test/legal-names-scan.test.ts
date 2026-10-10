@@ -2,16 +2,6 @@ import { describe, expect, it } from "vitest"
 import { scanFixture } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A destructuring declaration, a non-ASCII identifier, a computed member name and a quoted or
- * numeric one each fed something that is not a name into the Symbol-id builder, which threw —
- * and the throw was caught at the per-file boundary, so the file was skipped as
- * `extraction-failed` and every Symbol in it went too.
- *
- * The unit tests pin what extraction now produces. What these pin is the half only a scan can
- * see: the file reaches the IR at all, and `skipped` is empty.
- */
-
 const workspace = useScratchWorkspace("names")
 
 async function scanSources(files: Record<string, string>) {
@@ -63,8 +53,6 @@ describe("a file that names things legally keeps its Symbols", () => {
   })
 
   it("no longer costs an unrelated file its place in the run", async () => {
-    // The state this replaces: `bad.ts` skipped as `extraction-failed`, `ok.ts` the only
-    // Symbol in the IR, and the run exiting non-zero under a field that means a plugin bug.
     const { ids, skipped } = await scanSources({
       "bad.ts": "export const { GET, POST } = handlers\n",
       "ok.ts": "export function ok() {}\n",

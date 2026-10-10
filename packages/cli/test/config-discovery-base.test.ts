@@ -6,20 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, runCli, runScan } from "../src"
 import { MemStream } from "./fixtures"
 
-/**
- * Two anchors that are deliberately different, and the consequences of that.
- *
- * `docs/reference/cli.md` puts `aburi.jsonc` / `aburi.json` discovery at "walking up
- * from `cwd`", so a config in the current package wins over one in an ancestor. Everything
- * *inside* the config — `ignore`, `components[].roots`, relative plugin refs — resolves
- * against the marker-detected workspace root instead, and so does the file discovery the
- * scan performs. A package-local config therefore describes paths relative to a directory
- * above itself, and its scan still covers the whole workspace.
- */
-
 let mono = ""
 
-/** `mono/` is the workspace root (pnpm marker); `mono/pkgs/app` is a package inside it. */
 async function makeMonorepo(): Promise<string> {
   await writeFile(resolve(mono, "pnpm-workspace.yaml"), "packages:\n  - 'pkgs/*'\n", "utf8")
   await writeFile(
@@ -37,13 +25,8 @@ async function makeMonorepo(): Promise<string> {
   const app = resolve(mono, "pkgs/app")
   await mkdir(resolve(app, "src"), { recursive: true })
   await writeFile(resolve(app, "package.json"), JSON.stringify({ name: "app" }), "utf8")
-  // A non-empty body: an empty one is Category-B boilerplate and gets dropped, which
-  // would make "zero kept symbols" ambiguous between "config not found" and "dropped".
   await writeFile(resolve(app, "src/a.ts"), "export function alpha() { return 1 }\n", "utf8")
 
-  // `detectWorkspaceRoot` takes the *outermost* marker, so a `.git` or `package.json` in an
-  // ancestor of the temp directory would silently become the root and these assertions
-  // would be measuring the wrong tree.
   expect(await detectWorkspaceRoot({ cwd: app })).toBe(mono)
   return app
 }
@@ -95,9 +78,6 @@ describe("config discovery base", () => {
 
     const report = await runScan({ cwd: app, outputDir: resolve(app, "out"), format: "json" })
 
-    // Proof by presence: both files are valid and both load the same plugin, so only the
-    // reported source distinguishes them. Asserting "zero symbols" from a deliberately
-    // plugin-less nearer config would not — an autodetect fallback yields zero as well.
     expect(report.configSource).toBe(resolve(app, "aburi.json"))
   })
 
@@ -113,9 +93,6 @@ describe("config discovery base", () => {
 describe("workspace root stays the base for everything inside the config", () => {
   it("resolves a package-local `ignore` glob against the workspace root, not the package", async () => {
     const app = await makeMonorepo()
-    // Written by someone standing in `pkgs/app` who means `pkgs/app/src`. It resolves
-    // against `mono/`, so it drops `mono/src/root-only.ts` and keeps `pkgs/app/src/a.ts` —
-    // the inverse of the intent, which is why the CLI warns when the two directories differ.
     await writeConfig(app, { ignore: ["src/**"] })
 
     const report = await runScan({ cwd: app, outputDir: resolve(app, "out"), format: "json" })
@@ -130,7 +107,6 @@ describe("workspace root stays the base for everything inside the config", () =>
 
     const report = await runScan({ cwd: app, outputDir: resolve(app, "out"), format: "json" })
 
-    // `mono/src/root-only.ts` is outside `pkgs/app` and still contributes a Symbol.
     expect(report.keptSymbols).toBe(2)
   })
 
@@ -189,8 +165,6 @@ describe("--config relative paths", () => {
   it("names the cwd-relative path it tried when the file does not exist", async () => {
     const app = await makeMonorepo()
 
-    // The resolved path is the assertion: anchoring to the workspace root instead would
-    // report `mono/missing.json`, a file the caller never named.
     await expect(
       runScan({ cwd: app, configPath: "./missing.json", outputDir: resolve(app, "out") }),
     ).rejects.toThrow(resolve(app, "missing.json"))

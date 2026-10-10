@@ -3,20 +3,6 @@ import type { Component, IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, DiffError } from "../src"
 
-/**
- * `buildDiff` is public API and ran no integrity check, so an IR a caller assembled in memory
- * reached the matcher unverified — this file pins the gate that closed that.
- *
- * Measured beforehand, one field deleted at a time from a well-formed pair: `fingerprint` and
- * `source` crashed `classifyStatus`, `rules` / `effects` / `calls` / `decorators` crashed
- * `computeSymbolDelta`, `components[].roots` crashed `diffComponents`, and `stats` crashed
- * `dependencySideView` — each a `TypeError` naming neither the record nor the field.
- *
- * The gate is invariant #20 alone (`checkDocumentShape`), not the whole checker. It
- * establishes what the `IR` brand asserts; the semantic rules are about a Document whose
- * answer the diff does not depend on, and running them would refuse an IR the diff can read.
- */
-
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
 /** A pair whose Symbol genuinely changed, so the delta path — where four of the crashes lived — runs. */
@@ -63,8 +49,6 @@ describe("a Symbol missing a field the diff reads is named, not crashed on", () 
     const error = caught(base, withoutSymbolField(field))
 
     expect(error.code).toBe("ir-shape-invalid")
-    // The record and the field are the whole point: the `TypeError` each of these used to
-    // raise named neither, and a caller holding a thousand Symbols had nowhere to look.
     expect(error.message).toContain("headIR.symbols[0]")
     expect(error.message).toContain(`"${field}"`)
   })
@@ -75,9 +59,6 @@ describe("a Symbol missing a field the diff reads is named, not crashed on", () 
   ])("accepts an absent %s, which the schema makes optional", (field) => {
     const { base } = changedPair()
 
-    // The gate follows the schema's own optionality rather than requiring every key. These
-    // two are `optional(nullable(...))` in `aburi.ir.v1`, so absent is a document a writer
-    // predating the field would produce, and the diff reads both through a null check.
     expect(() => diffOf(base, withoutSymbolField(field))).not.toThrow()
   })
 
@@ -103,10 +84,6 @@ describe("a field the diff never reads is refused too, and that is deliberate", 
     const { base } = changedPair()
     const error = caught(base, withoutSymbolField(field))
 
-    // A widening: each of these used to produce an answer, because nothing in the matcher
-    // happened to dereference it. What the gate establishes is what the `IR` brand asserts
-    // rather than what today's matcher touches — scoping it to the latter would move with
-    // every change to the matcher and leave a caller's IR conditionally valid.
     expect(error.code).toBe("ir-shape-invalid")
     expect(error.message).toContain(`"${field}"`)
   })
@@ -164,9 +141,6 @@ describe("the malformed entry is located, not merely reported", () => {
     // Which of the three is quoted is the spec's field order, not this test's business.
     expect(error.message).toMatch(/"(source|calls|rules)" is absent/)
     expect(error.message).toContain("2 more")
-    // A count is enough to know how much is left and not enough to act on. `violations`
-    // carries every breach, so a caller repairing a hand-assembled Document does not run the
-    // diff once per field to find the next one.
     expect(error.violations?.map((v) => v.subject)).toEqual([
       "headIR.symbols[0]",
       "headIR.symbols[0]",
@@ -181,17 +155,12 @@ describe("the malformed entry is located, not merely reported", () => {
     delete symbol.source
     const error = caught(makeIR({ symbols: [symbol as unknown as IRSymbol] }), makeIR())
 
-    // `checkDocumentShape` writes `symbols[0]`; which document that is comes from here, and
-    // an array a caller reads without the message is where it matters most.
     expect(error.violations?.[0]?.subject).toBe("baseIR.symbols[0]")
   })
 })
 
 describe("the Document's own records are gated too, not just the collections", () => {
   it("refuses a minimal hand-assembled IR carrying only the three collections", () => {
-    // The shape someone reaches for after their first crash: `$schema` plus the arrays the
-    // matcher reads. It is not an `aburi.ir.v1` Document, and `dependencySideView` reads
-    // `stats.skippedFiles` off every side unconditionally.
     const minimal = {
       $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
       symbols: [],
@@ -217,8 +186,6 @@ describe("the Document's own records are gated too, not just the collections", (
     delete broken[field]
     const error = caught(base, broken as unknown as IR)
 
-    // A top-level breach has no collection and no index, so the subject is the side alone
-    // — `headIR: "stats" is absent`, not `headIR.document: …`.
     expect(error.message).toBe(`headIR: "${field}" is absent, not an object.`)
   })
 
@@ -227,8 +194,6 @@ describe("the Document's own records are gated too, not just the collections", (
     const stats = { ...head.stats, effectPropagation: { sccCount: 0 } }
     const error = caught(base, { ...head, stats } as unknown as IR)
 
-    // The only path that exercises stripping the `document.` prefix out of the middle of a
-    // subject rather than off the whole of it.
     expect(error.message).toContain("headIR.stats.effectPropagation:")
     expect(error.message).not.toContain("document")
   })
@@ -237,8 +202,6 @@ describe("the Document's own records are gated too, not just the collections", (
     const { base, head } = changedPair()
     const error = caught({ ...base, $schema: "" } as unknown as IR, head)
 
-    // Two Documents that both say "" agree with each other, so `schema-mismatch` never fires
-    // on the pair. One code, one message shape.
     expect(error.code).toBe("ir-shape-invalid")
     expect(error.message).toBe(`baseIR: "$schema" is empty, not a schema URL.`)
   })
@@ -250,10 +213,6 @@ describe("a Symbol with no id is the caller's fault, and says so", () => {
     delete symbol.id
     const error = caught(makeIR({ symbols: [symbol as unknown as IRSymbol] }), makeIR())
 
-    // `slice-invariant-violated` means Aburi produced a bad Slice, and the CLI prints it as
-    // "a bug in Aburi, not in your configuration". A Slice derived from a caller's malformed
-    // Symbol is not that. The identity scan already closed this path; the gate now closes it
-    // one step earlier, and this pins that neither reopens.
     expect(error.code).toBe("ir-shape-invalid")
     expect(error.message).toContain("symbols[0]")
   })
@@ -261,9 +220,6 @@ describe("a Symbol with no id is the caller's fault, and says so", () => {
 
 describe("the gate is invariant #20, not the whole checker", () => {
   it("diffs an IR whose symbols[] is out of sort order", () => {
-    // Array ordering is a semantic invariant the CLI enforces on a Document read off disk.
-    // The diff's answer does not depend on it — stage 1 keys by id — so refusing this input
-    // would withhold an answer the matcher can give.
     const z = makeSymbol({ id: "ts:src/z.ts#f", name: "z" })
     const a = makeSymbol({ id: "ts:src/a.ts#f", name: "a" })
     const unsorted = makeIR({ symbols: [z, a] })

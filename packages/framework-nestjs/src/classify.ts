@@ -22,14 +22,6 @@ import { NESTJS_DERIVED_BY_PREFIX } from "./manifest"
 /** Shared by HTTP-verb and pattern-style handlers so one predicate finds every entry point. */
 const ROUTE_EXT_KIND = "framework:nestjs:route"
 
-/**
- * Classes look for `@Module` / `@Controller` / `@Injectable` / `@Catch`; methods for HTTP
- * verbs, pattern handlers and Guards / Interceptors / Pipes / Filters. `null` when nothing
- * matches, so a hollow classification never shadows another plugin (first-match-wins).
- * Tables are matched against the name a decorator was **imported** under, or written on the
- * module object it came through (see `./imports`); the import index is only built once a
- * decorator needs resolving.
- */
 export function classifyNestjsSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: FrameworkClassifyContext,
@@ -42,12 +34,6 @@ export function classifyNestjsSymbol(
   return classifyMethod(symbol, names)
 }
 
-/**
- * Per-file import index, memoized on the identity of the `imports` array the pipeline hands
- * every candidate of a file (`scan/pipeline.ts`). Rebuilding it per decorated Symbol would
- * charge a large single-shard file declarations × imports (`performance.md`). A fresh
- * array per call simply takes the uncached path.
- */
 const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedBindings>()
 
 function importedNamesFor(ctx: FrameworkClassifyContext): ImportedBindings {
@@ -58,12 +44,6 @@ function importedNamesFor(ctx: FrameworkClassifyContext): ImportedBindings {
   return names
 }
 
-/**
- * The first class-level decorator in source order wins the role; every recognized one still
- * flags a boundary, keyed on the **written** form (`boundaryKey`) because that is what the
- * core matches against `SymbolCandidate.decorators`. Confidence follows the winner's
- * provenance alone.
- */
 function classifyClass(
   symbol: SymbolCandidate<OpaqueAstNode>,
   names: ImportedBindings,
@@ -94,13 +74,6 @@ function classifyClass(
   }
 }
 
-/**
- * An HTTP verb or pattern decorator makes the method a route; handler-only decorators
- * (Guards / Interceptors / Pipes / Filters) flag a boundary without the route extKind.
- * `derivedBy` carries the **imported** identifier (`Get`, not a local `Fetch` alias) so the
- * closed vocabulary downstream filters read does not change with a rename; `Decorator.name`
- * keeps the written spelling. Confidence follows the slot that decided the answer.
- */
 function classifyMethod(
   symbol: SymbolCandidate<OpaqueAstNode>,
   names: ImportedBindings,
@@ -151,21 +124,6 @@ function confidenceOverride(confidence: Confidence): { confidence?: Confidence }
   return confidence === "high" ? {} : { confidence }
 }
 
-/**
- * The key a boundary flag is filed under: the decorator as the source wrote it, receiver
- * included. `@nest.Controller()` is `nest.Controller` and `@Controller()` is `Controller`.
- *
- * The leaf alone is not a key. Two decorators on one Symbol can share it while resolving
- * differently — `@Ctrl()` under `import { Controller as Ctrl }` classifies, `@x.Ctrl()`
- * canonicalises to `Ctrl` and matches nothing — and a shared key would flag both, putting
- * `boundary: true` on a decorator that was never classified. That flag is read by
- * `scan/drop-b.ts`, so it decides which Symbols survive.
- *
- * `SymbolClassification.decoratorBoundaries` has always been documented as keyed on the
- * written name; before `Decorator.qualifier` existed the leaf *was* the written name, and
- * the two only came apart when a receiver could be read. The core builds the same key from
- * `qualifier` and `name` when it folds the result back (`scan/pipeline.ts`).
- */
 function boundaryKey(decorator: Decorator): string {
   const { qualifier } = decorator
   return qualifier === undefined ? decorator.name : `${qualifier}.${decorator.name}`
@@ -180,16 +138,6 @@ function assertDecoratorName(name: string, symbolId: string): void {
   )
 }
 
-/**
- * A qualifier that cannot name anything, for the reason `assertImportBinding` gives about an
- * import's halves: an empty one is not a name, and letting it through would send a qualified
- * decorator down the bare-name path — the named-import index its own contract says it must
- * never reach. A leading dot is the same fault one character over, since the head segment of
- * `.a` is `""`, which misses every key and lands in the most trusting tier instead.
- *
- * The schema forbids both (`minLength: 1`, and a receiver is a path), so neither is a
- * legitimate input, which is what makes throwing the right answer rather than skipping.
- */
 function assertDecoratorQualifier(
   qualifier: string | undefined,
   name: string,

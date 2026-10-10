@@ -6,16 +6,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith, warningCollector } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A body whose logic axis names nothing — a class, a function that only calls something, one
- * that is a single loop over calls — hashes alike across unrelated Symbols, so sharing it is no
- * evidence that two are one. Stage 3 used to pair a lone deleted one with whichever such head
- * was closest by name: a deleted function became a move into an unrelated class, and
- * `--fail-on removed` never saw the deletion. This runs the real pipeline, without git, so no
- * rename map can pair anything, and every scan has to be silent, so an extraction failure
- * cannot pass for a matcher outcome.
- */
-
 const workspace = useScratchWorkspace("empty-logic-pairing")
 
 async function scanSilently(): Promise<IR> {
@@ -84,8 +74,6 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
   })
 
   it("DF19h: reports an unrelated function of the same kind as removed + added (no lone-base shortcut)", async () => {
-    // Both names say more than one word and the kinds agree, so only the missing shortcut keeps
-    // these apart. No `return`, or the logic axis would carry the returned expression.
     const diff = await diffOfChange(
       {
         "src/mail.ts":
@@ -124,10 +112,6 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
     expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 1 })
   })
 
-  // The counterpart: a body that returns a non-trivial expression names something, whichever way
-  // it is spelled. A concise arrow's expression is its `return` rule, so it pairs on logic alone
-  // as its block twin does; read as a bare expression it named nothing, and these two names are
-  // too far apart to pair on.
   it.each([
     [
       "a concise arrow",
@@ -166,8 +150,6 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
   })
 
   it("DF19g: reports a class whose name says one word as removed + added, while its method moves", async () => {
-    // The owner and its member pair independently, as a renamed class and its methods already
-    // did; nothing reconciles the two.
     const source =
       "export class Invoice {\n  render(t: number) {\n    return t.toFixed(2)\n  }\n}\n"
     const diff = await diffOfChange({ "src/old.ts": source }, { "src/new.ts": source })

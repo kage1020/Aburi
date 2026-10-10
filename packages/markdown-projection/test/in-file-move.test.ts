@@ -4,8 +4,6 @@ import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
 import { emptySummary, makeDiff } from "./fixtures"
 
-/** markdown-projection.md MP11a: a move within one file names the file once, with both names and lines. */
-
 /** `makeSymbol` takes the file from the id; only the line is this suite's. */
 function symbol(id: string, name: string, startLine: number, edited = false): IRSymbol {
   const base = makeSymbol({
@@ -119,9 +117,6 @@ describe("a Slice member's follow-up line", () => {
   })
 
   it("renders a pure moved member the same way, though `@aburi/diff` never lists one", () => {
-    // slice-view.md §4.1 keeps a pure `moved` out of the Node set, and `requireChangeForMember`
-    // checks only that the id is in `diff.symbols[]`. This pins the branch that renders such a
-    // document anyway, not anything the Slice View produces.
     const md = projectSlice(renamedInFile, relocated)
     expect(md).toContain(
       "↳ moved: within `src/output-file.ts`: `isADirectory` (L40) → `outputIsADirectory` (L60)",

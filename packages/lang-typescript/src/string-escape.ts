@@ -1,18 +1,5 @@
 import type { Node } from "web-tree-sitter"
 
-/**
- * What a string literal's contents decode to, and whether that is all of them.
- *
- * Its readers want different things from the same read, so the read answers both rather than
- * picking one. A module specifier keeps whatever parsed — the parser's own syntax error
- * already accounts for the rest, and a second diagnostic would claim the author wrote no
- * module name. A name that is about to become part of a Symbol id refuses a partial read
- * instead, because what it would be believing is a name the source does not contain.
- *
- * *How much* a partial read drops is the grammar's business rather than this contract's — an
- * ERROR node's extent is whatever recovery gave it, and for the invalid escapes measured here
- * it runs to the end of the literal, so `"o\uZZZZk"` reads as `o` and not as `ok`.
- */
 export interface DecodedLiteral {
   /** The characters the literal's `string_fragment`s and `escape_sequence`s name, in order. */
   value: string
@@ -20,17 +7,6 @@ export interface DecodedLiteral {
   whole: boolean
 }
 
-/**
- * Read a `string` or `template_string` node's contents into the characters they name.
- *
- * **An escape is decoded, not skipped.** `"./a\tb"` reads as `./a`, a tab, `b`; dropping the
- * escape answers `./ab`, a module that does not exist and is indistinguishable in the IR
- * from one that does.
- *
- * An empty `value` is not the same question as an empty literal, and `whole` is what separates
- * them: a literal whose only content is a line continuation was read, decodes to nothing, and
- * is whole; one whose content stands as an ERROR was not read and is not.
- */
 export function decodeStringLiteral(node: Node): DecodedLiteral {
   const parts: string[] = []
   let whole = true
@@ -43,30 +19,6 @@ export function decodeStringLiteral(node: Node): DecodedLiteral {
   return { value: parts.join(""), whole }
 }
 
-/**
- * The characters a literal names, with its quote-stripped source text standing in when the
- * read came back with nothing at all.
- *
- * `decodeStringLiteral` answers `value: ""` for two literals that are not the same thing, and
- * `whole` is the bit that tells them apart. A literal the author wrote empty — or wrote as
- * nothing but a line continuation — was read, and an empty string is what it says; it is kept
- * as one, so an empty module specifier still reaches its own diagnostic. A literal whose
- * contents stand as an ERROR node was never read, and calling it empty makes every such
- * literal in a file identical: two routes written `app.get("\u12b/a", h)` and
- * `app.get("\u12b/b", h)` would share a stem and be told apart only by the order they are
- * written in, so swapping the two lines would swap their Symbol ids. The source text is what
- * the author typed, it keeps the two apart, and the parser has already reported the syntax
- * error that says why it is raw.
- *
- * A *partial* read is kept as it stands: `"./a\uZZZZb"` answers `./a`, because the fragment
- * that did parse is nearer the value than the source text with its broken escape still in it.
- *
- * This is not the only judgement `whole` admits, which is why it lives here rather than inside
- * the decoder. `memberNameSegment` in `class-members.ts` refuses a partial read outright: its
- * answer is about to become part of a Symbol id, where believing a name the source does not
- * contain is worse than having no name, and raw text is no fallback for something that has to
- * be a qualified-name segment.
- */
 export function decodeStringLiteralOrRaw(node: Node): string {
   const { value, whole } = decodeStringLiteral(node)
   if (whole || value !== "") return value
@@ -77,35 +29,10 @@ export function decodeStringLiteralOrRaw(node: Node): string {
 /** The quotes a literal can open with — a template's is the backtick. */
 const QUOTE = /^["'`]/
 
-/**
- * Decode one `escape_sequence` node's source text into the characters it names.
- *
- * The input is what tree-sitter hands over — the escape with its backslash still on it, from
- * `\n` through `\u{1F600}` to a line continuation. The output is the value, so a caller
- * joining fragments and escapes in source order reconstructs the string the author wrote.
- *
- * **What the grammar admits is what this covers, and it admits more than ECMAScript.**
- * `"\uZZZZ"`, `"\u12b"`, `"\u{}"` and `"\xZZ"` parse as ERROR nodes rather than
- * `escape_sequence` and are already reported as recoverable syntax errors, so an ill-formed
- * hex or unicode escape never arrives here. A braced escape is different: the grammar checks
- * its *shape* and not its *range*, so `\u{110000}` does arrive, and has no value ECMAScript
- * will give it.
- *
- * Every escape with no legal value is handled the same way — `\u{110000}`, `\1`, `\8` — and
- * it is the way the identity arm already worked: the text the author wrote comes back, minus
- * the backslash. Inventing a value would put a module name in the IR that the source does not
- * contain, and throwing would cost the file. Nothing downstream learns the specifier was
- * illegal, which is a gap worth its own change rather than a silent one worth pretending away.
- */
 export function decodeEscapeSequence(raw: string): string {
-  // Defensive rather than reachable: the only caller reads `escape_sequence` nodes, whose text
-  // always starts with a backslash. Returning the input is the one answer that cannot corrupt
-  // a module specifier if that ever stops being true.
   if (raw.length < 2 || raw[0] !== "\\") return raw
   const body = raw.slice(1)
 
-  // A line continuation joins two source lines and contributes no character, which is why a
-  // specifier written as nothing but one is empty and reaches the empty-specifier gate.
   if (LINE_TERMINATOR.test(body)) return ""
 
   const named = NAMED_ESCAPES.get(body)
@@ -113,14 +40,7 @@ export function decodeEscapeSequence(raw: string): string {
 
   if (body.startsWith("u{")) {
     const codePoint = Number.parseInt(body.slice(2, -1), 16)
-    // The range check is the load-bearing half. The grammar accepts `\u{110000}` as an
-    // `escape_sequence`, and `String.fromCodePoint` throws a `RangeError` on it — which would
-    // leave `parseFile`, land on the per-file boundary, and cost the whole file over one
-    // character in one specifier.
     if (Number.isNaN(codePoint) || codePoint > MAX_CODE_POINT) return body
-    // `fromCodePoint`, not `fromCharCode`: the braced form is the only one that can name a
-    // code point above the BMP, and truncating `\u{1F600}` to its low 16 bits would answer a
-    // private-use character instead.
     return String.fromCodePoint(codePoint)
   }
   if (body.startsWith("u") || body.startsWith("x")) {
@@ -128,12 +48,6 @@ export function decodeEscapeSequence(raw: string): string {
     return Number.isNaN(codeUnit) ? body : String.fromCharCode(codeUnit)
   }
 
-  // Everything else is the character itself: `\"`, `\\`, a backtick, a `$`, an identity escape
-  // like `\a`, and the digit escapes the grammar still accepts — `\1` (legacy octal) and `\8`
-  // (a non-octal decimal escape). Both are a SyntaxError inside a module, so there is no
-  // correct value to produce; `1` is not what `\1` means anywhere, but it is what the author
-  // typed, and it beats inventing a control character that would then travel through the IR as
-  // part of a module name.
   return body
 }
 

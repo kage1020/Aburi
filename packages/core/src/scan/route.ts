@@ -1,24 +1,11 @@
 import type { LanguagePlugin } from "@aburi/types"
 import { CoreError } from "../errors"
 
-/**
- * The lowercased extension of `path`, dot included (`src/A.TSX` → `.tsx`), or `null` when the
- * name has none. The one spelling the router, discovery and the language census key by.
- */
 export function fileExtension(path: string): string | null {
   const dot = path.lastIndexOf(".")
   return dot < 0 ? null : path.slice(dot).toLowerCase()
 }
 
-/**
- * Build a case-insensitive extension → LanguagePlugin dispatch table. Each plugin
- * publishes its handled extensions via `fileExtensions` (e.g. `[".ts", ".tsx"]`) and
- * the scan orchestrator uses the map to pick the right parser for each discovered file.
- *
- * A given extension may only be owned by one plugin; a duplicate throws because
- * plugin-registry already enforces manifest uniqueness at load time and reaching here
- * with a collision means something in the caller wiring is inconsistent.
- */
 export function buildLanguageRouter(
   plugins: readonly LanguagePlugin<unknown, unknown>[],
 ): LanguageRouter {
@@ -39,10 +26,6 @@ export function buildLanguageRouter(
   return new LanguageRouter(table)
 }
 
-/**
- * Extension-to-plugin dispatcher. Constructed only via `buildLanguageRouter` so the
- * collision check cannot be bypassed by a direct `new LanguageRouter(...)` call.
- */
 export class LanguageRouter {
   readonly #table: ReadonlyMap<string, LanguagePlugin<unknown, unknown>>
 
@@ -56,11 +39,6 @@ export class LanguageRouter {
     return [...this.#table.keys()]
   }
 
-  /**
-   * Route a file path to its owning plugin. Returns `null` when the extension is not
-   * claimed by any plugin — the scan pipeline records those as `skipped.reason ===
-   * "unroutable"` rather than guessing a fallback.
-   */
   route(path: string): LanguagePlugin<unknown, unknown> | null {
     const extension = fileExtension(path)
     return extension === null ? null : (this.#table.get(extension) ?? null)

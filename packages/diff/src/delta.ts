@@ -17,24 +17,9 @@ export const MAX_LINE_FUZZ = 10
 export const MIN_LINE_FUZZ = 0
 
 export interface DeltaOptions {
-  /**
-   * Line fuzz for pairing an edited rule/call/decorator with its predecessor
-   * (diff-algorithm.md); an unchanged one pairs however far it moved. Must be an integer in
-   * `[MIN_LINE_FUZZ, MAX_LINE_FUZZ]` (`0..10`); anything outside — or a non-finite value —
-   * throws `DiffError({ code: "invalid-line-fuzz" })`. Setting `0` pairs an edit only with an
-   * element on the same line, and does not stop an unchanged element from pairing; omitting the
-   * field falls back to `DEFAULT_LINE_FUZZ` (2).
-   */
   lineFuzz?: number
 }
 
-/**
- * The full per-Symbol delta between two paired Symbols (diff-algorithm.md). The axis booleans
- * come from fingerprint comparison; the array deltas from identity-preserving pairing, with line
- * fuzz deciding only how far an edited element may sit from the one it replaced.
- * `confidenceChanged` is always written, `false` included, so a reader can tell it from a diff
- * that predates the field.
- */
 export function computeSymbolDelta(
   base: IRSymbol,
   head: IRSymbol,
@@ -56,11 +41,6 @@ export function computeSymbolDelta(
   }
 }
 
-/**
- * Line-fuzz range check (diff-algorithm.md). Loud rather than clamping so a caller's typo
- * (`lineFuzz: 999`) or an upstream `NaN` surfaces at the diff boundary instead of rounding
- * into the wrong deltas.
- */
 function validateLineFuzz(value: number): number {
   if (!Number.isFinite(value) || !Number.isInteger(value)) {
     throw new DiffError(
@@ -83,31 +63,6 @@ interface Identified<T> {
   line: number
 }
 
-/**
- * Array diff (diff-algorithm.md) — pair the two sides by identity key, then classify each
- * element into `added` / `removed` / `modified`. `modified` fires only when a pairing holds
- * and the content differs, so a line shift on its own produces nothing.
- *
- * Several elements of one Symbol routinely share a key — two `guard` rules, two `@Get` — so
- * which base element a head element takes is a real choice. Two passes make it:
- * first the elements whose key **and content** agree, wherever they sit, then whatever is
- * left, within ±`lineFuzz`. An untouched element is therefore claimed by its own counterpart
- * before an edited or deleted neighbour can take it, however far the body moved, and the
- * remainder pairs by proximity, where a genuine edit lands.
- *
- * The exact pass has no line window because it needs none: non-crossing already stops an
- * element from pairing with one it was never beside, and an absolute distance would refuse
- * exactly the case the pass exists for — an unchanged body that moved further than the
- * window. The window stays on the second pass, where it is all that separates an edit from
- * an unrelated element that happens to share the key.
- *
- * Each pass is an order-preserving assignment rather than a per-element search, because a
- * greedy pass can take a pairing that leaves a better set unreachable: two edited guards
- * shifted down two lines would come back as an edit, an `added` and a `removed`. The order it
- * preserves is the order among elements of one key. Elements of different keys are never
- * candidates for each other, so which sits above which says nothing about identity — a call
- * that moved below a different call is still the same call.
- */
 function classifyArrayDelta<T>(
   base: readonly Identified<T>[],
   head: readonly Identified<T>[],
@@ -117,9 +72,6 @@ function classifyArrayDelta<T>(
   const freeBase = new Set(base.map((_, index) => index))
   const freeHead = new Set(head.map((_, index) => index))
   const partnerOf = new Map<number, Identified<T>>()
-  // Each predicate checks the key itself, although the grouping below already guarantees it:
-  // for signature inputs the key carries the position and `isEqual` does not, so a pairing
-  // reached by any other route would otherwise cross positions with nothing to stop it.
   const passes: Array<(b: Identified<T>, h: Identified<T>) => boolean> = [
     (b, h) => b.key === h.key && isEqual(b.item, h.item),
     (b, h) => b.key === h.key && Math.abs(b.line - h.line) <= lineFuzz,
@@ -188,17 +140,6 @@ function outranks(a: AssignmentScore, b: AssignmentScore): boolean {
   return a.pairs !== b.pairs ? a.pairs > b.pairs : a.distance < b.distance
 }
 
-/**
- * The best set of non-crossing pairings between `base` and `head` — the still-free elements of
- * one key, which the caller has already grouped — as slot pairs in ascending order.
- *
- * Non-crossing is the whole content of the rule, and ir-schema.md #11 licenses it: these
- * arrays are ordered by line, so two pairings that cross would have an element move above
- * another of its key that it was below, which is a different element rather than a line
- * shift. It also makes the optimum reachable by a suffix recurrence. Maximising the count
- * before minimising distance stops a near pairing from being taken at the cost of a far one
- * that would otherwise have no partner at all.
- */
 function assignInOrder<T>(
   base: readonly Slot<T>[],
   head: readonly Slot<T>[],
@@ -274,10 +215,6 @@ function diffEffects(base: readonly Effect[], head: readonly Effect[]): ArrayDel
   const mapper = (effect: Effect): Identified<Effect> => ({
     item: effect,
     key: `${effect.id}::${effect.target}`,
-    // Propagated entries (effect-propagation.md) omit `line`. The infinite fuzz admits
-    // every same-key candidate, and `(id, target)` is the whole of an effect's identity
-    // (ir-schema.md), so `0` only ranks a propagated effect nearest the earliest local one
-    // carrying its key; the exact-content pass settles the rest.
     line: effect.line ?? 0,
   })
   return classifyArrayDelta(
@@ -289,10 +226,6 @@ function diffEffects(base: readonly Effect[], head: readonly Effect[]): ArrayDel
 }
 
 function effectsEqual(a: Effect, b: Effect): boolean {
-  // `line` is position rather than content; `derivedBy` is plugin-issued evidence text whose
-  // wording may change independently of the effect identity already carried by `plugin`.
-  // Readers compare `derivedFrom` as a set so documents from another producer remain tolerant
-  // of source ordering, matching effect-propagation.md §5.1's reader rule for `propagated`.
   return (
     a.id === b.id &&
     a.target === b.target &&
@@ -319,10 +252,6 @@ function callsEqual(a: Call, b: Call): boolean {
   return a.target === b.target && (a.resolved ?? null) === (b.resolved ?? null)
 }
 
-/**
- * Decorator identity is `name`; the argument list and the receiver decide `modified`
- * (diff-algorithm.md).
- */
 function diffDecorators(
   base: readonly Decorator[],
   head: readonly Decorator[],
@@ -336,19 +265,6 @@ function diffDecorators(
   return classifyArrayDelta(base.map(mapper), head.map(mapper), decoratorsEqual, lineFuzz)
 }
 
-/**
- * `name`, `qualifier` and `arguments` are compared; `raw` and `boundary` are not.
- *
- * The api fingerprint hashes the normalized `raw`, which quotes the receiver, so
- * `@nest.Post()` → `@tsed.Post()` moves it and the delta has to say why. `raw` itself is left out
- * because `(name, qualifier, arguments)` is its structured decomposition, and comparing the quoted
- * text would report a reformat as an edit. `boundary` is derived by plugins rather than written,
- * so comparing it would report a decorator that reads the same on both sides as modified.
- *
- * An absent `qualifier` reads as `null`. Two Documents written before the field existed are both
- * `null` and report nothing, but a stored base from such a producer, set against a head that
- * carries the field, reports each qualified decorator as modified, once.
- */
 function decoratorsEqual(a: Decorator, b: Decorator): boolean {
   return (
     a.name === b.name &&

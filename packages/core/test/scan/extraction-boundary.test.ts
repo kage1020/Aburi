@@ -29,20 +29,6 @@ import {
   useStubWorkspace,
 } from "../fixtures/plugins"
 
-/**
- * One file's plugin throw must cost that file and no other.
- *
- * `lang-plugin.md` has said so since before there was a `try` anywhere in the scan:
- * an extraction exception skips the file and the pipeline as a whole does not stop. Until
- * the boundary existed, a single throw discarded every other file's Symbols — the run
- * produced no IR at all, so a workspace of healthy files yielded nothing because one file
- * upset one plugin.
- *
- * The stub plugin throws on demand rather than being coaxed into it, because the throw is
- * the subject: which stage raised it does not change what the boundary owes the caller, and
- * a fixture that had to reach a real guard would pin the guard instead.
- */
-
 function candidate(file: string): SymbolCandidate<OpaqueAstNode> {
   const base = file.replace(/[^A-Za-z0-9]/g, "_")
   return {
@@ -90,9 +76,6 @@ function stubLanguage(spec?: ThrowSpec): LanguagePlugin {
     ): BodyExtraction => {
       raise("walkBody", ctx.file.path)
       void symbol
-      // One call per Symbol, so the effect classifiers are actually reached — a body with
-      // no calls never asks them anything, and a test for a throwing classifier would pass
-      // against a boundary that did not exist.
       return {
         rules: [],
         calls: [
@@ -262,9 +245,6 @@ describe("what the caller is told", () => {
   })
 
   it("reads a thrown object rather than reporting [object Object]", async () => {
-    // A plugin is ordinary JavaScript loaded by ref and can throw anything. `String()` on a
-    // plain object gives the reader nothing at all, which is the same silence the boundary
-    // exists to avoid — one step further in.
     const { result } = await run({
       language: stubLanguage({
         stage: "extractSymbols",
@@ -292,10 +272,6 @@ describe("a file the read cannot reach", () => {
   }
 
   it("skips one that vanished, rather than calling it an extraction failure", async () => {
-    // Discovery lists the workspace up front and the loop reads each file when it reaches
-    // it, so anything removing files while a scan runs — a concurrent build, a watch-mode
-    // clean — puts a listed path out of reach. That is the condition discovery's own
-    // `unreadable` already names, and it is not the plugin's doing.
     const { result } = await run({ language: deleting("c.stub") })
     expect(result.skipped).toEqual([
       { path: "c.stub", reason: "unreadable", detail: expect.stringContaining("ENOENT") },
@@ -305,18 +281,11 @@ describe("a file the read cannot reach", () => {
   })
 
   it("does not gate the run on it", async () => {
-    // A file that is gone is gone the same way on every machine, and a rerun is the fix.
-    // Only `extractionFailures` moves the exit code, and this is not one.
     const { result } = await run({ language: deleting("c.stub") })
     expect(result.extractionFailures).toEqual([])
   })
 
   it("skips one whose directory stopped being one, under whichever code the platform gives", async () => {
-    // The same event as a deletion — something replaced part of the path while the scan held
-    // a listing of it — and the operating systems disagree about what to call it: POSIX
-    // answers ENOTDIR, Windows answers ENOENT for the identical act. A predicate holding only
-    // ENOENT ends the run on POSIX and absorbs it on Windows, which is one commit producing
-    // two different outcomes by platform.
     await mkdir(join(workspace.root, "sub"))
     await writeFile(join(workspace.root, "sub", "d.stub"), "d", "utf8")
     const language: LanguagePlugin = {
@@ -340,9 +309,6 @@ describe("a file the read cannot reach", () => {
       },
     ])
     expect(result.extractionFailures).toEqual([])
-    // "gone" would be a smaller claim than the condition: the file was never deleted, its
-    // directory was, and the log line is what a reader has to reconcile with a tree where
-    // something of that name is still sitting.
     expect(warned.warn).toEqual([
       expect.stringContaining(
         "Skipped sub/d.stub: it was no longer a file by the time it was read",
@@ -351,9 +317,6 @@ describe("a file the read cannot reach", () => {
   })
 
   it("still ends the run for a read failure that is the machine's rather than the file's", async () => {
-    // `EACCES`, `EMFILE`, `EIO`: whether they happen depends on how loaded or how
-    // badly-checked-out the machine is, so absorbing them would let one commit produce a
-    // different Document on a different day and still exit 0.
     const language: LanguagePlugin = {
       ...stubLanguage(),
       parseFile: async (file: SourceFile) => {
@@ -381,11 +344,6 @@ describe("a fault in the plugin set is not a per-file fault", () => {
   })
 
   it("re-throws a registry error about undeclared vocabulary", async () => {
-    // The shape a plugin raises when it calls the registry's `assertEffectDeclared` itself: a
-    // `RegistryError`, where `VocabCheck` raises a `CoreError` with the same code. Both reach
-    // one predicate, which reads the code rather than the class because `@aburi/core` does not
-    // depend on `@aburi/plugin-registry`; absorbing this would replace one precise sentence
-    // about the manifest with a file count.
     const error = Object.assign(new Error('Effect id "x-stripe:charge" is not declared'), {
       name: "RegistryError",
       code: "vocab-undeclared",
@@ -396,8 +354,6 @@ describe("a fault in the plugin set is not a per-file fault", () => {
   })
 
   it("absorbs a coded error that describes the file rather than the wiring", async () => {
-    // `anonymous-symbol-id-attempted` is the reachable one: a declaration whose qualified
-    // name the id grammar refuses. It is a property of what that file contains.
     const error = new CoreError('qualified name "a\u{1F642}" contains a non-identifier', {
       code: "anonymous-symbol-id-attempted",
       value: "a\u{1F642}",
@@ -410,8 +366,6 @@ describe("a fault in the plugin set is not a per-file fault", () => {
   })
 
   it("keeps the code beside the message, so a caller need not match on text", async () => {
-    // The difference between "this source is something the plugins cannot express" and "a
-    // plugin crashed" is the first thing a reader wants, and the message is prose.
     const error = new CoreError('qualified name "a\u{1F642}" contains a non-identifier', {
       code: "anonymous-symbol-id-attempted",
       value: "a\u{1F642}",
@@ -444,9 +398,6 @@ describe("a throw that says nothing about itself", () => {
   })
 
   it("survives a value that cannot be stringified at all", async () => {
-    // Circular *and* null-prototype: `JSON.stringify` throws on the cycle and `String()`
-    // throws for want of a `toString`. A describe helper that threw here would escape the
-    // catch it is inside and take the run down with it.
     const hostile: Record<string, unknown> = Object.create(null)
     hostile.self = hostile
     const { result } = await run({

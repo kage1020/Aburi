@@ -4,12 +4,6 @@ import { makeLanguageId } from "../../src/id"
 import { apiFingerprint } from "../../src/index"
 import { makeSymbol } from "../fixtures/ir"
 
-/**
- * Signature narrowing helper. base() always constructs a Symbol with a non-null signature,
- * but TypeScript still sees `Signature | null | undefined` on the field; extracting through
- * this helper keeps every test free of `!` assertions (banned by the codebase's linter
- * rules) while giving each test a fresh Signature to patch.
- */
 function sig(sym: IRSymbol): Signature {
   if (sym.signature === null || sym.signature === undefined) {
     throw new Error("test fixture invariant: base() must produce a Symbol with a signature")
@@ -350,8 +344,6 @@ describe("apiFingerprint — order preservation", () => {
   })
 
   it("A19: same-name decorators tie-break on line so their source order is preserved", () => {
-    // Two `@ApiResponse` on adjacent lines. Reversing the (line-ordered) input should
-    // give the same hash because the sort by (name, line) canonicalizes both permutations.
     const inSourceOrder = makeSymbol(base().id, {
       ...base(),
       decorators: [
@@ -392,8 +384,6 @@ describe("apiFingerprint — order preservation", () => {
     })
     expect(apiFingerprint(inSourceOrder)).toBe(apiFingerprint(reversedInput))
 
-    // Swapping the LINE assignments (so the same-name decorators sit in a different source
-    // order) is a real source change and must register.
     const linesSwapped = makeSymbol(base().id, {
       ...base(),
       decorators: [

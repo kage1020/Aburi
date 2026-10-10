@@ -5,12 +5,6 @@ import { describe, expect, it } from "vitest"
 import { useFixtureCheckout } from "../src/fixture"
 import { diffIRs, scanFixture } from "../src/scan-helper"
 
-/**
- * Scenario B — a large refactor stubs out every `BillingService` method body so each method
- * Symbol's `dropped` flag flips from false → true (drop-b.ts "empty body" rule). The
- * `--fail-on dropped-toggled:to-dropped:>10` gate must trip: BillingService has 12 methods,
- * all of which now qualify.
- */
 const HEAD_BILLING_SERVICE = [
   'import { Injectable } from "@nestjs/common"',
   'import { LoggerService } from "../common/logger.service"',

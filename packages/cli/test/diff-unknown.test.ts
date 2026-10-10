@@ -7,14 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runDiff } from "../src"
 import { symbolId } from "./fixtures"
 
-/**
- * `--fail-on removed` must not trip on a file the head scan never read.
- *
- * That gate is the reason the whole chain matters: a scan that withdrew one file used to
- * produce a document indistinguishable from one where the author deleted its API, and the
- * gate fired with a confident count and the wrong explanation.
- */
-
 let scratch = ""
 
 function makeIR(symbols: IR["symbols"], skipped?: readonly SkippedFile[], discovered = 2): IR {
@@ -103,8 +95,6 @@ describe("aburi diff — a file the head scan never read", () => {
   })
 
   it("does trip --fail-on unknown, and respects a threshold", async () => {
-    // `alsoGone` sorts before `handleRequest`, and the reader holds the document to
-    // invariant #11.
     const other = symbol("src/gone.ts", "alsoGone")
     const { basePath, headPath } = await writePair(
       makeIR([other, gone, kept]),
@@ -152,9 +142,6 @@ describe("aburi diff — a file the head scan never read", () => {
   })
 
   it("warns when a document lost files it cannot enumerate", async () => {
-    // An IR written before `stats.skippedFiles` existed reports the count and no list, so
-    // the diff cannot tell a loss from a deletion. It reports what it can see; the CLI says
-    // what it could not check.
     const headWithoutList: IR = {
       ...makeIR([kept]),
       stats: { ...makeIR([kept]).stats, totalFiles: 2, parsedFiles: 1 },
@@ -195,9 +182,6 @@ describe("aburi diff — a file the head scan never read", () => {
   })
 
   it("puts the count on the stdout summary line, where every CI job sees it", async () => {
-    // The stderr warning cannot fire here — `stats.skippedFiles` is present on both sides —
-    // so without this the whole incident is invisible to anyone who did not pass
-    // `--fail-on unknown`. It qualifies the counts beside it: they are that much short.
     const { basePath, headPath } = await writePair(
       makeIR([gone, kept]),
       makeIR([kept], [{ path: "src/gone.ts", reason: "parse-failed" }]),
@@ -225,8 +209,6 @@ describe("aburi diff — a file the head scan never read", () => {
   })
 
   it("names the files both scans skipped, which no unknown entry can cover", async () => {
-    // Neither document holds Symbols from a file both sides dropped, so there is no leftover
-    // to classify and the diff is silent about a file it never compared.
     const both = { path: "vendor/huge.ts", reason: "over-size" } as const
     const { basePath, headPath } = await writePair(makeIR([kept], [both]), makeIR([kept], [both]))
     const warnings: string[] = []
@@ -238,12 +220,9 @@ describe("aburi diff — a file the head scan never read", () => {
       warn: (m) => warnings.push(m),
     })
     expect(report.summaryLine).toBe("+0 -0 ~0 ↔0 ⤴0")
-    // Not "are not represented in this diff" — they are, now, and the line points at where.
     expect(warnings.join("\n")).toContain(
       "1 file(s) were skipped by both scans; see notCompared[] in diff.json: vendor/huge.ts",
     )
-    // stderr is the cover note; the artifact is what a bot or a pasted PR comment gets, and
-    // it used to carry no trace of the file at all.
     const written = JSON.parse(await readFile(report.diffJsonPath ?? "", "utf8")) as DiffResult
     expect(written.notCompared).toEqual([
       { path: "vendor/huge.ts", baseReason: "over-size", headReason: "over-size" },
@@ -254,8 +233,6 @@ describe("aburi diff — a file the head scan never read", () => {
   })
 
   it("summarises the tail rather than printing a workspace's whole blind spot", async () => {
-    // The reason the line is shorter than the artifact. Eleven files: ten named, the rest
-    // counted, and `diff.json` carries all of them with their reasons.
     const lost = Array.from({ length: 11 }, (_, i) => ({
       path: `vendor/gen${String(i).padStart(2, "0")}.js`,
       reason: "over-size" as const,

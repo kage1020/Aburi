@@ -17,12 +17,6 @@ import {
   useStubWorkspace,
 } from "../fixtures/plugins"
 
-/**
- * `config.strict` (config.md, extension-vocab.md): a value a plugin emits has to be claimed by
- * that plugin's manifest. Strict by default, a run stops at the first one; with strict off it
- * carries on and hands every one back.
- */
-
 /** Owns exactly the pairs listed, as `VocabRegistry` does after loading manifests. */
 function registryOwning(owned: { effects?: [string, string][]; extKinds?: [string, string][] }) {
   const effects = new Map(owned.effects ?? [])

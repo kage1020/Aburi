@@ -36,15 +36,8 @@ describe("C8: dynamic import specifier shapes", () => {
       `export async function f(p: string) { await import(\`./\${p}\`) }`,
     ],
   ])("silently ignores a non-literal specifier — %s", async (_label, source) => {
-    // A computed specifier yields no edge because static dependency analysis has nothing to
-    // record. The substitution is what makes the template computed; a template without one
-    // names a fixed module and is read like any other literal (`import-forms.test.ts`).
     const { imports, errors } = await importsOf(source)
     expect(imports.every((e) => !e.dynamic)).toBe(true)
-    // *Silently* is the load-bearing half, and it is what separates "this reader does not
-    // follow computed specifiers" from "this specifier is empty". Collapsing those two
-    // answers into one `null` is a one-line edit that no other assertion notices, and it
-    // would report a fault against perfectly good code.
     expect(errors).toEqual([])
   })
 })

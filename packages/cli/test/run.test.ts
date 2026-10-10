@@ -12,7 +12,6 @@ describe("exit code table", () => {
   })
 })
 
-/** CL1 — `aburi --version` prints a single line, exit 0. */
 describe("CL1 — --version", () => {
   it("prints a version string and returns EXIT.SUCCESS", async () => {
     const { stdout, stderr } = makeStreams()
@@ -22,7 +21,6 @@ describe("CL1 — --version", () => {
   })
 })
 
-/** CL2 — `aburi --help` returns exit 0. */
 describe("CL2 — --help", () => {
   it("returns EXIT.SUCCESS and prints usage text", async () => {
     const { stdout, stderr } = makeStreams()
@@ -32,7 +30,6 @@ describe("CL2 — --help", () => {
   })
 })
 
-/** CL3 — unknown command returns EXIT.INPUT_ERROR (2). */
 describe("CL3 — unknown command", () => {
   it("returns EXIT.INPUT_ERROR", async () => {
     const { stdout, stderr } = makeStreams()
@@ -41,7 +38,6 @@ describe("CL3 — unknown command", () => {
   })
 })
 
-/** CL10 — `aburi diff` with no arguments returns EXIT.INPUT_ERROR. */
 describe("CL10 — diff arguments missing", () => {
   it("errors when neither refspec nor --base/--head is given", async () => {
     const { stdout, stderr } = makeStreams()
@@ -63,12 +59,8 @@ describe("CL10 — diff arguments missing", () => {
   })
 })
 
-/** `cli-spec.md` — `--max-bytes` is read at argv parsing, so a typo never reaches a scan. */
 describe("diff --max-bytes", () => {
   it("rejects a value that is not a plain byte count", async () => {
-    // The last one reaches the `Number.isSafeInteger` check past the regex, which is the only
-    // thing keeping that branch — and its own message — from reading as redundant and being
-    // deleted. An overflowing count is not "not a positive integer"; it is too large to be one.
     for (const value of ["64kb", "0", "-1", "1.5", "", "99999999999999999999"]) {
       const { stdout, stderr } = makeStreams()
       const code = await runCli({

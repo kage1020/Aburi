@@ -14,18 +14,12 @@ beforeAll(async () => {
 
 describe("e2e: scan on fixtures/nestjs-billing", () => {
   it("passes every integrity invariant and emits the schema-pinned IR", () => {
-    // scan() throws on any integrity violation, so reaching here means every invariant
-    // passed for the whole billing fixture.
     expect(result.ir.$schema).toBe(IR_SCHEMA)
     expect(result.parseErrors).toEqual([])
     expect(result.skipped).toEqual([])
   })
 
   it("emits well-shaped via:call edges when the resolver produces any (untyped tier ⇒ may be zero)", () => {
-    // The fixture is dominated by `this.<service>.<method>()` — the `call-resolution.md`
-    // "runtime receivers" the untyped tier cannot resolve — so zero call edges is the expected
-    // outcome. What is asserted is the shape contract on any edge that is emitted; positive
-    // file-scope / import-scope resolution lives in core-scan.test.ts.
     const callEdges = result.ir.dependencies.filter((d) => d.via === "call")
     for (const edge of callEdges) {
       expect(edge.from).toMatch(/^[a-z][a-z0-9]*:[^#]+#.+$/)
@@ -36,8 +30,6 @@ describe("e2e: scan on fixtures/nestjs-billing", () => {
   })
 
   it("recognises every fixture source file and none get skipped", () => {
-    // 10 handwritten .ts files under src/. The concrete integer catches discoverFiles'
-    // ignore rules starting to drop something they should not.
     expect(result.ir.stats.totalFiles).toBe(10)
     expect(result.ir.stats.parsedFiles).toBe(10)
   })
@@ -52,8 +44,6 @@ describe("e2e: scan on fixtures/nestjs-billing", () => {
     const routes = result.ir.symbols.filter((s) => s.extKind === "framework:nestjs:route")
     // BillingController: create / read / send. CustomersController: create / read / list.
     expect(routes.length).toBe(6)
-    // Every route must carry `boundary: true` — the reason drop-b exempts them from the
-    // "dropped" list.
     for (const route of routes) {
       const routeDecorator = route.decorators.find((d) => d.boundary)
       expect(routeDecorator, `route ${route.id} is missing a boundary decorator`).toBeDefined()
@@ -68,8 +58,6 @@ describe("e2e: scan on fixtures/nestjs-billing", () => {
       "LoggerService",
     ])
 
-    // BillingService has 12 methods, every one with a real body, so none is dropped in the
-    // base state — this is what scenario B mutates against.
     const billingMethods = result.ir.symbols.filter(
       (s) => s.kind === "method" && s.source.file.endsWith("billing/billing.service.ts"),
     )

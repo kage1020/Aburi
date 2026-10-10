@@ -48,7 +48,6 @@ function makeIRWithAdded(): IR {
   }
 }
 
-/** The same symbol `count` times over, which is all the size cap cares about. */
 function makeIRWithManyAdded(count: number): IR {
   const one = makeIRWithAdded()
   const template = one.symbols[0]
@@ -65,12 +64,6 @@ function makeIRWithManyAdded(count: number): IR {
   return { ...one, symbols, stats: { ...one.stats, keptSymbols: count } }
 }
 
-/**
- * The base side of a two-section diff: one symbol the head keeps but changes. Without it every
- * fixture here renders a single `Added` section, and a capped run drops that one section and
- * returns the heading — which measures well under any budget worth testing and so never
- * exercises the path where some sections survive and others go.
- */
 function makeIRWithKept(apiFingerprint: string): IR {
   const one = makeIRWithAdded()
   const template = one.symbols[0]
@@ -90,10 +83,6 @@ function makeIRWithKept(apiFingerprint: string): IR {
   }
 }
 
-/**
- * That same symbol, changed, plus `count` added ones: `API changes` above `Added`. Sorted by id,
- * which the IR's own integrity check requires of every document the reader accepts.
- */
 function makeIRWithChangeAndManyAdded(count: number): IR {
   const changed = makeIRWithKept("zzz000000000")
   const added = makeIRWithManyAdded(count)
@@ -134,8 +123,6 @@ describe("runDiff — --base/--head (file mode)", () => {
   })
 
   it("caps diff.md at --max-bytes, leaving diff.json whole", async () => {
-    // What GitHub rejects at 65536 bytes is the comment body, not the JSON: the cap belongs to
-    // the document that gets posted, and the artefact beside it still holds every symbol.
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
     await writeFile(basePath, JSON.stringify(makeIRWithKept("aaa000000000")), "utf8")
@@ -158,8 +145,6 @@ describe("runDiff — --base/--head (file mode)", () => {
     if (capped.diffMdPath === null) throw new Error("expected diffMdPath")
     const markdown = await readFile(capped.diffMdPath, "utf8")
     expect(Buffer.byteLength(markdown, "utf8")).toBeLessThanOrEqual(2_000)
-    // The budget was met by dropping the lower section and keeping the higher one, which is the
-    // path the flag exists for — not by dropping everything and returning the heading.
     expect(markdown).toContain("## ⚠ API changes")
     expect(markdown).not.toContain("## ➕ Added")
     expect(markdown).toContain("➕ Added")
@@ -169,7 +154,6 @@ describe("runDiff — --base/--head (file mode)", () => {
     const diffJson = await readFile(capped.diffJsonPath, "utf8")
     expect(diffJson).toContain("Added0399")
 
-    // The note points at the uncapped report, so that report is written beside it.
     expect(markdown).toContain("is `diff.full.md` beside `diff.md`.")
     expect(capped.diffFullMdPath).toBe(resolve(dirname(capped.diffMdPath), DIFF_FULL_MD_FILENAME))
     if (capped.diffFullMdPath === null) throw new Error("expected diffFullMdPath")
@@ -177,9 +161,6 @@ describe("runDiff — --base/--head (file mode)", () => {
   })
 
   it("writes diff.full.md only when the cap changed the report", async () => {
-    // A full report left over from an earlier capped run would describe some other diff, so
-    // every run that does not write one removes it: one that fits its budget, one with no
-    // budget, and one that writes no Markdown at all.
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
     await writeFile(basePath, JSON.stringify(makeIRWithKept("aaa000000000")), "utf8")
@@ -256,7 +237,6 @@ describe("runDiff — --base/--head (file mode)", () => {
     const written = Buffer.byteLength(await readFile(report.diffMdPath, "utf8"), "utf8")
     expect(written).toBeGreaterThan(10)
     expect(warnings.join("\n")).toContain(`diff.md is ${written} bytes, over the 10 requested`)
-    // Its note still points at the uncapped report, so that is written too.
     if (report.diffFullMdPath === null) throw new Error("expected diffFullMdPath")
     expect(await pathExists(report.diffFullMdPath)).toBe(true)
   })
@@ -317,11 +297,6 @@ describe("runDiff — call-resolution census on stdout (call-resolution.md)", ()
     return { basePath, headPath }
   }
 
-  /**
-   * Integrity invariant #15 cross-checks the counters against `symbols[]`, so
-   * the fixture has to carry the call sites it claims. Every call here is left
-   * unresolved, which keeps `dependencies[]` empty and invariant #14 happy.
-   */
   function headWithUnresolvedCalls(callResolution: CallResolutionStats): IR {
     const head = makeIRWithAdded()
     const count = callResolution.totalCalls - callResolution.resolvedCalls
@@ -371,9 +346,6 @@ describe("runDiff — call-resolution census on stdout (call-resolution.md)", ()
       warn: (m) => warnings.push(m),
     })
     expect(report.callResolutionLine).toBeNull()
-    // Dropping the line without a word would leave the reviewer reading the
-    // Slice View unaware that the one signal explaining a suspicious singleton
-    // is absent.
     expect(warnings.join("\n")).toContain("no stats.callResolution")
   })
 
@@ -434,10 +406,6 @@ describe("runDiff — call-resolution census on stdout (call-resolution.md)", ()
 
 describe("argv routing for --max-bytes", () => {
   it("caps the written diff.md from runCli end-to-end", async () => {
-    // The one hop the action depends on: `--max-bytes 65507` on the command line reaching
-    // `projectDiff`. Delete the forwarding line in `run.ts` and every other test in this repo
-    // still passes — the CLI exits 0, writes a full-size diff.md, and the comment silently
-    // stops being posted, which is the bug this flag exists to prevent.
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
     await writeFile(basePath, JSON.stringify(makeIRWithKept("aaa000000000")), "utf8")
@@ -526,8 +494,6 @@ describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md)", (
   })
 
   it("maps slice-invariant-violated to runtime-error and says it is an Aburi bug", () => {
-    // slice-view.md: this code fires only on a producer bug, so reporting
-    // it as a config error would send the reader to aburi.json for nothing.
     const cause = new DiffError("SliceRecord slice:a: members[] is empty.", {
       code: "slice-invariant-violated",
       value: "slice:a",
@@ -540,9 +506,6 @@ describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md)", (
   })
 
   it("keeps what a code it has no arm for said, rather than throwing it away", () => {
-    // `@aburi/diff` and `@aburi/cli` version independently, so a compiled switch can meet a
-    // code it never saw. The compile-time check cannot help an installed tree, and discarding
-    // the message would leave the reader with nothing about the diff that failed.
     const cause = new DiffError("Symbol sym:a: fingerprint is not a string.", {
       code: "symbol-fingerprint-invalid",
     } as unknown as ConstructorParameters<typeof DiffError>[1])
@@ -566,7 +529,6 @@ describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md)", (
 })
 
 describe("runDiff — a base IR that is not shaped like a Document", () => {
-  /** Write an IR file with one top-level key removed. */
   async function writeIRWithout(path: string, key: string): Promise<void> {
     const ir = emptyIR() as unknown as Record<string, unknown>
     delete ir[key]
@@ -603,10 +565,6 @@ describe("runDiff — a base IR that is not shaped like a Document", () => {
     "dependencies",
     "generator",
   ])("names the missing %s instead of reporting an unexplained load failure", async (key) => {
-    // The invariant list exists to say which rule broke. A malformed Document used to
-    // reach a `TypeError` inside the checker, which the CLI reported as "failed integrity
-    // check: Cannot read properties of undefined" — the caller learned only that
-    // something went wrong inside Aburi.
     const error = await readErrorFor((path) => writeIRWithout(path, key))
     expect(error.code).toBe("config-error")
     expect(error.message).toContain("[#20]")
@@ -619,8 +577,6 @@ describe("runDiff — a base IR that is not shaped like a Document", () => {
     ["workspace", null],
     ["stats", 7],
   ])("names %s when it is present but the wrong type", async (key, value) => {
-    // Deleting a key is not the only corruption a hand-edit produces, and the pre-check
-    // this replaced rejected `"symbols": {}` too.
     const error = await readErrorFor((path) => writeIRWith(path, key, value))
     expect(error.code).toBe("config-error")
     expect(error.message).toContain("[#20]")
@@ -628,7 +584,6 @@ describe("runDiff — a base IR that is not shaped like a Document", () => {
   })
 
   it("names the record and the field for a corruption inside a Symbol", async () => {
-    // The field the diff reads without the invariants ever having looked at it.
     const error = await readErrorFor((path) =>
       writeIRWith(path, "symbols", [
         { ...(makeIRWithAdded().symbols[0] as object), fingerprint: undefined },

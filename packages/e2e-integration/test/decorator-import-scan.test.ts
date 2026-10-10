@@ -4,17 +4,6 @@ import { describe, expect, it } from "vitest"
 import { scanWith, symbolNamed } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * What the file's imports say about a decorator, all the way through `scan()`.
- *
- * The unit tests hand the classifier an import list built by hand. This one makes the
- * language plugin produce it, and then makes the core fold the answer back onto the Symbol —
- * which is where the classification's two halves have to agree on which name is which. The
- * tables are matched on the name a decorator was imported under, while the boundary flags
- * come back keyed on the name the source wrote; get that backwards and every extKind is
- * still right while every `Decorator.boundary` silently stays false.
- */
-
 const workspace = useScratchWorkspace("decorator-import")
 
 const scanWorkspace = () =>
@@ -56,9 +45,6 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
   })
 
   it("takes the written name when nothing in the file binds it", async () => {
-    // The same source without its import line. Nothing says what `Ctrl` is, so the written
-    // name stands and matches nothing — the alias above was recognized because the file
-    // said what it was, not because `Ctrl` is vocabulary.
     await workspace.writeSource("src/d2.controller.ts", controllerSource(null))
 
     const result = await scanWorkspace()
@@ -86,9 +72,6 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
   })
 
   it("ties a namespace-imported decorator back to the module it was written through", async () => {
-    // `Decorator.qualifier` carries the receiver, and the framework resolves it against the
-    // edge's `namespaceBinding`. The boundary flags still come back on the leaf name, which
-    // is what `Decorator.name` holds.
     await workspace.writeSource(
       "src/d5.controller.ts",
       [
@@ -117,9 +100,6 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
   })
 
   it("classifies a decorator written in parentheses as the one it encloses", async () => {
-    // `@(Controller)` and `@(nest\n  .Controller)` are legal and parse cleanly. Read as their
-    // text, they were named `(Controller)` and `(nest\n  .Controller)`, matched no table, and
-    // left the class unclassified with a line break in `Decorator.name`.
     await workspace.writeSource(
       "src/d6.controller.ts",
       [
@@ -151,9 +131,6 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
   })
 
   it("says it is less sure about a namespace import from a competing library", async () => {
-    // `@tsed.Controller()` used to be indistinguishable from `@nest.Controller()` — the
-    // qualifier was thrown away, so both arrived as the leaf `Controller` with nothing
-    // naming a module, and both came back `high`.
     await workspace.writeSource(
       "src/d6.controller.ts",
       [
@@ -174,9 +151,6 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
   })
 
   it("reads a receiver bound by a default import, not only a namespace one", async () => {
-    // `import tsed from "@tsed/common"` binds the module object through the named-import
-    // index instead — the language plugin reports it as `symbols: ["tsed"]`. A plugin
-    // reading only namespace edges leaves this file in the most-trusting tier.
     await workspace.writeSource(
       "src/d7.controller.ts",
       [

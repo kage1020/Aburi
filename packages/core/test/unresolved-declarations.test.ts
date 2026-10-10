@@ -4,13 +4,6 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CoreError, detectManagers } from "../src/index"
 
-/**
- * A manifest that declares package patterns and resolves none of them is a workspace whose
- * packages are all missing from the Document. It reaches the same single-project fallback as
- * a manifest that declared nothing, which is the right answer only for the second — so
- * detection reports which manifest it was, and the CLI says so.
- */
-
 let tmp = ""
 
 beforeEach(async () => {
@@ -57,9 +50,6 @@ describe("a manifest that declared packages and resolved none", () => {
   })
 
   it("counts a pattern the resolver drops as one that was declared", async () => {
-    // An empty entry and a negation both resolve to nothing on their own, and both are
-    // something the user wrote. Reporting only the patterns that reached the walk would be
-    // silent about exactly the manifests most likely to be wrong.
     await write("pnpm-workspace.yaml", 'packages:\n  - ""\n  - "!packages/legacy"\n')
 
     expect(await unresolved()).toEqual([
@@ -68,8 +58,6 @@ describe("a manifest that declared packages and resolved none", () => {
   })
 
   it("says nothing about a manifest with no packages key", async () => {
-    // pnpm reads that as "only the root package is included in the workspace", so the whole
-    // repository as one component is the right answer rather than a missing one.
     await write("pnpm-workspace.yaml", "onlyBuiltDependencies: []\n")
 
     expect(await unresolved()).toEqual([])
@@ -83,8 +71,6 @@ describe("a manifest that declared packages and resolved none", () => {
   })
 
   it("says nothing about turbo, which declares no patterns of its own", async () => {
-    // turbo's empty `roots` is deliberate — it is a co-marker — so it must not be read as a
-    // declaration that failed.
     await write("turbo.json", "{}")
 
     expect(await unresolved()).toEqual([])
@@ -109,9 +95,6 @@ describe("a manifest that declared packages and resolved none", () => {
   })
 
   it("orders two dead manifests by tool rather than by which detector finished first", async () => {
-    // The detectors race inside one `Promise.all`, so without an order of its own this list
-    // would be whichever finished first — and a report that names the same two manifests in a
-    // different order on each run is one a reader cannot diff.
     await write("pnpm-workspace.yaml", 'packages:\n  - "tools/*"\n')
     await write("package.json", JSON.stringify({ name: "root", workspaces: ["apps/*"] }))
 
@@ -119,9 +102,6 @@ describe("a manifest that declared packages and resolved none", () => {
   })
 
   it("orders two dead manifests that spell one tool by the manifest", async () => {
-    // `detectJsPackageManagerTool` answers "pnpm" for `package.json#workspaces` whenever a
-    // `pnpm-lock.yaml` is there, which is what a repository that moved to pnpm and left
-    // `workspaces` behind looks like. The tool is then not a key, and the manifest is.
     await write("pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
     await write("pnpm-workspace.yaml", 'packages:\n  - "tools/*"\n')
     await write("package.json", JSON.stringify({ name: "root", workspaces: ["apps/*"] }))
@@ -141,12 +121,6 @@ describe("a manifest that declared packages and resolved none", () => {
 })
 
 describe("a packages field that is not a list of patterns", () => {
-  /**
-   * Every shape here declares packages, resolves none, and lands on the same single-project
-   * fallback — while both the reason and the remedy differ from a pattern that matched
-   * nothing: write it as a list of strings, rather than fix the pattern. pnpm refuses all
-   * three itself, so refusing them is its reading rather than a stricter one.
-   */
   async function refused(): Promise<CoreError> {
     const thrown = await detectManagers(tmp).then(
       () => null,

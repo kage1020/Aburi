@@ -54,8 +54,6 @@ describe("detectWorkspaceRoot", () => {
   })
 
   it("CD32: stops at a `.git` beside another marker, in any probing order", async () => {
-    // This repository's own root is the layout: `.git` beside `turbo.json`. Probed in a list,
-    // `.git` ended the walk only while it came first in it.
     await writeFile(join(tmp, "turbo.json"), "{}", "utf8")
     const repo = join(tmp, "repo")
     await mkdir(join(repo, ".git"), { recursive: true })
@@ -118,12 +116,6 @@ describe("detectWorkspaceRoot", () => {
     }
   })
 
-  // Outside a repository the walk climbs to the filesystem root, so it reads manifests that
-  // belong to nobody in this workspace. The five cases below are the whole rule: a read
-  // failure at or below the root is the workspace's own and is raised, one above it is not and
-  // is ignored, and neither may displace "workspace-root-not-found" when there is no root to be
-  // inside of. The two "above" cases root at a marker other than `.git`, which would end the
-  // walk before it reached the manifest above.
   it("raises a malformed manifest below the workspace root", async () => {
     await mkdir(join(tmp, ".git"), { recursive: true })
     const pkg = join(tmp, "apps", "billing")
@@ -141,9 +133,6 @@ describe("detectWorkspaceRoot", () => {
   })
 
   it("raises a malformed manifest at the workspace root itself", async () => {
-    // The root is a root because of the `Cargo.toml` beside the broken manifest, so the
-    // probe that failed and the marker that answered are the same directory — the boundary
-    // case of "at or below", and the one a strict "below" test would wrongly let through.
     await writeFile(join(tmp, "package.json"), "{ not json", "utf8")
     await writeFile(join(tmp, "Cargo.toml"), '[workspace]\nmembers = ["crate-a"]\n', "utf8")
 
@@ -168,9 +157,6 @@ describe("detectWorkspaceRoot", () => {
   })
 
   it("ignores an unreadable manifest above the workspace root", async () => {
-    // Neither root nor Windows is refused by the permission bits, so there the file stays
-    // readable and there is nothing to assert. The case this covers is the shared machine or
-    // CI container, where a directory above the checkout belongs to somebody else.
     if (process.platform === "win32" || process.getuid?.() === 0) return
 
     const above = join(tmp, "home")
@@ -188,9 +174,6 @@ describe("detectWorkspaceRoot", () => {
   })
 
   it("a malformed manifest above an absent root stays workspace-root-not-found", async () => {
-    // Callers read that code as "cwd is a single-project workspace" and carry on. A broken
-    // manifest above a root that does not exist must not turn that fallback into a harder
-    // error, so the absent root outranks the deferred failure.
     const inner = join(tmp, "home", "plain")
     await mkdir(inner, { recursive: true })
     await writeFile(join(tmp, "home", "package.json"), "{ not json", "utf8")
@@ -281,8 +264,6 @@ describe("detectManagers", () => {
   })
 
   it("refuses a declared package that lies outside the workspace root", async () => {
-    // `tinyglobby` honours the ascending pattern and returns the match above `cwd`, which
-    // is what makes this reachable at all. `assertInsideWorkspace` carries the reasoning.
     const outside = join(tmp, "outside")
     await mkdir(join(outside, "pkg"), { recursive: true })
     await writeFile(join(outside, "pkg", "package.json"), JSON.stringify({ name: "o" }), "utf8")
@@ -308,11 +289,6 @@ describe("detectManagers", () => {
   })
 
   it("spells a workspace root in Unicode NFC, as the paths beside it are spelled", async () => {
-    // `symbols[].source.file` is normalized at its source (`toDocumentPath`). A root left
-    // in the spelling the filesystem handed back would disagree with it for the same
-    // directory, which is the divergence canonical serialization exists to prevent.
-    // Written decomposed on purpose: `e` + U+0301, the spelling an archive, an HFS+
-    // volume or a Finder rename hands back.
     const decomposed = "café"
     await mkdir(join(tmp, "apps", decomposed), { recursive: true })
     await writeFile(

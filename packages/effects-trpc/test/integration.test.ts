@@ -15,15 +15,6 @@ import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { classifyTrpcCall } from "../src/index"
 
-/**
- * End-to-end: parse a TypeScript source through `@aburi/lang-typescript`, walk each
- * Symbol's body to produce CallCandidate[], and confirm the tRPC classifier assigns the
- * right effect ids per call. Locks the wire between call extraction in the language
- * plugin and effect classification here — in particular the `normalizeCallee` behaviour
- * of collapsing a receiver-side `call_expression`, which is what makes the client
- * `client.user.byId.query` and the server `publicProcedure.input.query` share a shape.
- */
-
 const CLIENT_IMPORT: ImportEdge = {
   source: "@trpc/client",
   symbols: ["createTRPCClient", "httpBatchLink"],
@@ -155,13 +146,6 @@ export class UserGateway {
   })
 
   it("assigns no effect at all to a router definition file", async () => {
-    // The load-bearing guarantee behind keeping the server side out of this plugin.
-    // `publicProcedure.input(z).query(cb)` normalizes to `publicProcedure.input.query` —
-    // structurally identical to a client call — so a regression here would decorate
-    // every router definition with a spurious network.rpc.
-    // Written as a router factory so the definition sits inside a Symbol body and
-    // walkBody actually emits the calls — a top-level `const appRouter = t.router({...})`
-    // produces no CallCandidate at all and would make this test vacuous.
     const results = await classifyCalls(
       "src/server/router.ts",
       `import { initTRPC } from "@trpc/server"
@@ -217,8 +201,6 @@ export async function work(id: string) {
   })
 
   it("returns null for every call when no tRPC module is imported (cross-plugin non-interference)", async () => {
-    // A Prisma-only file. `prisma.user.findMany` is the Prisma plugin's business; tRPC
-    // must leave the call in Symbol.calls[] for it.
     const results = await classifyCalls(
       "src/services/prisma-only.ts",
       `import { PrismaClient } from "@prisma/client"

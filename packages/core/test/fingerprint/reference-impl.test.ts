@@ -8,17 +8,8 @@ import {
 } from "../../src/index"
 import { makeSymbol } from "../fixtures/ir"
 
-/**
- * These pinned hashes are the cross-implementation contract. A new language plugin or a
- * ported fingerprint reference in another language MUST reproduce them from the same input;
- * any change to the axis calculation would break this test on purpose so the drift shows
- * up before it silently invalidates historical IRs.
- */
-
 describe("reference implementation — pinned hex", () => {
   it("hashRawString of the empty JSON object matches the reference, at 12 lowercase hex", () => {
-    // Pinning hashRawString directly is the cheapest cross-impl assertion; a reader can
-    // verify with `echo -n '{}' | openssl dgst -sha256 | cut -c1-12`.
     expect(hashRawString("{}")).toBe("44136fa355b3")
     expect(hashRawString("anything else")).toMatch(/^[0-9a-f]{12}$/)
   })
@@ -43,8 +34,6 @@ describe("reference implementation — pinned hex", () => {
       visibility: "public",
       signature: null,
     })
-    // Regression-guard the exact 12-hex value. A shift means the api canonical form
-    // changed and every historical IR needs re-hashing before comparison.
     expect(apiFingerprint(sym)).toBe("abf3a0597098")
   })
 
@@ -78,9 +67,6 @@ describe("reference implementation — pinned hex", () => {
 
   it("logicFingerprint of a Symbol with no rules and no effects is pinned", () => {
     const sym = makeSymbol("ts:src/a.ts#foo", { rules: [], effects: [] })
-    // With canonicalizeRules and canonicalizeEffects both returning [], the JSON input is
-    // `{"effects":[],"rules":[]}`. Any accidental format churn (adding a field, changing
-    // key order, defaulting to null) trips this pin.
     expect(logicFingerprint(sym)).toBe(hashCanonicalObject({ effects: [], rules: [] }))
   })
 })

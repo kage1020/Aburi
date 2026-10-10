@@ -5,11 +5,6 @@ import { walkDescendants } from "../src/ast-helpers"
 import { walkBody } from "../src/walk-body"
 import { makeExtractionCtx, parseSource, requireTree, symbolsOf } from "./fixtures/ctx"
 
-/**
- * LP27b — an `import("…")` type the grammar cannot place is read through a second parse that
- * replaces it with a same-length name, and the tree still reads the original text.
- */
-
 async function errorsOf(source: string, path?: string): Promise<string[]> {
   const result = await parseSource(source, path)
   return result.errors.map((e) => `${e.line}:${e.column} ${e.message}`)

@@ -4,31 +4,8 @@ import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { discoverFiles } from "../../src"
 
-/**
- * Git reads a `.gitignore` in every directory from the repository root down to the file's own,
- * and a deeper file's rules override a shallower one's. Discovery read exactly one, so
- * `packages/app/.gitignore` holding `fixtures/` did nothing and those files reached the IR.
- *
- * Every verdict below was taken from `git check-ignore` on the same layout, on ext4 so nothing
- * is decided by case folding. They are hardcoded rather than compared against a subprocess:
- * a test that shells out proves the two agree on whatever git is installed and says nothing
- * about what either does, where these say what the answer is — and a change to one of them has
- * to change a line here.
- *
- * Not read, and not by accident: `$GIT_DIR/info/exclude` and `core.excludesFile`. Both are
- * per-machine, so honouring them would make the Document depend on who ran the scan.
- */
-
 let workRoot: string
 
-/**
- * A pattern past the length the matcher hands to a regex engine at all.
- *
- * Not an engine failure: where the engine's own size limit falls, and what reaching it costs,
- * is the engine's business — see `MAX_RULE_LENGTH`. The matcher refuses at a fixed length
- * before any of that, which is what makes this fixture instant and identical everywhere. For a
- * rule the engine itself refuses, `a/[/b` is five characters and unterminated.
- */
 const UNUSABLE = "a".repeat(5_000)
 
 async function writeFileAt(rel: string, content = "1"): Promise<void> {
@@ -81,8 +58,6 @@ describe("a .gitignore in every directory", () => {
   })
 
   it("anchors a nested pattern to the directory that declared it", async () => {
-    // `/local.ts` is anchored, and what it is anchored to is `pkg` — not the workspace root,
-    // and not every directory under `pkg`.
     await gitignoreIn("pkg", "/local.ts")
     await writeFileAt("pkg/local.ts")
     await writeFileAt("pkg/sub/local.ts")
@@ -109,8 +84,6 @@ describe("a .gitignore in every directory", () => {
   })
 
   it("lets a deeper exclusion take one away", async () => {
-    // The other direction, and the one a "nested files only ever re-include" reading gets
-    // wrong: precedence is by depth, not by which way the rule points.
     await gitignoreIn("", "!*.ts")
     await gitignoreIn("pkg", "keep.ts")
     await writeFileAt("pkg/keep.ts")
@@ -131,8 +104,6 @@ describe("a .gitignore in every directory", () => {
   })
 
   it("re-includes nothing under a directory the root excluded outright", async () => {
-    // Git never descends into `generated/`, so the file is not there to be rescued. A matcher
-    // that only ever asked about the full path would hand this one back.
     await gitignoreIn("", "generated/")
     await gitignoreIn("generated", "!g.ts")
     await writeFileAt("generated/g.ts")
@@ -141,8 +112,6 @@ describe("a .gitignore in every directory", () => {
   })
 
   it("re-includes under a directory whose contents, not the directory, were excluded", async () => {
-    // `generated/*` leaves the directory itself un-excluded, so git walks in and the nested
-    // negation is reached. The pair with the case above is what pins the distinction.
     await gitignoreIn("", "generated/*")
     await gitignoreIn("generated", "!g.ts")
     await writeFileAt("generated/g.ts")
@@ -152,11 +121,6 @@ describe("a .gitignore in every directory", () => {
   })
 
   it("does not let two nested files together rescue a file under an excluded directory", async () => {
-    // The shape that needs the exclusion to be *inherited* rather than re-derived. `gen/` puts
-    // the whole subtree out; `gen/.gitignore` un-excludes `sub/`, so asked in isolation that
-    // directory looks fine again; and `gen/sub/.gitignore` then un-ignores the file. Git
-    // ignores it regardless — it never descended into `gen`, so neither of those files exists
-    // as far as it is concerned. Rescuing one directory at a time is still not rescuing.
     await gitignoreIn("", "gen/")
     await gitignoreIn("gen", "!sub/")
     await gitignoreIn("gen/sub", "!x.ts")
@@ -176,8 +140,6 @@ describe("a .gitignore in every directory", () => {
   })
 
   it("governs a directory whose name is decomposed", async () => {
-    // The matcher is keyed by the spelling the filesystem gave, and the candidate arrives in
-    // the same spelling — normalising either one would stop the directory matching its own file.
     const directory = "café".normalize("NFD")
     await gitignoreIn(directory, "drop.ts")
     await writeFileAt(`${directory}/drop.ts`)
@@ -189,10 +151,6 @@ describe("a .gitignore in every directory", () => {
 
 describe("what is not read", () => {
   it("never opens a .gitignore inside .git", async () => {
-    // Not a rule file to git, whatever it holds. Its *rules* could not reach outside `.git`
-    // anyway — a matcher only speaks about its own subtree, and nothing under `.git` is a
-    // candidate — so what says the file was skipped is that a line the matcher refuses did not
-    // end the run.
     await writeFileAt(join(".git", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("keep.ts")
 
@@ -200,8 +158,6 @@ describe("what is not read", () => {
   })
 
   it("never opens a .gitignore under a directory the drop globs already removed", async () => {
-    // Same reasoning, same evidence: a `node_modules` package's own file cannot change a
-    // verdict about anything that survived the walk, and a scan must not fail over one.
     await writeFileAt(join("node_modules", "pkg", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("keep.ts")
 
@@ -238,16 +194,9 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("names a rule the walk would never have asked about", async () => {
-    // A negative rule is skipped while nothing has matched, and a rule that matches shadows the
-    // same-polarity rules after it — so one throwaway question of the assembled matcher reaches
-    // neither of these. Every line is looked at now, whichever position and polarity it holds.
     for (const [directory, rules] of [
       ["negation", [`!${UNUSABLE}`]],
       ["shadowed", ["a*", UNUSABLE]],
-      // The engine's own refusal rather than the length gate, in the position only per-line
-      // compilation reaches: `ignore` splits on `/`, so a `[` with a `/` inside it is an
-      // unterminated character class at five characters, and the assembled matcher never
-      // compiles a rule the one before it shadowed.
       ["shadowed-syntax", ["a*", "a/[/b"]],
     ] as const) {
       await writeFileAt(`${directory}/a.ts`)
@@ -262,10 +211,6 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("measures the line the matcher compiles, not a trimmed version of it", async () => {
-    // Two ways past a gate that reads `line.trim()`. Leading whitespace is part of a gitignore
-    // pattern, so a rule of four thousand spaces and one character trims to one; and `ignore`
-    // treats `#` as a comment only at the first character, so `  #…` trims to a comment here
-    // and stays a live pattern there. Both were measured against the matcher, not reasoned out.
     for (const [directory, line] of [
       ["padded", `${" ".repeat(5_000)}x`],
       ["pseudo-comment", `  #${UNUSABLE}`],
@@ -282,8 +227,6 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("leaves a real comment and a blank line alone", async () => {
-    // The other side of the same predicate: what `ignore` discards, this discards, so a file of
-    // comments is not a file of refusals.
     await writeFileAt("pkg/a.ts")
     await gitignoreIn("pkg", "", `#${UNUSABLE}`, "   ", "*.log")
 
@@ -291,8 +234,6 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("names the line, and quotes only the head of the rule", async () => {
-    // `CoreError` is not a `CliError`, so the message reaches a terminal verbatim. Quoting the
-    // rule whole would put five thousand characters of it there.
     await writeFileAt("pkg/a.ts")
     await writeFileAt(join("pkg", ".gitignore"), ["# a comment", "", "*.log", UNUSABLE].join("\n"))
 
@@ -304,9 +245,6 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("abridges the engine's own diagnostic too", async () => {
-    // A different string from the rule, and unbounded for a different reason: the engine quotes
-    // the whole pattern it refused, so a rule that stops just short of the length limit produces
-    // four kilobytes of message — and a `CoreError` is printed verbatim.
     await writeFileAt("pkg/a.ts")
     await gitignoreIn("pkg", `${"a".repeat(4_000)}/[/b`)
 
@@ -317,8 +255,6 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("is not read at all when respectGitignore is off", async () => {
-    // The off switch skips the read, not just the application. Nothing else here would notice
-    // the difference: a matcher built and thrown away answers the same as no matcher.
     await gitignoreIn("", "root.ts")
     await writeFileAt(join("pkg", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("pkg/a.ts")
@@ -328,9 +264,6 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("is not read under a directory the caller's own ignore globs removed", async () => {
-    // No candidate comes from there, so the descent never arrives. Reading it would let
-    // `config.ignore` turn a workspace's own exclusions into a failed scan — or, if the read
-    // succeeded, into no exclusions at all.
     await writeFileAt(join("private", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("private/a.ts")
     await writeFileAt("keep.ts")
@@ -344,10 +277,6 @@ const onPosix = it.skipIf(process.platform === "win32")
 
 describe("a .gitignore that is not a regular file", () => {
   onPosix("does not follow a symlink, resolvable or not", async () => {
-    // Measured: `git check-ignore` honours neither. It refuses to follow a symlinked
-    // `.gitignore` at all — a resolvable one is read as nothing, and a dangling one warns.
-    // Discovery agreed with the second by accident and the first not at all, because the walk
-    // that listed the files resolved links and silently dropped the ones that would not.
     await writeFileAt("rules.txt", "drop.ts\n")
     await symlinkAt(join(workRoot, "rules.txt"), join("resolvable", ".gitignore"))
     await symlinkAt(join(workRoot, "nothing-here"), join("dangling", ".gitignore"))

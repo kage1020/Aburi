@@ -4,13 +4,6 @@ import { dirname, resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runCli } from "../src/run"
 
-/**
- * A `packages:` list that named no package reaches the same single-project fallback as a
- * manifest that named none, and only the second wants it. The IR keeps no trace either way
- * that a reader can act on — `workspace.managers[].roots` is empty, which is also what a
- * turbo co-marker writes on purpose — so stderr is the whole of the account.
- */
-
 let workRoot = ""
 
 beforeEach(async () => {
@@ -27,7 +20,6 @@ async function write(relativePath: string, body: string): Promise<void> {
   await writeFile(path, body, "utf8")
 }
 
-/** Enough files of one extension to clear the census thresholds and give the scan something. */
 async function writeSource(directory: string): Promise<void> {
   for (let index = 0; index < 12; index += 1) {
     await write(`${directory}/f${index}.ts`, "export const x = 1\n")
@@ -87,8 +79,6 @@ describe("aburi scan says which manifest named no package", () => {
   })
 
   it("stops naming patterns before the line stops being readable", async () => {
-    // The manifest still holds every one of them, and the line names the manifest — so the
-    // rest is a file away, which is what the skip census truncates for too.
     const patterns = Array.from({ length: 12 }, (_, index) => `dead${index}/*`)
     await write(
       "pnpm-workspace.yaml",
@@ -115,9 +105,6 @@ describe("aburi scan says which manifest named no package", () => {
   })
 
   it("leaves out the consequence when the config decides the components", async () => {
-    // The manifest is still ineffective — `workspace.managers[]` records it with no roots —
-    // but detection's answer never reached the IR, so the second line would describe a
-    // Document that was built the other way.
     await write("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n')
     await writeSource("src")
     await writeConfig({ components: [{ id: "app", roots: ["src"], languages: ["ts"] }] })

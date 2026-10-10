@@ -1,12 +1,6 @@
 import type { CallCandidate } from "@aburi/types"
 import { toNfc } from "../codepoints"
 
-/**
- * Core standard callee prefixes that are dropped from Category C per drop-list.md.
- * Every entry is a dot-terminated identifier prefix — `console.log`,
- * `console.info`, etc. all match `console.` and never reach `Symbol.calls[]` or
- * `Symbol.effects[]`.
- */
 const CORE_DROP_PREFIXES: readonly string[] = [
   "console.log",
   "console.info",
@@ -31,15 +25,6 @@ export interface DropCFilterInput {
   keep?: readonly string[]
 }
 
-/**
- * Compile a reusable predicate that answers "should this callee be dropped from
- * effects / calls per Category C?". The compiled form is a set of prefix strings — no
- * regex — because drop rules are all exact identifier chains and the identifier chain
- * has already been normalized by the language plugin.
- *
- * Precedence follows drop-list.md: `keep` wins over `suppress` and both wins
- * over the core / plugin drop sets. Consumers only need one probe per call.
- */
 export function buildDropCFilter(input: DropCFilterInput = {}): DropCFilter {
   return new DropCFilter(
     CORE_DROP_PREFIXES,
@@ -60,14 +45,6 @@ export class DropCFilter {
     suppress: readonly string[],
     keep: readonly string[],
   ) {
-    // Decorator names in `keep[]` use `@Name` syntax per drop-list.md. Strip the
-    // `@` for prefix comparison — a decorator can't reach here anyway (this is
-    // call-level) so the strip is defensive against consumers mixing the two syntaxes.
-    //
-    // Both lists are put into Unicode NFC because the `target` they are matched against is
-    // (ir-schema.md). These arrive from a JSON config and a plugin manifest, neither of
-    // which normalizes, so without this a `suppress` entry could fail to match the call it
-    // names — and a dropped call leaves nothing in the Document to trace the miss back from.
     this.#dropPrefixes = [...core, ...pluginDropCallees, ...suppress].map(toNfc)
     this.#keepPrefixes = keep.map((k) => toNfc(k.startsWith("@") ? k.slice(1) : k))
   }
@@ -86,10 +63,6 @@ export class DropCFilter {
   }
 }
 
-/**
- * A prefix matches when the target equals it or continues past it at a member break
- * (`prefix + "."`): bare `console` matches `console.log` but not `consoleWrap.method`.
- */
 function isPrefixMatch(target: string, prefix: string): boolean {
   return target === prefix || target.startsWith(`${prefix}.`)
 }

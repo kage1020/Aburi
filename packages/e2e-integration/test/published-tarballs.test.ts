@@ -1,18 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { type PackedPackage, packPublishedPackages } from "../src/packed"
 
-/**
- * What a consumer actually receives from npm.
- *
- * The suites around this one exercise `dist/` through the workspace link, so a build-time
- * regression already goes red. The publish seam is what they cannot see: `files` decides
- * the tarball, `lang-typescript/wasm` is gitignored build output that has to ship anyway,
- * and nothing about either shows up in a test that imports the package by name.
- *
- * `test.dependsOn: ["^build"]` is what makes this checkable — every published package is a
- * devDependency of this one precisely so turbo builds all of them before this runs.
- */
-
 const PUBLISHED_PACKAGE_COUNT = 17
 
 let packed: PackedPackage[]
@@ -39,8 +27,6 @@ describe("e2e: published tarball contents", () => {
   })
 
   it("ships the grammar wasms with @aburi/lang-typescript", () => {
-    // The entry must stay exactly one directory below the package root: `src/parser.ts`
-    // reaches the grammars through `../wasm/`, relative to the module's own URL.
     expect(langTypescript.paths).toEqual(
       expect.arrayContaining([
         "dist/index.mjs",

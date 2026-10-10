@@ -17,10 +17,6 @@ export interface DiscoveredVocabItem {
   samples: { file: string; line?: number; symbol: string }[]
 }
 
-/**
- * One item per (kind, value), in the order the scan first met each. Scan order is path order,
- * so the record is the same for the same workspace.
- */
 export function summarizeUndeclaredVocab(
   occurrences: readonly UndeclaredVocabOccurrence[],
 ): DiscoveredVocabItem[] {

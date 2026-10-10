@@ -72,19 +72,6 @@ function readParameters(node: Node): Signature["inputs"] {
   return out
 }
 
-/**
- * A parenthesis-free arrow — `x => x + 1` — has no parameter list to read: the grammar
- * hangs its single binding off a `parameter` field as a bare identifier, so the list
- * lookup above finds nothing and the function would report itself zero-arity. The api
- * fingerprint (fingerprint.md) compares `inputs` positionally, so that reading
- * reports the wrong arity, and wrongly in both directions: `x => …` → `() => …` drops
- * the parameter and is reported as no change at all, while `x => …` → `(x) => …` leaves
- * the contract alone and is reported as an api change.
- *
- * The form admits no type annotation, so the input is untyped: the same empty `type` an
- * unannotated `(x) => …` produces, which keeps the two spellings of one parameter one
- * signature.
- */
 function readBareParameter(node: Node): Signature["inputs"] {
   const parameter = node.childForFieldName("parameter")
   if (parameter === null) return []
@@ -178,8 +165,6 @@ function readPatternBindings(binding: Node | null): string[] {
 function extractParamType(param: Node): string {
   const typeAnn = param.childForFieldName("type") ?? findChild(param, "type_annotation")
   if (typeAnn === null) return ""
-  // type_annotation is `: T` — strip the leading colon so the returned string is the type
-  // expression alone. Grammar-wise the first named child is the actual type.
   const inner = typeAnn.namedChild(0)
   return inner !== null ? inner.text.trim() : typeAnn.text.replace(/^:\s*/, "").trim()
 }
@@ -208,13 +193,6 @@ function readThrows(node: Node, jsDocText: string | null): string[] {
   return [...seen].sort(compareCodeUnit)
 }
 
-/**
- * The type a `throw` names, as far as the tree says: the constructor of `throw new Foo()`;
- * the identifier of `throw err`, which is likely a caught variable and is kept verbatim so at
- * least the local name shows up; the callee of `throw makeError()` / `throw errors.notFound()`
- * so factory-style construction is not silently dropped. Anything else is null — consumers
- * wanting stronger typing rely on JSDoc `@throws`.
- */
 function extractThrownType(throwNode: Node): string | null {
   const thrown = thrownValue(throwNode)
   if (thrown === null) return null

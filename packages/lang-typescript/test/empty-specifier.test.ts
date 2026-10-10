@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { BACKSLASH, emptySpecifierErrors, importsOf, parseSource } from "./fixtures/ctx"
 
-/**
- * An empty module specifier names no module, so it cannot become an `ImportEdge` — the
- * contract in `lang-plugin.md` says `source` is non-empty, and the shared guards in
- * `@aburi/plugin-registry/plugin-input` throw when it is not.
- *
- * The grammar accepts every form below and `tsc` rejects them at resolution (TS2307, or
- * TS2882 for the bare side-effect import), so they arrive here from a half-edited file
- * rather than from anything exotic. Withdrawing the edge is therefore not enough on its own:
- * a silent drop is the failure mode this repository keeps finding, so each one is reported
- * through the recoverable-parse-error channel the file already uses for syntax errors.
- */
-
 describe("an empty module specifier produces no edge and one recoverable error", () => {
   it.each([
     ["default import", 'import a from ""', 15, "import"],
@@ -23,9 +11,6 @@ describe("an empty module specifier produces no edge and one recoverable error",
     ["require-equals", "import x = require('')", 20, "import"],
     ["dynamic import", 'const p = import("")', 18, "dynamic import"],
     ["dynamic import of an empty template", "const m = import(``)", 18, "dynamic import"],
-    // What the gate sees is the *decoded* value. A line continuation joins two source lines
-    // and contributes no character, so a literal that is only one names no module — where it
-    // used to be an edge whose source was a backslash and a newline.
     ["import of a line continuation", `import x from "${BACKSLASH}\n"`, 15, "import"],
     ["re-export of a line continuation", `export { a } from "${BACKSLASH}\n"`, 19, "re-export"],
     ["require-equals of a line continuation", `import x = require("${BACKSLASH}\n")`, 20, "import"],
@@ -40,16 +25,12 @@ describe("an empty module specifier produces no edge and one recoverable error",
     expect(imports).toEqual([])
     expect(emptySpecifierErrors(errors)).toEqual([
       {
-        // The construct is named, because `export * from ""` is not an import and being told
-        // it is sends the author looking at the wrong line.
         message: `empty module specifier: this ${site} names no module — write one, or remove the ${site}`,
         line: 1,
         column,
         recoverable: true,
       },
     ])
-    // The file is kept. What withdraws one is a parse that returned no tree at all, and one
-    // mid-edit import line is not a reason to discard everything else in the file.
     expect(tree).not.toBeNull()
   })
 
@@ -66,9 +47,6 @@ describe("an empty module specifier produces no edge and one recoverable error",
   })
 
   it("LP26c: reports each occurrence, including the two an edge dedupe would have merged", async () => {
-    // `dedupeEdges` keys on the line among other things, so the only pair it can collapse is
-    // two writings on one line — which is exactly this input, and which is still two places
-    // for the author to go and fix. Columns rather than lines are what tell them apart.
     const { imports, errors } = await importsOf('import a from ""; import a from ""')
     expect(imports).toEqual([])
     expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([15, 33])
@@ -94,9 +72,6 @@ describe("an empty module specifier produces no edge and one recoverable error",
 })
 
 describe("the diagnostics come out in source order", () => {
-  // The dynamic-import pass runs after the statement pass, so its findings have to be merged
-  // into the file's order rather than appended: three broken dynamic imports on one line
-  // once handed the reader their columns counting down.
   it("orders several dynamic specifiers on one line by column", async () => {
     const { errors } = await importsOf(
       'const a = import(""); const b = import(""); const c = import("")',

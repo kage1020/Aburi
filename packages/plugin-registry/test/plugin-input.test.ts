@@ -35,9 +35,6 @@ describe("assertNonEmptySegments", () => {
   })
 
   it("types the first segment as present, so callers index it without a cast", () => {
-    // The tuple type is the whole point of the return value: a `readonly string[]` would
-    // widen `segments[0]` to `string | undefined` under noUncheckedIndexedAccess and push
-    // a cast back into every classifier. This assignment is the compile-time assertion.
     const first: string = assertNonEmptySegments("db.select", ORIGIN).segments[0]
     expect(first).toBe("db")
   })
@@ -94,8 +91,6 @@ describe("hasMatchingImport", () => {
   })
 
   it("validates every edge before matching, so a broken edge after a match still throws", () => {
-    // A `.some()` that validated inline would short-circuit on the match at index 0 and
-    // never see the broken edge behind it, making throw behaviour depend on import order.
     expect(() =>
       hasMatchingImport([edge("example-orm", 1), edge("", 2)], ORIGIN, isExample),
     ).toThrow(/line 2/)
@@ -141,9 +136,6 @@ describe("assertImportBinding", () => {
   })
 
   it("rejects an entry whose exported half is empty", () => {
-    // `" as T"`. The local half survives, so a caller that only guards `local` indexes the
-    // name against an empty canonical — which matches no vocabulary table and drops the
-    // classification with nothing recording that anything was skipped.
     expect(() =>
       assertImportBinding({ imported: "", local: "T" }, " as T", named([" as T"], 4), ORIGIN),
     ).toThrow(
@@ -199,8 +191,6 @@ describe("identifierWords", () => {
   })
 
   it("is a word split, not a substring search — the distinction the callers rely on", () => {
-    // `feedback` contains "db" and `context` contains "tx"; a substring test would call
-    // both a database client. This is the whole reason the helper exists.
     expect(identifierWords("feedback")).toEqual(["feedback"])
     expect(identifierWords("context")).toEqual(["context"])
   })
@@ -322,15 +312,6 @@ describe("defineEffectsManifest", () => {
   })
 
   it("keeps xPrefix and capabilities off the shape, so reading either is a compile error", () => {
-    // `PluginManifest` declares both optional, and `defineEffectsManifest`'s docblock leans
-    // on the first being absent: the registry derives `xPrefix` from `name`, so a manifest
-    // that carried one would be stating something nobody reads. While `EffectsPluginManifest`
-    // inherited the optionals, `manifest.xPrefix` was a well-typed read that answered
-    // `undefined` for every manifest in the repo — a mistake with nothing to catch it.
-    //
-    // Like the assignments above, this is enforced by `pnpm typecheck`, not by the runner,
-    // and it fails in both directions: should either read start compiling again, the
-    // directive goes unused and TypeScript reports it as TS2578.
     const manifest = defineEffectsManifest("effects-foo", "effects-plugin:foo")
     // @ts-expect-error `xPrefix` is the registry's to derive, not the manifest's to declare.
     const xPrefix = manifest.xPrefix
@@ -342,19 +323,11 @@ describe("defineEffectsManifest", () => {
 
 describe("plugin-input module", () => {
   it("has no value imports, so the subpath stays free of the barrel's ajv setup", () => {
-    // The whole reason this module is a separate tsdown entry is that importing the
-    // package root evaluates `manifest.ts`, which compiles the plugin JSON Schema at
-    // module scope. A value import added here would fold this chunk back into that graph
-    // — silently, since nothing else in the build would fail. Asserted against the source
-    // rather than `dist/` so the check does not depend on a build having run.
     const source = readFileSync(
       fileURLToPath(new URL("../src/plugin-input.ts", import.meta.url)),
       "utf8",
     )
     const importLines = source.split("\n").filter((line) => line.startsWith("import "))
-    // Asserted as a shape rather than as one pinned line: what must hold is that every
-    // import is type-only, and pinning the line made adding a second type to the same
-    // `import type` fail a test whose subject it is not.
     expect(importLines.length).toBeGreaterThan(0)
     for (const line of importLines) expect(line.startsWith("import type ")).toBe(true)
   })

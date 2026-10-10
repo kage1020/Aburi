@@ -45,11 +45,6 @@ import { classifyStatus, dropDirection, representativeSymbol } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
-/**
- * The two counters `buildDiff` always writes. They are optional on `Summary` only so a diff
- * written before they existed stays valid; a caller holding a freshly built value should not
- * have to re-decide what "absent" means.
- */
 interface UnknownCounters {
   unknown: number
   depsUnknown: number
@@ -78,12 +73,6 @@ export interface DiffInput {
 
 const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
 
-/**
- * Top-level entry: run the 5-stage matcher, classify each pair, produce array deltas,
- * fold in Component / Dependency diffs, and assemble the `aburi.diff.v1` JSON projection.
- * Pure; `writeCanonicalDiff` serialises, so callers can run the Markdown projection or the
- * `--fail-on` gate over the result first.
- */
 export function buildDiff(
   input: DiffInput,
 ): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & UnknownCounters } {
@@ -225,16 +214,11 @@ export function buildDiff(
   const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, sides)
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
-  // No `?? 0`: `diffDependencies` declares `unknown` present when it is given side views, so
-  // absorbing an absence here would launder a mis-wiring into a confident `depsUnknown: 0`.
   summary.depsUnknown = dependencies.unknown.length
   summary.unknown = unknown
 
   symbols.sort(compareSymbolChange)
 
-  // Slice View clustering (docs/design/slice-view.md), over the resolved call edges only —
-  // never `Symbol.calls[]` directly. `slices[]` is emitted even when empty; the Markdown side
-  // is what omits the section.
   const slices = computeSlices({
     changes: symbols,
     baseCallEdges: reconstructCallEdgesFromIR(input.baseIR),
@@ -321,21 +305,6 @@ function ensureSchemasAgree(base: IR, head: IR): void {
 /** Which of the two inputs a message is about. */
 type IRSide = "baseIR" | "headIR"
 
-/**
- * A collection `buildDiff` keys by identity, and refuses a repeat in. Reporting order is the
- * order of `IDENTIFIED_COLLECTIONS`, base side before head side. The shape gate has already
- * established that every entry is an object whose identity fields are strings.
- *
- * This pass used to re-establish that itself, with an array check, an object check and a
- * string check on every entry, kept on the argument that a fourth collection added here and
- * not to `aburi.ir.v1` would silently put them back on the live path. That argument was about
- * a version of `identityFields` that named its fields as strings and read them off an
- * `unknown` entry. It does not survive `identities`: a collection now supplies a typed
- * projection out of `IR`, so a field the schema does not declare is a field `IR` does not
- * have, and one that is not a string is not a `readonly string[]`. Both are compile errors at
- * the entry that introduces them rather than runtime guards waiting for one — which is why
- * the guards are gone and this note is here instead.
- */
 interface IdentifiedCollection {
   readonly field: "symbols" | "components" | "dependencies"
   /** The identity fields of every entry, in the order `keyOf` receives them. */
@@ -392,20 +361,10 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
   },
 ]
 
-/**
- * What `buildDiff` needs before stage 1 runs: a Document of the shape the schema requires
- * (`checkDocumentShape`, invariant #20 — `buildDiff` is public API, so an IR assembled in
- * memory arrives having passed nothing), a `$schema` that names something (two Documents
- * that both say `""` would agree with each other), and identities it can key on
- * (diff-algorithm.md). Deliberately not the semantic invariants: an unsorted
- * `symbols[]` diffs correctly, so refusing it would withhold an answer the matcher can give.
- */
 function assertDiffable(ir: IR, name: IRSide): void {
   const violations = checkDocumentShape(ir)
   const first = violations[0]
   if (first !== undefined) {
-    // The message quotes the first breach and counts the rest; `violations` carries all of
-    // them so a caller repairing a hand-assembled Document does not run the diff once per field.
     const subject = sidedSubject(name, first.subject)
     const rest = violations.length - 1
     const more = rest > 0 ? ` (and ${rest} more)` : ""
@@ -453,10 +412,6 @@ function assertUniqueIdentity(
   }
 }
 
-/**
- * Deterministic ordering of `symbols[]`: by status, then by the representative Symbol's id.
- * Byte-stable for equal inputs, which the canonical `out/diff.json` relies on.
- */
 function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
   return (
     compareCodeUnit(a.status, b.status) ||
@@ -464,10 +419,6 @@ function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
   )
 }
 
-/**
- * Byte-deterministic serialiser for a DiffResult, sharing `@aburi/core`'s canonical sort
- * order, NFC normalisation and key sort with the IR side.
- */
 export function writeCanonicalDiff(diff: DiffResult, options: SerializeOptions = {}): string {
   return serializeCanonical(diff, options)
 }

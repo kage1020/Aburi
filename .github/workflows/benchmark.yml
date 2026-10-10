@@ -1,9 +1,5 @@
 name: Benchmark
 
-# Monthly, and on demand. The numbers are only comparable across runs that used the
-# same runner class and the same pinned commits, so this job fixes both: a standard
-# `ubuntu-latest` runner, and the pins in `benchmarks/public-repos/repos.json`.
-# Changing a pin is a documented event, not a routine bump.
 on:
   schedule:
     - cron: "0 3 1 * *"
@@ -18,9 +14,6 @@ on:
         required: false
         default: "3"
 
-# The results land as a pull request rather than a push to `main`: a benchmark is read
-# before it is kept, and a wall-time move needs a human to say whether the runner or
-# the code caused it.
 permissions:
   contents: write
   pull-requests: write
@@ -33,18 +26,15 @@ jobs:
   measure:
     name: measure
     runs-on: ubuntu-latest
-    # The 2026-09-01 sweep spent 4.6 minutes measuring; the rest is the install, the
-    # build and ~125 MB of first-run clone fetch. This is a ceiling on a hang, not a
-    # budget — a run that reaches it has stopped making progress.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -52,13 +42,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The harness runs the built CLI from `packages/cli/dist`, so it measures this
-      # commit rather than a published version.
       - name: Build
         run: pnpm build
 
-      # A work directory inside the checkout would make every clone inherit Aburi's own
-      # workspace root, and the harness refuses; `RUNNER_TEMP` is outside it.
       - name: Run the benchmark
         env:
           ONLY: ${{ inputs.only }}
@@ -68,11 +54,9 @@ jobs:
           if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
           node benchmarks/public-repos/run.mjs "${args[@]}"
 
-      # The harness rewrites `results/` after each repository, so a sweep the timeout
-      # killed still has everything it finished on disk to upload.
       - name: Upload the results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: benchmarks/public-repos/results/
@@ -83,8 +67,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          # The stamp comes from the report the harness wrote, not from `date`: a run
-          # that crosses midnight UTC would otherwise name a file that does not exist.
           report="$(git status --porcelain benchmarks/public-repos/results | awk '$NF ~ /[0-9]\.md$/ { print $NF }' | sort | tail -1)"
           if [ -z "$report" ]; then
             echo "The run produced no new report." >&2
@@ -102,8 +84,6 @@ jobs:
             echo "A pull request for $branch is already open; the push updated it." >&2
             exit 0
           fi
-          # The rendered tables become the pull request body, so a run is readable
-          # without checking the branch out.
           {
             echo "Measured by the \`Benchmark\` workflow on \`$HEAD_SHA\`."
             echo

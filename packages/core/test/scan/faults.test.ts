@@ -4,13 +4,6 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { describeThrown, errorCode, isVanishedFile } from "../../src/scan/faults"
 
-/**
- * The predicate is asserted against errno values the operating system actually produced,
- * not against object literals carrying a `code`. A literal would pass whatever the real
- * syscall does, which is the only thing the two scan stages ever see — and the codes are
- * not the same on every platform: replacing a directory with a file answers `ENOTDIR` on
- * POSIX and `ENOENT` on Windows, which is why the predicate holds two codes rather than one.
- */
 let workRoot: string
 
 /** The failure a syscall raised, or a throw naming the call that was supposed to fail. */
@@ -31,8 +24,6 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  // Readable-but-not-traversable is also not deletable, so the mode goes back before the
-  // tree does.
   await chmod(join(workRoot, "sealed"), 0o755).catch(() => {})
   await rm(workRoot, { recursive: true, force: true })
 })
@@ -47,9 +38,6 @@ describe("isVanishedFile", () => {
   })
 
   it("absorbs a path whose directory is no longer one", async () => {
-    // The same event as a deletion — something replaced part of the path while the scan
-    // held a listing of it — reported under a different code, and under a different code
-    // again depending on the platform.
     const error = await statFailure(join(workRoot, "a-file", "inner.ts"))
     expect(errorCode(error)).toBe(process.platform === "win32" ? "ENOENT" : "ENOTDIR")
     expect(isVanishedFile(error)).toBe(true)
@@ -89,16 +77,12 @@ describe("describeThrown", () => {
   })
 
   it("says a string was thrown when the string is empty", () => {
-    // The value this function exists to replace. Recorded as "" it is indistinguishable
-    // from a detail nobody wrote, which is the silence the per-file boundary is for.
     const described = describeThrown("")
     expect(described).not.toBe("")
     expect(described).toContain("string")
   })
 
   it("says an object was thrown when the object describes itself as nothing", () => {
-    // Not the empty-string branch: this one reaches the end of the chain and comes back
-    // empty anyway, so the guard has to be on the result rather than on the branch.
     const described = describeThrown({ toJSON: () => undefined, toString: () => "" })
     expect(described).not.toBe("")
     expect(described).toContain("object")

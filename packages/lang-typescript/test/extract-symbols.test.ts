@@ -4,8 +4,6 @@ import type { Node } from "web-tree-sitter"
 import { BACKSLASH, byId, symbolsOf } from "./fixtures/ctx"
 
 describe("extractSymbols — structure (LP1-LP8)", () => {
-  // LP1 (top-level function), LP2 (class) and LP5 (interface) are rows of the LP6b table
-  // below, which pins each kind's `kind` beside its export evidence.
   it("LP3: class method uses '.' separator", async () => {
     const symbols = await symbolsOf("export class InvoiceService { createInvoice() {} }")
     const sym = byId(symbols, "#InvoiceService.createInvoice")
@@ -42,15 +40,6 @@ describe("extractSymbols — structure (LP1-LP8)", () => {
   })
 })
 
-/**
- * One question, one answer, whatever the declaration is written as (LP6b).
- *
- * `visibility` was already `public` for all seven kinds, because `computeTopLevelVisibility`
- * reads the statement rather than the declaration. The `export-keyword` token was not: four
- * builders — interface, type alias, enum, namespace — hardcoded a one-token `derivedBy`, so a
- * consumer reading the evidence off a Symbol was told the declaration was exported for a
- * `const` and told nothing at all for the `interface` beside it.
- */
 describe("extractSymbols — the export keyword is evidence on every kind (LP6b)", () => {
   it.each([
     ["function", "export function f() {}", "#f", "function"],
@@ -93,9 +82,6 @@ describe("extractSymbols — the export keyword is evidence on every kind (LP6b)
   })
 
   it("a declaration inside a namespace carries the token from its own keyword", async () => {
-    // The counterpart of the negative below: the namespace says nothing either way, so an
-    // `export` written on the inner declaration is what the inner Symbol reports. Covered for
-    // the ambient spelling by `declared-without-a-body.test.ts`; this is the plain one.
     const symbol = byId(await symbolsOf("namespace N { export const a = 1 }"), "#N.a")
     expect(symbol.visibility).toBe("public")
     expect(symbol.derivedBy).toContain("export-keyword")
@@ -105,10 +91,6 @@ describe("extractSymbols — the export keyword is evidence on every kind (LP6b)
     ["a named clause", "interface I {}\nexport { I }", "#I", "export-keyword"],
     ["a default clause", "const P = () => 1\nexport { P as default }", "#P", "export-default"],
   ])("%s is not read for exportedness", async (_label, source, id, token) => {
-    // No clause spelling is read yet, and LP6a says why: covering only some of them would make
-    // the answer depend on a clause's contents. Both of these are `internal` with no export
-    // token, and the pair is here so that changing one spelling cannot quietly change the
-    // other.
     const symbol = byId(await symbolsOf(source), id)
     expect(symbol.visibility).toBe("internal")
     expect(symbol.derivedBy).not.toContain(token)
@@ -123,19 +105,12 @@ describe("extractSymbols — the export keyword is evidence on every kind (LP6b)
       ["destructured-binding", "export-default"],
     ],
   ])("%s written with both keywords at once answers as the default export", async (_label, source, id, expected) => {
-    // TS1191 — illegal, and the grammar accepts it, so the plugin answers rather than
-    // crashes. The keyword loses to `default` here as it does for a class or a function,
-    // which is the point of one reader; before this file's change the variable path was the
-    // one that reported `export-keyword` for it. Pinned because nothing else would notice
-    // the answer moving.
     const symbol = byId(await symbolsOf(source), id)
     expect(symbol.visibility).toBe("public")
     expect(symbol.derivedBy).toEqual(expected)
   })
 
   it("a declaration inside an exported namespace is not exported by it", async () => {
-    // The keyword is read off the declaration's own statement, so the namespace being exported
-    // says nothing about the `const` written inside it — which is also what `visibility` says.
     const symbol = byId(await symbolsOf("export namespace N { const a = 1 }"), "#N.a")
     expect(symbol.visibility).toBe("internal")
     expect(symbol.derivedBy).not.toContain("export-keyword")
@@ -146,8 +121,6 @@ describe("extractSymbols — the export keyword is evidence on every kind (LP6b)
     ["function", "export default function f() {}", "#f"],
     ["interface", "export default interface I { a: number }", "#I"],
   ])("%s: export default replaces the keyword rather than joining it", async (_l, source, id) => {
-    // One statement cannot be written with both, and the default export is the boundary a
-    // framework plugin reads (LP6a) — so the two tokens are alternatives, not a pair.
     const symbol = byId(await symbolsOf(source), id)
     expect(symbol.visibility).toBe("public")
     expect(symbol.derivedBy).toContain("export-default")
@@ -181,17 +154,12 @@ describe("extractSymbols — Signature (LP9-LP13)", () => {
   })
 
   it("LP11a: a parenthesis-free arrow reports its single parameter", async () => {
-    // The grammar gives this arrow no parameter list at all — the binding hangs off a
-    // `parameter` field as a bare identifier — so a reader that only knows the list form
-    // calls the function zero-arity and the api fingerprint reads the wrong arity.
     const symbols = await symbolsOf("export const f = x => x + 1")
     const sym = byId(symbols, "#f")
     expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
   })
 
   it("LP11a: the parenthesised spelling of that parameter reads the same", async () => {
-    // `x => …` and `(x) => …` are one function written two ways; the signature must not
-    // tell them apart, or adding parentheses would register as an api change.
     const bare = await symbolsOf("export const f = x => x + 1")
     const parenthesised = await symbolsOf("export const f = (x) => x + 1")
     expect(byId(bare, "#f").signature?.inputs).toEqual(byId(parenthesised, "#f").signature?.inputs)
@@ -211,8 +179,6 @@ describe("extractSymbols — Signature (LP9-LP13)", () => {
   })
 
   it("LP11a: a class field holding that arrow reports its parameter too", async () => {
-    // A third route into the fallback: the class-member reader, not the variable one. The
-    // field holds the same arrow, so the Symbol must report the same parameter.
     const symbols = await symbolsOf("export class C { m = x => x }")
     const sym = byId(symbols, "#C.m")
     expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
@@ -270,8 +236,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     )
     const sym = byId(symbols, "#app__get__$users__d0")
     expect(sym.kind).toBe("call")
-    // The handler written as an argument is what the registration runs, so it is the Symbol's
-    // body. The Symbol's own signature stays null: a route has no parameters of its own.
     expect(sym.bodyNode?.type).toBe("statement_block")
     expect(sym.signature).toBeNull()
     expect(sym.decorators).toEqual([])
@@ -370,8 +334,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 
   it("CS8: path literal ending in `__d1` does NOT collide with a duplicated `/x` (C2 regression)", async () => {
-    // Without the unconditional `__d0` suffix, both calls below collapsed to
-    // `#app__get__$x__d1` and integrity check #1 (Symbol id uniqueness) would fail.
     const symbols = await symbolsOf(
       [
         `import express from "express"`,
@@ -384,8 +346,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     byId(symbols, "#app__get__$x__d0")
     byId(symbols, "#app__get__$x__d1")
     byId(symbols, "#app__get__$x__d1__d0")
-    // All three ids must be unique — assert explicitly rather than relying on byId's
-    // failure mode masking a duplicate.
     const ids = symbols.filter((s) => s.kind === "call").map((s) => s.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
@@ -394,14 +354,8 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     ["a hex escape", `/hex${BACKSLASH}x41fter`, "$hexAfter", "/hexAfter"],
     ["a tab", `/tab${BACKSLASH}tinside`, "$tab_inside", "/tab\tinside"],
     ["an escaped backslash", `/back${BACKSLASH}${BACKSLASH}slash`, "$back_slash", "/back\\slash"],
-    // The one row whose decoded character is an ordinary letter, so the slug gains a segment
-    // character rather than the `_` the others fold to: dropping the escape left `$usrs`,
-    // which is a different route from the `/users` the author wrote.
     ["a unicode escape", `/us${BACKSLASH}u0065rs`, "$users", "/users"],
   ])("CS9: reads %s in the path as the character it names", async (_label, path, slug, literal) => {
-    // The path is read through the string decoder, so an escape contributes its character
-    // rather than nothing. Dropping it folded `/hex\x41fter` to `$hexfter` — a route the
-    // workspace does not serve, and one that `/hexfter` would then collide with.
     const symbols = await symbolsOf(`app.get("${path}", h)`)
     const sym = byId(symbols, `#app__get__${slug}__d0`)
 
@@ -409,11 +363,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 
   it("CS10: keeps two routes apart when neither path could be read at all", async () => {
-    // `"\u12b"` is an invalid escape the grammar refuses, so the literal's whole contents
-    // parse as an ERROR node and decode to nothing. Reading that as an empty path gives both
-    // registrations the bare `app__get` stem, leaving the `__dN` ordinal — which is source
-    // order — as the only thing telling them apart, so swapping the two lines swaps their ids.
-    // The literal's own text is what the author wrote, and it keeps the paths distinct.
     const symbols = await symbolsOf(
       [`app.get("${BACKSLASH}u12b/a", h)`, `app.get("${BACKSLASH}u12b/b", h)`].join("\n"),
     )
@@ -574,13 +523,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
 })
 
 describe("extractSymbols — SourceRange key presence (ir-schema.md Class A)", () => {
-  /**
-   * Both column keys must be own properties carrying `null`, not absent. Asserting the
-   * value alone would not catch the regression this locks: `expect(x).toBeNull()` fails on
-   * `undefined`, but `serializeCanonical` drops `undefined` properties, so a writer that
-   * built the range without the keys would produce JSON missing them while every
-   * value-based assertion elsewhere still passed.
-   */
   function expectColumnKeys(symbols: SymbolCandidate<Node>[]): void {
     expect(symbols.length).toBeGreaterThan(0)
     for (const symbol of symbols) {
@@ -611,9 +553,6 @@ describe("extractSymbols — SourceRange key presence (ir-schema.md Class A)", (
   })
 
   it("promoted call Symbols write both column keys as null", async () => {
-    // Call promotion runs through a second extractor (`call-symbols.ts`); this is the only
-    // path that reaches it, so without this case the shared writer could regress on one
-    // side unnoticed.
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.get('/users', h)\napp.use(mw)\n`,
     )
@@ -634,8 +573,6 @@ describe("extractSymbols — Call promotion position independence (T2)", () => {
     const afterSym = byId(after, "#app__get__$users__d0")
 
     expect(afterSym.id).toBe(beforeSym.id)
-    // The line moved but the id did NOT — that's the whole point of the position-
-    // independent qname design.
     expect(afterSym.source.startLine).not.toBe(beforeSym.source.startLine)
   })
 

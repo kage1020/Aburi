@@ -6,25 +6,6 @@ import { describe, expect, it } from "vitest"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 
-/**
- * Assertions that mint a branded id out of a plain string, and how many each file may hold.
- * `ir-schema.md` says there are exactly these, and each carries a comment saying why:
- *
- * - `core/src/id.ts` is the module the whole workspace goes through to obtain a `SymbolId`
- *   or `ComponentId`; both assertions there run behind a full grammar check.
- * - `diff/src/slice.ts` holds the only `SliceId` constructor, plus the one predicate that
- *   takes `unknown` by contract and so has nothing better than an assertion to work with.
- * - `test-support/src/ir.ts` is the shared fixture boundary: a case that feeds a malformed id
- *   to the code that exists to reject it has to be able to write one, which routing through
- *   `makeSymbolId` would make unwritable. It is listed with a count rather than skipped by a
- *   glob `ignore`, because an ignore is an unbounded licence over a whole package — this
- *   guard's design is that every boundary is countable, and four is what the package needs.
- *
- * Each package's own `test/` tree is the remaining fixture boundary; it needs no entry
- * because the glob below reaches `src/` only. `cli/src/ir-io.ts` asserts a whole document
- * (`as unknown as IR`) rather than an id, so it does not match this pattern at all —
- * invariant #17 is what checks the ids inside it.
- */
 const ALLOWED_CAST_SITES: ReadonlyMap<string, number> = new Map([
   ["packages/core/src/id.ts", 2],
   ["packages/diff/src/slice.ts", 2],
@@ -50,9 +31,6 @@ describe("id brand boundaries", () => {
       if (count > 0) found.set(posix, count)
     }
 
-    // Compared as whole maps so the failure names both directions at once: a new cast site,
-    // and an allowlisted one that no longer casts (which should be removed from the list
-    // rather than left as a licence nobody is using).
     expect(Object.fromEntries([...found].sort())).toEqual(
       Object.fromEntries([...ALLOWED_CAST_SITES].sort()),
     )

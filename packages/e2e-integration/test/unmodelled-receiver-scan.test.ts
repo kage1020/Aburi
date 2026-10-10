@@ -7,16 +7,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith, symbolNamed } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A method called on a literal must not cost the file its Symbols.
- *
- * Every effect plugin checks that each `.`-separated segment of a call target is non-empty
- * before its import gate, and throws when one is not — so the check runs in files that never
- * import the plugin's library. A callee the language plugin does not model used to reach the
- * target as its source text, and the `...` of `[...names]` is two empty segments: the throw
- * withdrew the file and every Symbol it declared, `greet` included.
- */
-
 const workspace = useScratchWorkspace("unmodelled-receiver")
 
 describe("scan — a call on an array literal, with every effect plugin loaded", () => {

@@ -1,14 +1,3 @@
-/**
- * Three-tier fallback state machine (lsp-enrichment.md):
- *   per-request  → 3 consecutive fails on the same file  → per-file fallback
- *   per-file     → 5 consecutive fails on the same lang  → per-language fallback
- *   per-language → server disabled for the rest of the run + 1 CLI warning
- *
- * All transitions are pure functions of the outcomes recorded so far, so given
- * identical LSP responses the same files/languages fall back on rerun (a determinism
- * guarantee).
- */
-
 export interface FallbackState {
   /** Called after a single request completes (success OR failure). */
   onRequest(file: string, ok: boolean): { escalate: boolean }

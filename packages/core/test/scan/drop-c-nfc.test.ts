@@ -7,10 +7,6 @@ function call(target: string): CallCandidate {
 }
 
 describe("buildDropCFilter — Unicode normalization (ir-schema.md)", () => {
-  // The `target` a filter is asked about has been normalized at the scan pipeline's plugin
-  // boundary. These prefixes arrive from a JSON config and a plugin manifest, neither of
-  // which normalizes, so leaving them alone would make a `suppress` entry fail to match the
-  // call it names — and a dropped call leaves nothing in the Document to trace the miss from.
   const decomposed = "café".normalize("NFD")
   const composed = decomposed.normalize("NFC")
 

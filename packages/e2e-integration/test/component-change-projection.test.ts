@@ -3,17 +3,6 @@ import type { Component, ComponentId, IR, LanguageId, RelativePath } from "@abur
 import { describe, expect, it } from "vitest"
 import { diffIRs, IR_SCHEMA } from "../src/scan-helper"
 
-/**
- * The two halves of the Component-change fix, joined: `@aburi/diff` decides a component changed,
- * `@aburi/markdown-projection` renders the entry. Each package's own suite hand-writes the other
- * side — the projection tests build `delta` by hand — so neither can show that the renderer
- * stopped reading `delta` when the diff stopped deciding by it. This is the only place it is
- * checked end to end.
- *
- * IRs are written out here rather than imported: `@aburi/diff`'s fixtures are test-private, and
- * a component-only IR is small enough that spelling it is clearer than reaching for a builder.
- */
-
 function componentIR(overrides: Omit<Partial<Component>, "id"> & { id: string; name: string }): IR {
   const component: Component = {
     id: overrides.id as ComponentId,
@@ -50,8 +39,6 @@ describe("component change: diff → Markdown", () => {
       componentIR({ id: "billing", name: "Billing" }),
       componentIR({ id: "billing", name: "Billing & Invoicing" }),
     )
-    // Nothing the delta names moved — exactly the case that produced no entry at all, and so
-    // never reached the renderer.
     expect(diff.summary.componentsChanged).toBe(1)
     expect(diff.components.changed[0]?.delta).toEqual({
       rootsChanged: false,

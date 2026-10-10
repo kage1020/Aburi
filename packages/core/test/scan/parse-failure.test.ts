@@ -21,22 +21,6 @@ import { buildDropCFilter } from "../../src/scan/drop-c"
 import { runFilePipeline } from "../../src/scan/pipeline"
 import { stubCandidate, stubLanguagePlugin } from "../fixtures/plugins"
 
-/**
- * A `ParseError` marked `recoverable: false` withdraws its file.
- *
- * The field has been documented as "false → the core skips this file" since the plugin
- * types were written, and nothing read it: the only signal that withdrew a file was
- * `ParseResult.tree === null`, which a plugin sets separately. A plugin following the
- * documented contract — return the tree you managed to build, mark the error
- * non-recoverable to say "do not use this" — got its file processed normally, with no
- * error and no warning.
- *
- * `@aburi/lang-typescript` never noticed because the one `recoverable: false` it emits is
- * paired with a null tree, so the real gate fired anyway. The stub plugin here separates
- * the two signals, which is the whole point: a plugin that reasons from the type doc rather
- * than from that coincidence must get the behaviour it asked for.
- */
-
 function candidate(file: string): SymbolCandidate<OpaqueAstNode> {
   return stubCandidate(file.replace(/[^A-Za-z0-9]/g, "_"), { file })
 }
@@ -127,12 +111,8 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
     const { result } = await run({ errors, imports: [edge("./x")] })
     expect(result.kind).toBe("parse-failed")
     if (result.kind !== "parse-failed") return
-    // Kept for the same reason the null-tree path keeps them: the file told us truthfully
-    // what it imports even though its contents are unusable.
     expect(result.imports).toEqual([edge("./x")])
     expect(result.parseErrors).toEqual(errors)
-    // Not "empty symbols" — no symbols at all. A withdrawn file has nothing the IR could
-    // take, and a variant that carried the key would let a caller read it and believe it.
     expect("symbols" in result).toBe(false)
     expect("timeout" in result).toBe(false)
   })
@@ -169,8 +149,6 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
   })
 
   it("withdraws a null tree whose errors are all recoverable", async () => {
-    // The tree is the whole signal here. An implementation that read only `errors` — or
-    // only whether the list was empty — would extract this file from nothing.
     const { result, reached } = await run({
       tree: null,
       errors: [{ message: "stray token", line: 1, column: 1, recoverable: true }],
@@ -180,10 +158,6 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
   })
 
   it("keeps a file whose plugin omitted `recoverable` altogether", async () => {
-    // `recoverable` is required by the type, but a plugin is plain JavaScript loaded by ref
-    // and can simply not write it. Read as falsiness, a missing key would withdraw every
-    // file such a plugin reported any error on — silently, and at exit 0. Read literally,
-    // the plugin gets what it had before the field was read at all.
     const errors = [{ message: "stray token", line: 1, column: 1 } as ParseError]
     const { result, reached } = await run({ errors })
     expect(result.kind).toBe("extracted")
@@ -196,8 +170,6 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
 
   beforeEach(async () => {
     workRoot = await mkdtemp(join(tmpdir(), "aburi-parse-failure-"))
-    // One file either side of the broken one in discovery order, so a withdrawal that took
-    // the rest of the run with it would be visible in both directions.
     await writeFile(join(workRoot, "a.stub"), "a", "utf8")
     await writeFile(join(workRoot, "bad.stub"), "bad", "utf8")
     await writeFile(join(workRoot, "c.stub"), "c", "utf8")
@@ -238,8 +210,6 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
   })
 
   it("picks the refusing error out of a list that starts with a recoverable one", async () => {
-    // The detail names the error as non-recoverable, so quoting whichever came first would
-    // put that label on an error that said the opposite.
     const { result } = await runScanWith({
       errors: [
         { message: "stray token", line: 1, column: 1, recoverable: true },
@@ -263,8 +233,6 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
   })
 
   it("quotes a recoverable error beside the missing tree rather than dropping it", async () => {
-    // This file is excluded from the CLI's recoverable-error count by construction, so the
-    // skip detail is the last place the position it collapsed at can be read.
     const { result } = await runScanWith({
       tree: null,
       errors: [{ message: "stray token", line: 8, column: 2, recoverable: true }],
@@ -284,9 +252,6 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
   })
 
   it("subtracts it from parsedFiles exactly once", async () => {
-    // The regression this pins is arithmetic: a withdrawn file is netted out by the
-    // `skipped` list it now appears in, so a counter subtracting it a second time would
-    // report two files lost for one.
     const { result } = await runScanWith({ errors: [nonRecoverable("unterminated string")] })
     expect(result.ir.stats.totalFiles).toBe(3)
     expect(result.ir.stats.parsedFiles).toBe(2)
@@ -309,10 +274,6 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
   })
 
   it("counts one file lost per reason when several reasons meet in one run", async () => {
-    // The PR that added `parse-failed` rewrote the `parsedFiles` expression itself, so the
-    // arithmetic is worth pinning where every kind of loss is present at once: a discovery
-    // skip (which is added to `totalFiles` rather than netted out), a withdrawal, a throw,
-    // and one healthy file.
     await writeFile(join(workRoot, "big.stub"), "x".repeat(2000), "utf8")
     await writeFile(join(workRoot, "boom.stub"), "boom", "utf8")
     await rm(join(workRoot, "c.stub"))

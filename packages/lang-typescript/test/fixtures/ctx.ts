@@ -22,21 +22,8 @@ export const BACKSLASH = String.fromCharCode(92)
 
 const DEFAULT_PATH = "src/a.ts"
 
-/**
- * Re-exported rather than written again. The local copy built the same `ExtractionContext`
- * over the same `noopRegistry` and differed only in demanding both arguments, so a suite
- * reading `makeExtractionCtx(path, source)` could not tell which of the two it had imported —
- * and one of them would drift. The name stays reachable from the fixture module, because that
- * is where a suite looks for its helpers; the definition is the shared one every other
- * package's suites already use.
- */
 export { makeExtractionCtx }
 
-/**
- * Narrow a nullable Tree for tests that only exercise the happy path. Fails loudly when
- * the parse returned null so the missing tree does not get silently masked as an empty
- * Symbol list.
- */
 export function requireTree(tree: Tree | null): Tree {
   if (tree === null) throw new Error("test fixture invariant: parse returned null")
   return tree

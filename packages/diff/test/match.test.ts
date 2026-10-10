@@ -85,8 +85,6 @@ describe("matchStageLogicFingerprint", () => {
 
   it("uses name similarity to disambiguate multi-candidate buckets", () => {
     const shared = fp("shared")
-    // Two base symbols share the same logic fingerprint (workspace duplication of
-    // logic body across a helper and an alias, for example).
     const winner = makeSymbol({
       id: "ts:src/a.ts#Cls.readUser",
       name: "Cls.readUser",
@@ -97,9 +95,6 @@ describe("matchStageLogicFingerprint", () => {
       name: "Cls.somethingElse",
       fingerprint: shared,
     })
-    // Head is the same qualified name as winner but relocated to a new file; the id is
-    // different (path-part of id differs) so it falls through to stage 3, where the
-    // multi-candidate branch fires and name similarity 1.0 vs winner selects it.
     const h = makeSymbol({
       id: "ts:src/b.ts#Cls.readUser",
       name: "Cls.readUser",
@@ -119,12 +114,6 @@ describe("matchStageLogicFingerprint", () => {
   })
 })
 
-/**
- * A logic axis that names nothing — no effect, and no rule carrying more than its type and loop
- * kind — hashes alike across unrelated bodies, so sharing it says nothing about meaning. Its group
- * pairs only on a name that says more than one word and reaches the 0.85 bar, and never across
- * kinds. Every case asserts what is left over, so a Symbol refused here is still handed on.
- */
 describe("matchStageLogicFingerprint — a logic axis that names nothing", () => {
   const symbolAt = (
     file: string,
@@ -267,8 +256,6 @@ describe("matchStageLogicFingerprint — a logic axis that names nothing", () =>
   })
 
   it("leaves a renamed call-only method to stage 4, which refuses it too", () => {
-    // The price of the rule: `Cls.getUser` → `Cls.fetchUser` with a body that only calls
-    // something was a move through the lone-base branch, and is added + removed now.
     const base = makeSymbol({ ...at("src/a.ts", "Cls.getUser", "method"), signature: sig() })
     const head = makeSymbol({ ...at("src/a.ts", "Cls.fetchUser", "method"), signature: sig() })
     const afterStage3 = matchStageLogicFingerprint([base], [head])
@@ -324,9 +311,6 @@ describe("matchStageLogicFingerprint — kind", () => {
 
 describe("matchStageNameSignature", () => {
   it("pairs one that reaches the floor exactly", () => {
-    // 1.0 is the top of the scale and a reachable score: an identical name, signature and
-    // owner give `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754. `score >= threshold` is what lets
-    // this row pair at all — a `>` would empty it.
     const b = makeSymbol({ id: "ts:src/a.ts#UserRepo.get", name: "UserRepo.get", signature: sig() })
     const h = makeSymbol({ id: "ts:src/b.ts#UserRepo.get", name: "UserRepo.get", signature: sig() })
     const result = matchStageNameSignature([b], [h])

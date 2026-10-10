@@ -3,17 +3,6 @@ import type { Effect, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { computeSymbolDelta } from "../src"
 
-/**
- * The array diff (diff-algorithm.md) pairs the elements of `rules`, `calls` and `decorators` by an
- * identity key — an unchanged element however far it moved, an edited one within ±`lineFuzz` —
- * so a shift is not reported as a change. A key does not identify one element — a Symbol
- * routinely holds two `guard` rules, two calls to one target, two `@Get` — so which base element
- * a head element takes is a choice, and the same doc is where the rule for making it lives.
- *
- * The cases here are the ones that distinguish it from the near misses: pairing by array
- * order, pairing by proximity alone, and pairing greedily rather than as a set.
- */
-
 const GUARD_PAIR = [
   rule({ type: "guard", line: 1, condition: "!user" }),
   rule({ type: "guard", line: 3, condition: "!invoice" }),
@@ -51,8 +40,6 @@ describe("an element is paired with its own counterpart, not the nearest key", (
   })
 
   it("prefers the exact counterpart over a closer element of the same key", () => {
-    // `!invoice` sits 2 lines away and `!user` 1 — nearest-line alone pairs the wrong one and
-    // reports the untouched guard as modified.
     expect(
       ruleDelta(
         [
@@ -65,8 +52,6 @@ describe("an element is paired with its own counterpart, not the nearest key", (
   })
 
   it("keeps a whole block of shifted rules quiet", () => {
-    // Two guards moved down one line together, nothing edited. Every element has an exact
-    // counterpart, so nothing is reported — this is what the exact pass is for.
     expect(
       ruleDelta(
         [
@@ -82,8 +67,6 @@ describe("an element is paired with its own counterpart, not the nearest key", (
   })
 
   it("treats two guards that swapped places as unchanged", () => {
-    // Both conditions are still present within the window, so there is nothing to report. By
-    // array order or by proximity this reads as two edits.
     expect(
       ruleDelta(
         [
@@ -110,8 +93,6 @@ describe("a genuine edit is still a modification", () => {
   })
 
   it("edits the one guard that changed, leaving its neighbour alone", () => {
-    // The exact pass takes `!invoice`, so the edit has only `!user` left to pair with — which
-    // is the pairing a reader would make.
     expect(
       ruleDelta(GUARD_PAIR, [
         rule({ type: "guard", line: 1, condition: "!owner" }),
@@ -121,8 +102,6 @@ describe("a genuine edit is still a modification", () => {
   })
 
   it("reports an add and a remove once an edit drifts past the window", () => {
-    // The window is what tells an edit from a deletion and an unrelated insertion that share
-    // a key, and it still holds for an element whose content changed.
     expect(
       ruleDelta(
         [rule({ type: "guard", line: 1, condition: "!user" })],
@@ -149,11 +128,6 @@ describe("a genuine edit is still a modification", () => {
 })
 
 describe("an unchanged element pairs however far the body moved", () => {
-  // The exact pass has no line window (diff-algorithm.md §5.2.0): non-crossing already keeps an
-  // element beside its neighbours, and an absolute distance would refuse precisely the body
-  // that moved intact. Both ends of the configurable range and the default are covered: none
-  // of them reaches an ordinary shift — one guard inserted above a block moves it further.
-
   it.each([0, 2, 10])("keeps a moved rule quiet at lineFuzz=%i", (lineFuzz) => {
     expect(
       ruleDelta(
@@ -165,8 +139,6 @@ describe("an unchanged element pairs however far the body moved", () => {
   })
 
   it("keeps the calls of a function that moved 14 lines down its file quiet", () => {
-    // A function that moved 14 lines down its file: nothing about it changed, and the report
-    // listed `dirname`, `mkdir` and `writeFile` as both added and removed.
     const calls = (at: number) => [
       call({ target: "dirname", line: at }),
       call({ target: "mkdir", line: at }),
@@ -209,9 +181,6 @@ describe("an unchanged element pairs however far the body moved", () => {
   })
 
   it("pairs the survivors of a moved body and reports only what was edited", () => {
-    // A body moved 20 lines and one guard in it was rewritten. The two untouched guards pair
-    // across the distance; the rewritten one has no counterpart inside the window, so it is
-    // still an add and a remove rather than being pulled into a pairing by its key.
     expect(
       ruleDelta(
         [
@@ -229,8 +198,6 @@ describe("an unchanged element pairs however far the body moved", () => {
   })
 
   it("pairs a call that moved past a call to a different target", () => {
-    // Order binds only elements of one key. `scan` moving below `mkdir` is a reordering of two
-    // calls that both survived, not the removal of one and the insertion of another.
     const delta = computeSymbolDelta(
       makeSymbol({
         id: "ts:src/a.ts#run",
@@ -249,9 +216,6 @@ describe("an unchanged element pairs however far the body moved", () => {
   })
 
   it("still refuses an element that moved past a sibling sharing its key", () => {
-    // `!a` moved from above `!b` to 30 lines below it. Both have an exact counterpart, but the
-    // two pairings would cross, so only one can hold; `!b` is nearer and keeps its pairing.
-    // Pairing by key alone, without order, would report nothing here.
     expect(
       ruleDelta(
         [
@@ -268,12 +232,7 @@ describe("an unchanged element pairs however far the body moved", () => {
 })
 
 describe("the exact pass runs first, and a far exact counterpart outranks a near edit", () => {
-  // The cost of the exact pass having no window (diff-algorithm.md §5.2.0): an element nothing
-  // touched claims its counterpart wherever it sits, before the second pass can read a nearer,
-  // edited neighbour as its edit. Each case fails if the two passes are run the other way round.
-
   it("reads the near element as new when its would-be predecessor moved away intact", () => {
-    // `!x` claims its copy 50 lines down, so `!y` has no base element left to be an edit of.
     expect(
       ruleDelta(
         [rule({ type: "guard", line: 10, condition: "!x" })],
@@ -286,8 +245,6 @@ describe("the exact pass runs first, and a far exact counterpart outranks a near
   })
 
   it("reports the displaced element as removed rather than edited", () => {
-    // `!b` moves up to take `!a`'s line and pairs with itself; `!a` is then gone, and `!c`,
-    // though it sits where `!b` was, is new rather than an edit of it.
     expect(
       ruleDelta(
         [
@@ -350,9 +307,6 @@ describe("the same rule applies to the other keyed arrays", () => {
   })
 
   it("decorators: an unchanged receiver is claimed before a nearer edited one", () => {
-    // `@tsed.Post` was written above an unchanged `@nest.Post`, pushing it down two lines. The
-    // edited one is nearer the base, but the exact pass pairs the unchanged one first, so the
-    // new decorator reads as added rather than as a receiver edit beside an added `@nest.Post`.
     const post = (qualifier: string, line: number) =>
       decorator({ name: "Post", qualifier, line, arguments: ["/x"] })
     const delta = computeSymbolDelta(
@@ -379,17 +333,7 @@ describe("the same rule applies to the other keyed arrays", () => {
 })
 
 describe("pairings are chosen as a set, not one element at a time", () => {
-  // A greedy pass takes the pairing in front of it, and a nearer pairing can cost a farther
-  // one its only partner. Two guards shifted down together are the smallest case: the first
-  // head guard is nearest the *second* base guard, and claiming it can leave the other head
-  // without a partner. That only bites inside the window, so the two cases that show it have
-  // both guards edited: identical guards pair in the exact pass, which has no window, and the
-  // identical blocks below are kept as regressions of that pass rather than of the set choice.
-
   it("pairs two edits at the edge of the window", () => {
-    // Both guards edited and shifted by exactly `lineFuzz`, so every pairing that holds is at
-    // the boundary; greedily, the first head guard takes the second base guard (one line away)
-    // and strands the other.
     expect(
       ruleDelta(
         [
@@ -406,8 +350,6 @@ describe("pairings are chosen as a set, not one element at a time", () => {
   })
 
   it("reports two edits as two edits when both neighbours moved", () => {
-    // Nothing survives the exact pass, so the whole block is the second pass's problem —
-    // and the answer is still two modifications rather than an add, a remove and an edit.
     expect(
       ruleDelta(
         [
@@ -455,8 +397,6 @@ describe("pairings are chosen as a set, not one element at a time", () => {
       }),
       { lineFuzz: 2 },
     )
-    // Calling one function twice is ordinary, and `callsEqual` reads only `target` and
-    // `resolved`, so identical duplicates are the common case rather than a contrived one.
     expect(delta.calls).toEqual({ added: [], removed: [], modified: [] })
   })
 
@@ -482,9 +422,6 @@ describe("pairings are chosen as a set, not one element at a time", () => {
   })
 
   it("reads the head elements as a set too, whatever order they are written in", () => {
-    // One base guard and two head guards, only one of which can pair. Choosing per head
-    // element in enumeration order let the first one written take the base regardless of
-    // distance, so the answer followed the head array rather than the lines.
     const base = [rule({ type: "guard", line: 1, condition: "!original" })]
     const near = rule({ type: "guard", line: 1, condition: "!near" })
     const far = rule({ type: "guard", line: 3, condition: "!far" })
@@ -502,10 +439,6 @@ describe("pairings are chosen as a set, not one element at a time", () => {
 })
 
 describe("effects are paired under the same rule, with no line window", () => {
-  // `diffEffects` passes an infinite fuzz, so every same-key candidate is admitted and only
-  // the ranking is left. That ranking reads `line`, and a propagated effect has none —
-  // `line ?? 0` stands in, which is "at the top of the Symbol" rather than a neutral value.
-
   const at = (plugin: string, line?: number) =>
     effect({
       id: "db.write",
@@ -537,8 +470,6 @@ describe("effects are paired under the same rule, with no line window", () => {
   })
 
   it("keeps two entries of one key apart by content rather than by line", () => {
-    // Same `(id, target)` on both sides, so the key settles nothing. The exact-content pass
-    // pairs each plugin with itself even though their lines crossed.
     expect(
       effectDelta(
         [at("effects-prisma", 1), at("effects-drizzle", 2)],
@@ -548,8 +479,6 @@ describe("effects are paired under the same rule, with no line window", () => {
   })
 
   it("reports nothing for effects of different keys that changed places", () => {
-    // Order binds only effects that share `(id, target)`: three writes rotated through each
-    // other's lines are three writes that survived.
     const write = (target: string, line: number) =>
       effect({ id: "db.write", target, plugin: "effects-prisma", line })
     const delta = computeSymbolDelta(
@@ -570,9 +499,6 @@ describe("effects are paired under the same rule, with no line window", () => {
   })
 
   it("gives a propagated entry the nearest local one when it must choose", () => {
-    // Nothing matches on content, so the placeholder line decides: `0` is nearest the local
-    // effect at line 1. Documented rather than left to be discovered — a propagated effect
-    // reads as sitting at the top of the Symbol.
     expect(effectDelta([at("far", 100), at("near", 1)], [at("propagated")])).toEqual({
       added: [],
       removed: ["far"],
@@ -582,10 +508,6 @@ describe("effects are paired under the same rule, with no line window", () => {
 })
 
 describe("array order decides only where it has to", () => {
-  // diff-algorithm.md makes Symbol pairing independent of array order, and an array delta cannot
-  // be: it pairs by line, and ir-schema.md #11 fixes the canonical order of these arrays, so
-  // reading it is reading the Document. What order must not decide is a pairing the lines already
-  // settle — which is what taking the first key hit got wrong.
   it("answers the same with the base rules written the other way round", () => {
     const head = [rule({ type: "guard", line: 3, condition: "!invoice" })]
     expect(ruleDelta([...GUARD_PAIR].reverse(), head)).toEqual(ruleDelta(GUARD_PAIR, head))
@@ -600,9 +522,6 @@ describe("array order decides only where it has to", () => {
   })
 
   it("settles a tie on the lower base index", () => {
-    // Two guards equidistant from one edited head guard, neither an exact match. Nothing
-    // distinguishes them by line, so the lower index is taken and the other is removed — fixed
-    // rather than left to the enumeration, and visible because their conditions differ.
     const equidistant = [
       rule({ type: "guard", line: 1, condition: "!first" }),
       rule({ type: "guard", line: 3, condition: "!second" }),
@@ -613,10 +532,6 @@ describe("array order decides only where it has to", () => {
       removed: ["!second"],
       modified: ["!edited"],
     })
-    // Reversing the base array swaps which is taken, and that is not a defect: unlike Symbol
-    // pairing, an array delta reads array order, which ir-schema.md #11 fixes canonically — so the
-    // reversed input below is not a conforming Document, and what is asserted of it is only that
-    // the answer is determined. diff-algorithm.md records the distinction.
     const reversedBase = [...equidistant].reverse()
     expect(ruleDelta(reversedBase, edited)).toEqual(ruleDelta(reversedBase, edited))
     expect(ruleDelta(reversedBase, edited)).toEqual({
@@ -627,9 +542,6 @@ describe("array order decides only where it has to", () => {
   })
 
   it("pairs an edit with the nearest candidate, not the first one written", () => {
-    // Both survive the exact pass unclaimed, so the second pass decides. `!far@1` is written
-    // first and `!near@3` is 0 lines away — taking the first hit would call `!far` the edit and
-    // remove the guard that is still there.
     expect(
       ruleDelta(
         [
@@ -642,9 +554,6 @@ describe("array order decides only where it has to", () => {
   })
 
   it("lets one base element answer only one head element", () => {
-    // Two head guards, one base guard, both a line away. One is an addition rather than a
-    // second claim on the same element, and which one is settled by the pairing's ordering rather
-    // than by distance: the pairings may not cross, and the first head is above the second.
     expect(
       ruleDelta(
         [rule({ type: "guard", line: 2, condition: "!kept" })],

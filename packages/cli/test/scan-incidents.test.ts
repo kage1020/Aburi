@@ -7,32 +7,8 @@ import { EXIT, formatFailOnMessage, runCli, runDiff, runExplain, runScan } from 
 import { incidentLinesFrom, MemStream, scanReportWith } from "./fixtures"
 import { gitWith, populate } from "./stub-language"
 
-/**
- * Every command that scans reports what the scan lost.
- *
- * `aburi explain` and `aburi diff` run a full scan of their own and used to discard the
- * report: no incident line, and no exit code either, so a plugin exception that withdrew a
- * file left `explain` answering "No matches" at exit 1 and `diff` answering `+0 -0 ~0` at
- * exit 0. The scan is where the incident happens, so the scan is where it is now reported.
- *
- * The fixture writes its own language plugin into the workspace and names it by relative
- * path — a ref form the loader supports, and the only way to produce a refusal or an
- * extraction throw on demand, since no in-tree plugin will do either to order.
- */
-
-/**
- * What the stub plugin refuses `bad.stub` with, as the reporter renders it. The scan
- * composes it from the `ParseError` the plugin returned, so it is a fact about the fixture
- * rather than about the CLI — and it is now on the command's stderr, where before the only
- * copy went through the run's `Logger`.
- */
 const REFUSAL = "parse reported a non-recoverable error at 12:4 — unterminated string"
 
-/**
- * The advice each reason's group line carries. Spelled once here rather than inline in four
- * assertions: an exact-byte test that repeats the sentence it is checking drifts one copy at
- * a time, and the subject of these tests is the shape of the report, not the wording.
- */
 const PARSE_FAILED_ADVICE =
   "the language plugin refused the source. Deterministic: fix the file, or the plugin."
 const EXTRACTION_FAILED_ADVICE =
@@ -50,9 +26,6 @@ afterEach(async () => {
 
 describe("runScan — the report goes to the caller's sink", () => {
   it("returns the report and emits no incident line when no sink was given", async () => {
-    // Not the same as silence, and the option's docblock says so: the run's `Logger` is a
-    // separate channel that still writes per-file lines to the real `process.stderr`. What is
-    // asserted here is that the per-run report is the caller's to ask for.
     await populate(scratch, ["bad.stub", "boom.stub", "ok.stub"])
     const report = await runScan({
       cwd: scratch,
@@ -64,9 +37,6 @@ describe("runScan — the report goes to the caller's sink", () => {
   })
 
   it("cannot let a broken sink change the exit code", async () => {
-    // `aburi scan 2>&1 | head -1` reaches this: the pipe closes, the write throws, and the
-    // report — already complete, with the IR already on disk — would come back as a runtime
-    // error instead of the gate it is.
     await populate(scratch, ["boom.stub", "ok.stub"])
     const report = await runScan({
       cwd: scratch,
@@ -104,9 +74,6 @@ describe("runScan — the report goes to the caller's sink", () => {
   })
 
   it("summarizes a file that reported more than one error, and says where recovery began", async () => {
-    // Every error, per file, would be the whole listing on one broken grammar. The first
-    // position is the one that matters: it is where the parse came apart, and everything after
-    // it is recovery. The rest stay on `ScanResult.parseErrors`.
     await populate(scratch, ["noisy.stub", "ok.stub"])
     const lines: string[] = []
     await runScan({
@@ -137,14 +104,6 @@ describe("runScan — the report goes to the caller's sink", () => {
     ])
   })
 
-  // Exact bytes, where `parse-failure-scan.test.ts` asserts two of these lines by substring.
-  // The subjects differ: that test pins the split between recoverable and refused, this one
-  // pins that the command's own stream carries the whole report and nothing else.
-  //
-  // "Everything on the injected stream", not "everything on stderr" — the run's `Logger` writes
-  // its per-file lines to the real `process.stderr` and lands outside this capture. That gap is
-  // why the CLI lists the files itself: at `ABURI_LOG_LEVEL=error` the report is all there is,
-  // and for a discovery-time skip there is no `Logger` line to lose in the first place.
   it("puts the whole report on the scan command's stderr", async () => {
     await populate(scratch, ["bad.stub", "boom.stub", "warn.stub", "ok.stub"])
     const stdout = new MemStream()
@@ -170,11 +129,6 @@ describe("runScan — the report goes to the caller's sink", () => {
   })
 
   it("puts the warnings above the summary they qualify, not below it", async () => {
-    // The sink fires inside `runScan` now, so in any merged view the warnings precede the
-    // stdout summary where they used to follow it. Per-stream bytes are identical, which is
-    // exactly why the assertion above cannot see this. Pinned rather than left to drift: the
-    // last thing on screen is now the kept / dropped line and the paths, which is the part a
-    // reader acts on.
     await populate(scratch, ["boom.stub", "ok.stub"])
     const merged = new MemStream()
     await runCli({
@@ -194,9 +148,6 @@ describe("runScan — the report goes to the caller's sink", () => {
 
 describe("reportScanIncidents — the lines a real scan cannot be made to produce", () => {
   it("groups unreleased parse trees by plugin, and states what the leak costs", () => {
-    // A leak moves no exit code and takes nothing out of the artifact, so a line saying only
-    // that a tree was not released reads as noise. What it costs is the whole reason to print
-    // it — the run that pays is the next, longer one.
     const lines = incidentLinesFrom(
       scanReportWith({
         treeReleaseFailures: [
@@ -216,8 +167,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("names the framework ids a plugin-named frameworks value stands for, ahead of the tree leaks", () => {
-    // A first-party plugin that is not loaded is absent from the IR's `plugins[]`, so this line
-    // is the only place its misused name is pointed out; it goes where a closed pipe keeps it.
     const lines = incidentLinesFrom(
       scanReportWith({
         treeReleaseFailures: [{ plugin: "lang-stub", file: "a.ts", detail: "gone" }],
@@ -241,10 +190,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("names every file behind the recoverable-error count, uncapped", () => {
-    // The count alone was the whole warning, and mostly these files are in the IR rather than
-    // in `stats.skippedFiles[]`, so there is nowhere else to look them up. That is why the
-    // `MAX_LISTED` cap does not apply: over the only account of something, `…and N more` is
-    // the loss rather than the shape of it. Twelve is past the cap on purpose.
     const lines = incidentLinesFrom(
       scanReportWith({
         parseErrorFiles: Array.from({ length: 12 }, (_, i) => ({
@@ -285,8 +230,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("gives every LSP line the glyph and the label, including the request census", () => {
-    // The census line used to be indented and glyphless. It has its own condition and fires
-    // when neither line above it did, so in a two-scan diff nothing could attribute it.
     const lines = incidentLinesFrom(
       scanReportWith({
         lspEnrichment: {
@@ -327,9 +270,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("says what the typed tier bought, on a run every other counter calls healthy", () => {
-    // The whole point of the hint counters (lsp-enrichment.md): 12 hovers came back on
-    // time with nothing usable, so the census line above cannot fire and every number it
-    // would have printed reads clean. Without this line the CLI reports a perfect run.
     const lines = incidentLinesFrom(
       scanReportWith({
         lspEnrichment: {
@@ -357,9 +297,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("stays quiet when the run neither produced nor refused a hint", () => {
-    // Not the same as "produced none and refused none because the server was broken": a
-    // workspace with no `this.` / `super.` call sites left for the LSP tier has nothing to
-    // report, and a zeroed line there would be noise on every ordinary scan.
     const lines = incidentLinesFrom(
       scanReportWith({
         lspEnrichment: {
@@ -437,9 +374,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("says nothing about a tail when the cap is met exactly", () => {
-    // The one size the guard exists for, and the size every other case here steps over: at
-    // ten there is nothing hidden, and a tail would read `…and 0 more` — a truthful count of
-    // nothing on a line whose whole job is to say files are missing.
     const skipped = Array.from({ length: 10 }, (_, i) => ({
       path: `vendor/big${i}.js`,
       reason: "over-size" as const,
@@ -451,10 +385,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("gives each reason its own ten, so a flood cannot hide the one that gates", () => {
-    // A single cap across the whole listing is the failure: eleven over-size files would
-    // spend it, and the one file that set the exit code would be inside `…and N more`.
-    // `cli-spec.md` promises the opposite — a reader handed a non-zero status is told which
-    // files earned it.
     const flood = Array.from({ length: 11 }, (_, i) => ({
       path: `vendor/big${i}.js`,
       reason: "over-size" as const,
@@ -475,8 +405,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   it("names every reason's files, with the detail the core wrote", () => {
     const lines = incidentLinesFrom(
       scanReportWith({
-        // Handed over in an order no rule produces — the order a walk of some workspace or
-        // other would have produced. What comes out must not depend on it.
         skipped: [
           { path: "src/route.ts", reason: "extraction-failed", detail: "plugin exploded" },
           { path: "src/x.weird", reason: "unroutable", detail: "no plugin claims it" },
@@ -497,8 +425,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       }),
       null,
     )
-    // The order the schema's `reason` enum declares, not scan order: the groups arrive in the
-    // order the census named them, and neither depends on where in the workspace the files sat.
     expect(lines[0]).toBe(
       "⚠ 6 file(s) contributed no Symbols: over-size=1, unreadable=1, unroutable=1, parse-failed=1, parse-timeout=1, extraction-failed=1",
     )
@@ -513,7 +439,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("sends each reason somewhere different, and names the setting where there is one", () => {
-    // The line used to be neutral about six reasons that want six different responses.
     const advice = (reason: SkippedFile["reason"], detail?: string): string => {
       const entry = detail === undefined ? { path: "f", reason } : { path: "f", reason, detail }
       const found = incidentLinesFrom(scanReportWith({ skipped: [entry] }), null).find((l) =>
@@ -525,35 +450,19 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     expect(advice("over-size")).toContain("maxFileSizeBytes")
     expect(advice("parse-timeout")).toContain("parseTimeoutMs")
     expect(advice("parse-timeout")).toContain("re-run")
-    // One condition, at either of two calls: the file stopped being one while the scan ran.
-    // A read that failed for any other reason ends the run, so advice to check permissions
-    // would send the reader after something that cannot have produced this entry — and the
-    // line says so, because "where is my permission error" is the question it leaves.
     expect(advice("unreadable")).toContain("re-run")
     expect(advice("unreadable")).not.toContain("permission")
     expect(advice("unreadable")).toContain("ends the run")
-    // And it says the file stopped being one, not that it was no longer there. Under ENOTDIR
-    // nothing of that name was deleted — its directory was — so a reader is holding this line
-    // next to a tree where something of that name is still sitting.
     expect(advice("unreadable")).toContain("stopped being files")
-    // Two producers, like `unreadable`: the router refusing an extension, and a path segment
-    // holding a Symbol id separator. Advice true for one only would be false half the time, and
-    // nothing in the entry says which happened.
     expect(advice("unroutable")).toContain("plugin set")
     expect(advice("unroutable")).toContain("renaming that segment")
     expect(advice("parse-failed")).toContain("refused")
     expect(advice("extraction-failed")).toContain("threw")
-    // The split the reason's own schema docstring draws: machine-dependent says re-run,
-    // deterministic says fix something.
     expect(advice("parse-failed")).toContain("Deterministic")
     expect(advice("parse-timeout")).toContain("Machine-dependent")
   })
 
   it("lists a file the core gave no detail without a dangling separator", () => {
-    // Absent and empty are both reachable, and they render the same. `throw ""` reaches
-    // `describeThrown` and comes back as `""`, and discovery takes `(error as Error).message`
-    // unguarded, so an `Error` built with no message leaves one behind too. Either way
-    // `    src/quiet.ts: ` would be a path, a colon, and silence.
     for (const skipped of [
       [{ path: "src/quiet.ts", reason: "over-size" as const }],
       [{ path: "src/quiet.ts", reason: "over-size" as const, detail: "" }],
@@ -572,11 +481,6 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("stays quiet about a config the caller pinned, however far from the root it is", () => {
-    // The shape of every ref-mode `aburi diff`: the base scan reads the head tree's config
-    // against a workspace root that is the temporary worktree, so the directories never match
-    // and the line above would fire on every run. It would also be describing something that
-    // did not happen — the head config is not below the worktree, and nobody ran anything from
-    // a monorepo package.
     expect(
       incidentLinesFrom(
         scanReportWith({
@@ -602,9 +506,6 @@ describe("aburi explain — the scan it ran for you", () => {
       env: {},
       cwd: scratch,
     })
-    // Still not found — the Symbol genuinely is not in the IR. The difference is that the
-    // reader is now told the file it would have come from was never parsed, instead of
-    // reading an answer indistinguishable from "that Symbol does not exist".
     expect(code).toBe(EXIT.RUNTIME)
     expect(stderr.text()).toContain("1 file(s) could not be parsed and were left out of the IR.")
     expect(stderr.text()).toContain('No matches for "bad_stub".')
@@ -668,8 +569,6 @@ describe("aburi explain — the scan it ran for you", () => {
       env: {},
       cwd: scratch,
     })
-    // No scan ran, so there is no incident to report and no exit code to inherit. The live
-    // signal fired when `aburi scan` wrote the file.
     expect(code).toBe(EXIT.SUCCESS)
     expect(stderr.text()).toBe("")
   })
@@ -708,8 +607,6 @@ describe("aburi diff — both scans it ran for you", () => {
     )
     expect(warnings).toContain("⚠ head (working tree): 1 file(s) had recoverable parse errors.")
     expect(warnings).toContain("    warn.stub: 2:1 — stray token")
-    // `cli-spec.md` — the head is always the current checkout, whatever the ref spec calls it. A
-    // `head ref "v1.1.0"` label would name a revision this scan never read.
     expect(warnings.join("\n")).not.toContain("v1.1.0")
   })
 
@@ -726,10 +623,6 @@ describe("aburi diff — both scans it ran for you", () => {
     expect(report.faultedScans).toEqual(["base"])
     expect(report.triggered).toBeNull()
     expect(report.exitCode).toBe(EXIT.GATE)
-    // The gate is `exitCode !== SUCCESS`, which does not by itself say a plugin threw, so the
-    // wording is derived from what each side reported — count included, and attributed to the
-    // side that reported it. A second reason gates now, and a sentence about a joined list of
-    // sides would state one side's cause about both.
     expect(warnings).toContain(
       "⚠ base: extraction withdrew 1 file(s). This run exits 3 even though " +
         "the diff was written. Fix it, or the comparison is against a workspace one side could not read.",
@@ -758,14 +651,8 @@ describe("aburi diff — both scans it ran for you", () => {
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnings.push(m),
     })
-    // A file with recoverable errors is *in* both IRs, so it is in no `stats.skippedFiles`
-    // and nothing about it becomes `unknown`. Its Symbol set can still be short, and the
-    // added / removed counts then move with no file having gone missing.
     expect(warnings.join("\n")).toContain("recoverable parse errors")
     expect(warnings.join("\n")).toContain("added / removed")
-    // The files are named once per side, by each scan's own report, whose header carries the
-    // side. This command adds the consequence and no second listing: it runs both scans, so
-    // repeating their lines here would print every doubtful path a third time.
     expect(warnings).toEqual([
       '⚠ base ref "main": 1 file(s) had recoverable parse errors.',
       "    warn.stub: 2:1 — stray token",
@@ -785,13 +672,8 @@ describe("aburi diff — both scans it ran for you", () => {
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnings.push(m),
     })
-    // Two per-scan facts and one diff-level synthesis. They overlap on purpose: the first
-    // two say what each revision failed to read, the third says the comparison never
-    // happened — which neither scan is in a position to know.
     expect(warnings.filter((m) => m.includes("contributed no Symbols"))).toHaveLength(2)
     expect(warnings.filter((m) => m.includes("skipped by both scans"))).toHaveLength(1)
-    // And no fourth. A refusal is not a recoverable error, and neither scan faulted, so the
-    // two lines that qualify the counts have nothing to say here.
     expect(warnings.join("\n")).not.toContain("recoverable parse errors")
     expect(warnings.join("\n")).not.toContain("exits 3")
   })
@@ -808,25 +690,15 @@ describe("aburi diff — both scans it ran for you", () => {
       outputDir: resolve(scratch, "diff-out"),
       warn: (m) => warnings.push(m),
     })
-    // No scan ran here, which is not the same answer as two clean scans.
     expect(report.faultedScans).toBeNull()
-    // `stats.skippedFiles[].reason` persists `extraction-failed`, so this mode can see that a
-    // plugin threw when the documents were written even though it never watched it happen.
     expect(warnings.join("\n")).toContain("base IR records 1 file(s) withdrawn during extraction")
     expect(warnings.join("\n")).toContain("head IR records 1 file(s) withdrawn during extraction")
     expect(warnings.join("\n")).toContain("boom.stub")
-    // Warned, not gated: the fault already had its exit code in the run that hit it, and these
-    // are documents the caller pinned deliberately.
     expect(report.exitCode).toBe(EXIT.SUCCESS)
-    // `parseErrorCount` lives on the scan report, never in the IR, so this mode cannot know
-    // whether either document was written from a clean parse.
     expect(warnings.join("\n")).not.toContain("recoverable parse errors")
   })
 
   it("attributes a recorded fault to the document that holds it", async () => {
-    // Base and head must differ, or reading one document twice would satisfy any attribution.
-    // Beside the head workspace rather than inside it: a base nested under `scratch` is part of
-    // the head scan's own tree, so the head document would hold the base's files as well.
     const baseWorkspace = await mkdtemp(resolve(tmpdir(), "aburi-scan-incidents-base-"))
     await populate(baseWorkspace, ["boom.stub", "ok.stub"])
     await populate(scratch, ["ok.stub"])
@@ -876,12 +748,8 @@ describe("aburi diff — both scans it ran for you", () => {
     })
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
-    // Labelled, so a two-scan run says which side lost the file; the per-file line under it
-    // stays indented and unlabelled and is attributed by the line above.
     expect(warnings.join("\n")).toContain('⚠ base ref "main": extraction-failed (1)')
     expect(warnings).toContain("    boom.stub: plugin exploded")
-    // Rendering the clause is the CLI wrapper's job, so what is pinned here is that the fault
-    // did not swallow it: `triggered` survives, and it still formats as the gate that tripped.
     const triggered = report.triggered
     expect(triggered).not.toBeNull()
     if (triggered === null) return
@@ -903,13 +771,6 @@ describe("runExplain — the report reaches a programmatic caller too", () => {
   })
 })
 
-/**
- * `extraction-failed` has two causes and the CLI reports them the same way.
- *
- * A throw was the only one for as long as the group existed, so every assertion above reaches
- * these lines through `boom.stub`. A duplicate Symbol id withdraws a file without anything
- * throwing (`lang-plugin.md` §7.2, LP28b), and nothing below the core saw it until here.
- */
 describe("aburi scan — a file withdrawn for a duplicate Symbol id", () => {
   it("reports it on the same lines a throw reaches, with the core's message", async () => {
     await populate(scratch, ["ok.stub", "twin.stub"])
@@ -930,8 +791,6 @@ describe("aburi scan — a file withdrawn for a duplicate Symbol id", () => {
   })
 
   it("gates the run and still writes the IR the surviving file produced", async () => {
-    // The whole point of the change: `ok.stub` is in the document, and the exit code is not
-    // green. Before it, the scan threw on the assembled document and wrote nothing at all.
     await populate(scratch, ["ok.stub", "twin.stub"])
     const report = await runScan({
       cwd: scratch,
@@ -947,8 +806,6 @@ describe("aburi scan — a file withdrawn for a duplicate Symbol id", () => {
   })
 
   it("earns the diff fault clause without claiming an exception", async () => {
-    // The clause `describeScanFault` writes is the line a reader greps out of a CI log to
-    // account for the exit code, so it has to be true of a withdrawal that never threw.
     await populate(scratch, ["ok.stub", "twin.stub"])
     const warnings: string[] = []
     const report = await runDiff({

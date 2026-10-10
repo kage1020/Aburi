@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { byId, symbolsOf } from "./fixtures/ctx"
 
-/**
- * The receiver a decorator was written through, which `Decorator.qualifier` carries.
- *
- * `@nest.Controller()` and `@tsed.Controller()` both name `Controller`, and the leaf alone is
- * all a framework plugin used to get. A namespace import binds the module object rather than
- * any name on it, so nothing tied the leaf back to its module and a decorator from a
- * competing library was classified — at high confidence — on the strength of its spelling.
- *
- * What is carried is the whole receiver as written, not its first segment: the IR quotes
- * source, and a consumer resolving a namespace binding takes the first segment itself.
- */
-
 const decoratorsOf = async (source: string, id: string) =>
   byId(await symbolsOf(source), id).decorators
 
@@ -35,8 +23,6 @@ describe("Decorator.qualifier", () => {
   })
 
   it("LP14b: omits the key entirely on a bare decorator", async () => {
-    // Class B (ir-schema.md §1.1): absent, not null and not "". A writer that emitted the key
-    // anyway would make every decorator in every Document carry it.
     const decorators = await decoratorsOf(
       ["@Controller()", "export class C {}", ""].join("\n"),
       "#C",
@@ -46,8 +32,6 @@ describe("Decorator.qualifier", () => {
   })
 
   it("LP14a: reads the receiver of a decorator written without arguments", async () => {
-    // `@ns.Injectable` is a member expression rather than a call, and the qualifier is read
-    // off the same node the leaf is.
     const decorators = await decoratorsOf(
       ["@ns.Injectable", "export class C {}", ""].join("\n"),
       "#C",
@@ -68,37 +52,23 @@ describe("Decorator.qualifier", () => {
     ["a call", "@pick().Controller()"],
     ["a computed member", '@ns["Controller"]()'],
   ])("LP14d: has nothing to carry where the decorator never reaches the run (%s)", async (_label, written) => {
-    // Not a grammar rejection, though it is easy to read as one. Each of these parses as a
-    // decorator of the leading fragment the grammar could take — `@arr`, `@(a)`, `@pick()`,
-    // `@ns` — wrapped in an ERROR node that leaves it no longer a preceding sibling of the
-    // declaration, which is what `collectDecoratorNodes` walks. The class comes back
-    // undecorated, so there is nothing to qualify, but by where recovery put the node.
     const decorators = await decoratorsOf([written, "export class C {}", ""].join("\n"), "#C")
     expect(decorators).toEqual([])
   })
 
   it("LP14f: reads the receiver through the parentheses it was written in", async () => {
-    // `@(a.b)` parses cleanly, and the parentheses change nothing about which decorator it
-    // is. The rule about what carries a qualifier is still the extractor's own — a member
-    // expression with an object — applied to what the parentheses enclose.
     const decorators = await decoratorsOf(["@(a.b)", "export class C {}", ""].join("\n"), "#C")
     expect(decorators[0]?.qualifier).toBe("a")
     expect(decorators[0]?.name).toBe("b")
   })
 
   it("LP14b: omits the key on a bare decorator written without arguments", async () => {
-    // The second of the two paths through `readDecorator`: `@Post` is neither a call nor a
-    // member expression, so the bare-form spread has to omit the key as the call form does.
     const decorators = await decoratorsOf(["@Post", "export class C {}", ""].join("\n"), "#C")
     expect(decorators[0]).not.toHaveProperty("qualifier")
     expect(decorators[0]?.name).toBe("Post")
   })
 
   it("LP14e: quotes a receiver that is written but names no import, rather than dropping it", async () => {
-    // `this` and an optional chain do reach here. `@this.C()` parses cleanly; `@a?.C()` does
-    // not — the `?` lands in an ERROR child of a recovered member expression, whose object
-    // field still reads `a`. Neither names an import edge, so a consumer resolving them finds
-    // nothing and falls back on the leaf — the same answer as before.
     const viaThis = await decoratorsOf(
       ["export class C {", "  @this.Get()", "  list() {}", "}", ""].join("\n"),
       "#C.list",

@@ -55,16 +55,12 @@ describe("DropCFilter — Category C call drop", () => {
       suppress: ["console"],
       keep: ["console.error"],
     })
-    // `console.error` is explicitly kept even though `console` prefix is suppressed
-    // and `console.error` is a core drop target.
     expect(filter.shouldDropCall(makeCall("console.error"))).toBe(false)
     // Non-kept prefixes still fall under the suppress / core drop.
     expect(filter.shouldDropCall(makeCall("console.log"))).toBe(true)
   })
 
   it("supports the `@Decorator` keep syntax by stripping the `@`", () => {
-    // Even though decorators do not reach a call filter, the config schema allows the
-    // `@Name` shape; the filter must ignore the sigil rather than fail to match.
     const filter = buildDropCFilter({ suppress: ["Transaction"], keep: ["@Transaction"] })
     expect(filter.shouldDropCall(makeCall("Transaction.begin"))).toBe(false)
   })

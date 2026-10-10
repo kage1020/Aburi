@@ -2,52 +2,12 @@ import { type Decorator, UNNAMED_DECORATOR } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { firstNonCommentChild, hasErrorChild } from "./ast-helpers"
 
-/**
- * Read every decorator attached to a specific declaration node.
- *
- * A decorator always belongs to the declaration it precedes. Tree-sitter-typescript parents
- * it in one of two places, decided by **where it is written relative to the `export`
- * keyword**, and both have to be read:
- *
- * - **Beside the declaration**, when nothing separates the two. A decorated *method*
- *   (`class C { @A() m() {} }`) has its decorators as preceding siblings inside the class
- *   body, and a decorator written *before* `export` has them as preceding siblings inside the
- *   `export_statement`, whose rule is `decorator* 'export' ['default'] declaration`.
- *
- * - **Inside the declaration**, when the wrapper's rule cannot hold it. A decorator written
- *   *after* the keyword (`export @A() class C {}`, `export default @A() class C {}`) has
- *   nowhere in the wrapper to go, and one on a declaration that is not exported at all
- *   (`@A() class C {}`, `@A() abstract class C {}`) has no wrapper. So does a decorated
- *   **field** (`class C { @A() f = () => {} }`), whose rule holds it where a method's does
- *   not. Both become a `decorator:` field child of the declaration node itself.
- *
- * The two sources cannot overlap: a node has one parent, so a preceding sibling of the
- * declaration is never also its child. That is why the union needs no deduplication.
- *
- * Both positions at once — `@A() export @B() class C {}` — is what TypeScript rejects as
- * TS8038, but the grammar accepts it, so it does reach here from a half-edited file. Reading
- * the union rather than one side means such a file loses no decorator on the way to being
- * reported.
- *
- * A **parameter** decorator (`m(@P() x)`) is deliberately out of reach of both: it is a child
- * of the parameter, and the method does not field-tag it.
- */
 export function readDecorators(declaration: Node): Decorator[] {
   return collectDecoratorNodes(declaration)
     .map(readDecorator)
     .filter((d): d is Decorator => d !== null)
 }
 
-/**
- * The decorator nodes belonging to `declaration`, in source order.
- *
- * Ordered on `startIndex` rather than on the line each one starts, because two decorators
- * can share a line and `Decorator` carries no column: `@UseGuards(G) @Controller("x")` would
- * otherwise fall back on whatever tiebreak the caller chose, and the order is a contract —
- * `framework-nestjs` resolves a class with several recognised decorators by taking the first
- * in source order. A byte offset is total and agrees with the line ordering that integrity
- * invariant #11 checks, so one sort satisfies both.
- */
 function collectDecoratorNodes(declaration: Node): Node[] {
   const found = [
     ...precedingDecorators(declaration),
@@ -56,30 +16,6 @@ function collectDecoratorNodes(declaration: Node): Node[] {
   return found.sort((a, b) => a.startIndex - b.startIndex)
 }
 
-/**
- * The run of decorators written immediately before `declaration`, as siblings, nearest one
- * first — the walk's own order, which the caller sorts.
- *
- * The walk goes backwards from the declaration rather than reading the parent's child list
- * and searching it for the declaration's own position. Both find the same run, but the
- * parent of a top-level declaration is the whole program and `namedChildren` unmarshals
- * every child into a JS object, so reading it once per declaration costs a file of N
- * declarations O(N²) (lang-plugin.md). The walk pays for the run it collects plus
- * tree-sitter's own cost to step back one sibling, and stops as soon as the run ends — for
- * most declarations, before the first step returns anything.
- *
- * Anonymous tokens are stepped over for free, which is what lets one walk cover both the
- * class-member and the wrapped-export shape: `export` and `default` sit between the
- * decorators and the declaration in the wrapper, and `previousNamedSibling` does not see
- * them.
- *
- * A comment is a different matter. It is a *named* node, and tree-sitter puts it wherever
- * it was written — including between two decorators, or between the decorators and the
- * `export` keyword. Ending the run there would let a `// biome-ignore` or a TODO detach a
- * decorator from the class it decorates, which is silent: decorators feed
- * `mergeFrameworkClassification`, so the Symbol comes out with the wrong `extKind` rather
- * than with an error. Comments are skipped, the way `readCallArguments` skips them.
- */
 function precedingDecorators(declaration: Node): Node[] {
   const out: Node[] = []
   for (
@@ -95,10 +31,6 @@ function precedingDecorators(declaration: Node): Node[] {
 }
 
 function readDecorator(node: Node): Decorator | null {
-  // The decorator wraps either a call_expression (@Foo(...)) or a bare identifier / member
-  // access (@Foo, @Ns.Foo). A comment may be written between the `@` and the expression —
-  // `@/* why */ Foo()` parses — so taking the first named child unconditionally would read
-  // the comment as the decorator.
   const written = firstNonCommentChild(node)
   if (written === null) return null
   const inner = throughParentheses(written)
@@ -134,26 +66,6 @@ function readDecorator(node: Node): Decorator | null {
   }
 }
 
-/**
- * The expression a pair of parentheses encloses: `(Controller)` is `Controller`,
- * `(nest.Controller)` is `nest.Controller` and `(pick("x"))` is the call. Parentheses around
- * a name, a path or a call change nothing about which decorator it is, so reading through them
- * is what lets `@(Controller)` match the vocabulary `@Controller` does. A comment inside the
- * parentheses is skipped, as one after the `@` is.
- *
- * Parentheses the parser had to repair are not read through. TypeScript accepts any
- * expression there, but the grammar's decorator rule takes only a name, a path or a call, so
- * `@(x as any)`, `@(x!)`, `@(a[b])`, `@(C<T>)` and `@(new C())` arrive with an ERROR node
- * beside a fragment — `x`, `a`, `C`, or a call of `new` — that is not the decorator. Naming
- * it after that fragment would be a guess, so such a decorator stays enclosed and gets no
- * name. `((C))` needs no loop either: the grammar does not accept it, and error recovery
- * leaves it outside the declaration's run.
- *
- * The repair that counts is one in the head: an ERROR or MISSING token among the children of
- * the parentheses, or of the expression they enclose — which is where it lands for every form
- * above. A broken argument list nests its ERROR deeper, so `@(Controller(a b))` keeps the name
- * `@Controller(a b)` has; `hasErrorChild` says why that is the rule.
- */
 function throughParentheses(node: Node): Node {
   if (node.type !== "parenthesized_expression" || hasErrorChild(node)) return node
   const enclosed = firstNonCommentChild(node)
@@ -161,59 +73,15 @@ function throughParentheses(node: Node): Node {
   return enclosed
 }
 
-/**
- * `Ns.Foo` → `Foo`; `Foo` → `Foo`; anything else → `UNNAMED_DECORATOR`.
- *
- * The anything else is a parenthesized decorator `throughParentheses` could not read. Reporting
- * the node's text there would put arbitrary source, line breaks included, into a field that
- * every consumer treats as an identifier. The decorator is kept, since it is still in the
- * source, and `raw` carries its text.
- */
 function leafIdentifier(node: Node): string {
   if (node.type === "identifier" || node.type === "type_identifier") return node.text
   if (node.type === "member_expression") {
     const property = node.childForFieldName("property")
-    // No input is known to reach the empty case: a MISSING property is a head repair that
-    // `throughParentheses` refuses first. The check keeps `name` from ever being "".
     if (property !== null && property.text.length > 0) return property.text
   }
   return UNNAMED_DECORATOR
 }
 
-/**
- * The receiver a decorator was written through, as `Decorator.qualifier` — `nest` for
- * `@nest.Controller()`, `a.b` for `@a.b.C()`, nothing for `@Controller()`.
- *
- * `leafIdentifier` throws the receiver away, which is right for the name but loses the only
- * thing that says *where the name came from*: `@nest.Controller()` and `@tsed.Controller()`
- * both arrive as `Controller`, and a framework plugin matching names against the file's
- * import edges cannot tie either back to its module, because a namespace edge binds the
- * object rather than any name on it (lang-plugin.md §5.2.2).
- *
- * The whole receiver is carried, not its first segment, because the IR quotes what was
- * written; a consumer resolving a namespace binding takes the first segment itself, since
- * that is the only part of `a.b` that can name something in scope.
- *
- * The rule is stated by this function and nothing else: a qualifier is reported when the
- * callee is a `member_expression` with an object, and in no other case. The grammar is not
- * the guard it might look like. It parses a path in parentheses cleanly — `@(a.b)` — and
- * this function sees what `throughParentheses` read out of it, so that gives `a`, while a
- * parenthesized expression the grammar had to repair gets no name and no qualifier. And the
- * receivers that never arrive — `@arr[0].C()`, `@(a).C()`, `@pick().C()`, `@ns["C"]()` — are
- * not refused by the grammar either: each *is* parsed as a decorator, of the leading fragment
- * the grammar could take, and then wrapped in an ERROR node that leaves it no longer a
- * preceding sibling of the declaration, which is why `collectDecoratorNodes` does not reach
- * it. That is a property of error recovery, not a guarantee, and a grammar bump can move it.
- *
- * What does arrive besides a dotted run of names is `this` (`@this.C()`, which parses
- * cleanly) and the object of an optional chain (`@a?.C()`, which does not — the `?` lands in
- * an ERROR child of a recovered `member_expression`, so the object field still reads `a`).
- * Both are quoted as written, and neither names an import, so a consumer resolving them
- * finds nothing, which is the right answer for both.
- *
- * Returned as a spread so the key is absent rather than null on a bare decorator — the
- * Class B discipline `Decorator.qualifier` is declared under (ir-schema.md §1.1).
- */
 function qualifierOf(callee: Node | null): { qualifier?: string } {
   if (callee === null || callee.type !== "member_expression") return {}
   const object = callee.childForFieldName("object")

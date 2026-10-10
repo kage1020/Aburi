@@ -40,9 +40,6 @@ describe("decideSymbolDrop — Category B rules", () => {
   })
 
   it("keeps a method whose only body came from a second declaration", () => {
-    // A getter written `get v() {}` beside a setter that does the work is one member with two
-    // bodies. Reading `bodyNode` alone would call the member ceremonial on the strength of the
-    // declaration that happens to be written first.
     const merged = makeCandidate({
       kind: "method",
       bodyNode: null,

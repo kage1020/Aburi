@@ -45,19 +45,6 @@ import type {
 } from "../src/index"
 import { COMPUTED_TARGET_SEGMENT, UNNAMED_DECORATOR } from "../src/index"
 
-// Pure type-level tests. They compile-time-assert that the public surface stays
-// importable and shaped roughly as designed. No runtime cost beyond Vitest's
-// per-test bookkeeping.
-//
-// `expectTypeOf` erases at runtime: `pnpm test` alone can never fail an assertion in this
-// file. `pnpm typecheck` is what enforces them, and CI runs both — a green vitest run here
-// means the file imported, not that the types hold.
-
-/**
- * Is a value of type `From` accepted where `To` is expected? Wrapping both sides in a tuple
- * stops the conditional from distributing over unions, so `Assignable<SymbolId | ComponentId,
- * SymbolId>` answers about the union as a whole rather than member by member.
- */
 type Assignable<From, To> = [From] extends [To] ? true : false
 
 describe("@aburi/types public surface", () => {
@@ -94,8 +81,6 @@ describe("@aburi/types public surface", () => {
       qualifier?: string
       boundary: boolean
     }>()
-    // A field added to `Decorator` fails this until it is either passed on in `OwnerSummary` or
-    // added to the fields effect plugins do without.
     expectTypeOf<Exclude<keyof Decorator, keyof OwnerDecorator>>().toEqualTypeOf<
       "raw" | "arguments" | "line"
     >()
@@ -166,15 +151,10 @@ describe("@aburi/types public surface", () => {
   })
 
   it("exports the reserved target segment as a value both sides can spell from one place", () => {
-    // A language plugin writes it into `CallCandidate.target`; an effect plugin reads it at a
-    // fixed position. Two hand-written copies is one misspelling away from a segment that
-    // matches nothing, and neither the types nor the schema would say so.
     expect(COMPUTED_TARGET_SEGMENT).toBe("<computed>")
   })
 
   it("exports the reserved decorator name for an expression that has none", () => {
-    // Written by a language plugin into `Decorator.name`, and read by anything that prints or
-    // matches decorator names.
     expect(UNNAMED_DECORATOR).toBe("<expression>")
   })
 
@@ -281,13 +261,6 @@ describe("@aburi/types public surface", () => {
     expectTypeOf(noName).toEqualTypeOf<PluginManifest>()
   })
 
-  // The three id types own separate namespaces (ir-schema.md). JSON Schema cannot say
-  // so — all three are `{"type": "string"}` on the wire — so the distinction is layered on by
-  // the codegen brand pass, and these assertions are what proves it survived regeneration.
-  //
-  // `Assignable` is spelled out rather than reached through `expectTypeOf().toExtend()`
-  // because the negative direction is the interesting one: a structural alias would make
-  // every one of these pass.
   it("SymbolId / ComponentId / SliceId are mutually distinct nominal types", () => {
     expectTypeOf<Assignable<SymbolId, ComponentId>>().toEqualTypeOf<false>()
     expectTypeOf<Assignable<ComponentId, SymbolId>>().toEqualTypeOf<false>()
@@ -301,16 +274,12 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<Assignable<string, SymbolId>>().toEqualTypeOf<false>()
     expectTypeOf<Assignable<string, ComponentId>>().toEqualTypeOf<false>()
     expectTypeOf<Assignable<string, SliceId>>().toEqualTypeOf<false>()
-    // The other direction must keep working: ids are passed to `startsWith`, `localeCompare`,
-    // template literals and every `(s: string) => ...` helper in the projection layer.
     expectTypeOf<Assignable<SymbolId, string>>().toEqualTypeOf<true>()
     expectTypeOf<Assignable<ComponentId, string>>().toEqualTypeOf<true>()
     expectTypeOf<Assignable<SliceId, string>>().toEqualTypeOf<true>()
   })
 
   it("a slice id cannot be produced by concatenation", () => {
-    // What `sliceIdFor` in @aburi/diff exists to prevent: the template literal evaluates to
-    // `string`, which the brand rejects, so the derivation has to go through the one helper.
     expectTypeOf<Assignable<`slice:${string}`, SliceId>>().toEqualTypeOf<false>()
   })
 
@@ -330,18 +299,11 @@ describe("@aburi/types public surface", () => {
   })
 
   it("the write side of SourceRange is stricter than the read side (ir-schema.md)", () => {
-    // Class A says a writer always emits both column keys, carrying `null` when the
-    // position is unknown. `WrittenSourceRange` is that rule as a type, so a plugin that
-    // omits a column fails to compile instead of quietly emitting a shape the convention
-    // forbids -- `serializeCanonical` drops `undefined` properties, so the omission would
-    // otherwise be invisible in TypeScript and visible only in the emitted bytes.
     expectTypeOf<SymbolCandidate["source"]>().toEqualTypeOf<WrittenSourceRange>()
     expectTypeOf<WrittenSourceRange["startColumn"]>().toEqualTypeOf<number | null>()
     expectTypeOf<WrittenSourceRange["endColumn"]>().toEqualTypeOf<number | null>()
     expectTypeOf<Assignable<SourceRange, WrittenSourceRange>>().toEqualTypeOf<false>()
 
-    // The read side stays tolerant: an IR loaded off disk may predate the rule and omit the
-    // keys, so narrowing `Symbol["source"]` would make a valid v1 document unrepresentable.
     expectTypeOf<Symbol["source"]>().toEqualTypeOf<SourceRange>()
     expectTypeOf<SourceRange["startColumn"]>().toEqualTypeOf<number | null | undefined>()
     // ...and a writer's range is still a range, so nothing downstream needs the narrow type.

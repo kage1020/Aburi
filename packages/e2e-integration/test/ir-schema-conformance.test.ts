@@ -4,14 +4,6 @@ import { useFixtureCheckout } from "../src/fixture"
 import { irValidator } from "../src/ir-schema"
 import { scanFixture } from "../src/scan-helper"
 
-/**
- * Schema conformance for a scanned document, plus the two `workspace.languages` relations
- * the schema cannot state on its own: the field carries `LanguageId`s rather than plugin
- * manifest names, and it covers every `Symbol.language`.
- *
- * One checkout and one scan serve all three assertions — they mutate nothing.
- */
-
 const fixture = useFixtureCheckout("nestjs-billing", "all")
 
 let ir: ScanResult["ir"]
@@ -33,10 +25,6 @@ describe("e2e: emitted IR validates against schema/aburi.ir.v1.json", () => {
   })
 
   it("accepts a Decorator carrying a qualifier, and rejects the shapes Class B forbids", () => {
-    // The fixture has no `import * as` and writes no qualified decorator, so nothing else in
-    // the suite reaches the schema with a `qualifier` at all — in either direction. The key
-    // is optional, `minLength: 1`, and of type string, which makes absent, `""` and `null`
-    // three different answers the schema has to give.
     const decorated = ir.symbols.find((symbol) => symbol.decorators.length > 0)
     expect(decorated).toBeDefined()
     const withQualifier = (qualifier: unknown) => ({

@@ -93,10 +93,6 @@ beforeEach(async () => {
     JSON.stringify(makeIRWithTwoNamed()),
     "utf8",
   )
-  // The on-disk IR above names `src/a.ts` and `src/b.ts`, which do not exist on disk. A
-  // rescan therefore finds nothing, and `--debug-resolution` returning `not-found` for an
-  // id that IS in the file is what proves the file was bypassed. The config exists so the
-  // rescan is a real one rather than a run refused for having no language plugin.
   await writeFile(
     resolve(scratch, "package.json"),
     JSON.stringify({ name: "explain-fixture", private: true }),
@@ -193,9 +189,6 @@ describe("runExplain — --debug-resolution (call-resolution.md)", () => {
   })
 
   it("ignores the IR sitting on disk and rescans instead", async () => {
-    // The workspace has no source files, so a rescan yields zero symbols. Getting
-    // `not-found` for an id that IS present in out/aburi.ir.json is exactly the proof
-    // that the file was bypassed.
     const outcome = await runExplain({
       cwd: scratch,
       argument: "ts:src/a.ts#getUser",
@@ -205,10 +198,6 @@ describe("runExplain — --debug-resolution (call-resolution.md)", () => {
   })
 })
 
-/**
- * All three lookup arms write through the same path, and each is reached by a different
- * argument shape — an arm that kept its own `writeFile` would pass the other two's tests.
- */
 describe("CL26 — --output under directories that do not exist", () => {
   it("creates them for an id lookup", async () => {
     const outcome = await runExplain({
@@ -226,8 +215,6 @@ describe("CL26 — --output under directories that do not exist", () => {
   })
 
   it("creates them for a file lookup", async () => {
-    // The file arm claims the argument only for a path on disk or one the IR skipped; the
-    // fixture IR names `src/a.ts` without the workspace holding it.
     await mkdir(resolve(scratch, "src"), { recursive: true })
     await writeFile(resolve(scratch, "src/a.ts"), "export function getUser() {}\n", "utf8")
 
@@ -277,15 +264,12 @@ describe("CL27 — an --output that cannot hold a file", () => {
 
     expect(thrown).toBeInstanceOf(CliError)
     expect((thrown as CliError).code).toBe("input-error")
-    // The command and the artefact, not only the path: a message reading `aburi init could
-    // not write the config` would leave the path assertion green.
     expect((thrown as Error).message).toContain(
       `aburi explain could not write the explain Markdown to ${resolve(scratch, "generated/explain/get-user.md")}`,
     )
     expect((thrown as Error).message).toContain("--output")
   })
 
-  // No overwrite guard stands in front of this command, so the write is what answers.
   it("names a directory standing on the path itself", async () => {
     await mkdir(resolve(scratch, "generated"), { recursive: true })
 

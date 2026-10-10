@@ -76,10 +76,6 @@ describe("classifySymbolDropHint", () => {
   })
 
   it("keeps a Symbol carrying a boundary decorator, whatever its kind", () => {
-    // `decideDropReason` in core asks `decideSymbolDrop` first, which answers `null` on a
-    // boundary decorator, and then asks this. So an arm here that never looks at decorators
-    // is the one that decides — `drop-list.md` puts a boundary outside Category B, and
-    // that has to hold for every kind, not only for the class arm that already checked.
     const boundary = [
       { name: "Controller", raw: "@Controller()", arguments: [], boundary: true, line: 1 },
     ]
@@ -94,9 +90,6 @@ describe("classifySymbolDropHint", () => {
   })
 
   it("reads only class bodies when a class is merged with an interface", async () => {
-    // A merged `interface C {}` contributes its `interface_body`, whose `property_signature`
-    // and `method_signature` members would read as the class's own — turning `pure constants`
-    // into `pure DTO`, and a DTO into a Symbol that is not dropped at all.
     expect(await hintOf(CONSTANTS_PLUS_INTERFACE, "ts:src/a.ts#P")).toEqual({
       reason: "pure constants",
       category: "B",
@@ -108,13 +101,6 @@ describe("classifySymbolDropHint", () => {
   })
 })
 
-/**
- * The Category-A half of this module, which is a list rather than a function and so has no
- * behaviour a hint test reaches. Nothing else in the workspace reads it: the plugin copies it
- * into `fileDropPatterns` and core applies it to paths, so an entry dropped from here makes
- * every declaration file scannable — every ambient interface in a dependency's `.d.ts` landing
- * in the IR as a data model — with every other suite still green.
- */
 describe("the file drop patterns this plugin adds to the core standard set", () => {
   it("names a declaration file in each of the three module spellings", () => {
     expect([...TYPESCRIPT_FILE_DROP_PATTERNS].sort()).toEqual([

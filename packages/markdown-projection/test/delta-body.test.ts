@@ -4,12 +4,6 @@ import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { emptySummary, makeDiff } from "./fixtures"
 
-/**
- * C6 — renderDeltaBody branch coverage. Each test drives a single delta field so we can
- * assert the emitted row in isolation. Signature is stitched together from ArrayDeltas
- * because the schema's ArrayDelta uses `unknown[]` and the runtime shape has to match.
- */
-
 function baseDelta(): SymbolDelta {
   return {
     apiChanged: true, // force routing into API changes so the block emits
@@ -173,8 +167,6 @@ describe("renderDeltaBody — decorator branches", () => {
   })
 
   it("modified → keeps the receiver, which may be what changed", () => {
-    // `@nest.Post()` → `@tsed.Post()` is modified on its qualifier alone; `@Post` would name
-    // neither side of that edit.
     const md = renderWith({
       ...baseDelta(),
       decorators: {

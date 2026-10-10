@@ -11,18 +11,6 @@ import {
   sliceRecordViolation,
 } from "../src/slice"
 
-/**
- * Slice View pass acceptance tests. These map to SV1–SV21 and SV23 / SV25 in
- * docs/design/slice-view.md; SV22 and SV24 (schema validation) live in
- * schema.test.ts, and the cross-package SV21 shape is additionally exercised
- * end-to-end in @aburi/e2e-integration. The SliceRecord rejections below overlap
- * schema.test.ts on purpose: this layer checks the pass's own guard, that one the schema.
- *
- * Helpers below build the three pass inputs — a `SymbolChange[]`, plus base
- * and head `CallEdge[]` — as compactly as possible so each test spells out
- * only the fact under scrutiny.
- */
-
 const changed = (id: string): SymbolChange => ({
   status: "changed",
   before: makeSymbol({ id, name: id }),
@@ -114,8 +102,6 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
   })
 
   it("SV3: no bridging through an unchanged Symbol M (A→M→B does NOT unify A,B)", () => {
-    // M is unchanged → not a Node → the edges [A,M] and [M,B] are dropped
-    // because their non-A/B endpoint is not in the Node set.
     const A = "ts:src/a.ts#A"
     const M = "ts:src/mid.ts#M"
     const B = "ts:src/b.ts#B"
@@ -167,18 +153,6 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
   })
 
   it("SV5: propagated-only changed callers (status: changed) are Nodes and cluster with their downstream callee", () => {
-    // The Boundary controller's body is byte-identical between base
-    // and head; the *only* semantic change is that effect propagation has
-    // now attached a `db.write` entry with `propagated: true` because the
-    // downstream service `Svc.op` began invoking a repository write. The
-    // controller therefore appears as `status: changed` even though its
-    // own source is unchanged.
-    //
-    // The Slice View pass MUST NOT reach into `delta.effects` to distinguish
-    // this from a "real" body change — "any status: changed is a Node" is
-    // the whole rule (slice-view.md). This test constructs the propagated-only case
-    // faithfully so a future refactor that added such a distinction would
-    // silently break here.
     const Ctl = "ts:src/ctl.ts#Ctl.route"
     const Svc = "ts:src/svc.ts#Svc.op"
     const propagatedWrite: Effect = {
@@ -223,8 +197,6 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
       headCallEdges: [edge(C, newS)],
     })
     expect(slices).toEqual([
-      // Anchor is the lex-smallest of the three ids. ts:src/c.ts#... sorts
-      // before ts:src/svc.ts#..., so C is the anchor.
       { id: `slice:${C}`, members: [C, newS, oldS].sort() },
     ])
   })
@@ -430,9 +402,6 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
   })
 
   it("SV17: locality — adding an unchanged Symbol elsewhere does not change any slice", () => {
-    // Unchanged symbols never reach `changes[]` (slice-view.md precondition 1: unchanged
-    // is dropped upstream). So passing the same `changes[]` twice is the
-    // faithful representation of "adding an unchanged symbol elsewhere".
     const { changes, edges } = buildInputs()
     const before = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
     const after = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
@@ -449,8 +418,6 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
       baseCallEdges: [],
       headCallEdges: edges,
     })
-    // The A-B and C-D slices should appear identical to `before`; only a
-    // new `{Z}` singleton is added (appended in sorted-anchor order).
     expect(after.find((s) => s.id === `slice:${A}`)?.members).toEqual([A, B])
     expect(after.find((s) => s.id === `slice:${C}`)?.members).toEqual([C, D])
     expect(after.find((s) => s.id === `slice:${Z}`)?.members).toEqual([Z])
@@ -515,11 +482,6 @@ describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + 
 
 describe("computeSlices — SV21: cross-language partition", () => {
   it("partitions Nodes by language when the changes span multiple languages", () => {
-    // slice-view.md: cross-language edges do not exist yet, so
-    // a PR touching TypeScript and Python files produces disjoint slices per
-    // language. The e2e fixture only covers a single language; this unit
-    // test enforces the partition property at the pass boundary — even when
-    // Node ids from different languages are interleaved in the input.
     const tsCtl = "ts:src/ctl.ts#Ctl.route"
     const tsSvc = "ts:src/svc.ts#Svc.op"
     const pyCtl = "py:app/ctl.py#route"
@@ -536,13 +498,6 @@ describe("computeSlices — SV21: cross-language partition", () => {
   })
 
   it("a cross-language edge that reaches the pass anyway still unifies (defensive: no language-aware short-circuit)", () => {
-    // If a future resolver produces a genuine cross-language edge (planned in
-    // multi-language-id.md), the WCC pass MUST cluster the two Symbols —
-    // Slice View has no language-aware filter of its own. This test guards
-    // against a well-meaning "only same-language edges" filter being added
-    // here, which would violate its promise ("Slice View will then
-    // automatically produce cross-language clusters via the same WCC rule
-    // with no code change").
     const tsA = "ts:src/a.ts#a"
     const pyB = "py:app/b.py#b"
     const slices = computeSlices({
@@ -554,12 +509,6 @@ describe("computeSlices — SV21: cross-language partition", () => {
   })
 })
 
-/**
- * slice-view.md — the strictly-ascending `members[]` order and the derivation
- * `id === "slice:" + members[0]` compare one property against another, which no
- * JSON Schema can express. The pass validates them itself and consumers
- * read the anchor through a helper that answers from `members[0]`.
- */
 describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
   /** Assert the non-throwing and the throwing form agree on which clause broke. */
   function expectViolation(record: unknown, kind: SliceViolationKind, subject: string): void {
@@ -567,8 +516,6 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     expect(violation?.kind).toBe(kind)
     expect(violation?.subject).toBe(subject)
 
-    // `assertSliceRecordInvariant` takes a well-typed record; the shape cases
-    // below are only reachable through the validator entry point.
     if (violation?.kind === "malformed-shape") return
     expect(() => assertSliceRecordInvariant(record as SliceRecord)).toThrow(DiffError)
     try {
@@ -588,12 +535,6 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     const B = "ts:src/b.ts#B"
     const C = "ts:src/c.ts#C"
     const Z = "ts:src/z.ts#Z"
-    // The changes are listed in DESCENDING id order on purpose. `collectNodeIds`
-    // preserves input order and the WCC utility buckets nodes in first-seen
-    // order, so an ascending input would still come out ascending even if the
-    // utility stopped sorting each component — this test would then pass while
-    // the very guarantee it exists to pin was gone. Descending input makes the
-    // sort load-bearing here.
     const slices = computeSlices({
       changes: [droppedToggled(Z, Z, "to-dropped"), removed(C), added(B), changed(A)],
       baseCallEdges: [edge(C, A)],
@@ -622,8 +563,6 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     if (slice === undefined) throw new Error("unreachable: one Slice expected")
     expect(sliceAnchor(slice)).toBe(A)
 
-    // A record whose id disagrees with its members is malformed, but the helper
-    // still answers from members[0] — proof it never strips the `slice:` prefix.
     expect(sliceAnchor({ id: sliceId(`slice:${B}`), members: [symbolId(A), symbolId(B)] })).toBe(A)
   })
 
@@ -674,12 +613,6 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
   })
 })
 
-/**
- * Enforcement layer 2 (slice-view.md) points `sliceRecordViolation` at documents written by
- * third-party or older producers, so its input is untyped by definition. Every
- * case here reaches it through a shape TypeScript would have rejected, which is
- * exactly what a validator receives.
- */
 describe("sliceRecordViolation — untyped input (SV24)", () => {
   it("reports a missing members[] instead of throwing", () => {
     const violation = sliceRecordViolation({ id: "slice:ts:src/a.ts#A" })
@@ -688,8 +621,6 @@ describe("sliceRecordViolation — untyped input (SV24)", () => {
   })
 
   it("reports a members[] that is not an array instead of scanning its characters", () => {
-    // A string is indexable and iterable, so a naive scan would happily compare
-    // its characters and report a bogus "unordered at index 3".
     const violation = sliceRecordViolation({ id: "slice:ts:src/a.ts#A", members: "nope" })
     expect(violation?.kind).toBe("malformed-shape")
     expect(violation?.message).toMatch(/array of strings/)
@@ -716,10 +647,6 @@ describe("sliceRecordViolation — untyped input (SV24)", () => {
 
 describe("SV29: a Slice id cannot be built on an anchor from a reserved namespace", () => {
   it("rejects an anchor in the `slice:` namespace even though the derivation is self-consistent", () => {
-    // "slice:slice:…" satisfies every other clause: the prefix matches, members[] is a
-    // one-element ascending list, and the id IS "slice:" + members[0]. Only the namespace
-    // rule catches it. makeSymbolId refuses to build such a Symbol id and checkIRIntegrity
-    // #16 rejects one read from disk, but buildDiff is public API and runs neither.
     const violation = sliceRecordViolation({
       id: "slice:slice:src/a.ts#A",
       members: ["slice:src/a.ts#A"],

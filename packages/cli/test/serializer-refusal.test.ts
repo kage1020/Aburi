@@ -6,15 +6,6 @@ import { runDiff, runScan } from "../src"
 import { CliError } from "../src/errors"
 import { emptyIR, writeTypeScriptWorkspace } from "./fixtures"
 
-/**
- * The serializer is a separate step from the write, so that a document it refuses (two keys
- * differing only in Unicode composition, `canonical-key-collision`) is exit 2 and says
- * `serialize`, while a disk refusing the bytes is exit 1 and says `write`. Nothing a workspace
- * holds reaches the refusal for real — discovery withdraws file names that collide under NFC
- * before a Symbol is made of them — so the serializer is stood in for here, which is the only
- * way to pin which side of the split each failure lands on.
- */
-
 const REFUSAL = "serializeCanonical at $.symbols[0]: keys render identically after NFC"
 
 vi.mock("@aburi/core", async (importOriginal) => {
@@ -69,9 +60,6 @@ describe("a document the serializer refuses", () => {
   })
 
   it("leaves no pages beside an IR it refuses, under the default format", async () => {
-    // The IR is written before the pages derived from it (`cli-spec.md` §5.3), so a refused IR
-    // means no page is written either. A directory kept between runs still holds the previous
-    // run's pages, which is why the contract says so.
     await writeTypeScriptWorkspace(scratch, "serializer-fixture")
 
     await failure(runScan({ cwd: scratch }))

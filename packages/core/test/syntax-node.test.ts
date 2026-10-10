@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { asSyntaxNode, calleeText, type SyntaxNode } from "../src/syntax-node"
 
-/**
- * `syntax-node.ts` is the seam every framework plugin walks a tree-sitter node through, so it
- * is tested here rather than through one plugin: `framework-express`, `framework-react` and
- * anything that follows all reach these helpers, and a plugin's own suite would only pin the
- * subset that plugin happens to exercise.
- */
-
-/**
- * A stand-in carrying the whole duck-typed surface. `asSyntaxNode` is a shape check, so an
- * object that merely satisfies the shape is exactly what a plugin hands over — there is no
- * `web-tree-sitter` node to construct and nothing here needs one.
- */
 function node(overrides: Partial<SyntaxNode> = {}): SyntaxNode {
   return {
     type: "call_expression",
@@ -39,13 +27,6 @@ describe("calleeText", () => {
     expect(calleeText(callWith(null))).toBeNull()
   })
 
-  /**
-   * An empty callee answers `null`, not `""`. Every caller asks the result a question about a
-   * name — does its last dotted segment match a hook, is it `express()`, is it `forwardRef` —
-   * and `""` is a callee that matches nothing while still reading as present, so a caller that
-   * checks for absence before matching would be told there is a callee to inspect when there
-   * is not.
-   */
   it("returns null for a `function` field whose text is empty", () => {
     expect(calleeText(callWith(node({ type: "identifier", text: "" })))).toBeNull()
   })
@@ -76,12 +57,6 @@ describe("asSyntaxNode", () => {
     expect(asSyntaxNode({ ...node(), [field]: value })).toBeNull()
   })
 
-  /**
-   * `text` is asserted because `calleeText` reads `callee.text.length` unconditionally. A node
-   * that passed the guard without one would fail as a `TypeError` inside the helper the guard
-   * exists to keep non-tree-sitter values out of, which is the failure a plugin gets no
-   * chance to handle.
-   */
   it("refuses a node missing `text`, which `calleeText` reads without checking", () => {
     const withoutText = {
       type: "call_expression",
@@ -92,10 +67,6 @@ describe("asSyntaxNode", () => {
     expect(asSyntaxNode(withoutText)).toBeNull()
   })
 
-  /**
-   * `children` is asserted for the same reason one step further out: nothing in the module
-   * reads it, but `framework-react`'s JSX walk iterates it straight off the narrowed value.
-   */
   it("refuses a node missing `children` even though no helper here reads it", () => {
     const withoutChildren = {
       type: "jsx_element",

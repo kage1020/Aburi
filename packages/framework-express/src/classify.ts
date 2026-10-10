@@ -21,10 +21,6 @@ interface ExpressClassification {
   confidence: Confidence
 }
 
-/**
- * First-match-wins over `const` symbols (router instances) and `call` symbols (module-level
- * chained-call registrations); every other kind abstains with `null`.
- */
 export function classifyExpressSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: FrameworkClassifyContext,
@@ -98,8 +94,6 @@ function classifyUseCall(
   const shape = analyzeUseArguments(symbol.fullNode)
   if (shape === null) return null
 
-  // Priority: arity-4 error middleware (unambiguous) > `use(pathLiteral, identifier)` mount
-  // > anything else fitting the arity-3 or identifier shape.
   if (shape.hasErrorHandler) {
     return {
       extKind: "framework:express:error-middleware",

@@ -4,17 +4,6 @@ import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, runScan } from "../src"
 
-/**
- * A scan with no language plugin can parse nothing, so the only IR it could write has zero
- * Symbols and an empty `workspace.languages` — a document the IR schema rejects
- * (`minItems: 1`). Succeeding at that is worse than failing: two such IRs diff to
- * `+0 -0 ~0`, so every `--fail-on` gate downstream passes regardless of what changed.
- *
- * The state is reachable without user error. `init` writes no `languages` entry for a
- * project whose language has no first-party plugin, which today is every language but
- * TypeScript.
- */
-
 let scratch = ""
 
 async function writeConfig(config: Record<string, unknown>): Promise<void> {
@@ -75,9 +64,6 @@ describe("runScan — no language plugin", () => {
   })
 
   it("proceeds once a language plugin is configured", async () => {
-    // And once there is something for it to read. `src/m.py` is filtered out at discovery
-    // because no loaded plugin claims `.py`, so without this the scan discovers nothing and
-    // gates on coverage instead — a different refusal with a different fix.
     await writeFile(resolve(scratch, "src/m.ts"), "export const m = 1\n", "utf8")
     await writeConfig({ languages: ["lang-typescript"] })
 

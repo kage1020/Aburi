@@ -7,35 +7,11 @@ import { representativeSymbol } from "./status"
 export interface SliceInput {
   /** SymbolChange records produced by `buildDiff` (pre-sort is not required). */
   changes: readonly SymbolChange[]
-  /**
-   * Resolved call edges from the base IR. Typically produced by
-   * `reconstructCallEdgesFromIR(baseIR)` inside `buildDiff` — Slice View
-   * consumes only resolved edges, never `Symbol.calls[]` directly.
-   */
   baseCallEdges: readonly CallEdge[]
   /** Resolved call edges from the head IR (same source rule as base). */
   headCallEdges: readonly CallEdge[]
 }
 
-/**
- * Slice View clustering pass — docs/design/slice-view.md.
- *
- * Groups the changed-Symbol set of a diff into weakly-connected components
- * over the union of base and head call edges. Emits a `SliceRecord[]` whose
- * cluster ids are `"slice:" + <smallest-member Symbol id>`, both `slices[]`
- * and each `members[]` sorted ascending.
- *
- * Pure function: `(changes, baseCallEdges, headCallEdges)` → `SliceRecord[]`.
- * Determinism, idempotence, input-order insensitivity, and locality are all
- * guaranteed — see `computeWeaklyConnectedComponents` in `@aburi/core`.
- *
- * Returns `[]` when no SymbolChange is Node-eligible; callers should
- * still serialise the empty array — the Markdown projection omits the section
- * but the JSON always emits the key so consumers never
- * distinguish "field absent" from "no slices".
- *
- * Every returned record has passed `assertSliceRecordInvariant`.
- */
 export function computeSlices(input: SliceInput): SliceRecord[] {
   const nodeIds = collectNodeIds(input.changes)
   if (nodeIds.length === 0) return []
@@ -55,34 +31,10 @@ export function computeSlices(input: SliceInput): SliceRecord[] {
 
 const SLICE_ID_PREFIX = "slice:"
 
-/**
- * The single place production code derives a Slice id. Everything else
- * in `src/` either receives an id or renders one. (Tests spell the prefix out
- * literally on purpose: an expectation written in terms of the function under
- * test would agree with it no matter what it produced.)
- *
- * The cast is the one place a `SliceId` comes into existence. `SliceId` and
- * `SymbolId` are separate brands precisely so this concatenation cannot be
- * open-coded anywhere else: a bare `"slice:" + x` evaluates to `string`, which
- * `SliceRecord.id` no longer accepts.
- */
 function sliceIdFor(anchor: SymbolId): SliceId {
   return `${SLICE_ID_PREFIX}${anchor}` as SliceId
 }
 
-/**
- * Build one SliceRecord from an ascending-sorted component and check its own
- * post-condition before letting it out (slice-view.md, enforcement layer 1).
- *
- * The check is not defending against untrusted input — this function builds
- * the id itself, so the derivation clause is true by construction here and
- * only the two clauses about `members` can actually fire. Those are the point:
- * `members[0]` is the anchor only because `computeWeaklyConnectedComponents`
- * returns each component sorted ascending, a guarantee that lives one layer
- * down and is invisible from this file. If it ever stops holding, the diff
- * would otherwise keep emitting well-formed-looking SliceRecords naming the
- * wrong anchor. Here it fails instead.
- */
 function makeSliceRecord(members: readonly SymbolId[]): SliceRecord {
   const anchor = members[0]
   if (anchor === undefined) {
@@ -97,16 +49,6 @@ function makeSliceRecord(members: readonly SymbolId[]): SliceRecord {
   return record
 }
 
-/**
- * The anchor of a Slice: its lexicographically smallest member.
- *
- * Answers from `members[0]`. `id` is derived from the anchor, so
- * reconstructing the anchor by stripping the `"slice:"` prefix is circular at
- * best and, for a record that broke the derivation, silently wrong: it would
- * name a Symbol that is not in the Slice. `id` is read here only to name the
- * offending record in the error message. Consumers that need the anchor call
- * this; consumers that need a label keep using `id` directly.
- */
 export function sliceAnchor(record: SliceRecord): SymbolId {
   const anchor = record.members[0]
   if (anchor === undefined) {
@@ -140,17 +82,6 @@ export interface SliceRecordViolation {
   message: string
 }
 
-/**
- * Report which clause of the slice-view.md derivation invariant a value breaks, or `null`
- * when it is a well-formed `SliceRecord`. Non-throwing counterpart of
- * `assertSliceRecordInvariant`: the pass wants an exception, a schema
- * validator wants a verdict it can turn into its own error.
- *
- * Takes `unknown` rather than `SliceRecord` deliberately. Enforcement layer 2 points
- * this at documents written by third-party or older producers — data that has
- * not been type-checked by definition — so anything that assumed a well-typed
- * argument would crash on exactly the input it exists to reject.
- */
 export function sliceRecordViolation(value: unknown): SliceRecordViolation | null {
   if (typeof value !== "object" || value === null) {
     return {
@@ -178,11 +109,6 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
 
   const anchor = members[0]
   if (anchor === undefined) return emptyMembersViolation(subject)
-  // A Symbol id in the `slice:` namespace derives to `slice:slice:…`, which is
-  // self-consistent — it passes the derivation clause below — but names an id no reader can
-  // tell from a Slice id. `makeSymbolId` refuses to build such a Symbol id and
-  // `checkIRIntegrity` #16 rejects one read from disk, but `buildDiff` is public API and
-  // runs no integrity check, so the doubled prefix is caught here too.
   const reservedAnchor = reservedNamespaceOf(anchor)
   if (reservedAnchor !== null) {
     return {
@@ -206,10 +132,6 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
         `(slice-view.md for the order and uniqueness).`,
     }
   }
-  // The one place outside `sliceIdFor` that asserts an id brand, and the reason this
-  // function takes `unknown`: the anchor has been checked to be a string and nothing more.
-  // Whether it is a well-formed Symbol id is not this check's question — a record whose
-  // members are gibberish still has to be told apart from one whose id disagrees with them.
   const expected = sliceIdFor(anchor as SymbolId)
   if (id !== expected) {
     return {
@@ -242,11 +164,6 @@ function emptyMembersViolation(subject: string): SliceRecordViolation {
   }
 }
 
-/**
- * Throwing form of `sliceRecordViolation`. Raised as a coded `DiffError` so
- * callers branch on `code` rather than parsing the message; which clause broke
- * is `SliceRecordViolation.kind`, for callers that need to tell them apart.
- */
 export function assertSliceRecordInvariant(record: SliceRecord): void {
   const violation = sliceRecordViolation(record)
   if (violation === null) return
@@ -256,19 +173,6 @@ export function assertSliceRecordInvariant(record: SliceRecord): void {
   })
 }
 
-/**
- * Node selection: every SymbolChange except pure `moved`, identified by its
- * representative Symbol — the head side where present, the base side for `removed`.
- * `unknown` is a thing a reviewer has to look at, so it belongs in the cluster its
- * neighbours are in. Not deduplicated: `buildDiff` never mentions one id twice, and the
- * WCC primitive coalesces an accidental duplicate anyway.
- *
- * Written as a `switch` over every status rather than as "everything but `moved`", because
- * the second spelling admits a status added to `SymbolChange` later without anyone deciding
- * whether it is a Node. Node membership is what the whole pass is built on — a status
- * silently joining the set would move Slice boundaries and the ids derived from them — so
- * the addition has to fail the build here.
- */
 function collectNodeIds(changes: readonly SymbolChange[]): SymbolId[] {
   const ids: SymbolId[] = []
   for (const change of changes) {
@@ -282,8 +186,6 @@ function collectNodeIds(changes: readonly SymbolChange[]): SymbolId[] {
         ids.push(representativeSymbol(change).id)
         break
       case "moved":
-        // Not a Node, and not an intermediate connector either (slice-view.md): a pure move
-        // leaves the semantic surface unchanged, so clustering it would be noise.
         break
       default:
         return assertNeverChange(change)

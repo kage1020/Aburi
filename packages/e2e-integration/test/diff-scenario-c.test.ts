@@ -5,14 +5,6 @@ import { describe, expect, it } from "vitest"
 import { useFixtureCheckout } from "../src/fixture"
 import { diffIRs, scanFixture } from "../src/scan-helper"
 
-/**
- * Scenario C — `common/logger.service.ts` moves under a new `common/logging/` subdirectory
- * and every import is updated; the LoggerService class is byte-identical after the move.
- * The 5-stage matcher should pair each pre/post Symbol via the logic-fingerprint stage
- * (stage 3): the id changes because it embeds the file path, but the logic fingerprint is
- * invariant to file location. A plain rename must never gate.
- */
-
 const fixture = useFixtureCheckout()
 
 describe("e2e diff — scenario C: logger.service.ts moves under common/logging/", () => {
@@ -48,12 +40,8 @@ describe("e2e diff — scenario C: logger.service.ts moves under common/logging/
     expect(diff.summary.moved).toBeGreaterThan(0)
     expect(diff.summary.added).toBe(0)
     expect(diff.summary.removed).toBe(0)
-    // The logger's Symbols still exist in the head, just under a different source.file, so a
-    // drop toggle here would be a matching bug.
     expect(diff.summary.droppedToggled).toBe(0)
 
-    // Every moved Symbol must originate from the logger service; a move reported elsewhere
-    // would be a fingerprint collision.
     const moved = diff.symbols.filter((c) => c.status === "moved" || c.status === "moved+changed")
     expect(moved.length).toBeGreaterThan(0)
     for (const change of moved) {

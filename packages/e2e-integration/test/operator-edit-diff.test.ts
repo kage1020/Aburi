@@ -4,15 +4,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith, warningCollector } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * An operator in an assignment, a call argument or a loop header sits in no rule's text, so
- * neither `api` nor `logic` sees it, and only `syntax` can. The normalized string used to be
- * built from named nodes alone, which leaves every operator out of it: `a + b` → `a - b` moved
- * no fingerprint, and the diff reported the Symbol as unchanged. This runs the real pipeline:
- * scan, edit on disk, scan again, diff. Every scan has to be silent, so a parse failure cannot
- * pass for a fingerprint outcome.
- */
-
 const workspace = useScratchWorkspace("operator-edit")
 
 async function scanSilently(): Promise<IR> {
@@ -103,8 +94,6 @@ describe("e2e diff — an operator edit outside every rule", () => {
   })
 
   it("reports dropping a hole from a destructuring pattern as a syntax-only change", async () => {
-    // The hole is all that tells the two apart: after the edit `token` is the scheme, not the
-    // credential, and nothing else in the body moved.
     const bearer = (pattern: string) =>
       [
         "export function bearer(header: string): string {",

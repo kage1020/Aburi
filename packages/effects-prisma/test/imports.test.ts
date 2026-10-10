@@ -39,9 +39,6 @@ describe("hasPrismaImport", () => {
   })
 
   it("returns false for lookalike specifiers that are not real Prisma modules", () => {
-    // `@prisma/client-edge` (hyphen) does not exist — the real Edge entry uses a slash.
-    // A different-organization fork under `@my-org/prisma-client` is a third-party
-    // package we cannot assume is Prisma-shaped, so it stays unmatched.
     expect(
       hasPrismaImport(
         [
@@ -67,17 +64,12 @@ describe("hasPrismaImport", () => {
   })
 
   it("throws on an empty ImportEdge.source, naming the plugin, the file, and the line", () => {
-    // An empty source means the language plugin failed to normalize; returning false would
-    // mask the bug. `filePath` is the whole reason the parameter exists — an assertion on
-    // the "is empty" text alone would pass against an implementation that ignored it.
     expect(() =>
       hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 9, dynamic: false }], PATH),
     ).toThrow(`effects-prisma (${PATH}, line 9): ImportEdge.source is empty`)
   })
 
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
-    // Order-independence pin — using `.some()` alone would short-circuit on the first
-    // match and silently accept a broken edge later in the list.
     expect(() =>
       hasPrismaImport(
         [

@@ -4,12 +4,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * The same report as the class-body one, on the other common way to write a service: a
- * method written as a field holding an arrow. Constructing the class creates the closure and
- * does not run it, so a factory that only instantiates the service writes nothing.
- */
-
 const workspace = useScratchWorkspace("arrow-field-effects")
 
 const scanWorkspace = () =>
@@ -72,8 +66,6 @@ describe("scan — a service whose members are fields holding arrows", () => {
 
 describe("scan — a field initialiser that does run at construction", () => {
   it("keeps the write on the class, so instantiating it says so", async () => {
-    // Both halves of the distinction in one class: `seeded = …create(…)` runs when the class
-    // is constructed, and `reset = () => …` does not.
     await workspace.writeSource(
       "src/seeder.ts",
       [

@@ -7,17 +7,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * The artefacts a reviewer opens, over a two-package workspace scanned with the real
- * TypeScript and Prisma plugins.
- *
- * `Symbol.component` used to be `null` on every Symbol, and the views that count by it said
- * so: `workspace.md` reported `0` symbols against every component, the effect-surface table's
- * `components` column was `—` on every row, and `components/<id>.md` was four header lines
- * with nothing beneath. The attribution rule is unit-tested in `@aburi/core`; what is asserted
- * here is that a scan of a real workspace carries it into the three places it is read.
- */
-
 const API: Component = {
   id: makeComponentId("api"),
   name: "@acme/api",
@@ -92,14 +81,10 @@ describe("e2e: a scanned two-package workspace fills its per-component views", (
 
     const md = projectWorkspace(ir, { suppressTimestamp: true })
     const dbWrite = md.split("\n").find((line) => line.startsWith("| db.write |"))
-    // The whole row, so a `components` column reading `api-legacy` — or `—`, as it did for
-    // every row while attribution was unimplemented — is not mistaken for this one.
     expect(dbWrite).toMatch(/^\| db\.write \| \d+ \| api \|$/)
   })
 
   it("gives components/<id>.md the Symbols the component holds", async () => {
-    // The artefact itself, written to disk by the CLI, is covered in
-    // `packages/cli/test/component-md.test.ts`; this is the same filter over a real scan.
     const { ir } = await scanWorkspace()
 
     const md = projectComponent({

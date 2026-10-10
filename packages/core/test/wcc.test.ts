@@ -1,16 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { computeWeaklyConnectedComponents } from "../src/wcc"
 
-/**
- * Union-Find WCC utility tests. These are the language-agnostic properties the
- * primitive must uphold; Slice-View-specific rules (Node/Edge selection, sliceId
- * naming) live in `packages/diff/test/slice.test.ts`.
- *
- * Determinism, idempotence, input-order insensitivity, and locality here directly
- * back SV15–SV18 of docs/design/slice-view.md, because Slice View delegates the
- * grouping to this utility unchanged.
- */
-
 interface Node {
   key: string
 }
@@ -43,9 +33,6 @@ describe("computeWeaklyConnectedComponents", () => {
   })
 
   it("directed cycle a→b→c→a collapses into one component (no SCC pre-condense)", () => {
-    // SV9 backing: slice-view.md — an undirected walk over the directed
-    // cycle unifies all three nodes into a single component; no SCC / DAG
-    // condensation should happen inside the primitive.
     const nodes = [n("a"), n("b"), n("c")]
     const edges: [Node, Node][] = [
       [n("a"), n("b")],
@@ -58,9 +45,6 @@ describe("computeWeaklyConnectedComponents", () => {
   })
 
   it("edges referencing nodes outside the node set are ignored (bridging is a caller concern)", () => {
-    // The utility should NOT quietly union across implicit external nodes; slice-view.md's
-    // "no bridging via non-Node symbols" is enforced by giving this function only
-    // the Node subset. Any edge whose endpoint is not in `nodes` must be dropped.
     const nodes = [n("a"), n("b")]
     const result = computeWeaklyConnectedComponents(
       nodes,
@@ -128,9 +112,6 @@ describe("computeWeaklyConnectedComponents", () => {
     expect(result.map((c) => c.map(keyOf))).toEqual([["a", "b"], ["m", "x"], ["z"]])
   })
 
-  // Both calls are handed the *same* two arrays, which the input-order case below cannot do
-  // because it builds a fresh pair per call. Reusing them is what catches a run that sorts
-  // its input in place, or that carries state from one call into the next.
   it("idempotence — same input twice yields structurally equal output (SV17 backing)", () => {
     const nodes = [n("c"), n("a"), n("b"), n("d")]
     const edges: [Node, Node][] = [
@@ -169,15 +150,11 @@ describe("computeWeaklyConnectedComponents", () => {
       [[n("a"), n("b")]],
       keyOf,
     )
-    // The a-b component should appear structurally identical between the two runs;
-    // only the new `["z"]` singleton is appended (in sorted order).
     expect(after[0]?.map(keyOf)).toEqual(before[0]?.map(keyOf))
     expect(after.map((c) => c.map(keyOf))).toEqual([["a", "b"], ["z"]])
   })
 
   it("handles a chain of many nodes efficiently (union-by-rank sanity)", () => {
-    // Not a benchmark — just guards against O(n^2) accidental union chains that
-    // path-compression would otherwise mask in small tests.
     const size = 500
     const nodes = Array.from({ length: size }, (_, i) => n(`n${String(i).padStart(4, "0")}`))
     const edges: [Node, Node][] = []
@@ -193,10 +170,6 @@ describe("computeWeaklyConnectedComponents", () => {
   })
 
   it("keyOf is called with each input node exactly enough to identify it, not on external endpoints", () => {
-    // Regression guard: if keyOf were called with an edge endpoint that is a
-    // *different object instance* than the node in `nodes`, callers who use
-    // reference-comparing keyOfs (rare, but possible) would break. The utility
-    // must resolve edges by key equality, not by object identity.
     const a = n("a")
     const b = n("b")
     // Same key, different object identity.

@@ -8,12 +8,6 @@ import type {
 import { classifyPrismaCall } from "./classify"
 import { effectsPrismaManifest } from "./manifest"
 
-/**
- * Prisma effect plugin: maps `prisma.<model>.<verb>` and `prisma.$transaction` call
- * expressions onto the core `db.read` / `db.write` / `db.transaction` vocabulary. `classify`
- * is pure (effect-plugin.md) and throws on a malformed CallCandidate — an
- * upstream contract violation, surfaced rather than swallowed.
- */
 class PrismaEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsPrismaManifest
 

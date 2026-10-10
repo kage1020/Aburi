@@ -4,15 +4,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A factory that only constructs a service was told it writes to the database.
- *
- * The class Symbol's body is the whole `class_body`, so the walk recorded every method's calls
- * on the class as well as on the method. `new UserService()` resolves to the class Symbol
- * (`call-resolution.md` CR15), so effect propagation carried those duplicates up into every
- * caller that instantiates it — through a function whose own body touches nothing.
- */
-
 const workspace = useScratchWorkspace("class-body-effects")
 
 const scanWorkspace = () =>
@@ -72,9 +63,6 @@ describe("scan — a class whose members write to a database", () => {
   })
 
   it("resolves the instantiation to the class, and nothing to the constructor", async () => {
-    // Why the constructor's body still counts on the class: `new` resolves to the class
-    // Symbol, and nothing resolves to `#UserService.constructor`, so recording a constructor
-    // body on both propagates it nowhere twice.
     const result = await scanWorkspace()
     const resolved = result.ir.symbols.flatMap((symbol) => symbol.calls.map((c) => c.resolved))
 
@@ -85,9 +73,6 @@ describe("scan — a class whose members write to a database", () => {
 
 describe("scan — a member beside a namespace export of the same name", () => {
   it("keeps the member's write on the member, apart from the dropped export", async () => {
-    // `namespace C { export type m }` is `#C::m` and the method is `#C.m`. Spelled alike they
-    // folded, the type alias written first claimed the Symbol, and the drop list removed the
-    // write along with it.
     await workspace.writeSource(
       "src/merged.ts",
       [
@@ -119,8 +104,6 @@ describe("scan — a member beside a namespace export of the same name", () => {
 
 describe("scan — a class whose constructor writes to a database", () => {
   it("keeps the write on the class, so instantiating it says so", async () => {
-    // `new Seeder()` runs the constructor, and CR15 resolves it to the class Symbol. A class
-    // body that dropped its constructor would make this write invisible to every caller.
     await workspace.writeSource(
       "src/seeder.ts",
       [

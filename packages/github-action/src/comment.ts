@@ -1,33 +1,10 @@
-/**
- * Hidden HTML marker embedded at the top of every comment we post; the upsert step finds the
- * comment to update in place by it. Keep it stable across releases: changing it would orphan
- * users' existing PR comments unless a migration step also matches the previous value.
- */
 export const ABURI_COMMENT_MARKER = "<!-- aburi:diff-comment -->"
 
 /** What {@link ensureMarker} puts between the marker and the body; the budget below counts it. */
 const MARKER_SEPARATOR = "\n\n"
 
-/**
- * GitHub's ceiling on an issue-comment body. A create or update carrying more is rejected with
- * a 422 and nothing is posted — there is no partial write to fall back on.
- */
 export const GITHUB_COMMENT_MAX_BYTES = 65536
 
-/**
- * What a report rendered for the default marker may weigh: the ceiling less that marker and its
- * separator. This is the number to render with — `aburi diff --max-bytes <n>`
- * (`markdown-projection.md`) shortens and then drops sections to meet it — and the default
- * `scripts/resolve-max-bytes.mjs` holds.
- *
- * The action passes it on every run that writes Markdown, `comment: false` included, because
- * that is the mode a fork's pull request uses and its artefact is posted by another workflow
- * (`docs/design/github-action.md`). A caller naming its own `max-bytes` gets that instead,
- * and `max-bytes: 0` gets no cap at all.
- *
- * A caller passing its own {@link UpsertOptions.marker} should derive its own budget: a longer
- * marker leaves the report less room than this.
- */
 export const ABURI_COMMENT_BODY_MAX_BYTES =
   GITHUB_COMMENT_MAX_BYTES - Buffer.byteLength(`${ABURI_COMMENT_MARKER}${MARKER_SEPARATOR}`, "utf8")
 
@@ -54,25 +31,11 @@ export type UpsertOutcome =
   | { readonly action: "updated"; readonly commentId: number; readonly url: string }
   | { readonly action: "unchanged"; readonly commentId: number; readonly url: string }
 
-/**
- * Locate an existing marker comment on the PR and update it, or create a new one if none
- * exists. Returns `unchanged` when the current body already matches, so a re-run of the same
- * workflow does not bump `updated_at` and inflate notifications.
- *
- * PR-level comments live on the *issues* endpoint; line-level review comments are a different
- * endpoint this deliberately does not touch.
- */
 export async function upsertPullRequestComment(options: UpsertOptions): Promise<UpsertOutcome> {
   const marker = options.marker ?? ABURI_COMMENT_MARKER
   const bodyWithMarker = ensureMarker(options.body, marker)
-  // Measured before the round trip rather than left to the API. GitHub answers an oversized body
-  // with a bare 422 whose message says nothing about size, after the list call has already paged
-  // through every comment on the pull request; this says what is wrong and what renders smaller.
   const size = Buffer.byteLength(bodyWithMarker, "utf8")
   if (size > GITHUB_COMMENT_MAX_BYTES) {
-    // The budget in the message is derived from the marker actually in use, not from the default
-    // one: a caller with a longer marker that re-rendered at 65507 would overflow again, on the
-    // advice of this very line.
     const budget =
       GITHUB_COMMENT_MAX_BYTES - Buffer.byteLength(`${marker}${MARKER_SEPARATOR}`, "utf8")
     throw new Error(
@@ -132,14 +95,6 @@ function commentsPath(ref: PullRequestRef): string {
 /** The refusal an installation token gets from `GET /user` (see {@link posterLogin}). */
 const INTEGRATION_REFUSAL = "Resource not accessible by integration"
 
-/**
- * Who this token posts as: a personal token's login from `GET /user`, or `null` for an
- * installation token (the default `github.token`, or a GitHub App's), which that endpoint refuses
- * with a 403 that says so, and which posts as a `[bot]` account whose name it cannot read. Any
- * other refusal — a 401 for a bad token, a secondary rate limit, a personal token an SSO has not
- * authorised — is an error naming this request: read as "an installation token", it would give
- * up the login match for a personal token.
- */
 async function posterLogin(api: ApiContext): Promise<string | null> {
   const response = await api.fetch(buildApiUrl(api.apiBase, "user"), {
     method: "GET",
@@ -162,20 +117,11 @@ async function posterLogin(api: ApiContext): Promise<string | null> {
   return login
 }
 
-/**
- * Aburi's comment is one this token wrote, opening with the marker; `self` is
- * {@link posterLogin}'s answer. The same rule as `isOwnComment` in `scripts/upsert-comment.mjs`.
- */
 function isOwnComment(comment: ListedComment, marker: string, self: string | null): boolean {
   if (!comment.body.startsWith(marker)) return false
   return self === null ? comment.author.isBot : comment.author.login === self
 }
 
-/**
- * Aburi's comment by {@link isOwnComment}. A comment that merely quotes the marker is someone
- * else's and is never rewritten. The token's identity is asked once, and only when a comment
- * opens with the marker.
- */
 async function findMarkerComment(api: ApiContext, marker: string): Promise<ListedComment | null> {
   const perPage = 100
   let self: { readonly login: string | null } | undefined
@@ -224,10 +170,6 @@ async function writeComment(
   return written
 }
 
-/**
- * Build an absolute URL under the API base while preserving any base path (GitHub Enterprise
- * Server mounts the API under `/api/v3`): `new URL("/x", base)` would drop it.
- */
 function buildApiUrl(apiBase: string, relativePath: string): URL {
   const normalised = apiBase.endsWith("/") ? apiBase : `${apiBase}/`
   return new URL(relativePath, normalised)
@@ -275,11 +217,6 @@ function parseComment(row: unknown): StoredComment | null {
   return { id, body, htmlUrl }
 }
 
-/**
- * Prepend the marker unless the caller's body already opens with it. A body that only quotes the
- * marker further down still gets it first: only a comment that opens with it is recognised as
- * Aburi's on the next run.
- */
 export function ensureMarker(body: string, marker: string): string {
   if (body.startsWith(marker)) return body
   return `${marker}${MARKER_SEPARATOR}${body}`

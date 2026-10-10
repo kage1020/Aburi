@@ -1,27 +1,3 @@
-/**
- * Path cases and what each of the two path grammars says about them.
- *
- * The Symbol id constructor and IR integrity invariant #10 ask overlapping questions about
- * the same strings — one about a path Aburi is about to write, one about a path it read
- * back off disk — so both suites drive off this single list. A rule that reaches one side
- * and not the other fails here, rather than surfacing as an IR that satisfies every
- * invariant while holding a path that names somewhere outside the workspace.
- *
- * The two grammars are *not* the same, which is why every case states both outcomes rather
- * than one shared verdict:
- *
- * - `root` is the shared rule, as applied to `components[].roots` and
- *   `workspace.managers[].roots`. A root may be `.` (the workspace root itself) and may
- *   hold `:` or `#`, because nothing splits a root on anything.
- * - `symbolPath` is that rule plus what the id adds. A `symbols[].source.file` is never a
- *   directory, so `.` is out, and it may not hold the id's own `:` / `#` separators,
- *   because the id is split on the first of each.
- *
- * `reason` is a fragment of the rejection message. Asserting the code alone would let a
- * case pass for the wrong reason — `C:notabs.ts` is refused by two different clauses with
- * one shared code, so a narrower absolute-path pattern would still leave every assertion
- * green.
- */
 export type PathExpectation = { ok: true } | { ok: false; reason: string }
 
 export interface WorkspacePathCase {

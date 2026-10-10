@@ -36,8 +36,6 @@ export function makeEnrichmentInput(input: {
   const base: EnrichmentInput = {
     symbols: input.symbols,
     workspaceRoot: TEST_WORKSPACE_ROOT,
-    // Every fixture path here is ASCII by default, where the Document spelling and the
-    // filesystem's are the same string; `fsPaths` overrides one that is not.
     fileContents: new Map(
       Object.entries(input.fileContents).map(([path, content]) => [
         path,
@@ -51,11 +49,6 @@ export function makeEnrichmentInput(input: {
   return base
 }
 
-/**
- * Manually advanced clock for `EnrichmentInput.now`. Budget tests spend it in a
- * mock's side effect instead of sleeping, so the per-file budget assertions are
- * exact rather than timing-dependent.
- */
 export function makeManualClock(): { now: () => number; advance: (ms: number) => void } {
   let current = 0
   return {

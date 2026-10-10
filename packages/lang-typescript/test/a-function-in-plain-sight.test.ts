@@ -2,16 +2,6 @@ import { describe, expect, it } from "vitest"
 import { normalizeAst } from "../src/index"
 import { callsOf, hintOf, symbolOf, symbolsOf, walkOf } from "./fixtures/ctx"
 
-/**
- * Two shapes where the extractor was looking straight at a function and did not see it: one
- * written behind a wrapper the language uses to say nothing about the value, and one written
- * as an argument to a call that registers it.
- *
- * The first is a predicate question — a `parenthesized_expression`, an `as`, a `satisfies` and
- * a `!` all leave the value exactly what it was. The second is a body question: a registration
- * call already has a Symbol, and the handler is what that Symbol runs.
- */
-
 describe("a function behind a wrapper is a function", () => {
   it.each([
     ["parentheses", "export const h = (() => { doThing() })"],
@@ -46,17 +36,12 @@ describe("a function behind a wrapper is a function", () => {
   })
 
   it("stops at a call, which is not a wrapper", async () => {
-    // `withAuth(...)` returns a function by convention and nothing in the tree says so. The
-    // unwrap is syntactic, so it ends here rather than guessing. That settles the kind only: the
-    // function inside the call is still read, as the const's body (LP7c, below).
     const symbol = await symbolOf("export const h = (withAuth(() => { q() }))", "ts:src/a.ts#h")
 
     expect(symbol.kind).toBe("const")
   })
 
   it("stops at a call it is the callee of, which is not a wrapper either", async () => {
-    // An immediately-invoked function: `h` is what the call returned, not the function. The
-    // unwrap reads through what surrounds a value, never through what is done to it.
     const symbol = await symbolOf("export const h = (() => { q() })()", "ts:src/a.ts#h")
 
     expect(symbol.kind).toBe("const")
@@ -99,8 +84,6 @@ describe("a registration call's inline handler is its body", () => {
       "ts:src/a.ts#app__get__$x__d0",
       ["serve"],
     ],
-    // The arrow's `body` is the expression itself, not a `statement_block` — the most common
-    // spelling.
     [
       "an expression-bodied handler",
       'app.get("/x", (req, res) => res.json(x))',
@@ -122,8 +105,6 @@ describe("a registration call's inline handler is its body", () => {
       "ts:src/a.ts#app__post__$x__d0",
       ["read", "write"],
     ],
-    // The chain is walked through the same wrappers a value is read through; stopping at the
-    // parenthesis would leave the first handler in no Symbol at all.
     [
       "a chain with a wrapper standing in the middle",
       '(app.route("/x").get(() => { read() })).post(() => { write() })',
@@ -158,8 +139,6 @@ describe("a registration call's inline handler is its body", () => {
   })
 
   it("leaves a handler passed by name where it was", async () => {
-    // Nothing is written in the statement to walk. The edge to `handler` is a resolution
-    // question, not a body one.
     const source = 'app.get("/x", handler)'
     const symbol = await symbolOf(source, "ts:src/a.ts#app__get__$x__d0")
 
@@ -169,8 +148,6 @@ describe("a registration call's inline handler is its body", () => {
   })
 
   it("records why the Symbol has a body, and keeps its signature null", async () => {
-    // The Symbol is the registration, not the handler: a route has no parameters of its own,
-    // and reading the handler's would report the framework's callback shape as the route's API.
     const source = 'app.get("/x", (req, res) => { serve() })'
     const symbol = await symbolOf(source, "ts:src/a.ts#app__get__$x__d0")
 
@@ -179,11 +156,6 @@ describe("a registration call's inline handler is its body", () => {
   })
 })
 
-/**
- * A `const` initialised by a call stays a const (LP7b): nothing says the call returns what it
- * was given. But the function it hands the call is written in that declaration and nowhere else,
- * so it is the const's body, the way a registration's inline handler is the registration's.
- */
 describe("a function a const hands to a call is the const's body (LP7c)", () => {
   const POST = [
     "export const POST = withAuth(async (id: number) => {",
@@ -237,8 +209,6 @@ describe("a function a const hands to a call is the const's body (LP7c)", () => 
   })
 
   it("stops at a call inside an argument, as a registration does", async () => {
-    // `withLogging(...)` returns something by convention too; the reading is LP20g's, direct
-    // arguments only.
     const source = "export const POST = withAuth(withLogging(async () => { q() }))"
 
     expect((await symbolOf(source, "ts:src/a.ts#POST")).bodyNode).toBeNull()
@@ -282,8 +252,6 @@ describe("a function a const hands to a call is the const's body (LP7c)", () => 
   })
 
   it("reads a concise arrow it hands its call as returning its body, as the block spelling", async () => {
-    // Each handed function is a walk root, so LP19a applies: the expression body is the arrow's
-    // return value, and the block twin's `return` gives the same rule.
     const concise = await walkOf("export const d = xs.map((x: number) => x * 2)", "ts:src/a.ts#d")
     const block = await walkOf(
       "export const d = xs.map((x: number) => { return x * 2 })",
@@ -331,8 +299,6 @@ describe("what LP7c does not read", () => {
     ],
     ["a body of no width", "export const z = withAuth(async (req: any) =>)", "z"],
   ])("leaves %s unwalked", async (_label, source, name) => {
-    // A generator and a zero-width body are refused by the reading LP20g shares (the mirrors of
-    // the two refusals below); the rest are not a function written as a call's direct argument.
     const symbol = await symbolOf(source, `ts:src/a.ts#${name}`)
 
     expect(symbol.kind).toBe("const")
@@ -352,8 +318,6 @@ describe("what LP7c does not read", () => {
   })
 
   it("produces no Symbol for a wrapped default export", async () => {
-    // A default export's value is read for the declaration it names (LP6a), and a call names
-    // none, so the handler is in no Symbol here. LP7c reads a `const` and does not close this.
     expect(await symbolsOf("export default withAuth(() => { q() })")).toEqual([])
   })
 })
@@ -363,9 +327,6 @@ describe("a registration Symbol is still described by the whole registration", (
     `app.get("/users", ${middleware}async (req, res) => { res.json(1) })`
 
   it("tells a route's middleware apart, which its body cannot", async () => {
-    // A body narrows the normalized string to what the registration *runs*. What it *is* — the
-    // path, the method, the middleware standing between them and the handler — is the whole
-    // call, and a route that gains an auth middleware has to say so somewhere.
     const bare = await symbolOf(ROUTE(""), "ts:src/a.ts#app__get__$users__d0")
     const authed = await symbolOf(ROUTE("authenticate, "), "ts:src/a.ts#app__get__$users__d0")
     const limited = await symbolOf(
@@ -378,8 +339,6 @@ describe("a registration Symbol is still described by the whole registration", (
   })
 
   it("describes an inline handler and a named one the same way", async () => {
-    // The two spellings had different change-detection power while one narrowed to a body and
-    // the other did not.
     const inline = await symbolOf(ROUTE(""), "ts:src/a.ts#app__get__$users__d0")
     const named = await symbolOf('app.get("/users", handler)', "ts:src/a.ts#app__get__$users__d0")
 
@@ -391,9 +350,6 @@ describe("a registration Symbol is still described by the whole registration", (
 
 describe("what the registration scan refuses", () => {
   it("refuses a handler whose body the parser only recovered", async () => {
-    // `async (req, res) =>` with nothing after it still parses as an arrow, and its `body` is a
-    // zero-width error node. Adopting it would describe every broken handler in a workspace
-    // with the same string, and claim a handler where there is no body to walk.
     const source = 'app.get("/users", async (req, res) =>)'
     const symbol = await symbolOf(source, "ts:src/a.ts#app__get__$users__d0")
 
@@ -403,8 +359,6 @@ describe("what the registration scan refuses", () => {
   })
 
   it("refuses a generator argument, which is not a function at any site", async () => {
-    // Koa's middleware spelling. `generator_function` is outside the predicate's set at every
-    // reader, so it registers no body here either.
     const source = "app.use(function* (ctx, next) { h1() })"
     const symbol = await symbolOf(source, "ts:src/a.ts#app__use__d0")
 
@@ -426,16 +380,11 @@ describe("what the registration scan refuses", () => {
 
 describe("the statement's spine is one Symbol's worth of registrations", () => {
   it("reaches a call standing behind a member step", async () => {
-    // `.use`'s call is not the object of `.get`'s callee — a property access stands between
-    // them — and stopping there left `h0` in no Symbol at all.
     const source = "app.use(() => { h0() }).router.get(() => { h1() })"
 
     expect(await callsOf(source, "ts:src/a.ts#app__get__d0")).toEqual(["h0", "h1"])
   })
 
-  // Until the two readers shared the unwrap these produced no Symbol at all: the receiver
-  // walk hand-unwrapped parentheses and nothing else, so a route behind a type assertion was
-  // not a route.
   it.each([
     ["an `as`", '(app as Express).get("/x", () => { read() })', "ts:src/a.ts#app__get__$x__d0"],
     ["a non-null assertion", 'app!.get("/x", () => { read() })', "ts:src/a.ts#app__get__$x__d0"],

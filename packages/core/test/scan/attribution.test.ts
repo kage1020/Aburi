@@ -28,19 +28,6 @@ import {
 import { symbolId } from "../fixtures/ir"
 import { effectsManifest, stubLanguagePlugin } from "../fixtures/plugins"
 
-/**
- * Every Symbol says which Component it belongs to, and `Component.roots[]` is the whole of
- * what decides it — a file under a root is that Component's, and the deepest root claiming
- * it wins. Before this existed the field was `null` on every Symbol, so a workspace of
- * nineteen Symbols reported `0` against each of its components and every per-component
- * artefact was a header with nothing under it.
- *
- * The first half of the file is the rule on its own, over paths rather than a filesystem.
- * The second half is one scan, because the rule is only worth anything if what reaches the
- * IR carries it — including the Symbols the drop rules refuse and the `owner` an effect
- * plugin classifies against.
- */
-
 function component(id: string, roots: readonly string[]): Component {
   return {
     id: makeComponentId(id),
@@ -102,9 +89,6 @@ describe("buildComponentAttribution", () => {
   })
 
   it("orders colliding ids as strings, not as numbers", () => {
-    // "Lower id" is `<` over the id, which is the order `components[]` itself is sorted in
-    // (ir-schema.md) — so `svc-10` precedes `svc-9`, as it does in the document. Spelled
-    // out because `api` / `web` above read the same under a numeric or a natural order.
     const shared = ["packages/shared"]
     const attribution = buildComponentAttribution([
       component("svc-9", shared),
@@ -125,9 +109,6 @@ describe("buildComponentAttribution", () => {
   })
 
   it("reads a *file* spelled with a leading ./ as the same path", () => {
-    // The root side was normalized from the start; the file side was not, so `./apps/web/x.ts`
-    // missed `apps/web` and fell through to the workspace component — a wrong id rather than
-    // a missing one, which integrity invariant #3 cannot see because that id was declared.
     const attribution = buildComponentAttribution([
       component("root", ["."]),
       component("web", ["apps/web"]),
@@ -138,9 +119,6 @@ describe("buildComponentAttribution", () => {
   })
 
   it("repairs an empty path segment on either side", () => {
-    // `packages//api` passes the config schema, `posixWorkspaceRelativeViolation` and
-    // integrity #10 alike — none of them refuses an empty *segment* — so before the repair
-    // the component at that root silently held no Symbols at all.
     const attribution = buildComponentAttribution([component("api", ["packages//api"])])
 
     expect(attribution("packages/api/src/orders.ts")).toBe("api")
@@ -148,9 +126,6 @@ describe("buildComponentAttribution", () => {
   })
 
   it("claims nothing for a root that names nothing", () => {
-    // Not the workspace root: folding `""` there would hand that component every file in the
-    // workspace, and a caller driving `runFilePipeline` itself never reaches the integrity
-    // check that might have noticed.
     const attribution = buildComponentAttribution([
       component("nowhere", [""]),
       component("also-nowhere", ["/"]),
@@ -175,13 +150,6 @@ describe("buildComponentAttribution", () => {
   })
 })
 
-/* --- one scan, over a workspace of two components ------------------------------------- */
-
-/**
- * Two Symbols per file: one ordinary, and one the Category B rules drop for having no body
- * (`drop-list.md`). A dropped Symbol keeps its place in the IR, so it has to keep its
- * component with it — the per-component Markdown counts it in its own column.
- */
 function candidates(file: string): SymbolCandidate<OpaqueAstNode>[] {
   const base = file.replace(/[^A-Za-z0-9]/g, "_")
   const shared = {
@@ -303,9 +271,6 @@ describe("a scan of a two-component workspace", () => {
   })
 
   it("writes the component key into the serialized bytes, `null` included", async () => {
-    // `Object.hasOwn` on the in-memory Symbol cannot see this: `serializeCanonical` drops a
-    // property whose value is `undefined`, so an omitted Class A key (ir-schema.md) is
-    // invisible in TypeScript and visible only in what lands on disk.
     const { ir } = await scanWorkspace()
     const written = JSON.parse(serializeCanonical(ir)) as {
       symbols: Array<Record<string, unknown>>
@@ -330,18 +295,6 @@ describe("a scan of a two-component workspace", () => {
   })
 })
 
-/* --- what attribution changes for call resolution ------------------------------------- */
-
-/**
- * A stub whose every `pricing.stub` file declares one method `Pricing.calc`, and whose every
- * other file declares one function that calls it.
- *
- * The call resolver's component tier (call-resolution.md) keys on `Symbol.component`, so
- * before attribution existed every Symbol sat in one "no component" bucket: two Symbols named
- * `Pricing.calc` anywhere in the workspace made the tier ambiguous, and the call resolved to
- * nothing. Populating the field is what separates them — and nothing else in this suite would
- * notice if `runFilePipeline` went back to writing `null`.
- */
 function pricingLanguage(): LanguagePlugin {
   const isCallee = (file: string): boolean => file.endsWith("pricing.stub")
   const plugin: LanguagePlugin = {
@@ -416,16 +369,12 @@ describe("call resolution over an attributed workspace", () => {
     const resolvedFrom = (file: string): string | null | undefined =>
       ir.symbols.find((symbol) => symbol.source.file === file)?.calls[0]?.resolved
 
-    // Same name in both packages. With every Symbol in one "no component" bucket both tiers
-    // called it ambiguous and neither call resolved at all.
     expect(resolvedFrom("packages/api/src/orders.stub")).toBe(
       "stub:packages/api/src/pricing.stub#Pricing.calc",
     )
     expect(resolvedFrom("packages/web/page.stub")).toBe(
       "stub:packages/web/pricing.stub#Pricing.calc",
     )
-    // The caller outside every component has no component scope to search, and the workspace
-    // scope still sees the two candidates it always did.
     expect(resolvedFrom("scripts/release.stub")).toBeNull()
   })
 })

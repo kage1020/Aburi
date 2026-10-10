@@ -6,25 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import irSchema from "../../../schema/aburi.ir.v1.json" with { type: "json" }
 import { runScan } from "../src"
 
-/**
- * `resolveComponents` is one of the two writers that produce `Component` records — the
- * other is `detectComponents` in `@aburi/core`, exercised by the e2e suite. The two must
- * agree on shape, because a Component that gains or loses keys depending on whether the
- * user configured it or Aburi detected it turns `aburi diff` into a source of spurious
- * changes on a workspace where nothing moved.
- *
- * Everything here reads the IR back off disk rather than inspecting the in-memory report:
- * `serializeCanonical` drops properties whose value is `undefined`, so an omitted Class A
- * key (ir-schema.md) is invisible in TypeScript and visible only in the written bytes.
- */
-
 const ajv = new Ajv2020({ strict: false, allErrors: true })
 ajv.addSchema(irSchema, "ir")
-/**
- * Validates one `components[]` entry rather than the whole document, matching the scope of
- * this file: the two Component writers agreeing on shape. Whole-document conformance is
- * covered against a full plugin lineup in `@aburi/e2e-integration`.
- */
 const validateComponent = ajv.getSchema("ir#/$defs/Component") as (v: unknown) => boolean
 
 let scratch = ""
@@ -36,9 +19,6 @@ beforeEach(async () => {
     JSON.stringify({ name: "component-writer-fixture", private: true }),
     "utf8",
   )
-  // A source file that parses and declares nothing. This file asserts on Components rather
-  // than Symbols, but a workspace where nothing parsed is a gate now, so the fixture has to
-  // be a workspace.
   await mkdir(resolve(scratch, "src"), { recursive: true })
   await writeFile(resolve(scratch, "src/quiet.ts"), "// declares nothing\n", "utf8")
 })
@@ -52,8 +32,6 @@ async function scanWithComponents(components: unknown[]): Promise<Record<string,
     resolve(scratch, "aburi.json"),
     JSON.stringify({
       $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
-      // A scan with no language plugin cannot produce a schema-valid IR and is refused, so
-      // the plugin is named here even though this file never asserts on Symbols.
       languages: ["lang-typescript"],
       components,
     }),
@@ -78,8 +56,6 @@ describe("config-declared Components (ir-schema.md)", () => {
 
     expect(Object.hasOwn(billing, "description")).toBe(true)
     expect(billing.description).toBeNull()
-    // Class B: the empty case is an absent key. `detectComponents` omits these, so writing
-    // `[]` here would give the same Component two shapes across the two producers.
     expect(Object.hasOwn(billing, "publicApi")).toBe(false)
     expect(Object.hasOwn(billing, "frameworks")).toBe(false)
   })
@@ -102,9 +78,6 @@ describe("config-declared Components (ir-schema.md)", () => {
   })
 
   it("falls back to ['ts'] when the config omits languages", async () => {
-    // `languages` is optional in the config schema but `minItems: 1` in the IR schema, so
-    // the straightforward `entry.languages ?? []` produced a document that failed its own
-    // validation -- silently, because nothing validated a generated IR.
     const ir = await scanWithComponents([{ id: "billing", roots: ["src"] }])
     const billing = (ir.components as Array<Record<string, unknown>>)[0] as Record<string, unknown>
     expect(billing.languages).toEqual(["ts"])

@@ -4,13 +4,6 @@ import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { emptySummary, makeDiff } from "./fixtures"
 
-/**
- * markdown-projection.md — `partition` routes overlapping delta flags by priority:
- *   apiChanged > logicChanged > confidenceChanged > syntaxChanged
- * A single `changed` entry lands in exactly one of API changes / Logic changes / Confidence
- * changes / Syntax-only.
- */
-
 function makeDelta(overrides: Partial<SymbolDelta> = {}): SymbolDelta {
   return {
     apiChanged: overrides.apiChanged ?? false,

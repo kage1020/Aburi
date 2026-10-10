@@ -4,14 +4,6 @@ import type { Node } from "web-tree-sitter"
 import { classifySymbolDropHint } from "../src/index"
 import { byId, makeExtractionCtx, symbolsOf } from "./fixtures/ctx"
 
-/**
- * The two statement shapes a declaration with **no body** is written in: `abstract` inside a
- * class, and `declare` at statement position. Both were absent from the extractor, so an
- * abstract class reported only the methods it happened to implement, and every `declare` form
- * — `declare function`, `export declare class`, `declare namespace` — produced no Symbol at all
- * in the ordinary `.ts` files that are not dropped as `.d.ts` (LP35, LP36).
- */
-
 function names(symbols: SymbolCandidate<Node>[]): string[] {
   return symbols.map((s) => s.name)
 }
@@ -61,8 +53,6 @@ describe("LP35: abstract members", () => {
     expect(names(symbols).sort()).toEqual(["A", "A.f"])
     const f = byId(symbols, "#A.f")
     expect(f.derivedBy).toContain("declaration-merged")
-    // LP8f takes the signature from the implementation, and an abstract pair has none — so the
-    // leading declaration is what the Symbol reports, which is the answer LP35 records.
     expect(f.signature?.inputs).toEqual([{ name: "x", type: "string" }])
     expect(f.derivedBy.filter((t) => t === "abstract-declaration")).toHaveLength(1)
   })
@@ -164,10 +154,6 @@ describe("LP36: ambient declarations", () => {
     )
     expect(names(symbols).sort()).toEqual(["N", "N.K", "N.K.m", "N.g"])
     expect(byId(symbols, "#N.g").derivedBy).toContain("ambient-declaration")
-    // The divergence LP36 records: `tsc` resolves `N.g` from outside, because an ambient
-    // namespace exports its members with or without the keyword. Visibility here is read off
-    // the statement, so a member written without `export` answers `internal`. Pinned so the
-    // answer is a decision rather than a side effect.
     expect(byId(symbols, "#N.g").visibility).toBe("internal")
   })
 
@@ -199,14 +185,6 @@ describe("LP36: ambient declarations", () => {
     expect(byId(symbols, "#h").visibility).toBe("public")
   })
 
-  // `statementParent` is what makes `export declare` read as exported, and the node handed to
-  // it differs by kind — `addNamespaceAndBody` passes the `module`, `makeVariableCandidate` the
-  // enclosing `lexical_declaration` — so one kind passing does not carry the others.
-  //
-  // Both answers are asserted, because a reader asking "was this exported?" has two places to
-  // ask it — `visibility` and the `export-keyword` token on `derivedBy` — and for **one**
-  // declaration they agree by construction (LP6b). A Symbol several declarations wrote is the
-  // fold's business, not this reader's: see `one-symbol-per-entity.test.ts`.
   it.each([
     ["export declare const x: number", "#x"],
     ["export declare enum E { A }", "#E"],
@@ -257,8 +235,6 @@ describe("LP36: ambient declarations", () => {
   })
 
   it("a quoted module name is refused with or without the declare", async () => {
-    // `module "express" {}` parses without a `declare`, so this arm was reachable before the
-    // wrapper was read through — the grammar decides what gets here, not `tsc`.
     const symbols = await symbolsOf('export function local() {}\nmodule "express" { }')
     expect(names(symbols)).toEqual(["local"])
   })

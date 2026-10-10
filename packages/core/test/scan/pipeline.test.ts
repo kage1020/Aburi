@@ -24,11 +24,6 @@ import {
   stubLanguagePlugin,
 } from "../fixtures/plugins"
 
-/**
- * Build a single-Symbol language plugin fixture that returns whatever candidate + body
- * the caller wired in. Everything else is a no-op so tests can focus on the pipeline
- * dispatch semantics.
- */
 function singleSymbolPlugin(options: {
   candidate: SymbolCandidate<OpaqueAstNode>
   body: BodyExtraction
@@ -60,11 +55,6 @@ function stubCall(target: string, line = 1): CallCandidate {
   return { target, line, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
 }
 
-/**
- * Narrowed to the file that reached the IR, because every case in this file is about the
- * dispatch such a file goes through. A stub that produced any other outcome would be a broken
- * fixture rather than a case to assert on, so it fails here instead of at every read below.
- */
 async function runPipelineWithStubs(overrides: {
   frameworks?: readonly FrameworkPlugin[]
   effects?: readonly EffectPlugin[]
@@ -138,10 +128,6 @@ describe("runFilePipeline — framework classifySymbol dispatch", () => {
 
     const result = await runPipelineWithStubs({ frameworks: [fw], imports })
 
-    // The same edges the result reports: a classifier that resolved a decorator against a
-    // different list than the one the IR records would be unfalsifiable from the outside.
-    // Identity rather than equality — a plugin is entitled to memoize per file on it, and
-    // `framework-nestjs` does.
     expect(seen).toHaveLength(1)
     expect(seen[0]).toBe(result.imports)
   })
@@ -438,10 +424,6 @@ describe("runFilePipeline — effect classify dispatch", () => {
 
 describe("runFilePipeline — array line ordering (IR integrity invariant #11)", () => {
   it("sorts calls[] by line even when the language plugin visits body children out of source order", async () => {
-    // Reverse-alpha targets in reverse-line order — `classifyCalls` sorts unclassified
-    // calls by `byTargetThenLine`, which would leave them in target-alpha order:
-    // [alpha (line 40), zeta (line 20)]. Integrity invariant #11 demands line
-    // ascending. buildKeptSymbol must re-sort.
     const result = await runPipelineWithStubs({
       effects: [],
       body: {
@@ -454,10 +436,6 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
   })
 
   it("sorts effects[] by line — regression guard for the sibling of the calls sort bug", async () => {
-    // Two effect classifications whose target-alpha order ("alpha.emit" < "zeta.emit")
-    // is inverted from their source-line order (zeta on 15, alpha on 60). Without
-    // the sort in buildKeptSymbol, effects[] would leave classifyCalls's
-    // byTargetThenLine result untouched and violate invariant #11.
     const eff: EffectPlugin = {
       manifest: effectsManifest("effects-loud"),
       init: async () => {},
@@ -479,8 +457,6 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
   })
 
   it("sorts decorators[] by line when the language plugin emits them out of order", async () => {
-    // Decorators are typed as source-order by convention but the pipeline enforces
-    // it here so downstream integrity does not rely on unwritten plugin contracts.
     const candidate: SymbolCandidate<OpaqueAstNode> = {
       ...baseCandidate(),
       decorators: [
@@ -494,9 +470,6 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
   })
 
   it("preserves the relative order of same-line entries (stable sort)", async () => {
-    // The schema phrases the same-line contract as "appearance order". Node's
-    // Array.prototype.sort has been stable since ES2019 — we depend on that here
-    // so callers can trust the ordering of e.g. two calls on the same line.
     const result = await runPipelineWithStubs({
       effects: [],
       body: {
@@ -505,11 +478,6 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
       },
     })
     const targets = result.symbols[0]?.calls.map((c) => c.target) ?? []
-    // classifyCalls re-sorts unclassified calls by byTargetThenLine before
-    // buildKeptSymbol receives them, so same-line entries land in target-alpha
-    // order. The relevant assertion is that they stay grouped and in some
-    // deterministic order — not that source order survives (see the "known
-    // limitation" note in the changeset).
     expect(targets).toEqual(["first.hit", "second.hit", "third.hit"])
   })
 })
@@ -558,9 +526,6 @@ describe("runFilePipeline — Symbol id contract", () => {
 })
 
 describe("runFilePipeline — Unicode normalization at the plugin boundary", () => {
-  // A language plugin reads identifiers and paths out of source bytes, so whichever Unicode
-  // spelling the file carries is the spelling it hands back. ir-schema.md states why
-  // the Document cannot hold both, and this boundary is where the two collapse into one.
   const decomposed = "café".normalize("NFD")
   const composed = decomposed.normalize("NFC")
 
@@ -579,10 +544,6 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("normalizes signature.inputs[].name, which the local-shadow guard compares", async () => {
-    // call-resolution.md: a parameter of the same name as a Symbol shadows it, and the
-    // resolver decides that by comparing this string against the call's head segment. The
-    // head is normalized; leaving the parameter alone turns the guard off and emits an edge
-    // to an unrelated Symbol, which then carries effects through propagation.
     const candidate = {
       ...baseCandidate(),
       signature: {
@@ -633,10 +594,6 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("normalizes decorators[].name, which a framework plugin matches against the edges", async () => {
-    // A decorator-driven framework plugin resolves the written name against
-    // `ImportEdge.symbols`, and this boundary already normalizes those. Leaving the decorator
-    // alone means the two halves of that comparison arrive in different spellings, so the
-    // alias silently fails to resolve on a file that spells its identifiers decomposed.
     const candidate = {
       ...baseCandidate(),
       decorators: [
@@ -648,10 +605,6 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("normalizes decorators[].qualifier, which is matched against the namespace binding", async () => {
-    // The other half of the same comparison: a qualified decorator is resolved through
-    // `ImportEdge.namespaceBinding`, normalized on this boundary a few lines down. A receiver
-    // left decomposed misses the edge that names its module, and the decorator falls back to
-    // the tier that reads its leaf name alone.
     const candidate = {
       ...baseCandidate(),
       decorators: [
@@ -670,9 +623,6 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("leaves a bare decorator without a qualifier key at all", async () => {
-    // Class B: the key is absent, not `undefined`. A rebuild that spread `qualifier` back
-    // unconditionally would put one on every decorator the moment any sibling needed
-    // normalizing, and the serializer would then have to decide what to do with it.
     const candidate = {
       ...baseCandidate(),
       decorators: [
@@ -721,9 +671,6 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("normalizes a classified effect target, which is a sort key once propagated", async () => {
-    // `propagate.ts` orders propagated entries by `(id, target)` and integrity invariant
-    // #11 verifies that order against the in-memory string, while the serializer writes the
-    // normalized one. Two spellings there put the Document on disk out of its own order.
     const eff: EffectPlugin = {
       manifest: effectsManifest("effects-loud"),
       init: async () => {},
@@ -758,9 +705,6 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("normalizes the import edges the call resolver matches against", async () => {
-    // `namespaceBinding` and the local half of `symbols[]` are compared against a call's
-    // head segment; `source` resolves into a path compared against the discovered file set.
-    // A miss is silent — the call lands in the `no-match` bucket rather than `external`.
     const result = await runPipelineWithStubs({
       imports: [
         {
@@ -784,8 +728,6 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("returns the candidate and the call untouched when nothing needs normalizing", async () => {
-    // The identity, not just the equality: an ordinary ASCII scan must not pay a copy per
-    // candidate and per call for a normalization that changes nothing.
     const candidate = baseCandidate()
     const seen: CallCandidate[] = []
     const eff: EffectPlugin = {

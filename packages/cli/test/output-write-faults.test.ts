@@ -14,14 +14,6 @@ import {
 import { CliError } from "../src/errors"
 import { emptyIR, MemStream, writeTypeScriptWorkspace } from "./fixtures"
 
-/**
- * A write that fails used to surface as the errno alone — `EEXIST: file already exists,
- * mkdir '…/notadir'` — with nothing saying which command was running or which of its outputs
- * did not land. Every artefact `aburi scan` and `aburi diff` write now goes through one path
- * that names both, and the exit code follows who has to act (`cli-spec.md` §9): a path that
- * cannot hold the output is the caller's (2), a disk that refuses the bytes is the machine's (1).
- */
-
 let scratch = ""
 
 beforeEach(async () => {
@@ -32,7 +24,6 @@ afterEach(async () => {
   await rm(scratch, { recursive: true, force: true })
 })
 
-/** Two IR files for a file-mode diff, so the only thing left to fail is the write. */
 async function writeIRPair(): Promise<{ base: string; head: string }> {
   const base = resolve(scratch, "base.json")
   const head = resolve(scratch, "head.json")
@@ -47,13 +38,10 @@ async function run(argv: string[]): Promise<{ exitCode: number; stderr: string }
   return { exitCode, stderr: stderr.text() }
 }
 
-// The permission has to actually deny the write, which it does not for root.
 const onPosixAsAUser = it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
 
 describe("CL28 — aburi scan with an --output-dir that cannot hold the outputs", () => {
   it("names the command, the directory and the flag when a file stands where it would go", async () => {
-    // `--output-dir notadir` where `notadir` is a file: answered with a bare `EEXIST … mkdir`
-    // at exit 1 before.
     await writeTypeScriptWorkspace(scratch, "write-fixture")
     await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
 
@@ -64,13 +52,10 @@ describe("CL28 — aburi scan with an --output-dir that cannot hold the outputs"
       `aburi scan could not write the output directory to ${resolve(scratch, "notadir")}`,
     )
     expect(stderr).toContain("--output-dir")
-    // The errno is kept, after the sentence that explains it, for whoever has to reproduce it.
     expect(stderr).toContain("EEXIST")
   })
 
   it("refuses the directory before it scans anything", async () => {
-    // Nothing to scan: `src/` is absent, so a scan that ran would answer about coverage
-    // (exit 3), and the directory refusal (exit 2) is only reachable ahead of it.
     await writeFile(
       resolve(scratch, "aburi.json"),
       JSON.stringify({ languages: ["lang-typescript"] }),
@@ -85,8 +70,6 @@ describe("CL28 — aburi scan with an --output-dir that cannot hold the outputs"
   })
 
   it("names the workspace Markdown when a directory stands where it would go", async () => {
-    // `--format md`, so the page is the only artefact and the case does not depend on which of
-    // the IR and the page is written first.
     await writeTypeScriptWorkspace(scratch, "write-fixture")
     await mkdir(resolve(scratch, "out", WORKSPACE_MD_FILENAME), { recursive: true })
 
@@ -100,8 +83,6 @@ describe("CL28 — aburi scan with an --output-dir that cannot hold the outputs"
   })
 
   it("names the component whose Markdown could not be written", async () => {
-    // The component's file name is detection's to decide, so a clean run says where it
-    // goes; a directory is then put in its place for the run under test.
     await writeTypeScriptWorkspace(scratch, "write-fixture")
     const clean = await runScan({ cwd: scratch, format: "md" })
     const [componentMd] = clean.componentMdPaths
@@ -127,7 +108,6 @@ describe("CL29 — aburi scan into a place the machine refuses", () => {
 
     const { exitCode, stderr } = await run(["scan", "--format", "json", "--output-dir", "locked"])
 
-    // Before the assertions, so a failing one still leaves the scratch directory removable.
     await chmod(locked, 0o700)
 
     expect(exitCode).toBe(EXIT.RUNTIME)
@@ -135,13 +115,9 @@ describe("CL29 — aburi scan into a place the machine refuses", () => {
       `aburi scan could not write the IR to ${resolve(locked, IR_JSON_FILENAME)}`,
     )
     expect(stderr).toContain("EACCES")
-    // Not the caller's: no flag to point elsewhere is offered for a fault in the machine.
     expect(stderr).not.toContain("--output-dir")
   })
 
-  // A name longer than the filesystem allows fails for a reason that is not the path's shape,
-  // on every POSIX filesystem and for root too — which a permission bit is not, since root
-  // writes through it. Windows has its own limits and answers with other codes.
   it.skipIf(process.platform === "win32")(
     "reports any other refusal as the command's runtime failure, with the errno",
     async () => {
@@ -219,8 +195,6 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
   })
 
   it("names the uncapped report an earlier run left when it cannot be removed", async () => {
-    // Every run clears `diff.full.md` before it computes anything, so a directory standing
-    // there is refused the same way whether or not this run's cap would have written one.
     const { base, head } = await writeIRPair()
     await mkdir(resolve(scratch, "out", DIFF_FULL_MD_FILENAME), { recursive: true })
 
@@ -234,8 +208,6 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
   })
 
   it("is refused before either IR is read", async () => {
-    // Nothing at `--base`: a run that reached the reads would report the missing file, and
-    // the directory refusal is only reachable ahead of them.
     await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
 
     const thrown = await run([
@@ -253,8 +225,6 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
   })
 
   it("still refuses a malformed invocation with nothing created for it", async () => {
-    // Validation stays ahead of the directory: a half-given file pair must not leave an
-    // `out/` behind as the one trace of a run that did nothing.
     const thrown = await runCli({
       argv: ["diff", "--base", resolve(scratch, "base.json")],
       cwd: scratch,

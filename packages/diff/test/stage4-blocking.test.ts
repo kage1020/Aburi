@@ -3,20 +3,6 @@ import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { matchStageNameSignature } from "../src"
 
-/**
- * Stage 4's bucket key is `(kind, signatureNullness)`, which a bulk rename leaves in one piece:
- * every method of a renamed directory shares it, so stage 4 scored the whole cross-product and
- * took 64 s at 4000 symbols against diff-algorithm.md's 2 s target.
- *
- * Within a bucket the bases are now indexed by the tokens of their member names, and a head only
- * sees the bases sharing one. That costs nothing in recall, and the reason is arithmetic: `0.5 *
- * member + 0.3 * signature + 0.2` has to reach 0.85, the lowest row of the threshold table, and the
- * signature axis is worth at most 0.3 — so `member >= 0.7` for any pairing that survives. A Jaccard
- * that high is above zero, and a Jaccard above zero is a shared token.
- *
- * These are the cases where the narrowing could lose a pairing if that argument were wrong.
- */
-
 const ONE_INPUT = sig({ inputs: [{ name: "id", type: "string" }], outputs: ["User"] })
 
 function method(file: string, name: string, seed: string, signature = ONE_INPUT): IRSymbol {
@@ -37,8 +23,6 @@ function pairs(base: IRSymbol[], head: IRSymbol[]): string[] {
 
 describe("a pairing that survives always shares a member token", () => {
   it("pairs across a directory rename, which is what shares nothing else", () => {
-    // The reported shape: same qualified name, different file, edited body. The member token
-    // is the only thing left, and it is enough.
     expect(
       pairs(
         [method("src/old/a.ts", "Service.handleRequest", "a")],
@@ -48,9 +32,6 @@ describe("a pairing that survives always shares a member token", () => {
   })
 
   it("pairs on the member token even when the signature moved", () => {
-    // The other axis giving ground: an added `throws` drops the signature axis to 2/3, and an
-    // unchanged 3-token member name carries the pairing to 0.5 + 0.2 + 0.2 = 0.9, over the
-    // 0.85 row. Reachable only through the shared tokens, which is the property under test.
     expect(
       pairs(
         [method("src/old/a.ts", "Service.loadConfigFile", "a")],
@@ -71,9 +52,6 @@ describe("a pairing that survives always shares a member token", () => {
   })
 
   it("refuses a renamed member, which the floor already refused", () => {
-    // The threshold table asks 0.85 of a 3-token member name and the other two axes cap at 0.5, so
-    // the member axis must reach 0.7 — and changing one token of three gives 0.5. No renamed member
-    // reaches stage 4's bar, so the index narrowing to shared tokens cannot cost one.
     expect(
       pairs(
         [method("src/a.ts", "Repo.loadConfigFile", "a")],
@@ -83,8 +61,6 @@ describe("a pairing that survives always shares a member token", () => {
   })
 
   it("does not pair two members with no token in common", () => {
-    // Nothing shared, so the index never offers the pair — and the score would not have
-    // reached the threshold either. The narrowing agrees with the arithmetic.
     expect(
       pairs(
         [method("src/a.ts", "UserRepo.save", "a")],
@@ -94,8 +70,6 @@ describe("a pairing that survives always shares a member token", () => {
   })
 
   it("holds the floor where the member axis alone decides", () => {
-    // One token of two is a Jaccard of 1/3: 0.5/3 + 0.3 + 0.2 = 0.667, under every row. The
-    // pair is reachable through `get`, and refused on the score rather than on the index.
     expect(
       pairs(
         [method("src/a.ts", "Repo.getUser", "a")],
@@ -106,11 +80,6 @@ describe("a pairing that survives always shares a member token", () => {
 })
 
 describe("a member name with no tokens is indexed too", () => {
-  // `Foo.Bar.` has an empty last segment and two tokens in its qualified name, so it is
-  // admissible, and two of them score 1.0 on an axis comparing two empty sets. They carry no
-  // token to be indexed under, so they need a key of their own — without one they would be
-  // unreachable, which is a pairing lost to the index rather than to the score.
-
   it("pairs two Symbols whose member name is empty", () => {
     expect(
       pairs([method("src/a.ts", "Foo.Bar.", "a")], [method("src/b.ts", "Foo.Bar.", "b")]),
@@ -124,41 +93,24 @@ describe("a member name with no tokens is indexed too", () => {
   })
 })
 
-/**
- * Most of the cases above sit in a one-base bucket, where `reach` — which counts a base once
- * per shared token — already meets the bucket size and the whole-bucket fallback runs. These
- * are the ones wide enough that the postings walk is what answers, which is where the index
- * and its de-duplication stamp are observable at all.
- */
 describe("the postings walk finds what the fallback would have", () => {
   /** Bases sharing no member token with anything else, to make a bucket too wide to fall back. */
   const filler = (count: number): IRSymbol[] =>
     Array.from({ length: count }, (_, i) => method(`src/f${i}.ts`, `Repo.zeta${i}Alpha`, `f${i}`))
 
   it("reaches a base whose shared tokens exclude its first", () => {
-    // `{load, config, file, async}` against `{config, file, async}` — 3/4 = 0.75, a composite of
-    // 0.875 over the 0.85 row. The head carries none of `load`, so a base indexed under its
-    // first token alone is unreachable, and the bucket is too wide for the fallback to rescue
-    // it. This is the shape a same-name pair cannot test, because that shares every token.
     const base = [...filler(8), method("src/a.ts", "Repo.loadConfigFileAsync", "a")]
     const head = [method("src/b.ts", "Repo.configFileAsync", "b")]
     expect(pairs(base, head)).toEqual(["Repo.loadConfigFileAsync -> Repo.configFileAsync"])
   })
 
   it("reaches a base whose shared tokens exclude the head's first", () => {
-    // The mirror of the case above, and a separate skip: the head's postings are consulted in
-    // its own token order, so a head that carries `load` where the base does not must still
-    // find it through `config`.
     const base = [...filler(8), method("src/a.ts", "Repo.configFileAsync", "a")]
     const head = [method("src/b.ts", "Repo.loadConfigFileAsync", "b")]
     expect(pairs(base, head)).toEqual(["Repo.configFileAsync -> Repo.loadConfigFileAsync"])
   })
 
   it("keeps several heads apart through one bucket's stamp", () => {
-    // Two heads walking the same postings lists in one pass, each reaching its base through
-    // more than one token. The stamp is per bucket and advances per head, so a stale one would
-    // make the second head skip a base the first had visited — a lost pairing, which is the
-    // direction that shows. Counting a base twice does not: the sweep claims each side once.
     const base = [
       ...filler(8),
       method("src/a1.ts", "Repo.loadConfigFile", "a1"),
@@ -187,13 +139,7 @@ describe("the postings walk finds what the fallback would have", () => {
 })
 
 describe("the shortcuts answer as the rule they stand in for", () => {
-  // Reaching a base through several of its tokens, and answering the owner gate without running
-  // it, are optimisations. Each has to give the answer the long way round gives, and these are
-  // the shapes where a wrong shortcut is visible.
-
   it("pairs a namespaced class whose namespace is unchanged", () => {
-    // The first-segment shortcut is consulted here rather than short-circuited: the owners are
-    // not identical, and their first segments are.
     expect(
       pairs(
         [method("src/a.ts", "Users.UserRepo.loadConfigFile", "a")],
@@ -212,8 +158,6 @@ describe("the shortcuts answer as the rule they stand in for", () => {
   })
 
   it("refuses a first segment carrying an extra token", () => {
-    // `{user}` against `{user, admin}` — refused on the count before any word is compared, the
-    // same way the full gate would refuse it.
     expect(
       pairs(
         [method("src/a.ts", "User.Store.loadConfigFile", "a")],
@@ -223,8 +167,6 @@ describe("the shortcuts answer as the rule they stand in for", () => {
   })
 
   it("refuses a first segment whose token is merely similar", () => {
-    // `repo` and `report` share a prefix and nothing else — the gate admits only inflection, and
-    // the shortcut has to apply the same test rather than a looser one.
     expect(
       pairs(
         [method("src/a.ts", "Repo.Store.loadConfigFile", "a")],
@@ -234,8 +176,6 @@ describe("the shortcuts answer as the rule they stand in for", () => {
   })
 
   it("pairs two top-level functions, which the identical-owner branch settles", () => {
-    // Both owners extract to the empty string, so they are identical and the gate answers
-    // there — the first-segment check and the matching are never reached.
     const top = (file: string, name: string, seed: string): IRSymbol =>
       makeSymbol({
         id: `ts:${file}#${name}`,
@@ -252,8 +192,6 @@ describe("the shortcuts answer as the rule they stand in for", () => {
 
 describe("the fallback path answers a bulk rename the same way", () => {
   it("pairs every method of a renamed directory", () => {
-    // A four-base bucket, so every head's reach meets it and the members are walked directly.
-    // The indexed version of this is in the postings-walk block above.
     const members = ["loadConfig", "saveConfig", "resetConfig", "watchConfig"]
     const base = members.map((m, i) => method(`src/old/mod${i}.ts`, `Store.${m}`, `a${i}`))
     const head = members.map((m, i) => method(`src/new/mod${i}.ts`, `Store.${m}`, `b${i}`))
@@ -261,8 +199,6 @@ describe("the fallback path answers a bulk rename the same way", () => {
   })
 
   it("still separates the ones whose owners are unrelated", () => {
-    // Same member token throughout, so the index offers every pair and the owner gate is what
-    // refuses them. The index narrows; it does not decide.
     const base = [method("src/a.ts", "UserRepo.handleRequest", "a")]
     const head = [method("src/b.ts", "AdminRepo.handleRequest", "b")]
     expect(pairs(base, head)).toEqual([])

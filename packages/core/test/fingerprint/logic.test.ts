@@ -71,10 +71,6 @@ describe("logicFingerprint — invariance", () => {
   const baseFp = logicFingerprint(base())
 
   it("L1: renaming a local variable that does not appear in any rule/effect string is invariant", () => {
-    // At the fingerprint layer the "rename" surfaces as: Symbol fields that are NOT part
-    // of the logic input change, but the rule/effect strings stay byte-identical. Touch
-    // source line span, confidence, and derivedBy — all of which the IR carries but the
-    // logic axis excludes.
     const sym = makeSymbol(base().id, {
       ...base(),
       source: {
@@ -141,8 +137,6 @@ describe("logicFingerprint — invariance", () => {
   })
 
   it("L12: reordering the effects plugin lineup that produces the same targets is invariant", () => {
-    // Swap the plugin field (mirrors config.effects[] priority reshuffle) but keep target
-    // strings identical — logic axis must ignore this.
     const sym = makeSymbol(base().id, {
       ...base(),
       effects: [

@@ -74,8 +74,6 @@ describe("scan — a Firestore batch beside a Drizzle query", () => {
     // EP6: the classified root leaves `calls[]`; its chain links stay, by EP5.
     expect(targets).not.toContain("db.select")
 
-    // A genuine transaction beside the foreign ones still classifies: only the zero-argument
-    // shape is handed on.
     const renameUser = symbolNamed(result, "renameUser")
     expect(
       renameUser.effects

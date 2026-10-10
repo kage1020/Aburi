@@ -11,11 +11,6 @@ async function extractFrom(source: string): Promise<SymbolCandidate<unknown>[]> 
   return extractSymbols(result.tree, makeCtx(path, source))
 }
 
-/**
- * Find a candidate by name and fail-loud if it is missing. The extractor emits the
- * expected symbol on every test fixture; a missing candidate is a test-fixture bug we
- * want surfaced, not a silent `undefined` propagating into a nullable classification.
- */
 function findByName(
   candidates: readonly SymbolCandidate<unknown>[],
   name: string,

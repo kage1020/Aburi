@@ -5,18 +5,6 @@ import { createFakeServer, type FakeConnectionOptions } from "./fixtures/fake-co
 const WORKSPACE_ROOT = "/workspace"
 const FILE_URI = "file:///workspace/src/a.ts"
 
-/**
- * `createLspClient` bounds every JSON-RPC write it makes, notifications
- * included. A notification that never settles (a clogged stdio pipe, a large
- * `didOpen` meeting backpressure) used to park the enrichment pass forever,
- * ahead of the `fileBudgetMs` monitoring that only starts once a request is
- * issued.
- *
- * Timers are faked so each bound is pinned from both sides — unresolved at
- * `timeoutMs - 1`, resolved at `timeoutMs`. A one-sided "took at least N ms"
- * assertion would pass just as happily against a bound ten times too large,
- * which is the very defect these tests exist to prevent.
- */
 describe("LSP client write bounds", () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -61,8 +49,6 @@ describe("LSP client write bounds", () => {
   })
 
   it("reports a synchronously thrown write as a server error", async () => {
-    // `vscode-jsonrpc` throws, rather than rejecting, once the connection is
-    // closed or disposed — the likeliest shape of "the server died mid-pass".
     const { client } = makeClient({
       notification: "throw-sync",
       rejectMessage: "connection closed",

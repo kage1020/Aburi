@@ -4,11 +4,6 @@ import { describe, expect, it } from "vitest"
 import { projectDiff, projectWorkspace } from "../src"
 import { emptySummary, makeDiff } from "./fixtures"
 
-/**
- * The two documents a human reads have to say what the scan lost, or the exit code is the
- * only signal and an exit code does not travel with the artifact.
- */
-
 function unknown(overrides: Partial<SymbolUnknown> = {}): SymbolUnknown {
   return {
     status: "unknown",
@@ -118,8 +113,6 @@ describe("projectDiff — the Unknown section", () => {
   })
 
   it("leaves the summary line alone when there are none", () => {
-    // The line is skimmed on every PR; a permanent `?0` is noise on the overwhelming
-    // majority of diffs where nothing was lost.
     const md = projectDiff(makeDiff({ summary: { ...emptySummary(), removed: 2 } }))
     expect(md).not.toContain("unknown")
     expect(md).not.toContain("## ❔")
@@ -168,9 +161,6 @@ describe("projectDiff — the Not compared section", () => {
   })
 
   it("sits beside Unknown rather than inside it", () => {
-    // Both are gaps rather than changes, and a reader scanning for what the diff does not
-    // cover should find them together — but who can close them differs, so they are not one
-    // section.
     const md = projectDiff(
       makeDiff({
         symbols: [unknown()],
@@ -191,9 +181,6 @@ describe("projectDiff — the Not compared section", () => {
   })
 
   it("omits it for a document that predates the field, rather than claiming a clean run", () => {
-    // An older diff cannot say what it missed. Rendering the section over `?? []` would report
-    // "nothing was missed" on every archived document, which is the claim this whole field
-    // exists to stop making.
     const { notCompared: _absent, ...older } = makeDiff({ notCompared: [] })
     expect(projectDiff(older)).not.toContain("Not compared")
   })
@@ -234,9 +221,6 @@ describe("projectDiff — the Unknown dependency group", () => {
   })
 
   it("keeps the unknown edge out of the group a reviewer reads as deletions", () => {
-    // With `removed: []` the absence of `### Symbol-level removed` proves nothing — the
-    // assertion could not fail whatever the projection did. A real removal has to be present
-    // for "it did not land in there" to be a claim about anything.
     const deleted: Dependency = {
       from: endpoint("ts:src/a.ts#caller"),
       to: endpoint("ts:src/b.ts#callee"),
@@ -353,17 +337,11 @@ describe("projectWorkspace — the files not analysed", () => {
   })
 
   it("omits it for a document that predates the field, rather than claiming a clean run", () => {
-    // `totalFiles > parsedFiles` with no list: the writer could not say. Rendering an empty
-    // section would read as "nothing was lost", which is the opposite of what it knows.
     const md = projectWorkspace(irWith({}))
     expect(md).not.toContain("Files not analysed")
   })
 
   it("says so in the header when files went missing and cannot be named", () => {
-    // The section above is the only other place this would show, and it is correctly absent.
-    // Without the header saying it, a document that lost three files renders byte-identically
-    // to a clean scan of the same workspace — and a pure projection has no stderr to fall
-    // back on the way `aburi diff` does.
     expect(projectWorkspace(irWith({}))).toContain("(across 1 of 4 files; 3 produced no Symbols)")
   })
 

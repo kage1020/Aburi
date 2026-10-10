@@ -6,15 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, classifyConfigError, EXIT, runCli } from "../src"
 import { loadPinnedConfig, resolveConfig } from "../src/config-load"
 
-/**
- * Every failure of the config load used to be reported as the config being malformed, which
- * `cli-spec.md` spends exit 2 on. Two kinds of failure arrive there that are not: a file
- * that exists and cannot be read, which is IO, and Aburi's own invariants, which are bugs.
- * Sending a reader through `aburi.json` for either is the misdirection `classifyDiffError`
- * exists to avoid one file away.
- */
-
-/** The codes that describe the file the reader wrote, or the path they named. */
 const READER_FAULTS: ConfigErrorCode[] = [
   "config-not-found",
   "config-parse-failed",
@@ -24,7 +15,6 @@ const READER_FAULTS: ConfigErrorCode[] = [
   "reserved-namespace",
 ]
 
-/** `value` is required exactly for the codes that name one offending string. */
 function detailFor(code: ConfigErrorCode): ConstructorParameters<typeof ConfigError>[1] {
   switch (code) {
     case "duplicate-component-id":
@@ -48,8 +38,6 @@ describe("classifyConfigError — ConfigError to exit code (cli-spec.md)", () =>
   }
 
   it("reports a config that cannot be read as the machine's fault", () => {
-    // `cli-spec.md` keeps exit 1 for IO. A config that is there and unreadable is not a
-    // malformed one, and the remedy is a permission or a mount rather than an edit.
     const cause = new ConfigError("Failed to read config at /w/aburi.json (EACCES)", {
       code: "config-read-failed",
     })
@@ -57,15 +45,11 @@ describe("classifyConfigError — ConfigError to exit code (cli-spec.md)", () =>
     const cliError = classifyConfigError(cause)
 
     expect(cliError.code).toBe("runtime-error")
-    // The same prefix as every other arm: it names the phase that failed, which is what a
-    // reader sees before anything else on the line.
     expect(cliError.message).toContain("Failed to load Aburi config: ")
     expect(cliError.message).not.toContain("bug in Aburi")
   })
 
   it("keeps a path that names nothing on the reader's side", () => {
-    // The one that decides whether `--config ./typo.json` is an argument mistake or an IO
-    // failure. `cli-spec.md` lists "missing" under exit 2, and no permission is involved.
     const cliError = classifyConfigError(
       new ConfigError("No config file at /w/typo.json", { code: "config-not-found" }),
     )
@@ -75,12 +59,6 @@ describe("classifyConfigError — ConfigError to exit code (cli-spec.md)", () =>
 })
 
 describe("classifyConfigError — what is not a ConfigError at all", () => {
-  /**
-   * `formatAjvErrors` throws a bare `Error` when ajv reports failure with no errors, and its
-   * own docblock says that means ajv is in an unexpected state rather than the user being
-   * wrong. It reached the reader as `Failed to load Aburi config: ajv invariant violation…`
-   * on exit 2, which is a sentence about their file.
-   */
   const NOT_THE_CONFIG: [string, unknown][] = [
     ["an invariant Aburi broke", new Error("ajv invariant violation: validate returned false")],
     ["a shape nothing validated", new TypeError("x.map is not a function")],
@@ -99,8 +77,6 @@ describe("classifyConfigError — what is not a ConfigError at all", () => {
   }
 
   it("starts the report instruction on its own line", () => {
-    // Nothing that reaches here ends in punctuation, so run-on is the ordinary case and the
-    // instruction would be buried in the middle of whatever was thrown.
     const cliError = classifyConfigError(new TypeError("x.map is not a function"))
 
     expect(cliError.message).toContain("x.map is not a function\nThis is a bug in Aburi")
@@ -113,9 +89,6 @@ describe("classifyConfigError — what is not a ConfigError at all", () => {
   })
 
   it("keeps what a code it has no arm for said, rather than throwing it away", () => {
-    // `@aburi/config` and `@aburi/cli` version independently, so a compiled switch can meet a
-    // code it never saw. The compile-time check cannot help an installed tree, and discarding
-    // the message would leave the reader with nothing about their own config.
     const cause = new ConfigError("Config at /w/aburi.json extends a ref that does not resolve", {
       code: "config-extends-unresolved",
     } as unknown as ConstructorParameters<typeof ConfigError>[1])
@@ -164,17 +137,11 @@ describe("the exit code a command actually leaves with", () => {
   }
 
   it("exits with a runtime failure for a config it cannot read, and says which phase", async () => {
-    // A directory of that name: `access(F_OK)` finds it, so discovery hands it on, and the
-    // read fails with EISDIR. EACCES would say the same thing on POSIX and cannot be set up
-    // on Windows.
     await mkdir(resolve(workRoot, "aburi.json"))
 
     const { exitCode, stderr } = await run("scan")
 
     expect(exitCode).toBe(EXIT.RUNTIME)
-    // Asserted on the stream rather than on the thrown value, because the raw `ConfigError`
-    // would reach the same exit code through the generic handler — the prefix is what says
-    // the classification ran at all.
     expect(stderr).toContain("Failed to load Aburi config: ")
     expect(stderr).not.toContain("bug in Aburi")
   })
@@ -233,11 +200,6 @@ describe("loadPinnedConfig — the invariant the type only states", () => {
   })
 
   it("refuses a relative path rather than resolving it against the process cwd", async () => {
-    // A pinned config's whole contract is that the answer no longer depends on where the
-    // process is standing. `readConfigFile` calls `readFile` with the string it is handed, so
-    // a relative path would quietly re-acquire that dependence — and then ride
-    // `LoadedConfig.source` into `ScanReport.configSource`, where every consumer compares it
-    // against an absolute workspace root.
     const thrown = await loadPinnedConfig({ kind: "file", path: "./aburi.json" }).then(
       () => null,
       (error: unknown) => error,

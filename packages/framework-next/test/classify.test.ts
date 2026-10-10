@@ -123,9 +123,6 @@ describe("classifyNextSymbol — App Router route handlers", () => {
   })
 
   it("propagates the lastQnameSegment throw for broken qnames instead of swallowing them", () => {
-    // The core lastQnameSegment helper throws on empty / trailing-separator qnames.
-    // This test locks the "do not swallow" contract at the framework-plugin seam so a
-    // regression here shows up as a red test rather than a silent null.
     const file = "app/api/route.ts"
     expect(() =>
       classifyNextSymbol(

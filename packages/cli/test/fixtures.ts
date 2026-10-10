@@ -7,33 +7,18 @@ import { makeLanguageId } from "@aburi/core"
 import type { ComponentId, IR, SliceId, SymbolId } from "@aburi/types"
 import { EXIT, type GitRunner, reportScanIncidents, type ScanReport } from "../src"
 
-/**
- * Id branding for CLI test fixtures.
- *
- * Fixtures are one of the documented boundary layers where an id is asserted rather than
- * constructed (ir-schema.md): these files hand-write whole IR documents, including ones
- * the producers could never emit, so routing them through `makeSymbolId` would make the
- * negative cases unwritable. Production code has no such escape — it reaches a branded id
- * only through the constructors and guards in `@aburi/core`.
- */
 export function symbolId(raw: string): SymbolId {
   return raw as SymbolId
 }
 
-/** Component-id counterpart of `symbolId`, same rationale. */
 export function componentId(raw: string): ComponentId {
   return raw as ComponentId
 }
 
-/** Slice-id counterpart of `symbolId`, same rationale. */
 export function sliceId(raw: string): SliceId {
   return raw as SliceId
 }
 
-/**
- * A schema-valid IR that describes nothing: the smallest document `readIR` accepts, for tests
- * whose subject is what a command does around the comparison rather than the comparison.
- */
 export function emptyIR(): IR {
   return {
     $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
@@ -57,12 +42,6 @@ export function emptyIR(): IR {
   }
 }
 
-/**
- * The smallest workspace `aburi scan` reads for real: a manifest, a config naming
- * `lang-typescript`, and one source file that parses and declares nothing. Every report of it
- * carries zero Symbols while the scan still read the repository — the distinction the coverage
- * gate rests on, since a workspace where nothing parsed is not a success.
- */
 export async function writeTypeScriptWorkspace(directory: string, name: string): Promise<void> {
   await writeFile(
     resolve(directory, "package.json"),
@@ -81,7 +60,6 @@ export async function writeTypeScriptWorkspace(directory: string, name: string):
   await writeFile(resolve(directory, "src/quiet.ts"), "// declares nothing\n", "utf8")
 }
 
-/** A writable stream that keeps what was written, for capturing `runCli`'s stdout / stderr. */
 export class MemStream extends Writable {
   chunks: string[] = []
   override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
@@ -93,7 +71,6 @@ export class MemStream extends Writable {
   }
 }
 
-/** A clean, empty `ScanReport` with `overrides` applied, for driving `reportScanIncidents`. */
 export function scanReportWith(overrides: Partial<ScanReport>): ScanReport {
   return {
     irPath: null,
@@ -128,7 +105,6 @@ export function scanReportWith(overrides: Partial<ScanReport>): ScanReport {
   }
 }
 
-/** Every line `reportScanIncidents` writes for `report`, in order. */
 export function incidentLinesFrom(report: ScanReport, label: string | null): string[] {
   const lines: string[] = []
   reportScanIncidents(report, (line) => lines.push(line), label)
@@ -150,21 +126,8 @@ export interface RecordedGitCall {
 }
 
 export interface FakeGitOptions {
-  /**
-   * Responses keyed by the first two args (`"rev-parse --verify"`), overriding the defaults
-   * below. Each receives the whole argument list.
-   */
   handlers?: Record<string, (args: readonly string[]) => GitOutput | Promise<GitOutput>>
-  /**
-   * Materialises the base checkout when `worktree add` is issued, at the path git was given.
-   * Throws when the path is missing rather than resolving `undefined` against `process.cwd()`.
-   */
   onWorktreeAdd?: (worktreeDir: string) => Promise<void> | void
-  /**
-   * What a command with no handler does. `"succeed"` (the default) answers empty output;
-   * `"throw"` rejects, so a git call `runDiff` grows is covered by nothing rather than by
-   * a fake that cannot fail.
-   */
   unmodelled?: "succeed" | "throw"
 }
 
@@ -211,11 +174,6 @@ export function fakeGit(options: FakeGitOptions = {}): {
   return { runner, calls }
 }
 
-/**
- * What a fixture's own git calls must not take from the environment: the repository and index
- * it names. A test run started from a commit hook carries a `GIT_INDEX_FILE`, and a fixture
- * repository built through it would be built in the wrong index.
- */
 const FIXTURE_UNSET_GIT_ENV: readonly string[] = [
   "GIT_DIR",
   "GIT_WORK_TREE",
@@ -226,12 +184,6 @@ const FIXTURE_UNSET_GIT_ENV: readonly string[] = [
   "GIT_OBJECT_DIRECTORY",
 ]
 
-/**
- * A fixture's call to a real `git`. Whatever the developer's config or the surrounding
- * environment says must not decide what it does, so both are pinned; `env` is applied last,
- * for a call that means to name a repository or an index. Output is buffered and decoded once,
- * since a multi-byte character can straddle two chunks.
- */
 export function realGit(
   args: readonly string[],
   cwd: string,
@@ -265,13 +217,6 @@ export function realGit(
   })
 }
 
-/**
- * Whether a real `git` can be spawned here: `null`, or the error the attempt raised. Kept rather
- * than reduced to a boolean, because EACCES on the binary, a spawn EPERM under a sandbox and an
- * absent git are three different problems and "git is not on PATH" is wrong for two of them.
- * Without the probe, a machine with no git fails inside a fixture with a raw `spawn git ENOENT`
- * that reads like a product bug.
- */
 export async function probeRealGit(): Promise<unknown> {
   const probeDir = await mkdtemp(resolve(tmpdir(), "aburi-git-probe-"))
   try {

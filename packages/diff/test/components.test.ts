@@ -73,9 +73,6 @@ describe("diffComponents (I5)", () => {
     })
   })
 
-  // Change detection compares the whole Component; the three booleans summarise three axes and
-  // are not the definition of "changed" (diff-algorithm.md). A field outside them produced
-  // no entry at all, so the projection had no before/after pair to render.
   it("reports a display-name change with all three delta booleans false", () => {
     const before = component({ id: "billing", name: "Billing" })
     const after = component({ id: "billing", name: "Billing & Invoicing" })
@@ -127,9 +124,6 @@ describe("diffComponents (I5)", () => {
     expect(result.changed[0]?.delta.rootsChanged).toBe(true)
   })
 
-  // ir-schema.md: an absent Class A key reads as `null` and an empty Class B list reads as
-  // absent, so neither respelling is a change. A whole-record comparison has to be told this —
-  // it is the one thing a byte comparison would get wrong.
   it("does not report a change when a document respells absence", () => {
     const explicit = component({
       id: "billing",
@@ -149,8 +143,6 @@ describe("diffComponents (I5)", () => {
   })
 
   it("does not report a change when key insertion order differs", () => {
-    // Class B fields are spelled identically on both sides, so this pins key order alone and
-    // does not re-test the absence respellings above.
     const a = component({
       id: "billing",
       name: "billing",
@@ -169,10 +161,6 @@ describe("diffComponents (I5)", () => {
     expect(diffComponents([a], [b]).changed).toEqual([])
   })
 
-  // The property that justifies reaching for `@aburi/core`'s canonical serializer rather than
-  // sorting keys by hand: ir-schema.md puts every IR string in NFC, and a document that
-  // arrives in NFD would otherwise report an untouched component as changed on every pull
-  // request. Swap the serializer for `JSON.stringify` over sorted keys and only this fails.
   it("does not report a change when a string arrives in a different Unicode form", () => {
     const composed = "café"
     const decomposed = "cafe\u0301"
@@ -191,9 +179,6 @@ describe("diffComponents (I5)", () => {
 
   it("refuses a component it cannot compare, as a DiffError naming the component", () => {
     const sound = component({ id: "billing", name: "billing" })
-    // A nested value JSON cannot carry. Only a hand-assembled document reaches this — which is
-    // the case the error exists for, and `errors.ts` is the whole of this package's failure
-    // surface, so it must not leave as a bare `CoreError` from `@aburi/core`.
     const unsound = { ...sound, roots: [(() => "apps/billing") as unknown as string] }
     let raised: unknown
     try {
@@ -314,9 +299,6 @@ describe("diffDependencies (I5)", () => {
     expect(result.added).toHaveLength(2)
     const keys = result.added.map((d) => `${d.from}::${d.to}::${d.via}`)
     expect(keys).toEqual([...keys].sort())
-    // The composite-key sort places the component-level "billing::payments::import"
-    // before the symbol-id "ts:src/..." endpoints because lowercase kebab-case
-    // component ids sort ahead of the language-prefixed symbol ids.
     expect(result.added[0]?.from).toBe("billing")
     expect(result.added[1]?.from).toBe("ts:src/a.ts#caller")
   })

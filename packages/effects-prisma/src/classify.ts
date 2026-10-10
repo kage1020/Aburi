@@ -19,25 +19,6 @@ import {
   PRISMA_TRANSACTION_MAX_ARGUMENTS,
 } from "./receivers"
 
-/**
- * Classify a CallCandidate against Prisma Client conventions.
- *
- * Two shapes are accepted once the file imports a Prisma Client module (`hasPrismaImport`):
- *   - `<...>.<model>.<verb>` (3+ segments) — a model delegate call. The client segment is
- *     what separates it from two-segment collisions such as Express `router.create(...)`.
- *   - `<...>.$transaction` (2+ segments) — the transaction API on the client itself.
- *
- * The import gate is not a receiver check: `this.cache.items.delete(key)` is a `Map` and
- * `session.user.update(fields)` an object, both three segments with a delegate verb in a
- * file that also uses Prisma. A literal first argument rules a call out — no Prisma method
- * takes one — and the receiver plus argument count decide the tier, downgrading rather
- * than dropping (`receiverConfidence`). A model addressed through brackets arrives as
- * `<computed>` and supplies the third segment without a model, so there the receiver must
- * name a client outright.
- *
- * Throws on a malformed target (`assertNonEmptySegments`): an upstream contract violation,
- * not a classification decision. Pure with respect to plugin state (effect-plugin.md).
- */
 export function classifyPrismaCall(
   call: CallCandidate,
   ctx: ClassifyContext,
@@ -69,10 +50,6 @@ export function classifyPrismaCall(
   // The client sits immediately before the model, whatever precedes it.
   const clientSegment = segments.at(-3)
 
-  // `prisma[model].create(…)` arrives as `prisma.<computed>.create`: three segments, one of
-  // which names nothing. Segment count is what separates a delegate call from
-  // `queues[id].upsert(job)` / `sets[key].delete(item)`, so the receiver has to carry the
-  // claim alone; `classificationConfidence` already answers `medium` on the same flag.
   if (clientSegment !== undefined && segments.at(-2) === COMPUTED_TARGET_SEGMENT) {
     if (!namesPrismaClient(clientSegment)) return null
   }

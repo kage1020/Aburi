@@ -5,42 +5,25 @@ import { buildDiff, classifyStatus, computeSymbolDelta, dropDirection } from "..
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
-// -----------------------------------------------------------------------------
-// Re-attribution — what a changed `Symbol.component` is, and is not, a change to
-// -----------------------------------------------------------------------------
-
 describe("a Symbol whose component moved under it", () => {
   const inApi = makeSymbol({ id: "ts:packages/api/a.ts#f", name: "f", component: "api" })
   const inShared = makeSymbol({ ...inApi, component: "shared" })
 
   it("is unchanged: redrawing a boundary is not editing the code", () => {
-    // `Symbol.component` comes from `Component.roots[]` and from nothing in the file
-    // (component-detect.md), so a config that re-roots a package must not report every
-    // Symbol under it as a code change — `--fail-on changed` would fire on an edit nobody
-    // made. `classifyStatus` reads the three fingerprints and the path, and `component` is
-    // in none of them, which is what makes that true rather than incidental.
     expect(classifyStatus(inApi, inShared)).toBe("unchanged")
   })
 
   it("still records the move on the delta, for a Symbol that changed for another reason", () => {
-    // The flag is therefore only ever read alongside another axis — the view showing
-    // `- component: changed` is describing a Symbol the diff had already picked up.
     expect(computeSymbolDelta(inApi, inShared).componentChanged).toBe(true)
     expect(computeSymbolDelta(inApi, inApi).componentChanged).toBe(false)
   })
 })
-
-// -----------------------------------------------------------------------------
-// Confidence — the same code classified less surely is a change a reviewer sees
-// -----------------------------------------------------------------------------
 
 describe("a Symbol whose confidence moved under it", () => {
   const sure = makeSymbol({ id: "ts:src/a.ts#C", name: "C", kind: "class", confidence: "high" })
   const unsure = makeSymbol({ ...sure, confidence: "medium" })
 
   it("is changed although no fingerprint moved", () => {
-    // Unlike `component`, which a config re-roots under unchanged code, confidence is the
-    // plugins' reading of the code itself, and `unchanged` is never reported.
     expect(classifyStatus(sure, unsure)).toBe("changed")
     expect(classifyStatus(unsure, sure)).toBe("changed")
   })
@@ -83,10 +66,6 @@ describe("a Symbol whose confidence moved under it", () => {
     })
   })
 })
-
-// -----------------------------------------------------------------------------
-// C2 — dropped-toggled coverage (rationale + both directions + summary)
-// -----------------------------------------------------------------------------
 
 describe("dropped-toggled status (C2)", () => {
   it("classifies dropped=false → dropped=true as dropped-toggled regardless of fingerprint", () => {
@@ -157,10 +136,6 @@ describe("dropped-toggled status (C2)", () => {
   })
 })
 
-// -----------------------------------------------------------------------------
-// I1 — Decorator delta
-// -----------------------------------------------------------------------------
-
 describe("Decorator delta (I1)", () => {
   it("emits modified when the same name gets a different argument list", () => {
     const b = makeSymbol({
@@ -213,10 +188,6 @@ describe("Decorator delta (I1)", () => {
     expect(delta.decorators?.modified).toHaveLength(0)
   })
 })
-
-// -----------------------------------------------------------------------------
-// I2 — Effects / Calls delta
-// -----------------------------------------------------------------------------
 
 describe("Effects delta (I2)", () => {
   const shared = fp("v1")
@@ -376,8 +347,6 @@ describe("Decorator delta — qualifier", () => {
     })
 
   it("emits modified when only the receiver changed", () => {
-    // `@nest.Post("/x")` → `@tsed.Post("/x")`: the classification behind the api fingerprint
-    // moved, so the decorator list has to say so.
     const delta = computeSymbolDelta(
       withDecorators([post("nest")], "a"),
       withDecorators([post("tsed")], "b"),
@@ -411,8 +380,6 @@ describe("Decorator delta — qualifier", () => {
   })
 
   it("does not compare raw, so a reformat of the same decorator is no change", () => {
-    // Both sides bare, and `raw` differs in spacing only. A comparison that read `raw` would
-    // report this as modified.
     const delta = computeSymbolDelta(
       withDecorators([{ ...post(), raw: 'Post("/x")' }], "a"),
       withDecorators([{ ...post(), raw: 'Post( "/x" )' }], "b"),
@@ -472,10 +439,6 @@ describe("Calls delta (I2)", () => {
     expect(delta.calls?.modified).toHaveLength(1)
   })
 })
-
-// -----------------------------------------------------------------------------
-// signature delta three-branch behaviour (backs up the signature-delta JSDoc fix)
-// -----------------------------------------------------------------------------
 
 describe("Signature delta three branches", () => {
   const shared = fp("v1")

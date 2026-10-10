@@ -64,10 +64,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("file scope: a dotted target that cannot form a Symbol id stays unresolved, not fatal", () => {
-    // The candidate id here is built from a qname the id grammar rejects. Resolution asks
-    // "does this callee exist?", and the answer for an unbuildable id is no — the same
-    // answer a well-formed id absent from the Symbol set would get. Aborting the scan
-    // instead would make one odd call expression fail the whole run.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls.not an identifier", line: 3 }])
     const cls = makeSymbol("ts:src/a.ts#Cls", { kind: "class" })
     const result = resolveCallGraph({ symbols: [caller, cls], importsByFile: new Map() })
@@ -168,10 +164,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("import scope: namespace binding uses the local alias even when the specifier basename differs", () => {
-    // `import * as helpers from './my-utilities'` — the module basename is
-    // `my-utilities` (not a legal identifier) but the caller writes
-    // `helpers.helper()`. The resolver must key off the explicit binding, not
-    // the specifier basename.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "helpers.helper", line: 8 }])
     const callee = makeSymbol("ts:src/my-utilities.ts#helper")
     const imports = new Map<string, readonly ImportEdge[]>([
@@ -222,12 +214,6 @@ describe("resolveCallGraph", () => {
     expect(result.edges[0]?.to).toBe("ts:src/util/index.ts#helper")
   })
 
-  /**
-   * CR2 in two further spellings, from two resolution modes. CR2a: under `node16`/`nodenext` a
-   * relative import of `repo.ts` has to be written `./repo.js`. CR2b: `.` and `..` name a
-   * directory's index, which `node` and `bundler` resolution accept and Node ESM, needing a
-   * complete file specifier, does not.
-   */
   describe("import scope: relative specifier spellings (CR2a, CR2b)", () => {
     /** The caller's one call, after checking that its edge agrees with it (CR2: confidence `high`). */
     function resolveFrom(
@@ -400,13 +386,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("keeps the untyped resolution when a receiver hint names a different target", () => {
-    // Untyped result preservation — the untyped answer is authoritative and the LSP tier only
-    // fills
-    // holes. The test above pins that against an empty LSP tier, which passes
-    // just as well if the tier is never reached at all; this one hands the
-    // resolver a hint that actively disagrees, so a refactor that consults
-    // `receiverHints` before checking `resolved` fails here instead of silently
-    // re-pointing edges the untyped tier already justified.
     const caller: IRSymbol = makeSymbol("ts:src/a.ts#Svc.run", {
       calls: [{ target: "this.helper", line: 7, resolved: symbolId("ts:src/a.ts#Svc.helper") }],
     })
@@ -428,11 +407,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("spends a receiver hint only on the call it was produced for, not on its line-mates", () => {
-    // A hint keyed by `(file, line)` alone was applied to whatever else shared
-    // the line, so `sendPaymentToBank()` next to `this.charge()` resolved to
-    // `Svc.charge`: an edge no source line justifies, a `Dependency` the reader
-    // cannot find, and — because the call had a `resolved` — one fewer entry in
-    // the `unresolved` diagnostics that would have shown the mistake.
     const caller = withCalls("ts:src/a.ts#Svc.run", [
       { target: "this.charge", line: 4 },
       { target: "sendPaymentToBank", line: 4 },
@@ -459,10 +433,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("raises rather than silently missing when receiverHints is keyed the pre-0.4 way", () => {
-    // The one way this side channel can fail without a trace: every lookup
-    // misses, the LSP tier adds nothing, and the run looks exactly like one
-    // against a server that had nothing to say. Both key spellings are
-    // `string`, so a caller upgrading from 0.3.0 keeps compiling.
     const caller = withCalls("ts:src/a.ts#Svc.run", [{ target: "this.helper", line: 6 }])
     const helper = makeSymbol("ts:src/a.ts#Svc.helper", { kind: "method" })
     const call = () =>
@@ -494,11 +464,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("refuses a `this` hint aimed at a call with no receiver at all", () => {
-    // The case the `kind` check exists for. The test below pairs a `this.` call
-    // with a `super` hint, where a reader could argue the key is close enough;
-    // here the key matches exactly and the target names a free function, so the
-    // `kind` check is the only thing between a hand-built map and the very edge
-    // this PR is about — `sendPaymentToBank` resolving to a class method.
     const caller = withCalls("ts:src/a.ts#Svc.run", [{ target: "sendPaymentToBank", line: 4 }])
     const charge = makeSymbol("ts:src/a.ts#Svc.charge", { kind: "method" })
     const result = resolveCallGraph({
@@ -517,11 +482,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("refuses a hint whose kind disagrees with the receiver the call names", () => {
-    // The key already carries the target, so the producer cannot file a `super`
-    // hint against a `this.` call — but `receiverHints` is a public input and a
-    // caller assembling one by hand can. A mismatched hint is a hint for some
-    // other call site, and spending it would fabricate the same edge the key
-    // now prevents.
     const caller = withCalls("ts:src/a.ts#Sub.run", [{ target: "this.foo", line: 3 }])
     const foo = makeSymbol("ts:src/a.ts#Base.foo", { kind: "method" })
     const result = resolveCallGraph({
@@ -732,9 +692,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("import scope: cross-file dotted target resolves the composite id when the class Symbol exists over there", () => {
-    // `import { Cls } from './x'; new Cls().method()` — the head `Cls` binds
-    // to `x.ts#Cls`, the tail `method` extends the composite qname, and the
-    // resulting id `ts:src/x.ts#Cls.method` is looked up as a whole.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls.method", line: 5 }])
     const cls = makeSymbol("ts:src/x.ts#Cls", { kind: "class" })
     const method = makeSymbol("ts:src/x.ts#Cls.method", { kind: "method" })
@@ -800,14 +757,7 @@ describe("resolveCallGraph", () => {
     ])
   })
 
-  // ---------------------------------------------------------------------------
-  // Component scope — CR11 / CR13, precedence, dropped, cross-language guard
-  // ---------------------------------------------------------------------------
-
   it("component scope (CR11): qualified name unique within the caller's component resolves with medium confidence", () => {
-    // No explicit import for `PricingService` — the resolver must fall through
-    // file scope (no such Symbol) and import scope (no import), then find the
-    // method Symbol by qname within the same component.
     const caller = withCalls(
       "ts:src/checkout.ts#caller",
       [{ target: "PricingService.calc", line: 5 }],
@@ -830,12 +780,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("component scope: a unique name outside the caller's component falls through to workspace scope", () => {
-    // The tier a cross-package qualified call lands on, which moved when the scan began
-    // populating `component`. With every Symbol carrying `null` the whole workspace was one
-    // component bucket, so this resolved at component scope (`medium`); now component scope
-    // finds nothing in `web` and workspace scope answers with the same callee at `low`. Same
-    // edge, weaker claim — and the claim is the honest one, since nothing about the two
-    // packages says they are one scope.
     const caller = withCalls("ts:apps/web/a.ts#caller", [{ target: "Pricing.calc", line: 5 }], {
       component: "web",
     })
@@ -856,10 +800,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("component scope: does not cross component boundaries", () => {
-    // Two same-named candidates exist workspace-wide but neither shares the
-    // caller's component. Component scope must NOT pick either (its filter is strict);
-    // workspace scope must NOT pick either (workspace ambiguity). Result: no edge — proving
-    // the component filter is real and not accidentally satisfied by workspace scope.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "PricingService.calc", line: 5 }], {
       component: "billing",
     })
@@ -900,9 +840,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("component scope: single-identifier target is not searched (must be qualified)", () => {
-    // `helper` alone must not be resolved through component scope even when a Symbol
-    // named `helper` exists in the same component but a different file —
-    // otherwise file / import scope's "same file / imported only" contract would leak.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 3 }], {
       component: "billing",
     })
@@ -924,10 +861,6 @@ describe("resolveCallGraph", () => {
     const result = resolveCallGraph({ symbols: [caller, dropped], importsByFile: new Map() })
     expect(result.edges).toEqual([])
   })
-
-  // ---------------------------------------------------------------------------
-  // Workspace scope — CR12, ambiguity, cross-language guard, precedence
-  // ---------------------------------------------------------------------------
 
   it("workspace scope (CR12): globally-unique qualified name resolves with low confidence", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "Uniq.method", line: 9 }], {
@@ -1028,8 +961,6 @@ describe("resolveCallGraph", () => {
       symbols: [caller, imported, clsForImport, componentOnly],
       importsByFile: imports,
     })
-    // Import wins: confidence must be high, targeting the imported file — not
-    // medium via the component-scope candidate in y.ts.
     expect(result.edges).toEqual([
       {
         from: "ts:src/a.ts#caller",
@@ -1055,14 +986,7 @@ describe("resolveCallGraph", () => {
     expect(result.edges).toEqual([])
   })
 
-  // ---------------------------------------------------------------------------
-  // Dynamic-dispatch / special targets — CR14, CR15
-  // ---------------------------------------------------------------------------
-
   it("CR14: `this.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
-    // `this` is a runtime value; the untyped tier must not fabricate an edge
-    // to `SomeClass.method` just because the qname `this.method` would
-    // textually match a workspace Symbol.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "this.method", line: 5 }], {
       component: "billing",
     })
@@ -1076,8 +1000,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("`this.#v` in untyped tier stays unresolved, although `C.#v` is now a Symbol it could name", () => {
-    // The grammar used to refuse `C.#v`, which kept this target unresolvable twice over. It is
-    // a legitimate Symbol now, so only the `this` guard keeps the untyped tier off it.
     const caller = withCalls("ts:src/a.ts#C.bar", [{ target: "this.#v", line: 5 }], {
       component: "billing",
     })
@@ -1088,10 +1010,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("`super.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
-    // Symmetric guard to CR14 — `super` resolves through the class hierarchy,
-    // which only the LSP tier can see. Without a dedicated test the `super`
-    // branch of the special-target guard could be dropped in a refactor without any
-    // regression being caught.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "super.method", line: 5 }], {
       component: "billing",
     })
@@ -1105,11 +1023,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("parameter shadow also blocks component / workspace scope for dotted targets", () => {
-    // If component / workspace scope ran before the parameter guard — or if the guard
-    // only covered file / import scope — a caller parameter named `helper` could still
-    // resolve to a workspace Symbol `helper.method` through component or
-    // workspace scope. The step order in call-resolution.md must ensure parameters
-    // short-circuit every subsequent scope, not just the file / import scopes.
     const caller = makeSymbol("ts:src/a.ts#caller", {
       component: "billing",
       signature: {
@@ -1141,8 +1054,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("CR15: `new ClassName()` resolves the class Symbol via imports (confidence high)", () => {
-    // `walkBody` normalizes `new Cls()` to the callee identifier `Cls`; that
-    // reaches import scope and lands on the class Symbol with confidence high.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls", line: 6 }])
     const cls = makeSymbol("ts:src/x.ts#Cls", { kind: "class" })
     const imports = new Map<string, readonly ImportEdge[]>([
@@ -1251,12 +1162,6 @@ describe("resolveCallGraph", () => {
 
   describe("resolveCallGraph — integrated resolution matrix", () => {
     it("resolves intra-file / intra-package / cross-package / dynamic in one run", () => {
-      // caller invokes four callees in one body — each one exercises a
-      // distinct tier of the resolver:
-      //   L10 same-file       → high  (file scope)
-      //   L20 same-component  → medium (component scope)
-      //   L30 workspace-only  → low    (workspace scope)
-      //   L40 dynamic (this.) → null   (special target — no edge)
       const caller = makeSymbol("ts:src/a.ts#caller", {
         component: "billing",
         calls: [
@@ -1355,8 +1260,6 @@ describe("reconstructCallEdgesFromIR", () => {
     expect(reconstructCallEdgesFromIR(ir)).toEqual([])
   })
 
-  // ir-schema.md does not model per-call confidence; the reconstructed edge uses the
-  // containing Symbol's confidence as a defensible floor.
   it.each<Confidence>([
     "high",
     "low",
@@ -1413,9 +1316,6 @@ describe("reconstructCallEdgesFromIR", () => {
     ])
   })
 
-  // The determinism case in the resolution matrix above pins `resolveCallGraph`, which is a
-  // different function reached by a different path: this one reads an already-resolved
-  // Document and has its own sort, so nothing above would catch it drifting.
   it("is deterministic — repeated invocations return byte-identical output", () => {
     const ir = minimalIR()
     ir.symbols = [

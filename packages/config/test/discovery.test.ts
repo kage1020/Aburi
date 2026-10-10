@@ -7,9 +7,6 @@ import { findConfig } from "../src/index"
 describe("findConfig", () => {
   let tmp: string
   beforeEach(async () => {
-    // On macOS `os.tmpdir()` is a symlink (`/tmp` → `/private/tmp`), and `process.cwd()`
-    // after `chdir` returns the resolved path; `realpath` keeps the string-equal assertion
-    // below true.
     tmp = await realpath(await mkdtemp(join(tmpdir(), "aburi-discovery-test-")))
   })
   afterEach(async () => {

@@ -34,17 +34,6 @@ interface OwnedExtKind {
   owner: PluginManifest
 }
 
-/**
- * Stable JSON serialization for manifest equality (idempotent `register`). Keys are
- * sorted deeply so logically-identical manifests round-trip to identical strings.
- *
- * `register` accepts any object typed `PluginManifest` — TS cannot guarantee the
- * caller actually went through `parsePluginManifest`. A naive `JSON.stringify` would
- * silently coerce `Date` / class instances / `Map` / `undefined` / functions into
- * lossy forms, making two non-equal manifests look identical and short-circuiting
- * the `name-collision` guard. Reject those values explicitly so the failure mode
- * is loud rather than a silent no-op re-register.
- */
 function stableStringify(value: unknown, path = "$"): string {
   if (value === null) return "null"
   const t = typeof value
@@ -59,8 +48,6 @@ function stableStringify(value: unknown, path = "$"): string {
   if (Array.isArray(value)) {
     return `[${value.map((v, i) => stableStringify(v, `${path}[${i}]`)).join(",")}]`
   }
-  // Reject non-plain objects (Date, Map, Set, RegExp, class instances, …). Their
-  // structural shape would either crash the recursion or serialise as `{}`.
   const proto = Object.getPrototypeOf(value as object)
   if (proto !== Object.prototype && proto !== null) {
     const ctor = (value as { constructor?: { name?: string } }).constructor?.name ?? "unknown"
@@ -76,11 +63,6 @@ function stableStringify(value: unknown, path = "$"): string {
   return `{${entries.join(",")}}`
 }
 
-/**
- * What each provides.* array holds: the fields an object entry must own as strings, or "string"
- * for an array of strings. Keyed by `Provides`, so an array the schema adds fails typecheck here
- * until its entries are described.
- */
 const PROVIDES_ENTRIES = {
   effects: ["id", "description"],
   effectPrefixes: "string",
@@ -108,11 +90,6 @@ function raise(
   )
 }
 
-/**
- * Concrete VocabRegistry. Each `register` call validates the manifest on its own, then against
- * the current registry state; each `#validate*` method says what it checks. All checks pass
- * before any mutation, so a failing register leaves the registry untouched.
- */
 export class VocabRegistry implements VocabRegistryContract {
   readonly #pluginsByName = new Map<string, PluginManifest>()
   readonly #pluginsStable = new Map<string, string>()
@@ -123,25 +100,10 @@ export class VocabRegistry implements VocabRegistryContract {
   readonly #frameworks = new Map<string, FrameworkVocab>()
   readonly #derivedByPrefixes = new Map<string, OwnedPrefix>()
 
-  /**
-   * Validate and register a plugin manifest. Idempotent: re-registering the same
-   * (name, content) is a no-op. Re-registering a name with different content
-   * throws `name-collision`.
-   */
   register(manifest: PluginManifest): void {
     this.#register(manifest, null)
   }
 
-  /**
-   * Register the manifest the config loader synthesised from one `frameworkHints` entry.
-   *
-   * `framework:hint` is reserved so that a hint can own a namespace under it, and this is the
-   * only way to hand one out: the hint's extKinds are written `framework:acme:controller` and
-   * stored as `framework:hint:acme:controller` (`config.md` §8.3.1), so `register` refused the
-   * prefix the loader had just derived and every command stopped at startup. An imported plugin
-   * goes through `register` and still cannot claim anything under it, and a hint still cannot
-   * claim `framework:hint` itself or any other reserved namespace.
-   */
   registerHint(manifest: PluginManifest): void {
     this.#register(manifest, HINT_NAMESPACE)
   }
@@ -161,9 +123,6 @@ export class VocabRegistry implements VocabRegistryContract {
       )
     }
 
-    // Reserved-namespace check runs first because it is the strongest invariant
-    // (no plugin may ever own those names, regardless of type). Type-namespace and
-    // xPrefix checks are plugin-class concerns that come second.
     this.#validateReserved(manifest, granted)
     this.#validateTypeNamespaces(manifest)
     this.#validateXPrefix(manifest)
@@ -198,16 +157,6 @@ export class VocabRegistry implements VocabRegistryContract {
     }
   }
 
-  // ---------- Validations ----------
-
-  /**
-   * Pre-flight: the schema requires a string name, every provides.* array and the shape of each
-   * entry, but `register` accepts any value typed PluginManifest at runtime (e.g. a hand-built
-   * object skipping `loadPluginManifest`). Without this check, a malformed manifest would
-   * `TypeError` inside a later validation, as `Cannot read properties of null (reading 'id')`.
-   * Surface a coded error instead. Hand-rolled rather than the schema's `validate()`, which would
-   * also hold in-memory callers to `pattern`, `additionalProperties` and the `baseKind` enum.
-   */
   #assertProvidesShape(m: PluginManifest): void {
     if (typeof m.name !== "string") {
       raise(
@@ -305,17 +254,6 @@ export class VocabRegistry implements VocabRegistryContract {
     for (const p of m.provides.extKindPrefixes) checkRoot(p, "extKind prefix")
   }
 
-  /**
-   * Refuse an id `m` declares twice, or two of its own prefixes where one nests under the other.
-   * `#validateConflicts` compares a manifest only with the plugins already registered. For ids,
-   * the commit is a `Map.set` per entry, so the later declaration would replace the earlier
-   * whatever the two said; for prefixes, both would register, and a lookup under both would match
-   * two prefixes and trip `#uniquePrefixOwner`'s invariant. Effect prefixes cannot nest:
-   * `#validateTypeNamespaces` refuses them for every type but `effects`, and `#validateXPrefix`
-   * makes each one there equal `x-<xPrefix>`. An exact repeat is left alone: the schema's
-   * `uniqueItems` refuses it in a manifest file, and it cannot give a lookup two owners. Each list
-   * is checked on its own, since a framework plugin writes one string in both.
-   */
   #validateOwnDuplicates(m: PluginManifest): void {
     const checkOnce = (kind: string, entries: readonly { id: string }[]): void => {
       const seen = new Set<string>()
@@ -563,15 +501,6 @@ export class VocabRegistry implements VocabRegistryContract {
     }
   }
 
-  // ---------- Query API ----------
-
-  /**
-   * Returns the single prefix in `prefixes` that owns `id`, or `null` if none does.
-   * Throws an invariant error if more than one prefix matches — that would mean
-   * conflict detection let an overlap slip through and the registry's view of
-   * ownership is no longer well-defined. `code` is the one `register` raises for the map's
-   * overlaps, so the error names the check that should have fired.
-   */
   #uniquePrefixOwner(
     id: string,
     prefixes: Map<string, OwnedPrefix>,

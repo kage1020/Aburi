@@ -15,13 +15,6 @@ import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { classifyPrismaCall } from "../src/index"
 
-/**
- * End-to-end: parse a TypeScript source through `@aburi/lang-typescript`, walk each
- * Symbol's body to produce CallCandidate[], and confirm that the Prisma classifier
- * assigns the right effect ids per call. Locks the wire between call extraction in the
- * language plugin and effect classification here.
- */
-
 async function classifyCalls(
   path: string,
   source: string,
@@ -148,10 +141,6 @@ export async function listUsers() {
   })
 
   it("classifies inner tx callback calls (tx.user.create inside $transaction) as db.write", async () => {
-    // The callback form `prisma.$transaction(async (tx) => tx.user.create(...))` is the
-    // idiomatic interactive transaction pattern. Each nested call has its own target so
-    // the classifier sees them independently — pin that the inner target classifies as
-    // a normal write.
     const results = await classifyCalls(
       "src/services/tx.ts",
       `import { PrismaClient } from "@prisma/client"
@@ -168,10 +157,6 @@ export async function moveUser(prisma: PrismaClient) {
   })
 
   it("does not fabricate a high-confidence db.write for a Map beside the client", async () => {
-    // The reported reproduction: one class holding both a PrismaClient and a plain Map
-    // cache. `this.cache.items.delete(key)` has three segments and a delegate verb inside
-    // a file that imports Prisma, which is everything the old shape gate asked for. The
-    // receiver is the only thing that separates it from the write on the next line.
     const results = await classifyCalls(
       "src/cache.ts",
       `import { PrismaClient } from "@prisma/client"
@@ -196,8 +181,6 @@ export class Repo {
   })
 
   it("keeps a write whose argument list carries a comment", async () => {
-    // Comments are grammar `extras`: tree-sitter hangs them inside the argument list, and
-    // counting them made this a two-argument call, which no delegate method takes.
     const results = await classifyCalls(
       "src/services/commented.ts",
       `import { PrismaClient } from "@prisma/client"

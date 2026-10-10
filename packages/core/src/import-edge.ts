@@ -42,14 +42,6 @@ export interface ImportBinding {
   local: string
 }
 
-/**
- * Split one `ImportEdge.symbols` entry into its exported and local names.
- *
- * `"X as Y"` → `{ imported: "X", local: "Y" }`; `"X"` → `{ imported: "X", local: "X" }`.
- * Surrounding whitespace is trimmed on both branches, because a plugin is free to have
- * written the entry with the spacing of the source and the separator is matched on the first
- * ` as ` rather than by re-tokenizing.
- */
 export function splitAliasedImportName(raw: string): ImportBinding {
   const marker = " as "
   const idx = raw.indexOf(marker)

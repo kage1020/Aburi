@@ -42,18 +42,12 @@ describe("tRPC terminal vocabulary", () => {
   })
 
   it("keeps the three families pairwise disjoint at the type level", () => {
-    // Fails at `pnpm typecheck` rather than at test time, so a terminal added to two
-    // `_LIST`s is caught before the runtime pass below even runs. `terminalFamily`'s
-    // dispatch order in classify.ts is only meaningless while this holds — an overlap
-    // would make the emitted derivedBy suffix silently depend on branch order.
     expectTypeOf<Extract<TrpcQueryTerminal, TrpcMutationTerminal>>().toBeNever()
     expectTypeOf<Extract<TrpcQueryTerminal, TrpcSubscriptionTerminal>>().toBeNever()
     expectTypeOf<Extract<TrpcMutationTerminal, TrpcSubscriptionTerminal>>().toBeNever()
   })
 
   it("keeps the three families pairwise disjoint", () => {
-    // A terminal appearing in two families would make the classifier's dispatch order
-    // load-bearing; the derivedBy suffix it emits would silently depend on branch order.
     for (const [nameA, setA] of ALL_SETS) {
       for (const [nameB, setB] of ALL_SETS) {
         if (nameA === nameB) continue
@@ -83,8 +77,6 @@ describe("tRPC terminal vocabulary", () => {
     "input",
     "output",
   ])("excludes the server-side router vocabulary term %s from every family", (terminal) => {
-    // Server-side procedure builders are a Boundary concern, not an effect. Including
-    // any of these would turn a router definition into a `network.rpc` call site.
     for (const [, set] of ALL_SETS) expect(set.has(terminal)).toBe(false)
   })
 

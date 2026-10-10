@@ -2,22 +2,12 @@ import { parseTypescriptFile } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
 import { findReturnedJsxElementName, hasJsxReturn, isProviderElementName } from "../src/index"
 
-/**
- * Parse a TSX source and return the root node. Kept for `hasJsxReturn` tests where the
- * walker is deliberately loose (any JSX descendant counts).
- */
 async function parseRoot(source: string): Promise<unknown> {
   const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
   if (result.tree === null) throw new Error("parse returned null")
   return result.tree.rootNode
 }
 
-/**
- * Parse and return the body node of the first `function_declaration` / `arrow_function`
- * found — matches how the plugin uses `symbol.bodyNode` in production (extractSymbols
- * hands the statement_block, not the program root). Provider-detection walkers stop at
- * nested function scopes, so we have to hand them the actual body.
- */
 async function parseFunctionBody(source: string): Promise<unknown> {
   const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
   if (result.tree === null) throw new Error("parse returned null")
@@ -105,9 +95,6 @@ describe("findReturnedJsxElementName", () => {
   })
 
   it("ignores JSX helpers defined above the return and picks the returned element", async () => {
-    // Regression: pre-order walk would surface the helper's <div> before the
-    // <Ctx.Provider>, causing provider detection to miss real Providers. The returned-
-    // JSX walker must skip past helper JSX literals and pull the return statement's own.
     const body = await parseFunctionBody(
       "function Provider({ children }) { const badge = <div /> ; return <Ctx.Provider>{children}</Ctx.Provider> }",
     )
@@ -115,8 +102,6 @@ describe("findReturnedJsxElementName", () => {
   })
 
   it("does not descend into nested function scopes when finding the return", async () => {
-    // The outer function returns null; a nested arrow returns <div/>. The outer's
-    // returned JSX should be null, not "div".
     const body = await parseFunctionBody(
       "function Outer() { const cb = () => <div /> ; return null }",
     )

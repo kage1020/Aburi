@@ -1,19 +1,9 @@
 name: Docs
 
-# The site ships with the release, not with the merge. `workflow_call` is how
-# release.yml deploys it in the same run that publishes to npm, so what
-# aburi.kage1020.com documents is always a version that exists on the registry.
-# `workflow_dispatch` is the way out of that coupling: a typo fix, or a broken
-# link, does not have to wait for the next release to be visible.
 on:
   workflow_call:
   workflow_dispatch:
 
-# A deploy moves live traffic, so two of them must not overlap — the loser of
-# that race decides what the site serves. Queue instead, and never cancel the
-# run that is already mid-deploy. The group is deliberately not keyed on
-# `github.ref`: there is one production site, and a dispatch from a branch is
-# competing for exactly the same thing as the release.
 concurrency:
   group: docs-deploy
   cancel-in-progress: false
@@ -23,24 +13,19 @@ permissions:
 
 jobs:
   deploy:
-    name: deploy to aburi.kage1020.com
-    # A fork has neither the Cloudflare credentials nor any business deploying
-    # this domain; without the guard a dispatch there fails on a missing secret.
+    name: Deploy
     if: github.repository == 'kage1020/Aburi'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          # VitePress' `lastUpdated` reads each page's timestamp out of the git
-          # log. A shallow clone has one commit, so every page in the site would
-          # claim it was updated the moment this workflow ran.
           fetch-depth: 0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -48,27 +33,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # `@aburi/docs` has no workspace dependencies, so `--filter` here builds
-      # the whole site and nothing else: the packages have already been built,
-      # tested and published by the time the release calls this workflow, and
-      # rebuilding them would only add minutes to a deploy.
       - name: Build the site
         run: pnpm turbo run build --filter=@aburi/docs
 
-      # Wrangler is deliberately not a workspace dependency. It pulls in ~300
-      # packages and a `workerd` build-script approval, which every `pnpm
-      # install --frozen-lockfile` in CI would pay for — on three operating
-      # systems — to serve this one job. The action brings its own copy.
-      #
-      # npm publishing upstream authenticates over OIDC and keeps no token;
-      # Cloudflare has no equivalent, so these two repository secrets are
-      # required: CLOUDFLARE_API_TOKEN (Workers Scripts: Edit) and
-      # CLOUDFLARE_ACCOUNT_ID.
-      # `@v4` rather than `@v3` for the Wrangler it brings. `docs/wrangler.jsonc` is an
-      # assets-only Worker — static files, no `main` — and the 3.90.0 that `@v3` pins
-      # answers that config with "Missing entry-point", which is how the first real run of
-      # this job failed. Reproduced against this exact config: 3.90.0 errors that way, 4.x
-      # reads the assets directory and deploys. The action's v4 defaults to Wrangler 4.
       - name: Deploy
         uses: cloudflare/wrangler-action@v4
         with:

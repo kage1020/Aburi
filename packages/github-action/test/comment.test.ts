@@ -389,8 +389,6 @@ describe("upsertPullRequestComment", () => {
       userResponse,
       expected,
     }) => {
-      // Read as "an installation token", any of these would give up the login match for a
-      // personal token: a duplicate report, or another bot's comment rewritten.
       const { fetch, calls } = makeFakeFetch({ listPages: [[ours]], userStatus, userResponse })
       await expect(
         upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
@@ -445,9 +443,6 @@ describe("the comment-body size limit", () => {
   })
 
   it("refuses an oversized body before touching the API", async () => {
-    // GitHub answers this with a bare 422 that never says "too large", and only after the list
-    // call has paged through every comment on the pull request. The message here names the size
-    // and the flag that renders a smaller one.
     const { fetch, calls } = makeFakeFetch({ listPages: [[]] })
     await expect(
       upsertPullRequestComment({
@@ -462,8 +457,6 @@ describe("the comment-body size limit", () => {
   })
 
   it("advises a budget derived from the marker actually in use", async () => {
-    // A caller with a longer marker that re-rendered at the default 65507 would overflow again,
-    // on the advice of this very message.
     const marker = "<!-- a much longer marker than the default one -->"
     const budget = 65536 - Buffer.byteLength(`${marker}\n\n`, "utf8")
     const { fetch } = makeFakeFetch({ listPages: [[]] })

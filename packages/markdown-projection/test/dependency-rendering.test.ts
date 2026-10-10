@@ -40,9 +40,6 @@ describe("workspace mermaid dependencies (symbol-edge exclusion)", () => {
       ],
     })
     const md = projectWorkspace(ir)
-    // The symbol-only edge is excluded from the workspace mermaid, but the declared
-    // component still appears as a standalone node (isolated components must not
-    // disappear from the L0 monorepo view).
     expect(md).toContain("graph LR")
     expect(md).toContain('billing["Billing"]')
     expect(md).not.toContain("Fallback list:")
@@ -107,9 +104,6 @@ describe("workspace mermaid graph — all-component enumeration", () => {
   })
 
   it("sanitizes distinct ComponentId inputs to distinct mermaid node ids (injectivity)", () => {
-    // If ir-schema.md ever admits `_` in ComponentId, this test breaks first — the
-    // sanitizer's `- → _` mapping would stop being injective and node lines would
-    // collide silently in the rendered graph.
     const ids = ["billing", "billing-api", "billing-api-v2", "a", "ab-c", "abc"]
     const ir = makeIR({
       components: ids.map((id) => component({ id, name: id })),
@@ -132,10 +126,6 @@ describe("workspace mermaid graph — all-component enumeration", () => {
   })
 
   it("escapes mermaid-hostile characters in component names so the label syntax stays valid", () => {
-    // Each character below would silently break the graph render if it slipped
-    // through raw: `"` closes the label, `]` closes the node, `<`/`>` break
-    // out into raw HTML, `\n` splits the mermaid statement, and `&` in raw
-    // form would corrupt any subsequent HTML entity.
     const ir = makeIR({
       components: [component({ id: "foo", name: 'A "b" & <c> [d]\nnext' })],
     })
@@ -172,9 +162,6 @@ describe("workspace mermaid graph — all-component enumeration", () => {
   })
 
   it("keeps the Fallback list header when the mermaid block is dropped due to the cap", () => {
-    // 60 components + 60 edges to non-declared endpoints → 120 union nodes
-    // (well above the cap) while producing a non-empty component-edge list.
-    // The reviewer still needs the bullet list AND the label that marks it.
     const components = Array.from({ length: 60 }, (_, i) =>
       component({ id: `c-${String(i).padStart(3, "0")}`, name: `C${i}` }),
     )
@@ -192,9 +179,6 @@ describe("workspace mermaid graph — all-component enumeration", () => {
   })
 
   it("counts a stray edge endpoint (not declared in ir.components) toward the union gate", () => {
-    // `stray` never appears in `ir.components` but is a `to` endpoint. The
-    // mermaid graph must still emit the edge (readers need to see the arrow
-    // land somewhere) and the union gate must count `stray` as a node.
     const ir = makeIR({
       components: [component({ id: "billing", name: "Billing" })],
       dependencies: [dependency({ from: "billing", to: "stray" })],
@@ -204,8 +188,6 @@ describe("workspace mermaid graph — all-component enumeration", () => {
     expect(md).toContain('billing["Billing"]')
     expect(md).toContain("billing --> stray")
     expect(md).toContain("- billing → stray (via `import`)")
-    // `stray` has no `Component.name` so it has no label declaration line —
-    // mermaid still renders it as a bare-id node.
     expect(md).not.toContain('stray["')
   })
 })

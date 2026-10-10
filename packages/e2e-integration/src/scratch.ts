@@ -10,10 +10,6 @@ export interface ScratchWorkspace {
   writeSource(rel: string, content: string): Promise<void>
 }
 
-/**
- * An empty directory per test, created in `beforeEach` and removed in `afterEach`. Call it
- * at module scope; `prefix` names the tmpdir so a leaked one can be traced to its suite.
- */
 export function useScratchWorkspace(prefix: string): ScratchWorkspace {
   let root = ""
 

@@ -1,6 +1,3 @@
-// NestJS decorator vocabulary. Every extKind here must stay under `framework:nestjs`, the
-// prefix the manifest declares ownership of.
-
 /** Class-level decorators → extKind plus the semantic role `classifyClass` puts in `derivedBy`. */
 export const NESTJS_CLASS_DECORATORS: ReadonlyMap<string, { extKind: string; role: string }> =
   new Map([

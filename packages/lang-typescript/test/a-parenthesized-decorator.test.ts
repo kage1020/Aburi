@@ -2,19 +2,6 @@ import { UNNAMED_DECORATOR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { byId, importsOf, symbolsOf } from "./fixtures/ctx"
 
-/**
- * `@(expr)` is legal TypeScript, and the grammar parses a name, a member path or a call in
- * those parentheses cleanly. The parentheses change nothing about which decorator it is, so
- * the extractor reads through them: `@(Controller)` is `Controller` and has to match what
- * `@Controller` matches.
- *
- * TypeScript accepts any expression there, but the grammar does not, so `@(x as any)` reaches
- * the extractor only through error recovery, beside a fragment that is not the decorator. It
- * keeps its place in the list under `UNNAMED_DECORATOR`, with its text in `raw`, because the
- * alternative — the text as the name — put arbitrary source, line breaks included, into a
- * field every consumer treats as an identifier.
- */
-
 const decoratorsOf = async (source: string) =>
   byId(await symbolsOf([source, "export class C {}", ""].join("\n")), "#C").decorators
 
@@ -23,8 +10,6 @@ const errorsOf = async (source: string) =>
 
 describe("a decorator written in parentheses", () => {
   it("imports the marker from a built @aburi/types", () => {
-    // Against a stale build the import is `undefined`, and every LP14h case below would compare
-    // `undefined` with `undefined` and pass.
     expect(UNNAMED_DECORATOR).toBe("<expression>")
   })
 
@@ -64,8 +49,6 @@ describe("a decorator written in parentheses", () => {
   })
 
   it("LP14g: keeps the name when only an argument is broken, as the unparenthesized form does", async () => {
-    // The repair is inside the argument list, not in the head, which is what an editor sees on
-    // every keystroke between the parentheses.
     for (const written of ["@(Controller(a b))", "@Controller(a b)"]) {
       expect(await errorsOf(written)).toBeGreaterThan(0)
       const [decorator] = await decoratorsOf(written)
@@ -92,9 +75,6 @@ describe("a decorator written in parentheses", () => {
     ["an optional chain", "@(a?.C)"],
     ["a path missing its property", "@(nest.)"],
   ])("LP14h: gives %s, which the grammar had to repair, no name", async (_label, written) => {
-    // Each of these is valid TypeScript that the grammar's decorator rule does not take, so
-    // the parse carries an ERROR node beside a fragment: `x`, `a`, `C`, a call of `new`.
-    // Naming the decorator after that fragment would be a guess.
     expect(await errorsOf(written)).toBeGreaterThan(0)
     expect(await decoratorsOf(written)).toStrictEqual([
       {

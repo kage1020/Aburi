@@ -17,13 +17,6 @@ import type {
   SymbolId,
 } from "@aburi/types"
 
-/**
- * Brand a literal as a Symbol id. Fixtures are one of the boundary layers where an id is
- * asserted rather than constructed (ir-schema.md): several suites feed *malformed* ids to the
- * code that exists to reject them, which routing through `makeSymbolId` would make
- * unwritable. Production code has no such need and reaches a `SymbolId` only through
- * `makeSymbolId` / `trySymbolId` in `@aburi/core`.
- */
 export function symbolId(raw: string): SymbolId {
   return raw as SymbolId
 }
@@ -48,11 +41,6 @@ export function endpoint(raw: string): DependencyEndpoint {
   return raw as DependencyEndpoint
 }
 
-/**
- * Compact Symbol builder. Every field carries a schema-satisfying default so cases only spell
- * out what they intend to change; id-shaped fields are widened back to `string` so cases keep
- * writing literals, and the branding happens here, once.
- */
 export function makeSymbol(
   overrides: Omit<Partial<IRSymbol>, "id" | "component"> & {
     id: string
@@ -126,12 +114,6 @@ export function rule(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
   }
 }
 
-/**
- * A body that names something on the logic axis: one guard on `condition`. `fp(seed)` gives a
- * fixture a logic hash with no body behind it, and the diff's stage 3 decides whether a shared
- * hash is evidence from the body itself (`logicNamesNothing`), so a fixture meaning "these two
- * share a real body" gives both this as well as the hash.
- */
 export function guardedBody(condition: string): Rule[] {
   return [rule({ type: "guard", condition })]
 }

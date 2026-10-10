@@ -1,17 +1,3 @@
-/**
- * Generates every Aburi brand asset from a single source of truth: the mark's cell
- * pattern is the first 16 bits of the project's own fingerprint.
- *
- *   pattern = sha256("@aburi/core").hex.slice(0, 4) === "5e72"
- *
- * Each hex digit is one row of the 4x4 grid, most significant bit on the left. A set
- * bit is a filled square (the Symbol surfaced by a scan); a clear bit is a small dot
- * (still latent). Nothing here is hand-placed — change the input string and the mark
- * changes with it, which is why the derivation is asserted rather than assumed.
- *
- * Run with `node brand/generate.mjs`. Output is byte-for-byte reproducible.
- */
-
 import { createHash } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -25,7 +11,6 @@ const PUBLIC = join(ROOT, "docs", "public")
 const FINGERPRINT_INPUT = "@aburi/core"
 const EXPECTED_NIBBLES = "5e72"
 
-/** Mirrors packages/core/src/fingerprint/hash.ts — sha256 of the UTF-8 bytes, first 12 hex chars. */
 function fingerprint(text) {
   return createHash("sha256").update(text, "utf8").digest("hex").slice(0, 12)
 }
@@ -39,7 +24,6 @@ if (nibbles !== EXPECTED_NIBBLES) {
   )
 }
 
-/** Cells the fingerprint sets, as [column, row] pairs. Row r is nibble r, MSB leftmost. */
 const setCells = []
 const clearCells = []
 for (let row = 0; row < 4; row++) {
@@ -61,9 +45,7 @@ const COLOR = {
   monoLatentOnDark: "#605B54",
 }
 
-/** Full mark: 4x4 at pitch 13 from origin 7 — 11px squares, 5px dots centred in their cell. */
 const GRID = { origin: 7, pitch: 13, cell: 11, dot: 5 }
-/** Small mark (<= 24px): the grid bleeds to the edges so cells land on whole device pixels. */
 const SMALL = { origin: 0, pitch: 16, cell: 12 }
 
 const at = (i, { origin, pitch }) => origin + i * pitch
@@ -84,18 +66,11 @@ const rect = ({ x, y, w, h }) => `<rect x="${x}" y="${y}" width="${w}" height="$
 const group = (fill, boxes) =>
   boxes.length ? `<g fill="${fill}">${boxes.map(rect).join("")}</g>` : ""
 
-/**
- * Deliberately no width/height: a mark carrying an intrinsic 64px renders at 64px
- * wherever the surrounding CSS only caps it — VitePress's hero, for one, sets a
- * `max-width` and nothing else, so the logo came out the size of a favicon. With
- * just the viewBox the asset takes the size it is given.
- */
 function svg(body, { size = 64, background } = {}) {
   const ground = background ? `<rect width="${size}" height="${size}" fill="${background}"/>` : ""
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="Aburi">${ground}${body}</svg>\n`
 }
 
-/** Reading order — left to right, top to bottom — so the reveal follows how the grid is read. */
 const readingOrder = [...setCells].sort((a, b) => a[1] - b[1] || a[0] - b[0])
 
 function animatedBody() {
@@ -134,8 +109,6 @@ const files = {
   "mark-small.svg": svg(group(COLOR.sear, squares(setCells, SMALL))),
   "mark-animated.svg": svg(animatedBody()),
 }
-
-/** --- PNG ------------------------------------------------------------------ */
 
 const crcTable = Array.from({ length: 256 }, (_, n) => {
   let c = n
@@ -183,10 +156,6 @@ const rgba = (hex, alpha = 255) => [
   alpha,
 ]
 
-/**
- * Paints axis-aligned boxes given in viewBox units. Every edge in the mark is a
- * multiple of the pitch, so rounding to device pixels never splits a cell.
- */
 function paint(width, height, background, boxes, { scale, offsetX = 0, offsetY = 0 }) {
   const pixels = Buffer.alloc(width * height * 4)
   if (background) {
@@ -210,7 +179,6 @@ function paint(width, height, background, boxes, { scale, offsetX = 0, offsetY =
 
 const withFill = (boxes, fill) => boxes.map((box) => ({ ...box, fill }))
 
-/** Favicons drop the latent dots — below 24px they are smaller than a device pixel. */
 const faviconBoxes = withFill(squares(setCells, SMALL), COLOR.sear)
 const favicons = Object.fromEntries(
   [16, 32, 48].map((size) => [
@@ -219,7 +187,6 @@ const favicons = Object.fromEntries(
   ]),
 )
 
-/** Apple touch icons are composited on an opaque tile, so the mark keeps its contrast. */
 const appleTouch = paint(
   180,
   180,
@@ -231,7 +198,6 @@ const appleTouch = paint(
   { scale: (180 * 0.68) / 64, offsetX: 180 * 0.16, offsetY: 180 * 0.16 },
 )
 
-/** Social preview: the mark alone on ink. Title and description come from the meta tags. */
 const OG = { width: 1200, height: 630, mark: 416 }
 const og = paint(
   OG.width,
@@ -248,8 +214,6 @@ const og = paint(
   },
 )
 
-/** --- write ---------------------------------------------------------------- */
-
 mkdirSync(OUT, { recursive: true })
 const written = []
 for (const [name, contents] of Object.entries(files)) {
@@ -265,7 +229,6 @@ written.push("brand/apple-touch-icon.png")
 writeFileSync(join(OUT, "og.png"), og)
 written.push("brand/og.png")
 
-/** The site's favicon lives at the root so browsers find it without a hint. */
 writeFileSync(join(PUBLIC, "favicon.svg"), files["mark-small.svg"])
 written.push("favicon.svg")
 

@@ -21,15 +21,6 @@ import {
 import { spend } from "../fixtures/clock"
 import { stubCandidate, stubFile, stubLanguagePlugin } from "../fixtures/plugins"
 
-/**
- * `parseTimeoutMs` is a cooperative deadline: `extractSymbols` and `walkBody` are
- * synchronous plugin calls the runtime cannot preempt, so the budget is read where
- * control comes back to the pipeline. These tests make a stub plugin *deliberately spend*
- * the time rather than mocking a clock — the over-budget cases can only fail in the
- * direction of spending more, never less, so a slow machine cannot flake them. The
- * under-budget cases pass a budget large enough that no machine could blow it.
- */
-
 interface StubTiming {
   parseMs?: number
   extractMs?: number
@@ -79,8 +70,6 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
     effects: [],
     registry: noopRegistry,
     vocab: new VocabCheck(noopRegistry, true),
-    // Through the config rather than beside it: the pipeline reads its budgets from the
-    // same object production hands it, so a test cannot exercise a path the CLI cannot.
     config: parseTimeoutMs === undefined ? {} : { parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
     component: null,
@@ -92,9 +81,6 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
 }
 
 describe("parse deadline budget", () => {
-  // Against the schema rather than against a literal: the constants exist to mirror it, so
-  // a test that repeated the numbers would be a third copy and would stay green while the
-  // two that matter drifted apart.
   const spec = configSchema.properties.parseTimeoutMs
 
   it("defaults to what the config schema documents", () => {
@@ -103,8 +89,6 @@ describe("parse deadline budget", () => {
   })
 
   it("clamps a value below the schema minimum up to it", () => {
-    // Only reachable programmatically — ajv refuses a config file that says less than this
-    // long before `startParseDeadline` sees it.
     expect(startParseDeadline(1).budgetMs).toBe(PARSE_TIMEOUT_MIN_MS)
     expect(PARSE_TIMEOUT_MIN_MS).toBe(spec.minimum)
   })
@@ -129,12 +113,7 @@ describe("runFilePipeline — parse deadline", () => {
     )
     expect(result.kind).toBe("parse-timeout")
     expect(calls.extract).toBe(1)
-    // 60 ms a candidate against 100: the check before the third is the first that can
-    // find the budget spent, and a slower machine only finds it sooner.
     expect(calls.walk.length).toBeLessThanOrEqual(2)
-    // The Symbols already built go with the rest. This is the contract that makes the
-    // outcome binary rather than a function of how fast the machine was — and it is the
-    // type that says so now: an abandoned file has no key to put them under.
     expect("symbols" in result).toBe(false)
     expect("imports" in result).toBe(false)
   })
@@ -149,16 +128,11 @@ describe("runFilePipeline — parse deadline", () => {
   })
 
   it("reports a file with no tree as a parse failure rather than as a timeout", async () => {
-    // One outcome per file, so the two cannot both be reported — the withdrawal is decided
-    // before the first deadline reading, and a file that carried both would be labelled by
-    // whichever the caller tested first.
     const { result } = await run({ parseMs: 250, noTree: true }, 100)
     expect(result.kind).toBe("parse-failed")
   })
 
   it("reports a refused file as a parse failure even when the parse also blew the budget", async () => {
-    // The other half of the same exclusion. Reported as a timeout, a plugin's outright
-    // refusal would send the reader to raise a budget that was never the problem.
     const parseErrors: readonly ParseError[] = [
       { message: "wrong dialect", line: 1, column: 1, recoverable: false },
     ]
@@ -167,9 +141,6 @@ describe("runFilePipeline — parse deadline", () => {
   })
 
   it("abandons a file whose extraction blew the budget and found nothing to walk", async () => {
-    // With no candidates the per-candidate check never runs, so this is the only reading
-    // that can catch a file that spent everything inside `extractSymbols`. Reported as a
-    // timeout rather than as a file that legitimately holds no Symbols.
     const { result, calls } = await run({ candidates: [], extractMs: 250 }, 100)
     expect(result.kind).toBe("parse-timeout")
     expect(calls.extract).toBe(1)
@@ -190,8 +161,6 @@ describe("runFilePipeline — parse deadline", () => {
       { source: "./other", symbols: ["thing"], line: 1, dynamic: false },
     ]
     const { result } = await run({ parseMs: 250, imports }, 100)
-    // The whole key set rather than a list of absences: an outcome that grew a field nobody
-    // meant it to have would pass an enumeration of the ones it must not have.
     expect(Object.keys(result).sort()).toEqual(["kind", "parseErrors", "path", "timeout"])
   })
 

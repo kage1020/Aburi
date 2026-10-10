@@ -138,8 +138,6 @@ describe("classifyWithTimeout", () => {
       { symbolId: "ts:test.ts#Fn", file: "test.ts" },
       { timeoutMs: 99_999, onTimeout: (event) => (observed = event.budgetMs) },
     )
-    // The classifier resolved fast so no timeout event fires; we only assert the
-    // clamp had a chance to run by verifying the plugin actually classified.
     expect(observed).toBe(0)
   })
 })

@@ -4,16 +4,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A delegate reached through brackets — `prisma["user"].create(…)`, `prisma[model].create(…)`.
- * The walk used to answer the object alone, so both arrived as `prisma.create`: a call written
- * nowhere in the source, one segment short of the delegate shape `effects-prisma` matches.
- *
- * Both spellings write to the database. What separates them is what the source knows: a
- * literal index is the model, and a computed one is not a name, which the confidence tier
- * carries rather than the effect's presence.
- */
-
 const workspace = useScratchWorkspace("bracket-delegate")
 
 const scanWorkspace = () =>
@@ -62,8 +52,6 @@ describe("scan — a Prisma delegate addressed through brackets", () => {
     const result = await scanWorkspace()
     const create = symbolById(result, "ts:src/repo.ts#createAny")
 
-    // A classified call never reaches `calls[]` (`ir-schema.md`), so the segment in
-    // `target` and the `medium` tier are the whole record of what the source computed.
     expect(create.calls.map((c) => c.target)).not.toContain("prisma.create")
     expect(create.calls.map((c) => c.target)).not.toContain("prisma.<computed>.create")
   })
@@ -71,8 +59,6 @@ describe("scan — a Prisma delegate addressed through brackets", () => {
 
 describe("scan — a bracket on something that is not a client", () => {
   it("does not read a Map or a queue as a delegate call", async () => {
-    // Three segments and Prisma's own verbs — exactly the false positive that segment count
-    // alone would buy. Only the receiver separates these from `prisma[model].create(…)`.
     await workspace.writeSource(
       "src/queue.ts",
       [

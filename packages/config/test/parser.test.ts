@@ -184,8 +184,6 @@ describe("C19 — a key named twice in one object", () => {
   })
 
   it("refuses __proto__, which never becomes a key the schema can see", async () => {
-    // Parsed, `output` is reachable through the prototype while `Object.keys` is empty, so the
-    // schema's `additionalProperties` passes it.
     const text = `{ "__proto__": { "output": { "dir": "smuggled-out" } } }`
     const caught = await configErrorFrom(() => parseConfig(text, "inline"))
     expect(caught.code).toBe("config-invalid")
@@ -218,8 +216,6 @@ describe("readConfigFile", () => {
   })
 
   it("throws config-not-found when the named path holds nothing", async () => {
-    // Separate from `config-read-failed` because the remedy differs: a mistyped name is the
-    // caller's to fix, a file the filesystem refused is not.
     const caught = await configErrorFrom(() => readConfigFile(join(tmp, "missing.jsonc")))
     expect(caught.code).toBe("config-not-found")
     expect(caught.message).toContain("No config file at ")
@@ -229,8 +225,6 @@ describe("readConfigFile", () => {
   const onPosix = it.skipIf(process.platform === "win32")
 
   onPosix("throws config-not-found when a path segment is not a directory", async () => {
-    // ENOTDIR is the same fact through a different errno: `--config out/aburi.json` where
-    // `out` is a file. Windows answers the same path with ENOENT, so only POSIX exercises it.
     const file = join(tmp, "not-a-dir")
     await writeFile(file, "x", "utf8")
     const caught = await configErrorFrom(() => readConfigFile(join(file, "aburi.json")))
@@ -238,8 +232,6 @@ describe("readConfigFile", () => {
   })
 
   it("throws config-read-failed on EISDIR (path is a directory)", async () => {
-    // Node's SystemError is an Error-derived instance, which a plain-object errno guard
-    // would silently demote to "unknown".
     const caught = await configErrorFrom(() => readConfigFile(tmp))
     expect(caught.code).toBe("config-read-failed")
     expect(caught.message).toMatch(/EISDIR/)

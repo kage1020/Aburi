@@ -1,20 +1,7 @@
-/**
- * Drizzle ORM method vocabulary. Each `_LIST` is the single source of truth for its union
- * type and runtime `Set`.
- *
- * Chained builder steps (`.from`, `.where`, `.set`, `.values`, `.returning`, ...) are
- * deliberately absent: they surface as internal segments in the classifier's chain-collapse
- * pass so exactly one classification is emitted per query. Raw SQL (`.execute()`) is absent
- * because a raw statement can be a read or a write, and telling them apart needs SQL parsing.
- */
 const DRIZZLE_READ_METHODS_LIST = ["select", "selectDistinct", "selectDistinctOn"] as const
 
 const DRIZZLE_WRITE_METHODS_LIST = ["insert", "update", "delete"] as const
 
-/**
- * `transaction` is the interactive-transaction API on every driver; `batch` is the atomic
- * multi-statement API on Neon and Cloudflare D1, so it maps to `db.transaction` too.
- */
 const DRIZZLE_TRANSACTION_METHODS_LIST = ["transaction", "batch"] as const
 
 /** Relational query API terminals (`db.query.<table>.findMany`). No `findUnique` — that is Prisma. */
@@ -54,11 +41,6 @@ export function isDrizzleQueryMethod(name: string): name is DrizzleQueryMethod {
   return (DRIZZLE_QUERY_METHODS as ReadonlySet<string>).has(name)
 }
 
-/**
- * Terminals that take more than one argument: Postgres' `selectDistinctOn(columns,
- * projection)` and `transaction(callback, config)`. Everything else takes at most one.
- * Keyed on the vocabulary unions so dropping a terminal breaks the build here too.
- */
 const DRIZZLE_MULTI_ARGUMENT_TERMINALS: ReadonlyMap<
   DrizzleReadMethod | DrizzleTransactionMethod,
   number

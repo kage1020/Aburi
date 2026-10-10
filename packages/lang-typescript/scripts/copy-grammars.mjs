@@ -1,22 +1,3 @@
-/**
- * Vendors the tree-sitter grammar wasms this plugin parses with into the package's own
- * `wasm/` directory, and writes the attribution that has to travel with them.
- *
- * This plugin reads two of the grammars `@vscode/tree-sitter-wasm` ships. npm cannot
- * install part of a tarball, so keeping it a runtime dependency would put all the others
- * on every consumer's disk unread — hence a devDependency plus this copy. The measured
- * sizes behind that decision are in the changeset, where they stay true to their date.
- *
- * The destination is the package root rather than `dist/` so that one relative path,
- * `../wasm/`, resolves for both `dist/index.mjs` (published) and `src/parser.ts` (tests,
- * which import the sources directly). Both live exactly one directory below the package
- * root; `parser.ts` states that dependency where it builds the paths.
- *
- * Runs from two places — the package's `build` script, and vitest's `globalSetup`, so
- * that `vitest --watch`, a single-file run and the editor extension all provision the
- * grammars rather than failing on a missing file. Those can run concurrently, so every
- * write lands through a temporary file and a rename.
- */
 import { createHash } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
@@ -27,27 +8,10 @@ const require = createRequire(import.meta.url)
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const destinationDir = join(packageRoot, "wasm")
 
-/**
- * Grammar wasms `EXTENSION_GRAMMAR` in `src/parser.ts` dispatches to.
- *
- * This list and the two `new URL()` literals over there are necessarily separate: those
- * have to stay literals for a bundler to treat them as assets, so they cannot read a
- * shared constant. `test/vendored-grammars.test.ts` in `@aburi/e2e-integration` asserts
- * that every path the parser resolves exists, which is what catches the two drifting.
- */
 const GRAMMARS = ["tree-sitter-typescript.wasm", "tree-sitter-tsx.wasm"]
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex")
 
-/**
- * Read a file, distinguishing "not written yet" from every other failure.
- *
- * Only ENOENT means the destination is absent. EACCES on a `wasm/` restored from a CI
- * cache under another owner, EBUSY from a vitest run holding the file on Windows, EIO on
- * a network drive — collapsing those into "absent" makes the next write fail with a
- * second-order message ("permission denied, copyfile") in place of the one fact the
- * script already had.
- */
 async function readIfPresent(path) {
   try {
     return await readFile(path)
@@ -61,14 +25,6 @@ async function readIfPresent(path) {
   }
 }
 
-/**
- * Write `content` to `destination` unless the identical bytes are already there.
- *
- * Comparing content rather than size is what keeps `NOTICE` honest: a size-only check
- * would let a grammar that changed upstream without changing length stay on disk under a
- * `NOTICE` naming the new version — a false provenance record rather than a stale cache.
- * Since `wasm/` is gitignored, such a file would survive branch switches and `git clean`.
- */
 async function writeIfChanged(destination, content) {
   const existing = await readIfPresent(destination)
   if (existing !== null && digest(existing) === digest(content)) return false
@@ -78,15 +34,6 @@ async function writeIfChanged(destination, content) {
   return true
 }
 
-/**
- * The attribution that ships beside the binaries.
- *
- * Two separate credits are owed and they are not the same one: the licence text upstream
- * distributes is `@vscode/tree-sitter-wasm`'s own, whose copyright line is Microsoft's,
- * while the grammars are tree-sitter's work. Upstream registers only tree-sitter itself
- * in `cgmanifest.json` and ships no grammar-project licence, so this reproduces that
- * registration verbatim rather than implying a licence text it does not have.
- */
 async function buildNotice() {
   const { version } = require("@vscode/tree-sitter-wasm/package.json")
   const { registrations } = require("@vscode/tree-sitter-wasm/cgmanifest.json")

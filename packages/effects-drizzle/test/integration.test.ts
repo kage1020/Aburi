@@ -15,14 +15,6 @@ import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { classifyDrizzleCall } from "../src/index"
 
-/**
- * End-to-end: parse a TypeScript source through `@aburi/lang-typescript`, walk each
- * Symbol's body to produce CallCandidate[], and confirm that the Drizzle classifier
- * assigns the right effect ids per call. Locks the wire between call extraction in the
- * language plugin and effect classification here — especially the
- * one-classification-per-fluent-chain invariant that is central to this package.
- */
-
 async function classifyCalls(path: string, source: string, imports: ImportEdge[]) {
   const parseResult = await parseTypescriptFile({ path, content: source })
   const tree = parseResult.tree
@@ -62,9 +54,6 @@ async function classifyCalls(path: string, source: string, imports: ImportEdge[]
 
 describe("integration — lang-typescript walkBody → effects-drizzle classify", () => {
   it("classifies a bare db.select().from(users) chain as exactly one db.read (chain-collapse)", async () => {
-    // The core invariant: a single SQL query, no matter how many `.from`/`.where`/...
-    // links it has, must yield exactly ONE effect record. walkBody emits one candidate
-    // per link; the classifier drops every downstream link so the count matches.
     const results = await classifyCalls(
       "src/services/users.ts",
       `import { drizzle } from "drizzle-orm/postgres-js"
@@ -140,10 +129,6 @@ export class UserService {
   })
 
   it("classifies db.transaction(async tx => tx.insert(users).values(...)) as tx + inner write", async () => {
-    // The callback form is the interactive-transaction idiom. Both the outer
-    // db.transaction and the inner tx.insert appear as separate CallCandidates; the
-    // outer classifies as db.transaction, the inner as db.write. Chain-collapse still
-    // applies inside the callback body: `tx.insert.values` is dropped.
     const results = await classifyCalls(
       "src/services/tx.ts",
       `import { drizzle } from "drizzle-orm/postgres-js"
@@ -204,8 +189,6 @@ export class ProfileForm {
   })
 
   it("returns null for every call when drizzle-orm is not imported (cross-plugin non-interference)", async () => {
-    // A Prisma-only file: `db.select` shape exists but with a non-Drizzle import.
-    // Drizzle must not classify — leaves the call for the Prisma classifier upstream.
     const results = await classifyCalls(
       "src/services/prisma-only.ts",
       `import { PrismaClient } from "@prisma/client"
@@ -220,10 +203,6 @@ export async function listUsers(prisma: PrismaClient) {
   })
 
   it("classifies db.batch([...]) (Neon / D1 multi-statement API) as db.transaction", async () => {
-    // batch is the driver-side atomic multi-statement API on Neon and Cloudflare D1.
-    // Semantically a transaction. Statements passed inside the array are drizzle
-    // query-builder expressions; their fluent chains are inside a literal array so
-    // walkBody still emits per-link candidates that must chain-collapse to root.
     const results = await classifyCalls(
       "src/services/batch.ts",
       `import { drizzle } from "drizzle-orm/neon-http"
@@ -246,10 +225,6 @@ export async function bulk(db: ReturnType<typeof drizzle>) {
   })
 
   it("does not classify an Express route registration beside the queries", async () => {
-    // The reported reproduction: Express and Drizzle in one file, which the import gate
-    // waves through wholesale. `router.delete("/users/:id", handler)` was recorded as a
-    // high-confidence db.write; the argument shape is what rules it out, since no Drizzle
-    // root takes a string literal or a second argument.
     const results = await classifyCalls(
       "src/routes/users.ts",
       `import { drizzle } from "drizzle-orm/postgres-js"
@@ -292,10 +267,6 @@ export function mountUserRoutes(router: Router) {
   })
 
   it("keeps a write whose argument list carries a comment", async () => {
-    // Comments are grammar `extras`: tree-sitter hangs them inside the argument list, and
-    // counting them made this a two-argument call. Nothing downstream would have said so —
-    // the root would answer null and the `.where` link is dropped by chain-collapse, so the
-    // DELETE would simply not exist in the IR.
     const results = await classifyCalls(
       "src/services/commented.ts",
       `import { drizzle } from "drizzle-orm/postgres-js"

@@ -4,13 +4,6 @@ import { describe, expect, it } from "vitest"
 import { scanWith, warningCollector } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * The leak this guards is invisible from the IR: a scan that never frees a tree produces
- * exactly the same Document as one that does, and only says so by running out of WASM heap
- * some thousands of files later. So the assertion is on the handles themselves — every tree
- * the real plugin hands to the real scan is dead by the time the scan returns.
- */
-
 /** The one thing this test asks of a tree-sitter tree: whether it still has a root. */
 interface TreeHandle {
   rootNode: unknown
@@ -18,11 +11,6 @@ interface TreeHandle {
 
 const workspace = useScratchWorkspace("tree-release")
 
-/**
- * The real plugin, recording each tree it hands over. `Object.create` keeps the original as
- * the prototype rather than spreading it, which would lose the prototype methods; the plugin
- * holds no instance state, so the split receiver cannot diverge.
- */
 function recording(handedOut: TreeHandle[]): LanguagePlugin {
   const base = langTypescriptPlugin as unknown as LanguagePlugin
   const wrapped: LanguagePlugin = Object.create(base)
@@ -96,8 +84,6 @@ describe("a plugin whose releaseTree fails", () => {
   })
 
   it("leaves the Document complete and the run's other accounts empty", async () => {
-    // A leaked tree costs the next run, not this one, which is exactly why the structured
-    // record has to exist: nothing else about this result says anything is wrong.
     await workspace.writeSource("a.ts", "export function alpha() { return 1 }\n")
 
     const { result } = await scanThrough(neverReleases())

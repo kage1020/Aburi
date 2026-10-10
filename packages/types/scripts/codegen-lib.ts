@@ -14,21 +14,8 @@ export interface SchemaEntry {
   schema: string
   out: string
   rootName: string
-  // Loose placeholders to rewrite as re-exports from another generated module. Used for
-  // cross-schema $ref-by-description patterns (e.g., diff schema's Symbol/Component/
-  // Dependency/SymbolId are deliberately loose and point back to ir schema). Object $defs
-  // land as `interface X {}`, string $defs as `type X = string`; both forms are stripped.
   crossRefs?: Record<string, string>
-  // Generated `export type X = string` aliases whose right-hand side is replaced. JSON
-  // Schema cannot express a nominal type, so the ids that carry a namespace (SymbolId,
-  // ComponentId, SliceId) get their brand here rather than in the schema — a `tsType`-style
-  // keyword in a frozen v1 document would make strict-mode validators reject the schema
-  // itself. Keys must NOT overlap with crossRefs: those aliases are gone by this point.
   aliasOverrides?: Record<string, string>
-  // `$defs` whose name ends in `Id` but which deliberately carry no brand. Listing them is
-  // what makes the brand table exhaustive: the drift test walks every `*Id` definition and
-  // requires it to appear in `aliasOverrides`, in `crossRefs`, or here — so adding a new id
-  // to a schema and forgetting to brand it fails the build instead of shipping a bare alias.
   unbrandedIds?: readonly string[]
 }
 
@@ -45,20 +32,9 @@ export const ENTRIES: readonly SchemaEntry[] = [
     aliasOverrides: {
       SymbolId: brand("SymbolId"),
       ComponentId: brand("ComponentId"),
-      // ir-schema.md: one array holds both endpoint kinds and the kind is recovered from the id
-      // shape. The union keeps a bare string out while admitting either id.
       DependencyEndpoint: "SymbolId | ComponentId",
-      // A plugin-declared token rather than an entity id, but one with a grammar
-      // (`^[a-z][a-z0-9]*$`) and a reserved list, and one that three vocabularies compete
-      // over: the plugin manifest name (`lang-typescript`), the component detector's token
-      // (`tsx`, `js`) and this. A bare alias let a manifest name be assigned straight into
-      // `workspace.languages`, which the frozen IR schema rejects. The brand makes that a
-      // compile error and routes construction through `makeLanguageId` in `@aburi/core`.
       LanguageId: brand("LanguageId"),
     },
-    // `EffectId` is a vocabulary term, not an entity id — it names a kind of side effect,
-    // and `x-<plugin>:<action>` values are meant to be written as literals, so it cannot be
-    // confused with the ids above and does not earn a namespace.
     unbrandedIds: ["EffectId"],
   },
   { schema: "aburi.config.v1.json", out: "config.ts", rootName: "Config" },
@@ -106,16 +82,6 @@ function rewriteCrossRefs(
 ): string {
   let out = body
 
-  // 1. Strip loose placeholders. Match optional `/** ... */` JSDoc + either
-  //    `export interface X {\n}` (object $def) or `export type X = string` (string $def).
-  //    JSDoc inner uses `(?:[^*]|\*(?!\/))*` so it cannot cross `*/` boundaries, otherwise the
-  //    non-greedy variant `[\s\S]*?` would backtrack across earlier definitions (e.g. DiffResult's
-  //    own JSDoc → Symbol's JSDoc) and delete everything between.
-  //
-  //    Each name MUST match exactly once. If json-schema-to-typescript ever changes its output
-  //    so the placeholder no longer appears (or appears multiple times), we want to fail loudly
-  //    here rather than silently leave a colliding local `interface Symbol {}` next to the
-  //    re-exported one — that would slip past the drift test.
   for (const name of Object.keys(crossRefs)) {
     const pattern = new RegExp(
       String.raw`(?:\/\*\*(?:[^*]|\*(?!\/))*\*\/\s*)?export (?:interface ${name}\s*\{\s*\}|type ${name} = string)\s*\n`,
@@ -133,10 +99,6 @@ function rewriteCrossRefs(
     out = out.replace(pattern, "")
   }
 
-  // 2. Group imports/re-exports by source module so duplicate imports collapse.
-  //    `export type {} from "./mod"` re-exports names but does NOT bring them into local
-  //    scope. Emit both `import type` (for local refs like SymbolAdded.symbol: Symbol) and
-  //    `export type` (so consumers of the diff barrel see them).
   const bySource = new Map<string, string[]>()
   for (const [name, modulePath] of Object.entries(crossRefs)) {
     const list = bySource.get(modulePath) ?? []
@@ -154,18 +116,6 @@ function rewriteCrossRefs(
   return `${headers}\n${out.trimStart()}`
 }
 
-/**
- * json-schema-to-typescript wraps types whose schema has `allOf` / `if-then-else`
- * structure into `({ [k: string]: unknown | undefined } & { ...real fields... })`.
- * Schema-wise these declare `additionalProperties: false`, so the wrapping index
- * signature is a false positive: it defeats `noUncheckedIndexedAccess` and lets
- * consumers silently add undeclared keys. Strip the wrapper so `tsc` sees what the
- * schema actually says.
- *
- * Legitimate inner `Record<string, X>` style index signatures (e.g. config
- * `pluginOptions: { [k: string]: unknown }`) are NOT touched — only the very specific
- * outer `export type X = ({ ... } & { ... })` wrap pattern matches.
- */
 const WRAPPER_PATTERN =
   /^export type (\w+) = \(\{\n\[k: string\]: unknown \| undefined\n\} & \{\n([\s\S]*?)\n\}\)$/gm
 
@@ -176,8 +126,6 @@ function stripPermissiveIntersection(schemaFile: string, source: string): string
     if (name === undefined || inner === undefined) continue
     out = out.replace(whole, `export interface ${name} {\n${inner}\n}`)
   }
-  // Re-run the pattern on the output. If any wrapper survives, the strip silently
-  // missed an occurrence and the resulting interface would still admit any extra key.
   if (WRAPPER_PATTERN.test(out)) {
     WRAPPER_PATTERN.lastIndex = 0
     throw new CodegenError(
@@ -190,19 +138,6 @@ function stripPermissiveIntersection(schemaFile: string, source: string): string
   return out
 }
 
-/**
- * Replace the right-hand side of generated `export type X = string` aliases.
- *
- * An id that owns a namespace — a Symbol id, a Component id, a Slice id — is not
- * interchangeable with an arbitrary string, but JSON Schema has no way to say so: every one
- * of them is `{"type": "string"}` on the wire and json-schema-to-typescript faithfully emits
- * a structural alias that any string satisfies. The nominal part is layered on here, after
- * generation, so the schema files stay expressible in standard JSON Schema 2020-12.
- *
- * Each name MUST match exactly once, for the same reason `rewriteCrossRefs` insists on it: a
- * silently-missed alias leaves the plain `= string` in place, and the drift test would then
- * happily compare one unbranded file against another.
- */
 function applyAliasOverrides(
   schemaFile: string,
   body: string,
@@ -220,8 +155,6 @@ function applyAliasOverrides(
           `output and update ENTRIES.aliasOverrides.`,
       )
     }
-    // Callback form: `String.replace` reads `$&`, `` $` ``, `$'` and `$1` in a string
-    // replacement, which would silently mangle a right-hand side containing one.
     out = out.replace(pattern, () => `export type ${name} = ${replacement}`)
   }
   return out
@@ -231,9 +164,6 @@ async function generateContent(entry: SchemaEntry): Promise<string> {
   const schemaPath = join(SCHEMA_DIR, entry.schema)
   const raw = await readFile(schemaPath, "utf8")
   const schema = JSON.parse(raw) as Record<string, unknown>
-  // json-schema-to-typescript prefers schema.title over the rootName argument when
-  // computing the root type name. Force-rewrite title so the generated root type matches
-  // the public API contract documented in lang-plugin.md, ir-schema.md, etc.
   schema.title = entry.rootName
   const ts = await compile(schema, entry.rootName, JST_OPTIONS)
 
@@ -242,8 +172,6 @@ async function generateContent(entry: SchemaEntry): Promise<string> {
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd()
   let body = stripPermissiveIntersection(entry.schema, `${normalized}\n`)
-  // crossRefs must run first: it removes the loose local aliases that point at another
-  // module (diff's `SymbolId`), which would otherwise be branded here and never re-exported.
   if (entry.crossRefs) {
     body = rewriteCrossRefs(entry.schema, body, entry.crossRefs)
   }

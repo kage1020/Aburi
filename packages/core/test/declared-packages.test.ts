@@ -4,12 +4,6 @@ import { basename, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CoreError, detectComponents, detectManagers } from "../src/index"
 
-/**
- * A `packages:` / `workspaces` entry names a directory that holds a manifest, so each pattern
- * is resolved against the manifest rather than against the directory. The behaviours pinned
- * here are pnpm's own, measured with `pnpm ls -r` on the same trees these fixtures build.
- */
-
 let tmp = ""
 
 beforeEach(async () => {
@@ -39,10 +33,6 @@ async function pnpmRoots(): Promise<string[]> {
     .sort()
 }
 
-/**
- * Directories that are not packages, spread across the depths a directory walk would reach.
- * Every assertion below is really the same one — none of these may become a candidate.
- */
 async function writeNonPackageDirectories(): Promise<void> {
   await mkdir(join(tmp, "src"), { recursive: true })
   await mkdir(join(tmp, "a", "b", "c", "d"), { recursive: true })
@@ -108,8 +98,6 @@ describe("a declared package is the directory that holds the manifest", () => {
   })
 
   it("passes over a dependency's own manifest", async () => {
-    // `**` is the one pattern that reaches into `node_modules`, and a workspace that declares
-    // it would otherwise take every installed dependency for one of its own packages.
     await writePackage("packages/app", "app")
     await writePackage("node_modules/left-pad", "left-pad")
     await writePnpmManifest("**")
@@ -118,9 +106,6 @@ describe("a declared package is the directory that holds the manifest", () => {
   })
 
   it("reaches ten directory levels down and stops there", async () => {
-    // The documented ceiling for `**` (component-detect.md), pinned from both sides: a
-    // workspace that nests its packages under a few grouping directories is ordinary, and one
-    // package at the ceiling with another just past it is what says where the ceiling is.
     const deep = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10"].join("/")
     await writePackage(deep, "deep")
     await writePackage(`${deep}/l11`, "past-the-ceiling")
@@ -130,10 +115,6 @@ describe("a declared package is the directory that holds the manifest", () => {
   })
 
   it("falls back to the whole repository when no matched directory holds a manifest", async () => {
-    // `detectComponents` reads "no candidate" as "no detector hit", so patterns that matched
-    // nothing land on the single-project fallback rather than on nothing at all. Whether that
-    // is the right answer depends on why they matched nothing — component-detect.md carries
-    // the two cases, and `DetectManagersResult.unresolved` is what tells them apart.
     await mkdir(join(tmp, "packages", "one"), { recursive: true })
     await mkdir(join(tmp, "packages", "two"), { recursive: true })
     await writePnpmManifest("packages/*")
@@ -147,8 +128,6 @@ describe("a declared package is the directory that holds the manifest", () => {
   })
 
   it("declares nothing for an empty pattern", async () => {
-    // The transform would otherwise turn it into "/package.json", which names the filesystem
-    // root rather than anything inside the workspace.
     await writePackage("packages/app", "app")
     await writePnpmManifest("")
 
@@ -246,10 +225,6 @@ describe("the workspace root as a declared component", () => {
   })
 
   it("censuses the packages nested under it as its own subtree", async () => {
-    // `languages` inference counts each component's subtree, and the root's subtree holds the
-    // other packages.
-    // A root declared beside them is the shape this rule makes ordinary, so what its
-    // `languages` then contains is worth saying out loud rather than leaving to be found.
     await writePackage(".", "root-pkg")
     await writePackage("packages/app", "app")
     await seedFiles("services", "py", 12)
@@ -263,8 +238,6 @@ describe("the workspace root as a declared component", () => {
   })
 
   it("names the root after its directory when the root manifest carries no name", async () => {
-    // `relativeRoot` is "." here, so the id cannot come from the path's trailing segment the
-    // way every other component's does — the root's own directory name is what is left.
     const root = join(tmp, "storefront")
     await mkdir(root, { recursive: true })
     await writeFile(join(root, "package.json"), JSON.stringify({ private: true }), "utf8")

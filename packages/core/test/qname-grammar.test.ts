@@ -7,22 +7,6 @@ import {
   makeSymbolId,
 } from "../src"
 
-/**
- * The qualified-name segment grammar used to be `[A-Za-z_$][A-Za-z0-9_$]*`, which refuses
- * identifiers ECMAScript defines and `schema/aburi.ir.v1.json#/$defs/SymbolId` already
- * accepts — its pattern is `^[a-z][a-z0-9]*:[^#\\]+#[^\\]+$`. A Japanese or accented
- * declaration therefore cost its whole file: `makeSymbolId` throws, the throw reaches the
- * per-file boundary, and every Symbol in the file goes with it.
- *
- * The grammar is `[$_\p{ID_Start}][$\p{ID_Continue}]*` now, which is ECMAScript's
- * IdentifierName less the escape forms. Only `$` and `_` are named — `$` is in neither
- * property, `_` is in `ID_Continue` and not in `ID_Start` — and ZWNJ and ZWJ, which
- * ECMAScript names separately, are already inside `ID_Continue` here.
- *
- * What it still refuses is what is not a name at all — a destructuring pattern's text, a
- * computed member's brackets — which the extraction side no longer sends here.
- */
-
 const ZWNJ = "\u200C"
 const ZWJ = "\u200D"
 const COMBINING_ACUTE = "\u0301"
@@ -63,10 +47,6 @@ describe("an identifier ECMAScript defines is a qualified name", () => {
     ["a zero-width non-joiner", `a${ZWNJ}b`],
     ["a zero-width joiner", `a${ZWJ}b`],
   ])("accepts %s, which is an identifier part and not a letter", (_label, qname) => {
-    // ECMAScript names both in IdentifierPartChar, and a Persian or Arabic-script identifier
-    // uses them to control ligature shaping. `\p{ID_Continue}` already covers them here —
-    // measured — so this pins the behaviour rather than a second spelling of it, and the
-    // tree-sitter grammar parses `a<ZWNJ>b` as one `identifier` either way.
     expect(build(qname)).toBe(`ts:src/a.ts#${qname}`)
   })
 
@@ -76,15 +56,10 @@ describe("an identifier ECMAScript defines is a qualified name", () => {
   })
 
   it("accepts a combining mark after the first character, and stores it composed", () => {
-    // `normalizeParts` runs before the check, so the segment validated and the segment stored
-    // are the composed one — the id never carries the spelling that was handed in.
     expect(build(`a${COMBINING_ACUTE}b`)).toBe("ts:src/a.ts#áb")
   })
 
   it("normalizes a decomposed spelling before it validates one", () => {
-    // `normalizeParts` runs first, so an NFD `café` is checked and stored as its NFC form —
-    // and the widened grammar accepts both spellings anyway, since a combining mark is
-    // `ID_Continue`.
     const decomposed = build(`cafe${COMBINING_ACUTE}`)
 
     expect(decomposed).toBe("ts:src/a.ts#café")
@@ -134,12 +109,6 @@ describe("what is not a name is still refused, and named", () => {
   })
 
   it("refuses a connector punctuation mark that is not the underscore itself", () => {
-    // U+FF3F FULLWIDTH LOW LINE is `Pc`, so it is `ID_Continue` but not `ID_Start`, and
-    // ECMAScript adds only U+005F by name. `tsc` agrees: `function ＿x() {}` is TS1127,
-    // "Invalid character". The tree-sitter grammar is more permissive and parses it as an
-    // `identifier`, so a file containing one still loses its Symbols — but the source does
-    // not compile, and admitting the character would put a name in the IR that no TypeScript
-    // program can declare.
     expect(refusalFor("＿x").code).toBe("anonymous-symbol-id-attempted")
   })
 
@@ -149,17 +118,12 @@ describe("what is not a name is still refused, and named", () => {
   })
 
   it("keeps the default sentinel, which is exempted before the segment check", () => {
-    // `<` and `>` are in neither character class, so the sentinel would fail the grammar if
-    // it ever reached it. It does not, and this is what says so.
     expect(build(DEFAULT_EXPORT_QNAME)).toBe(`ts:src/a.ts#${DEFAULT_EXPORT_QNAME}`)
     expect(refusalFor("<other>").code).toBe("anonymous-symbol-id-attempted")
   })
 })
 
 describe("a producer can ask whether a name is a segment before it builds one", () => {
-  // A plugin holding a candidate name has somewhere to go other than build-and-catch: a class
-  // member whose name is not a segment has no Symbol, and its body stays on the class. That is
-  // a decision, not a fault, so it needs a predicate rather than a throw.
   it.each([
     ["a plain identifier", "ok"],
     ["a dollar first", "$x"],
@@ -186,9 +150,6 @@ describe("a producer can ask whether a name is a segment before it builds one", 
   })
 
   it("accepts a private name only when asked for one", () => {
-    // `"#v"() {}` decodes to the characters `#v`, and it is a public property. Only the private
-    // name node may carry the segment, so the default refuses it and a producer that never
-    // thought about private names cannot mint one.
     expect(isQnameSegment("#v")).toBe(false)
     expect(isQnameSegment("#v", { privateName: true })).toBe(true)
     expect(isQnameSegment("#ユーザー", { privateName: true })).toBe(true)
@@ -204,9 +165,6 @@ describe("a producer can ask whether a name is a segment before it builds one", 
   })
 
   it("is stricter than the whole-qname predicate, which is the reason it exists", () => {
-    // `isQualifiedName` answers a question about a *finished* name, so it admits the
-    // separators. A caller that reached for it to vet one member name would accept `"a.b"()`
-    // and mint `C.a.b` — a nested qname built out of a single member.
     expect(isQualifiedName("a.b")).toBe(true)
     expect(isQnameSegment("a.b")).toBe(false)
   })

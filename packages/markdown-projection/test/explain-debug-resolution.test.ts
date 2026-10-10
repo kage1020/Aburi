@@ -3,10 +3,6 @@ import type { UnresolvedCallDiagnostic } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectSymbolExplain } from "../src/explain"
 
-// call-resolution.md — `aburi explain --debug-resolution` renders the
-// per-Symbol dump the doc promises. The buckets never enter the IR, so they
-// arrive through the projection context instead.
-
 const CALLER_ID = symbolId("ts:src/ctl.ts#Ctl.route")
 
 function caller() {

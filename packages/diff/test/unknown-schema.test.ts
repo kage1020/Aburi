@@ -6,23 +6,6 @@ import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" 
 import irSchema from "../../../schema/aburi.ir.v1.json" with { type: "json" }
 import { buildDiff } from "../src/diff"
 
-/**
- * Instance conformance for the diff shape this change added.
- *
- * `codegen-drift` proves the generated types match the schemas, and TypeScript accepts
- * excess properties structurally — so a value that violates `additionalProperties: false` or
- * omits a `required` key type-checks, passes every unit test, and is rejected by the first
- * third-party validator that reads the artifact. Nothing validated a `SymbolUnknown` entry
- * against the published schema until here.
- *
- * `summary.unknown` matters for the same reason without being new: `buildDiff` now writes it
- * on every diff, so the shape of every `diff.json` changed.
- *
- * The IR side is validated in `@aburi/e2e-integration`, against a document a real scan
- * produced: this package's fixtures carry placeholder fingerprints the IR schema refuses,
- * which is fine for a diff and useless for conformance.
- */
-
 const ajv = new Ajv2020({ strict: true, strictTypes: false, allErrors: true })
 const validateDiff = ajv.compile<DiffResult>(diffSchema satisfies SchemaObject)
 
@@ -149,8 +132,6 @@ describe("aburi.diff.v1.json — DependencyUnknown instances", () => {
   })
 
   it("validates a diff that predates the field, with no unknown key at all", () => {
-    // The counterpart of the Markdown side's "omits the group for a diff that predates the
-    // field". The two were asymmetric: nothing here showed that such a document still reads.
     const diff = edgeDiff()
     const { unknown: _dropped, ...dependencies } = diff.dependencies
     const { depsUnknown: _counter, ...summary } = diff.summary
@@ -159,8 +140,6 @@ describe("aburi.diff.v1.json — DependencyUnknown instances", () => {
   })
 
   it("refuses an entry whose lostFiles is empty", () => {
-    // `minItems: 1` is the schema saying what the classification means: an entry exists
-    // because a file went missing, so one with no file is a claim with nothing behind it.
     const diff = edgeDiff()
     const first = diff.dependencies.unknown?.[0]
     if (first === undefined) throw new Error("fixture produced no unknown edge")
@@ -244,8 +223,6 @@ describe("aburi.diff.v1.json — notCompared instances", () => {
   })
 
   it("refuses an entry that reports only one side's reason", () => {
-    // The pair is the point: a file that timed out on one revision and was over the cap on the
-    // other needs two different actions, and half the answer sends the reader to the wrong one.
     const diff = symmetricDiff()
     const broken = {
       ...diff,
@@ -282,11 +259,6 @@ describe("aburi.diff.v1.json — notCompared instances", () => {
 
 describe("the schemas agree on what a skip reason is", () => {
   it("enumerates the same values as the IR", () => {
-    // Spelled independently in `SkippedFile.reason` (IR) and `SkipReason` (diff), and the only
-    // compile-time link between them fires when the *IR* side grows. A value added to the diff
-    // schema alone leaves an unconstructible arm and a validator that accepts something nothing
-    // produces. One comparison rather than one per use site: the diff schema hoisted the enum
-    // into a single `$def` that both `SymbolUnknown.reason` and `SkippedFile.reason` point at.
     const ofIR = [...irSchema.$defs.SkippedFile.properties.reason.enum].sort()
     expect([...diffSchema.$defs.SkipReason.enum].sort()).toEqual(ofIR)
   })

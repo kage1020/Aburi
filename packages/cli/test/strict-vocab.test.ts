@@ -6,12 +6,6 @@ import { EXIT, runCli, runScan, VOCAB_DISCOVERED_FILENAME } from "../src"
 import { MemStream } from "./fixtures"
 import { populate } from "./stub-language"
 
-/**
- * `strict` (config.md, cli-spec.md): a value a plugin emits without its manifest declaring it
- * stops a strict run with exit 3, and is kept and recorded otherwise. `odd.stub` is the file
- * whose Symbol the stub plugin gives the undeclared extKind `stub:odd:thing`.
- */
-
 let scratch = ""
 
 beforeEach(async () => {

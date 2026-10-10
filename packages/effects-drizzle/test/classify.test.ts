@@ -86,9 +86,6 @@ describe("classifyDrizzleCall — transaction terminals", () => {
     "sequelize.transaction",
     "this.transaction",
   ])("returns null for %s with argCount=0 — no Drizzle signature takes it", (target) => {
-    // An unrecognised receiver with no argument is a shape Drizzle's API never takes, and it has
-    // owners elsewhere: Firestore's `batch()`, an unmanaged Sequelize or Knex `transaction()`, a
-    // class's own method. It stays in `calls[]` rather than withdrawing the file.
     expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
   })
 
@@ -96,15 +93,10 @@ describe("classifyDrizzleCall — transaction terminals", () => {
     "db.transaction",
     "db.batch",
   ])("returns null for %s with argCount=0 — the arity floor outranks the receiver", (target) => {
-    // `db` is a client word and would earn `high`, but the floor is checked first: a
-    // zero-argument call is broken source (`db.transaction(/* cb */)` parses at zero) or a
-    // miscount, not separable here, and recording a phantom transaction is the costlier mistake.
     expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
   })
 
   it("still records sequelize.transaction(cb) at medium — EP11, not the floor", () => {
-    // One argument clears the floor; the receiver is outside the client vocabulary, so the
-    // effect is recorded at the tier an unplaceable receiver gets, not dropped.
     const result = classifyDrizzleCall(
       makeCall({ target: "sequelize.transaction", argumentCount: 1 }),
       ctx,
@@ -149,15 +141,10 @@ describe("classifyDrizzleCall — relational query API", () => {
   })
 
   it("requires the `.query.` marker at index -3 — table.findMany without it is null", () => {
-    // `db.users.findMany` (no `.query.`) is not the relational query shape, and
-    // `findMany` is not in the generic terminal vocab either, so returns null.
     expect(classifyDrizzleCall(makeCall({ target: "db.users.findMany" }), ctx)).toBeNull()
   })
 
   it("requires the table segment — db.query.findMany (3 segments, missing table) is null", () => {
-    // 3-segment shape with `query` at index -2 does not match the length-4 gate.
-    // The relational query API requires an explicit table segment between `query`
-    // and the verb.
     expect(classifyDrizzleCall(makeCall({ target: "db.query.findMany" }), ctx)).toBeNull()
   })
 })
@@ -180,9 +167,6 @@ describe("classifyDrizzleCall — chain-collapse (one classification per fluent 
     "db.delete.where",
     "db.delete.where.returning",
   ])("rejects fluent-chain link %s (root already classifies)", (target) => {
-    // walkBody emits one CallCandidate per link in the chain. Only the ROOT survives —
-    // every candidate carrying a root verb as an internal segment must return null so
-    // a single SQL statement produces exactly one effect record.
     expect(classifyDrizzleCall(makeCall({ target }), ctx)).toBeNull()
   })
 
@@ -197,10 +181,6 @@ describe("classifyDrizzleCall — receiver identification", () => {
   const ctx = makeCtx({ imports: [makeDrizzleImport()] })
 
   it("returns null for an Express route registration", () => {
-    // The bug this suite exists for: `router.delete("/users/:id", handler)` in a file that
-    // also uses Drizzle was a high-confidence db.write, because the import gate was the
-    // only defense and Express + Drizzle share a file all the time. No Drizzle root takes
-    // a string literal or a second argument, so the shape rules the call out entirely.
     expect(
       classifyDrizzleCall(
         makeCall({
@@ -215,8 +195,6 @@ describe("classifyDrizzleCall — receiver identification", () => {
   })
 
   it("keeps Postgres selectDistinctOn(columns, projection), a two-argument root", () => {
-    // The arity limit reads off the terminal: a flat "one argument" rule would answer null
-    // for a valid `db.selectDistinctOn([users.id], { ... })`.
     const result = classifyDrizzleCall(
       makeCall({
         target: "db.selectDistinctOn",
@@ -244,9 +222,6 @@ describe("classifyDrizzleCall — receiver identification", () => {
   })
 
   it("still classifies an unrecognized receiver, at medium — recall is not the price", () => {
-    // A client bound under a house convention (`store.select(...)`) is not distinguishable
-    // from an unrelated object with the same shape, so the effect is recorded with the
-    // uncertainty stated rather than dropped.
     const result = classifyDrizzleCall(makeCall({ target: "store.select" }), ctx)
     expect(result?.effectId).toBe("db.read")
     expect(result?.confidence).toBe("medium")
@@ -269,9 +244,6 @@ describe("classifyDrizzleCall — receiver identification", () => {
   })
 
   it("downgrades an over-long argument list rather than dropping the call", () => {
-    // `db.delete(\n  users, // soft delete is not used\n)` reached this classifier as
-    // argumentCount=2 before `walkBody` stopped counting comments. A drop would have
-    // erased the write with nothing logged; the tier pays for the doubt instead.
     const result = classifyDrizzleCall(
       makeCall({ target: "db.delete", argumentCount: 2, literalArgs: [null, null] }),
       ctx,
@@ -314,8 +286,6 @@ describe("classifyDrizzleCall — negative paths", () => {
   })
 
   it("returns null for execute — raw SQL cannot be disambiguated statically", () => {
-    // `db.execute(sql`...`)` may be a read or a write. Prisma drops $queryRaw/$executeRaw
-    // for the same reason. Users who need raw-SQL effects hand-annotate.
     expect(classifyDrizzleCall(makeCall({ target: "db.execute" }), ctxWithDrizzle)).toBeNull()
     expect(classifyDrizzleCall(makeCall({ target: "this.db.execute" }), ctxWithDrizzle)).toBeNull()
   })
@@ -336,16 +306,11 @@ describe("classifyDrizzleCall — malformed input fail-fast", () => {
     [".select", /empty segment/],
     ["db.select.", /empty segment/],
   ])("throws for the malformed target %j with or without a Drizzle import", (target, message) => {
-    // Without the throw, `db..insert` would false-classify as db.write. The import gate must
-    // NOT shadow the check, or the same upstream bug would surface only in Drizzle-consuming
-    // files — locking the order at the test seam.
     expect(() => classifyDrizzleCall(makeCall({ target }), ctxWithDrizzle)).toThrow(message)
     expect(() => classifyDrizzleCall(makeCall({ target }), ctxNoImport)).toThrow(message)
   })
 
   it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
-    // The name is now an importable const shared by four packages rather than a literal in
-    // this file, so nothing but this assertion catches `EFFECTS_TRPC_PLUGIN_NAME` here.
     expect(() => classifyDrizzleCall(makeCall({ target: "" }), ctxWithDrizzle)).toThrow(
       /^effects-drizzle \(/,
     )
@@ -370,9 +335,6 @@ describe("classifyDrizzleCall — malformed input fail-fast", () => {
 
 describe("classifyDrizzleCall — purity", () => {
   it("does not mutate the input CallCandidate or the observable data slices of ClassifyContext", () => {
-    // structuredClone would reject the VocabRegistry's function properties, so clone
-    // the data slices the classifier actually reads (file + owner + language) plus the
-    // CallCandidate.
     const ctx = makeCtx({ imports: [makeDrizzleImport()] })
     // `literalArgs: [null]` — `db.insert(users)` passes a table reference, not a literal.
     const call = makeCall({ target: "db.insert", argumentCount: 1, literalArgs: [null] })

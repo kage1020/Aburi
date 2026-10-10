@@ -15,8 +15,6 @@ describe("lastQnameSegment", () => {
   })
 
   it("prefers '::' over '.' when both are present", () => {
-    // Static receiver dominates: Class::foo.bar means "field bar on the value returned by
-    // static Class::foo", and the fingerprint's shortName tracks the leaf of the receiver.
     expect(lastQnameSegment("A.B::method")).toBe("method")
   })
 

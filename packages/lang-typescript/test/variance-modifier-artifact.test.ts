@@ -4,19 +4,6 @@ import type { Node } from "web-tree-sitter"
 import { normalizeAst } from "../src/index"
 import { callsOf, parseSource, symbolOf, symbolsOf } from "./fixtures/ctx"
 
-/**
- * The typescript grammar has no rule for TypeScript 4.7's `in` / `out` variance modifiers, so
- * `interface A<out T>` was a parse error in a file `tsc` accepts. Recovery usually reads the first
- * modifier as the parameter's name and leaves the rest in an ERROR, but in some longer lists it
- * makes the modifier itself the ERROR instead. No published `@vscode/tree-sitter-wasm` has fixed it
- * as of 2026-09; the canary below is what will say when one does.
- *
- * `collectParseErrors` drops exactly that shape (`lang-plugin.md` LP27c). As with the JSX `&`,
- * these suites hold both halves of why that is safe: a file `tsc`'s parser rejects still reports,
- * and the Symbols come out the same with the modifiers as without them. Where either half stops
- * is written down at the end, as the JSX suite does.
- */
-
 async function errorsOf(content: string, path = "src/a.ts"): Promise<string[]> {
   const result = await parseSource(content, path)
   return result.errors.map((e) => `${e.line}:${e.column} ${e.message}`)
@@ -63,22 +50,15 @@ describe("a variance modifier is not reported as a parse error", () => {
     ["a variable named `out`", "export const out = 1"],
     ["`out` as the name after an `out` modifier", "export interface B<out out> { v: out }"],
   ])("never reported %s either", async (_label, source) => {
-    // Without these, the suite above would also pass had the word `out` simply stopped
-    // reporting wherever it appears.
     expect(await errorsOf(source)).toEqual([])
   })
 })
 
 describe("a list where recovery makes the modifier the ERROR", () => {
-  // Measured on `zod`, whose `ZodType` is written this way: every `out` is an ERROR of its own,
-  // standing before a parameter that parsed clean. The same list with one parameter does not do
-  // it, which is why the rule reads the words back rather than matching one shape.
   const listOf = (first: string, owner = "export interface A<", close = "> {}") =>
     `${owner}${first}, out Input = unknown, out Internals extends Base<Output, Input> = Base<Output, Input>${close}`
 
   it("is the shape this fixture gets, so the cases below exercise it", async () => {
-    // Pinned in full so the cases below keep reaching this shape; a change in how recovery splits
-    // the list fails here even while the grammar still lacks the rule.
     const { tree } = await parseSource(listOf("out Output = unknown"))
     const list = tree?.rootNode.descendantsOfType("type_parameters")[0]
     const shape = list?.children.filter((c) => c?.isNamed).map((c) => c?.type)
@@ -139,8 +119,6 @@ describe("a `.tsx` file, whose grammar has the same gap", () => {
   })
 
   it("keeps the JSX `&` rule and this one apart in a file that has both", async () => {
-    // Neither can take the other's ERROR: the `&` rule needs an ampersand-led run under JSX, and
-    // this one a run of identifiers in a type parameter list.
     const both = "export interface A<out T> { v: T }\nexport const C = () => <div>a & b</div>"
     expect(await errorsOf(both, TSX)).toEqual([])
     expect(await errorsOf(both.replace("a & b", "a & } b"), TSX)).toEqual(["2:31 syntax error"])
@@ -168,8 +146,6 @@ describe("a file `tsc`'s parser rejects still reports", () => {
     expect(await errorsOf(source)).not.toEqual([])
   })
 
-  // Each of these is the only case that keeps one branch of the rule honest, so the errors are
-  // pinned rather than merely present: one more incidental error would otherwise hide a regression.
   it("reports a name after a modifier's constraint, where the parameter already closed", async () => {
     expect(await errorsOf("export interface I<out extends X T> { v: T }")).toEqual([
       "1:34 syntax error",
@@ -224,8 +200,6 @@ describe("a file `tsc`'s parser rejects still reports", () => {
   })
 
   it("is counted the same way where the file is parsed twice for an `import(…)` type", async () => {
-    // `repairedOrFirst` keeps the reparse only when it has fewer errors, counted by the same
-    // `collectParseErrors`, so both trees have to drop the modifier alike.
     const withImport = 'type T = import("./m").X\nexport interface A<out U> { v: U }'
     expect(await errorsOf(withImport)).toEqual([])
     expect(await errorsOf(`${withImport}\nexport const b = f(`)).toEqual(["3:1 syntax error"])
@@ -274,9 +248,6 @@ describe("the Symbols are the same with the modifiers as without them", () => {
   })
 
   it("extracts the same ids, kinds and signatures, through both recovery shapes", async () => {
-    // A class, an interface and a type alias carry no `Signature`, so the parameter name the
-    // grammar misread has no field to reach; a method's own type parameters come from its own
-    // list, which the modifier never touches. `Z` is the list where the modifier is the ERROR.
     const shape = await shapeOf(WITH_MODIFIERS)
     expect(shape.map((s) => s.id)).toEqual([
       "ts:src/a.ts#A",
@@ -325,8 +296,6 @@ describe("the Symbols are the same with the modifiers as without them", () => {
 
 describe("where the rule stops", () => {
   it("still needs the filter: the grammar has no rule for a variance modifier yet", async () => {
-    // Every case above would stay green if the grammar learned variance annotations, and the rule
-    // would be dead code without a test noticing. This is the one that will say so.
     const { tree } = await parseSource("export interface A<out T> { v: T }")
     expect(tree?.rootNode.hasError).toBe(true)
   })
@@ -336,8 +305,6 @@ describe("where the rule stops", () => {
     ["a union", "export type H<out T> = T | Promise<T>"],
     ["`in out` before a parameter named `out`", "export interface Z<in out> { v: out }"],
   ])("drops the modifier on %s, which only `tsc`'s checker refuses", async (_label, source) => {
-    // TS2637 and TS2636 come from the checker: `tsc`'s parser reads these files, so the ERROR is
-    // the grammar's alone. The rule does not read an alias's right-hand side.
     expect(await errorsOf(source)).toEqual([])
   })
 

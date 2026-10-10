@@ -6,21 +6,6 @@ import { runCli, runScan } from "../src"
 import { CliError } from "../src/errors"
 import { MemStream, writeTypeScriptWorkspace } from "./fixtures"
 
-/**
- * runScan integration tests — use a minimal on-disk workspace so config resolution and
- * plugin loading follow the real code paths. The point is to lock in the ScanReport shape
- * that `run.ts` reads to decide whether to emit stderr warnings.
- *
- * The workspace holds one source file that parses and declares nothing, so every report here
- * comes back with zero Symbols while the scan still read the repository. That distinction is
- * the one the coverage gate rests on: a file that parses cleanly and declares nothing is
- * counted as parsed, and a workspace where nothing parsed is not a success. The fixture used
- * to carry no source file at all, which is now the state `scan-coverage.test.ts` covers.
- *
- * The config names a language plugin because a scan without one cannot produce a
- * schema-valid IR — `workspace.languages` is `minItems: 1` — and is refused up front.
- */
-
 let scratch = ""
 
 beforeEach(async () => {
@@ -95,8 +80,6 @@ describe("runScan — respects --ignore glob", () => {
       ignore: ["vendor/**"],
     })
     expect(report.exitCode).toBe(0)
-    // `vendor/x.ts` is excluded before routing and `src/kept.ts` is not, so the glob is
-    // accepted, applied to the file it names, and the run still writes an IR.
     expect(report.irPath).not.toBeNull()
     expect(report.keptSymbols).toBe(1)
   })
@@ -116,11 +99,6 @@ describe("runScan — config-supplied component roots", () => {
   }
 
   it("blames the config, not the IR, for a root that leaves the workspace", async () => {
-    // `RelativePath` in the config schema constrains only `minLength` and "no backslash",
-    // so this is schema-valid and reaches component construction untouched. Left to run, it
-    // would be caught at the very end by `assertIRIntegrity` — reported against
-    // `components[id=shared].roots` as though the Document were at fault, and exiting 1
-    // through the generic handler rather than 2 as a problem with the scanned project.
     await writeConfigWithRoots(["../shared"])
     let caught: unknown
     try {
@@ -147,9 +125,6 @@ describe("runScan — config-supplied component roots", () => {
 
 describe("runScan — config-supplied publicApi", () => {
   it("normalizes the patterns, as component detection does for the detected path", async () => {
-    // ir-schema.md: `@aburi/diff` compares `publicApi` against the previous revision's,
-    // which was read off disk and is therefore NFC. An un-normalized entry written here
-    // reports a `publicApiChanged` for a component nobody touched.
     const decomposed = "café".normalize("NFD")
     await mkdir(resolve(scratch, "packages/shared"), { recursive: true })
     await writeFile(
@@ -181,16 +156,6 @@ describe("runScan — config-supplied publicApi", () => {
   })
 })
 
-/**
- * A file a plugin throws on is withdrawn rather than fatal (`lang-plugin.md`), and the
- * IR is still written — so the exit code is the only thing left to tell a CI job that
- * something in the run is broken rather than merely partial.
- *
- * `export const a🙂 = 1` is the reachable trigger with real plugins: tree-sitter parses the
- * name, `makeSymbolId` is handed a qualified name carrying a character ECMAScript's
- * IdentifierName does not admit, and the id grammar refuses it. The destructuring pattern
- * that used to sit here is read as its bindings now.
- */
 describe("runScan — a file withdrawn during extraction", () => {
   beforeEach(async () => {
     await mkdir(resolve(scratch, "src"), { recursive: true })
@@ -242,8 +207,6 @@ describe("runScan — a file withdrawn during extraction", () => {
       cwd: scratch,
     })
     expect(code).toBe(3)
-    // The reason that earned the 3, and the file that earned it, on the reader's screen —
-    // the message being the plugin's own account of what it refused.
     expect(stderr.text()).toContain(
       "⚠ extraction-failed (1) — a plugin threw while extracting, or its Symbols could not " +
         "enter the Document. This is the reason the run does not exit clean.",
@@ -252,9 +215,6 @@ describe("runScan — a file withdrawn during extraction", () => {
   })
 
   it("caps the list, because a broken plugin rejects every file", async () => {
-    // A plugin broken enough to reject one file usually rejects them all, and the
-    // untruncated list is then the whole workspace — which on CI scrolls every other
-    // warning out of the log it was meant to appear in.
     const bad = ["export const a\u{1F642} = 1", ""].join("\n")
     for (let i = 0; i < 14; i++) {
       await writeFile(resolve(scratch, "src", `r${i}.ts`), bad, "utf8")
@@ -277,9 +237,6 @@ describe("runScan — a file withdrawn during extraction", () => {
   })
 
   it("names the file and the reason, not just the count", async () => {
-    // The core logs the same per file, but through its own sink: it disappears at
-    // `ABURI_LOG_LEVEL=error` and never reaches an injected stream, so a caller reading
-    // this one would otherwise be told a number and nothing else.
     const stdout = new MemStream()
     const stderr = new MemStream()
     await runCli({
@@ -296,9 +253,6 @@ describe("runScan — a file withdrawn during extraction", () => {
 
 describe("runScan — a workspace whose files all extract", () => {
   it("stays SUCCESS when files were skipped for a reason that is not a plugin throw", async () => {
-    // A file over `maxFileSizeBytes` is skipped, and skipping it says nothing is broken —
-    // it is a deterministic budget doing its job. Gating on `skipped` as a whole rather than
-    // on `extractionFailures` would turn every repository with one large generated file red.
     await mkdir(resolve(scratch, "src"), { recursive: true })
     await writeFile(
       resolve(scratch, "src", "ok.ts"),

@@ -66,9 +66,6 @@ describe("LSP protocol", () => {
   })
 
   it("disables the language when consecutive files hit per-file fallback", async () => {
-    // Each file has 3 call sites; each hover call fails after file 1. Per-request
-    // fallback fires 3× on a single file → per-file fallback → after 5 such files
-    // → per-language fallback.
     let firstFileServed = false
     const factory = mockServerFactory((_lang, client) => {
       client.installHandler("textDocument/documentSymbol", () => [])

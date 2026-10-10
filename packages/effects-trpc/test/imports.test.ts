@@ -1,7 +1,4 @@
 import { describe, expect, it } from "vitest"
-// `hasTrpcServerImport` is the classifier's internal discriminator and is deliberately
-// absent from the public barrel — imported from the module directly so its behaviour stays
-// pinned without leaking it to consumers.
 import { hasTrpcServerImport } from "../src/imports"
 import { hasTrpcClientImport } from "../src/index"
 
@@ -25,8 +22,6 @@ describe("hasTrpcClientImport", () => {
     "@trpc/react-query/shared",
     "@trpc/next/app-dir/client",
   ])("returns true for the subpath %s", (source) => {
-    // The gate is a prefix match rather than a closed allowlist — tRPC reorganizes its
-    // subpath exports between minors and a stale allowlist would silently stop matching.
     expect(hasTrpcClientImport([edge(source)], PATH)).toBe(true)
   })
 
@@ -37,8 +32,6 @@ describe("hasTrpcClientImport", () => {
     "trpc",
     "not-@trpc/client",
   ])("returns false for the lookalike specifier %s", (source) => {
-    // The `/` separator in the subpath check is what keeps `@trpc/client-mock` and
-    // friends from matching the `@trpc/client` root.
     expect(hasTrpcClientImport([edge(source)], PATH)).toBe(false)
   })
 
@@ -48,9 +41,6 @@ describe("hasTrpcClientImport", () => {
   })
 
   it("returns false for @trpc/tanstack-react-query", () => {
-    // That integration's surface (`queryOptions()` / `mutationOptions()`) is out of the
-    // v1 vocabulary, so passing the gate would only widen the false-positive window
-    // without enabling any classification.
     expect(hasTrpcClientImport([edge("@trpc/tanstack-react-query")], PATH)).toBe(false)
   })
 
@@ -71,9 +61,6 @@ describe("hasTrpcClientImport", () => {
   })
 
   it("throws when the language plugin emits an empty ImportEdge.source, including the file path and line", () => {
-    // ImportEdge.source is contract-guaranteed to be normalized and non-empty. Getting
-    // `""` here means the upstream language plugin failed to normalize — silently
-    // returning false would mask the bug.
     expect(() => hasTrpcClientImport([edge("", 7)], PATH)).toThrow(/ImportEdge\.source is empty/)
     expect(() => hasTrpcClientImport([edge("", 7)], PATH)).toThrow(
       new RegExp(PATH.replace(/\//g, "\\/")),
@@ -82,8 +69,6 @@ describe("hasTrpcClientImport", () => {
   })
 
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
-    // Order-independence pin — using `.some()` alone would short-circuit on the first
-    // match and silently accept a broken edge later in the list.
     expect(() => hasTrpcClientImport([edge("@trpc/client", 1), edge("", 2)], PATH)).toThrow(
       /ImportEdge\.source is empty/,
     )
@@ -113,9 +98,6 @@ describe("hasTrpcServerImport", () => {
   })
 
   it("returns true when both client and server packages are imported in one file", () => {
-    // A Next.js app can legitimately colocate a server caller and a client. Both gates
-    // report true; the classifier's `query`-terminal suppression is what resolves the
-    // resulting ambiguity.
     const imports = [edge("@trpc/client", 1), edge("@trpc/server", 2)]
     expect(hasTrpcServerImport(imports, PATH)).toBe(true)
     expect(hasTrpcClientImport(imports, PATH)).toBe(true)

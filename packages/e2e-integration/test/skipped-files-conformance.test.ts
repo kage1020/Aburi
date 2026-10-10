@@ -4,19 +4,6 @@ import { useFixtureCheckout } from "../src/fixture"
 import { irValidator } from "../src/ir-schema"
 import { scanFixture } from "../src/scan-helper"
 
-/**
- * `stats.skippedFiles[]` on a real document, validated against the published schema.
- *
- * `codegen-drift` proves the generated types match the schema and TypeScript accepts excess
- * properties structurally, so a document that violates `additionalProperties: false` or omits
- * a `required` key type-checks, passes every unit test, and is refused by the first
- * third-party validator that reads it. The conformance suite next door skips nothing, so
- * until now no validated document carried this array.
- *
- * The cap is set below the size of the fixture's own sources, which is the one way to make a
- * real scan drop real files without breaking any of them.
- */
-
 const fixture = useFixtureCheckout("nestjs-billing", "all")
 
 let result: ScanResult

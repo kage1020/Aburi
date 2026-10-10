@@ -3,15 +3,6 @@ import { langTypescriptPlugin } from "../src/index"
 import { TYPESCRIPT_LANGUAGE_ID } from "../src/qname"
 import { makeExtractionCtx, parseSource, requireTree } from "./fixtures/ctx"
 
-/**
- * `LanguagePlugin.languageId` is the `LanguageId` this plugin stamps on every Symbol id
- * (`<language>:<file>#<qname>`), and it is what `@aburi/core` projects into
- * `IR.workspace.languages`. The manifest name (`lang-typescript`) is a *plugin ref*,
- * resolved as a module specifier and outside the `LanguageId` grammar, so the two are not
- * interchangeable: a manifest name in this field yields an IR its own frozen schema
- * rejects. Both halves are pinned here — the declared value, and the value the extractor
- * actually writes.
- */
 describe("langTypescriptPlugin.languageId", () => {
   it("is the LanguageId the qname builder stamps, not the manifest name", () => {
     expect(langTypescriptPlugin.languageId).toBe("ts")

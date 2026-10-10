@@ -41,8 +41,6 @@ describe("Drizzle method vocabulary", () => {
   })
 
   it("does NOT include findUnique — that is Prisma vocabulary, not Drizzle", () => {
-    // Prisma's Client exposes findUnique; Drizzle's relational query API does not.
-    // Locking the disjoint vocabulary boundary between the two plugins.
     const untypedQuery = DRIZZLE_QUERY_METHODS as ReadonlySet<string>
     expect(untypedQuery.has("findUnique")).toBe(false)
     expect(isDrizzleQueryMethod("findUnique")).toBe(false)
@@ -77,12 +75,6 @@ describe("Drizzle method vocabulary", () => {
   })
 
   it("collects every fluent-root verb into DRIZZLE_FLUENT_ROOT_METHODS (internal helper)", () => {
-    // The chain-collapse reject pass in classify.ts reads this set. It must be the
-    // union of the read verbs (select variants) and the write verbs (insert/update/
-    // delete). Transaction and query terminals are excluded — they do not appear as
-    // internal segments of another root's chain. Deliberately NOT exported through the
-    // public barrel — imported from `../src/methods` directly to keep the invariant
-    // pinned without leaking an internal helper.
     const untypedRoot = DRIZZLE_FLUENT_ROOT_METHODS as ReadonlySet<string>
     for (const m of [
       "select",

@@ -6,8 +6,6 @@ import { describe, expect, it } from "vitest"
 import { classifyReactSymbol } from "../src/index"
 import { makeCtx } from "./fixtures/symbol"
 
-// End-to-end: real TSX through `@aburi/lang-typescript`, then `classifyReactSymbol`.
-
 async function classifyEach(path: string, source: string) {
   const parseResult = await parseTypescriptFile({ path, content: source })
   const tree = parseResult.tree
@@ -69,8 +67,6 @@ describe("integration — lang-typescript → framework-react", () => {
       "src/Cell.tsx",
       "export const Cell = memo(function Cell(props: { v: number }) { return <td>{props.v}</td> })",
     )
-    // The wrapper is a Cell const; the inner function is nested inside memo() and is not
-    // extracted as a top-level Symbol.
     const cell = results.find((r) => r.name === "Cell" && r.kind === "const")
     expect(cell?.classification?.extKind).toBe("framework:react:memo")
   })
@@ -111,9 +107,6 @@ describe("integration — lang-typescript → framework-react", () => {
   })
 
   it("classifies memo(forwardRef(...)) as memo (outermost call wins)", async () => {
-    // The outer wrapper wins because extractWrapperCall walks pre-order and returns the
-    // outermost call_expression first. This test locks that ordering so a walker regression
-    // that finds the inner forwardRef instead would fail loudly.
     const results = await classifyEach(
       "src/Nested.tsx",
       "export const Nested = React.memo(React.forwardRef((p, ref) => <button ref={ref} />))",
@@ -123,9 +116,6 @@ describe("integration — lang-typescript → framework-react", () => {
   })
 
   it("classifies `export default function` components (named default export)", async () => {
-    // Real-world React pattern: pages / entry components are often the default export.
-    // The language plugin emits derivedBy: ["export-default"] but preserves the function
-    // name, so classification keys off the leaf just like a plain export.
     const results = await classifyEach(
       "src/App.tsx",
       "export default function App() {\n  return <div>hi</div>\n}\n",
@@ -135,10 +125,6 @@ describe("integration — lang-typescript → framework-react", () => {
   })
 
   it("does not classify an anonymous default export (name = <default>, not PascalCase)", async () => {
-    // Anonymous default exports (`export default function() {...}`) get the language
-    // plugin's `<default>` sentinel as their name; that fails the PascalCase gate, so
-    // the plugin abstains rather than making up an identity. Documented in the README's
-    // "Not classified today" list.
     const results = await classifyEach(
       "src/Anon.tsx",
       "export default function() { return <div /> }",
@@ -159,9 +145,6 @@ describe("integration — framework-react on plain .js / .jsx", () => {
   })
 
   it("classifies a hook defined in plain .js", async () => {
-    // A hook is classified by its name, so this one passed even while `.js` was read with a
-    // grammar that refuses JSX. It is the shape that did *not* need the grammar fixed, which
-    // is why the component above it is the one that says whether the routing is right.
     const results = await classifyEach(
       "src/useCount.js",
       "export function useCount() { const [c] = useState(0); return c }",

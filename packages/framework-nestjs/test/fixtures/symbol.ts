@@ -16,11 +16,6 @@ export function makeCtx(overrides: CtxOverrides = {}): FrameworkClassifyContext 
   }
 }
 
-/**
- * A static named-import edge, the shape `@aburi/lang-typescript` emits. `symbols` entries
- * follow the `ImportEdge.symbols` wire format, so an aliased import is written the way the
- * source wrote it: `"Controller as Ctrl"`.
- */
 export function makeImport(source: string, symbols: string[] | "*", line = 1): ImportEdge {
   return { source, symbols, line, dynamic: false }
 }
@@ -36,10 +31,6 @@ export function makeDecorator(name: string, args: string[] = [], line = 1): Deco
   }
 }
 
-/**
- * A decorator written through a receiver — `@nest.Controller("/x")` — which is what the
- * language plugin emits with `qualifier` set. `name` stays the leaf, as it does in the IR.
- */
 export function makeQualifiedDecorator(
   qualifier: string,
   name: string,

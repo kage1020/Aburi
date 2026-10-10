@@ -24,22 +24,12 @@ const FUNCTION_SCOPE_TYPES: ReadonlySet<string> = new Set([
   "method_definition",
 ])
 
-/**
- * True when `body` contains JSX anywhere — the loose component signal. Accepts anything so
- * callers can pass `symbol.bodyNode` verbatim; `false` for non-tree-sitter values.
- */
 export function hasJsxReturn(body: unknown): boolean {
   const node = asSyntaxNode(body)
   if (node === null) return false
   return findFirstJsxDescendant(node) !== null
 }
 
-/**
- * Element name of the JSX the function actually returns, or `null`. Handles an arrow
- * expression body (the body IS the JSX) and a statement block (first `return_statement`,
- * nested function scopes excluded). Provider detection needs this because "JSX somewhere in
- * the body" would mistake a `<div/>` helper above `return <Ctx.Provider>` for the return.
- */
 export function findReturnedJsxElementName(body: unknown): string | null {
   const node = asSyntaxNode(body)
   if (node === null) return null
@@ -48,10 +38,6 @@ export function findReturnedJsxElementName(body: unknown): string | null {
   return jsxElementName(jsx)
 }
 
-/**
- * True for a member expression ending in `.Provider` (`MyContext.Provider`). A bare
- * `<Provider>` could be any component, so it is excluded. Accepts `null` for chaining.
- */
 export function isProviderElementName(name: string | null): boolean {
   if (name === null || name === "") return false
   const dot = name.lastIndexOf(".")

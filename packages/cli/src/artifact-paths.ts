@@ -1,12 +1,5 @@
 import { resolve } from "node:path"
 
-/**
- * Every name the CLI writes into the `--output-dir`, and the directory itself, so external
- * drivers (the GitHub Action, integration fixtures) import the literal rather than copy it.
- * `docs/design/cli-spec.md` and `diff-algorithm.md` pin the diff artefacts;
- * `cli-spec.md` pins the scan's three.
- */
-
 export const DIFF_JSON_FILENAME = "diff.json"
 export const DIFF_MD_FILENAME = "diff.md"
 /** The uncapped `diff.md`, written only when `--max-bytes` shortened or dropped something. */
@@ -18,20 +11,8 @@ export const COMPONENTS_DIRNAME = "components"
 /** The last fallback, when neither `--output-dir` nor `config.output.dir` names a directory. */
 export const DEFAULT_OUTPUT_DIRNAME = "out"
 
-/**
- * The two places that decide the directory, as a remedy names them. Kept beside
- * `resolveOutputDir`, which is what reads them, so a message cannot name a key or a flag that
- * the resolution no longer consults. Deliberately no filename: discovery accepts more than
- * one, and `--config` can point anywhere.
- */
 export const OUTPUT_DIR_SOURCES = "--output-dir (or output.dir in the config)"
 
-/**
- * The directory a command writes its artefacts into, or reads them back from — against `cwd`,
- * not the workspace root, like every other path-bearing flag. `configured` is
- * `config.output.dir`, which stands exactly where the flag would (`cli-spec.md`,
- * `config.md`) and so resolves against the same directory.
- */
 export function resolveOutputDir(
   cwd: string,
   flag: string | undefined,

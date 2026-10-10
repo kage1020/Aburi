@@ -13,17 +13,8 @@ import {
 import { CliError } from "../src/errors"
 import { emptyIR } from "./fixtures"
 
-/**
- * `config.output.dir` is the documented default for `--output-dir` in three places and had no
- * reader anywhere, so a workspace that set it got `out/` on every run — silently, because
- * writing to `out/` succeeds. These assert the precedence flag → config → `out`, and that every
- * command reading or writing the directory agrees on it: `aburi scan` writing there and
- * `aburi explain` looking somewhere else is the defect one directory name has already caused.
- */
-
 let scratch = ""
 
-/** Whether anything is at `path`. Used negatively: the setting is only observable as an absence. */
 async function exists(path: string): Promise<boolean> {
   return await stat(path).then(
     () => true,
@@ -45,7 +36,6 @@ async function writeConfigFile(path: string, output: string | undefined): Promis
   )
 }
 
-/** The config discovery finds by walking up from the caller. */
 async function writeConfig(directory: string, output: string | undefined): Promise<void> {
   await writeConfigFile(resolve(directory, "aburi.json"), output)
 }
@@ -55,11 +45,6 @@ async function writeSource(directory: string): Promise<void> {
   await writeFile(resolve(directory, "src/a.ts"), "export function alpha() { return 1 }\n", "utf8")
 }
 
-/**
- * A config the parser refuses. Truncated rather than merely odd: the config is JSONC, so a
- * trailing comma is legal and a comment is legal, and either would have let these tests pass
- * without anything having read the file.
- */
 async function writeBrokenConfig(directory: string): Promise<void> {
   await writeFile(
     resolve(directory, "aburi.json"),
@@ -68,7 +53,6 @@ async function writeBrokenConfig(directory: string): Promise<void> {
   )
 }
 
-/** Two identical IR files, so `aburi diff` runs without git and writes its artefacts. */
 async function writeIRPair(directory: string): Promise<{ base: string; head: string }> {
   const base = resolve(directory, "base.json")
   const head = resolve(directory, "head.json")
@@ -114,8 +98,6 @@ describe("aburi scan", () => {
     const report = await runScan({ cwd: scratch, format: "json" })
 
     expect(report.irPath).toBe(resolve(scratch, "artifacts", IR_JSON_FILENAME))
-    // The half that made the defect invisible: writing to `out/` succeeds, so the only way to
-    // see the setting being honoured is that the default directory was not created.
     expect(await exists(resolve(scratch, DEFAULT_OUTPUT_DIRNAME))).toBe(false)
   })
 
@@ -130,9 +112,6 @@ describe("aburi scan", () => {
   })
 
   it("anchors the configured name to the working directory, not the workspace root", async () => {
-    // The root holds the config, the package is where the caller stands. A workspace-root
-    // anchor would make the default (`out`, resolved against `cwd`) and a configured value
-    // resolve against different directories — two rules for one slot.
     await writeFile(resolve(scratch, "pnpm-workspace.yaml"), "packages:\n  - 'pkgs/*'\n", "utf8")
     await writeFile(
       resolve(scratch, "package.json"),
@@ -165,10 +144,6 @@ describe("aburi diff", () => {
   })
 
   it("keeps a ref diff's per-side scans out of the configured directory", async () => {
-    // The intermediate IRs are handed an explicit `mkdtemp` path, which is a flag by another
-    // name — so a configured directory must collect the diff and nothing else. Otherwise a
-    // workspace that sets `output.dir` finds two whole IR documents in its own tree after
-    // every `aburi diff`.
     await writeConfig(scratch, "artifacts")
     await writeSource(scratch)
     const runner: GitRunner = {
@@ -177,8 +152,6 @@ describe("aburi diff", () => {
         if (key === "rev-parse --verify") return { stdout: "abc\n", stderr: "" }
         if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
         if (key === "worktree add") {
-          // `worktree add --detach <dir> <ref>` — materialise the base revision the command
-          // is about to scan, since no real git ran.
           const worktree = args[3] ?? ""
           await mkdir(worktree, { recursive: true })
           await writeConfig(worktree, "artifacts")
@@ -195,10 +168,6 @@ describe("aburi diff", () => {
   })
 
   it("refuses an unusable config before it computes anything", async () => {
-    // Resolved after the comparison, a config that cannot be read costs two scans — or two IR
-    // reads — and then reports `Failed to load Aburi config`, which reads as "the diff failed"
-    // when the diff had already succeeded and only its destination was unknown. Nothing git
-    // is asked is what says the refusal came first.
     await writeBrokenConfig(scratch)
     await writeSource(scratch)
     const asked: string[] = []
@@ -220,8 +189,6 @@ describe("aburi diff", () => {
   })
 
   it("does not read the config when the flag already answered", async () => {
-    // A run that said where to write has no use for `output.dir`, so a config it never
-    // consults must not be able to stop it.
     await writeBrokenConfig(scratch)
     const { base, head } = await writeIRPair(scratch)
 
@@ -257,10 +224,6 @@ describe("aburi explain", () => {
   })
 
   it("rescans into the configured directory, and finds it again next time", async () => {
-    // The ordinary invocation — no `--no-rescan`. A writer that goes to `artifacts` while the
-    // search goes to `out` leaves no visible failure here: the miss rescans, the rescan
-    // answers, and the only symptom is that every question costs a full scan. The second call
-    // is what pins it, because it can only succeed if the autoscan wrote where the search looks.
     await writeConfig(scratch, "artifacts")
     await writeSource(scratch)
 
@@ -273,9 +236,6 @@ describe("aburi explain", () => {
   })
 
   it("uses the configured name at every rung of the walk, and says which document answered", async () => {
-    // The scan happens at the root and the question is asked inside a package: the walk has to
-    // spell `artifacts` at the ancestor too, not only under the caller. The warning is the only
-    // thing that says *which* document answered — the IR records its workspace root as `"."`.
     await writeFile(resolve(scratch, "pnpm-workspace.yaml"), "packages:\n  - 'pkgs/*'\n", "utf8")
     await writeFile(
       resolve(scratch, "package.json"),
@@ -319,9 +279,6 @@ describe("aburi explain", () => {
   })
 
   it("searches an absolute configured directory once, and says so", async () => {
-    // Every rung of the walk resolves an absolute value to the same place. Left undeduplicated
-    // the list would hold that path once per ancestor, and the message would offer a range of
-    // directories the lookup never visited.
     const elsewhere = resolve(scratch, "shared-artifacts")
     const app = resolve(scratch, "pkgs/app")
     await mkdir(app, { recursive: true })
@@ -346,9 +303,6 @@ describe("aburi explain", () => {
   })
 
   it("refuses a config it cannot read rather than answering from the wrong directory", async () => {
-    // The trap this replaces: a good IR sits in `out/`, the config that would have said
-    // `artifacts` is unreadable, and falling back to the default would answer from a document
-    // the workspace stopped writing.
     await writeConfig(scratch, undefined)
     await writeSource(scratch)
     await runScan({ cwd: scratch, format: "json" })
@@ -381,13 +335,6 @@ describe("aburi explain", () => {
 })
 
 describe("--config names which config the setting comes from", () => {
-  /**
-   * `configuredOutputDir` hands `--config` / `ABURI_CONFIG` through to a different branch of
-   * the loader — `readConfigFile(resolve(cwd, path))` rather than discovery — and dropping that
-   * hand-off would read `output.dir` out of whichever `aburi.json` the walk happened to find.
-   * In a monorepo with a package-local config that is silently the wrong directory, and the
-   * flag whose whole purpose is to point somewhere else would be the thing not pointing.
-   */
   async function twoConfigs(): Promise<string> {
     await writeConfig(scratch, "discovered")
     await writeConfigFile(resolve(scratch, "custom.json"), "artifacts")

@@ -6,8 +6,6 @@ import { describe, expect, it } from "vitest"
 import { classifyNextSymbol } from "../src/index"
 import { makeCtx } from "./fixtures/symbol"
 
-// End-to-end: real TypeScript through `@aburi/lang-typescript`, then `classifyNextSymbol`.
-
 async function classifyEach(path: string, source: string) {
   const parseResult = await parseTypescriptFile({ path, content: source })
   const tree = parseResult.tree
@@ -28,8 +26,6 @@ describe("integration — lang-typescript → framework-next", () => {
       "app/dashboard/page.tsx",
       "export default function DashboardPage() {\n  return null\n}",
     )
-    // Named-but-default exports keep their function name — the plugin identifies them via
-    // the language plugin's `export-default` derivedBy marker rather than by name.
     const pageSymbol = results.find((r) => r.name === "DashboardPage")
     expect(pageSymbol?.classification?.extKind).toBe("framework:next:page")
   })
@@ -96,8 +92,6 @@ describe("integration — lang-typescript → framework-next", () => {
   })
 
   it("classifies a page whose default export is written apart from the declaration", async () => {
-    // `const Page = () => …` followed by `export default Page` is the other ordinary way to
-    // write a component, and the two files describe the same boundary to Next.js.
     const results = await classifyEach(
       "app/dashboard/page.tsx",
       "const Page = () => {\n  return null\n}\nexport default Page",

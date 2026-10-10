@@ -2,19 +2,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanFixture } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A parenthesis-free arrow — `x => x + 1` — states its parameter without a parameter
- * list, and the signature reader used to find none. Two edits fell out of that reading,
- * and neither is what the source did:
- *
- *   - Dropping the parameter (`name => "hi"` → `() => "hi"`) changed nothing the diff
- *     could see: both revisions read zero-arity.
- *   - Adding parentheses around it (`x => …` → `(x) => …`) changed the api: one function
- *     written two ways became a signature change with no callee to fix.
- *
- * This runs the real pipeline over both edits: scan, mutate on disk, scan again, diff.
- */
-
 const workspace = useScratchWorkspace("bare-arrow-arity")
 
 /** Scan `before`, rewrite the one source file to `after`, scan again, diff the two. */

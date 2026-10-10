@@ -1,9 +1,3 @@
-/**
- * Prisma model delegate method vocabulary. Each `_LIST` is the single source of truth for
- * its union type and runtime `Set`. Only methods that map onto core `db.read` / `db.write`
- * are listed; metadata accessors, raw SQL escapes and connection lifecycle stay out, so the
- * plugin returns `null` for them and downstream effect plugins get a chance.
- */
 const PRISMA_READ_METHODS_LIST = [
   "findUnique",
   "findUniqueOrThrow",

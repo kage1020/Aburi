@@ -17,15 +17,6 @@ import { checkIRIntegrity, makeLanguageId, scan } from "../../src"
 import { spend } from "../fixtures/clock"
 import { stubCandidate, stubLanguagePlugin } from "../fixtures/plugins"
 
-/**
- * The Document records what the scan gave up on.
- *
- * Without it the only trace of a loss was `totalFiles > parsedFiles`, which names no file
- * and is equally true of an over-size file, a timed-out one and a withdrawn one. A `diff`
- * against a document that lost a file therefore reported its Symbols as deliberately deleted
- * API, with a confident count and no way for the reader to tell.
- */
-
 function candidate(file: string): SymbolCandidate<OpaqueAstNode> {
   return stubCandidate(file.replace(/[^A-Za-z0-9]/g, "_"), { file })
 }
@@ -95,9 +86,6 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
   })
 
   it("passes its own integrity check, sort order included", async () => {
-    // `scan()` sorts with a raw `a.path < b.path` and `checkArraySortOrder` compares with
-    // `compareCodeUnit`; a document that satisfies one and not the other would be written
-    // and then refused on read.
     for (const name of ["Z.stub", "a.stub", "\u00e9.stub", "b.stub"]) {
       await writeFile(join(workRoot, name), "x".repeat(2000), "utf8")
     }
@@ -107,10 +95,6 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
   })
 
   it("names a file no Symbol in it could have named", async () => {
-    // `#` is legal in a filename on every platform this runs on and is refused by the id
-    // grammar alone, so one of them used to end the walk from inside the path normalizer.
-    // `stats.skippedFiles[].path` is held to the shared path rule, which admits it — so the
-    // Document can say the file was never analysed even though nothing in it could have a id.
     await writeFile(join(workRoot, "ok.stub"), "ok", "utf8")
     await writeFile(join(workRoot, "od#d.stub"), "odd", "utf8")
 
@@ -126,18 +110,12 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
   })
 
   it("omits the key entirely when nothing was lost", async () => {
-    // Class B. `[]` would erase the distinction between "this run lost nothing" and "this
-    // document predates the field", which is the one thing a reader of an old IR needs.
     await writeFile(join(workRoot, "ok.stub"), "ok", "utf8")
     const { stats } = (await runScan()).ir
     expect("skippedFiles" in stats).toBe(false)
   })
 
   it("says how long a timed-out file ran and what it was given", async () => {
-    // The detail is the whole account of the loss a `runScan` caller gets, and it read
-    // `extraction exceeded parseTimeoutMs` — a restatement of the reason. The numbers that
-    // decide whether to raise the budget or look at the file were in a log line on a
-    // channel `ABURI_LOG_LEVEL=error` silences.
     await writeFile(join(workRoot, "slow.stub"), "slow", "utf8")
     const result = await runScan({ parseTimeoutMs: 100 })
 
@@ -147,19 +125,12 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
       skipped?.detail ?? "",
     )
     expect(spent).not.toBeNull()
-    // The elapsed, not the budget again and not a zero — either would leave the sentence
-    // grammatical and drain it of the thing a reader acts on. The deadline starts before
-    // `parseFile` and is read after it returns, so a reading below the spin's own 250ms is
-    // impossible and a slower machine only widens the margin.
     expect(Number(spent?.[1])).toBeGreaterThanOrEqual(250)
     // And still not in the Document: those milliseconds are how loaded the machine was.
     expect(result.ir.stats.skippedFiles).toEqual([{ path: "slow.stub", reason: "parse-timeout" }])
   })
 
   it("carries no detail, so the bytes do not depend on where the repository sits", async () => {
-    // The scan holds a detail per entry and the `unreadable` one is a Node error message
-    // containing the absolute path. Serialising it would make two checkouts of the same
-    // commit produce different documents.
     await writeFile(join(workRoot, "refused.stub"), "refused", "utf8")
     const result = await runScan()
 
@@ -209,11 +180,6 @@ describe("integrity #21 — the list accounts for every unparsed file", () => {
   })
 
   it("holds the paths to the rules every other path-bearing array obeys", () => {
-    // Unfiltered on purpose. #21 is not the only check this array joined, and a test that
-    // filters to it would stay green with paths that are unsorted, absolute, or decomposed
-    // — and the NFC one is load-bearing: an NFD spelling never matches
-    // `symbols[].source.file`, so the lost file's Symbols go back to being confidently
-    // reported as removed, which is the regression the array exists to prevent.
     expect(
       checkIRIntegrity(
         documentWith({
@@ -262,16 +228,10 @@ describe("integrity #21 — the list accounts for every unparsed file", () => {
   })
 
   it("stays silent for a document that omits the key, however many files it lost", () => {
-    // An IR written before the field existed cannot satisfy this and is not wrong for it.
-    // Reporting a violation would make every archived document unreadable.
     expect(of21(documentWith({}))).toEqual([])
   })
 
   it("fires when more files were parsed than were found, list or no list", () => {
-    // The one clause that is not conditional on the key. For a document that omits it, the
-    // subtraction is the only trace of a loss there is, and a reader taking a negative
-    // difference for a count of losses reads it as "nothing was lost" — which is the
-    // assertion of absence the array exists to prevent, reached from the other side.
     expect(of21(documentWith({ totalFiles: 1, parsedFiles: 2 }))[0]?.message).toContain(
       "cannot parse more files than it found",
     )

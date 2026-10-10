@@ -4,15 +4,6 @@ import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runScan } from "../src"
 
-/**
- * `out/components/<id>.md` read back off disk, which is the artefact a reviewer opens.
- *
- * The file was four header lines and nothing else for every workspace, because every Symbol
- * carried `component: null` and the writer's filter (`s.component === component.id`) matched
- * none of them. Nothing here was covered: the projection layer's own tests hand
- * `projectComponent` a pre-filtered list, so they pass on a document the filter would empty.
- */
-
 let scratch = ""
 
 beforeEach(async () => {
@@ -46,7 +37,6 @@ async function writeSource(rel: string, content: string): Promise<void> {
   await writeFile(abs, content, "utf8")
 }
 
-/** Scan the fixture with two config-declared components and return the written Markdown. */
 async function scanTwoComponents(): Promise<{ api: string; web: string }> {
   await writeFile(
     resolve(scratch, "aburi.json"),
@@ -79,8 +69,6 @@ describe("out/components/<id>.md", () => {
     expect(api).toContain("## Symbols")
     expect(api).toContain("packages/api/src/orders.ts")
     expect(api).toContain("submitOrder")
-    // The other component's file belongs to the other page, which is the half of the
-    // attribution rule a single-component workspace cannot show.
     expect(api).not.toContain("packages/web/")
 
     expect(web).toContain("## Symbols")

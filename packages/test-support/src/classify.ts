@@ -1,6 +1,3 @@
-// Builders for the values an effects plugin classifies: CallCandidate, OwnerSummary,
-// ClassifyContext. Every field carries a contract-satisfying default so cases only spell
-// out what they intend to change.
 import type { CallCandidate, ClassifyContext, ImportEdge, OwnerSummary } from "@aburi/types"
 import { symbolId } from "./ir"
 import { noopRegistry } from "./registry"

@@ -1,9 +1,5 @@
 import type { PluginManifest } from "@aburi/types"
 
-// Helpers to build minimally-valid PluginManifest objects for registry tests.
-// Each helper returns a fresh object so individual tests can mutate without
-// affecting siblings.
-
 interface BaseOverrides {
   name?: string
   version?: string

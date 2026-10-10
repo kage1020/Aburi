@@ -16,17 +16,6 @@ import { DiffError } from "./errors"
 
 const byId = compareBy((item: { id: string }) => item.id)
 
-/**
- * `docs/design/diff-algorithm.md` — Component diff. Assumes `components[].id` is unique
- * on each side (ir-schema.md #2) and does not check it: `buildDiff` establishes that, and
- * a caller reaching this export directly owns the obligation, because the lookup map here is
- * last-write-wins.
- *
- * Any field that differs makes a Component `changed` — the whole object is compared, not the
- * three axes the delta names, so a `changed[]` entry with all three booleans `false` is a
- * well-formed answer meaning "something else about this component moved". `modified` deltas
- * are intentionally absent: fields are reported as before/after pairs.
- */
 export function diffComponents(
   base: readonly Component[],
   head: readonly Component[],
@@ -85,11 +74,6 @@ export function diffComponents(
  * file to lose.
  */
 export interface DependencySideView {
-  /**
-   * `source.file` of every Symbol this document holds, keyed by `DependencyEndpoint` rather
-   * than `SymbolId` because the lookup happens with an endpoint whose kind is not yet known,
-   * and "absent" is the answer for a Component id.
-   */
   symbolFiles: ReadonlyMap<DependencyEndpoint, RelativePath>
   /** Files this document never analysed, by path, with the reason it gave. */
   lostFiles: ReadonlyMap<RelativePath, SkipReason>
@@ -249,8 +233,6 @@ export function diffDependencies(
       else added.push(dep)
       continue
     }
-    // A direction or effect flip. No loss check: both documents hold the edge, so neither is
-    // silent about it, and `unknown` exists only to explain a silence.
     if (baseDep.direction !== dep.direction || (baseDep.effect ?? null) !== (dep.effect ?? null)) {
       removed.push(baseDep)
       added.push(dep)
@@ -285,10 +267,6 @@ function endpointsLostBy(
   const byPath = new Map<RelativePath, SkipReason>()
   for (const endpoint of [dep.from, dep.to]) {
     const file = holder.symbolFiles.get(endpoint)
-    // Normally a Component endpoint, which has no file to lose. A symbol-shaped endpoint with
-    // no Symbol behind it (forbidden by ir-schema.md #4, but `buildDiff` runs no integrity
-    // check) lands here too and quietly reverts to the plain classification: there is no
-    // diagnostics channel, and refusing would take down the legitimate case sharing the branch.
     if (file === undefined) continue
     const lost = lostCounterpart(file, absentFrom, sides)
     if (lost === undefined) continue
@@ -299,13 +277,6 @@ function endpointsLostBy(
     .sort(compareBy((file) => file.path))
 }
 
-/**
- * `docs/design/diff-algorithm.md` — the fields Dependency identity is made of, in key
- * order, and the join that turns them into one. Both exported so the entry-point uniqueness
- * check keys on exactly what this file keys on. Core's invariant #13 joins the same triple
- * with a different separator; the two agree for every endpoint that satisfies the id grammars
- * of ir-schema.md.
- */
 export const DEPENDENCY_IDENTITY_FIELDS = ["from", "to", "via"] as const
 
 export function dependencyIdentity(parts: readonly string[]): string {
@@ -318,14 +289,6 @@ function dependencyKey(dependency: Dependency): string {
 
 const compareDependencies = compareBy(dependencyKey)
 
-/**
- * Whether two Components are the same record over every field the document carries, via
- * `@aburi/core`'s canonical serialization of the normalized form — so a field added to `v1`
- * later is compared without a list here going stale, and key order or Unicode spelling
- * cannot manufacture a change. The serializer's refusals (`non-plain-json`,
- * `canonical-key-collision`) become `DiffError`, because `errors.ts` is the whole of this
- * package's failure surface.
- */
 function componentsEqual(a: Component, b: Component): boolean {
   return canonicalComponent(a, "base") === canonicalComponent(b, "head")
 }
@@ -342,13 +305,6 @@ function canonicalComponent(component: Component, side: "base" | "head"): string
   }
 }
 
-/**
- * The spelling-independent form of a Component (ir-schema.md): `description` is Class A,
- * so absent and `null` are one spelling; `publicApi` and `frameworks` are Class B fields whose
- * own writer rule is "omitted when empty", so absent and `[]` are one spelling. Class B does
- * not say that in general — a field whose presence is itself information must not be added
- * to `PRESENCE_EQUALS_EMPTY_FIELDS`.
- */
 function normalizeComponent(component: Component): Record<string, unknown> {
   const normalized: Record<string, unknown> = { ...component }
   if (normalized.description === null || normalized.description === undefined) {

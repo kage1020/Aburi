@@ -6,15 +6,6 @@ import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" 
 import { buildDiff } from "../src/diff"
 import { sliceRecordViolation } from "../src/slice"
 
-/**
- * SV22 and SV24 (docs/design/slice-view.md) — verify that
- * the diff schema addition (`slices[]`) is fully honoured at runtime, both by
- * valid outputs and by rejecting malformed shapes. Type-level assertions in
- * `packages/types/test/exports.test.ts` prove the compile-time contract; this
- * suite proves the runtime contract via Ajv, matching the strict-mode
- * validation `@aburi/config` already applies to its own schema.
- */
-
 const ajv = new Ajv2020({
   strict: true,
   strictTypes: false,
@@ -22,18 +13,6 @@ const ajv = new Ajv2020({
   allowUnionTypes: false,
 })
 
-/**
- * Enforcement layer 2 — the derivation check a JSON Schema cannot carry, registered by
- * the validating consumer rather than written into `schema/aburi.diff.v1.json`
- * (see `docs/design/slice-view.md` for why the schema file stays standard).
- *
- * `errors` on the function is how Ajv keywords report a custom message, so the
- * reason from `sliceRecordViolation` reaches the caller instead of Ajv's
- * generic "must pass keyword validation". Writing it to a module-level binding
- * is safe here because Ajv's generated code clears `errors` immediately before
- * every synchronous keyword call — that pre-clear only happens on the sync
- * path, so this must not become an `async: true` keyword without revisiting it.
- */
 interface AnchorKeywordValidator {
   (enabled: boolean, record: unknown): boolean
   errors?: Partial<ErrorObject>[]
@@ -59,12 +38,6 @@ ajv.addKeyword({
 
 const validate = ajv.compile<DiffResult>(diffSchema satisfies SchemaObject)
 
-/**
- * The published schema with the derivation keyword layered on top. Built by
- * spreading rather than mutating so `schema/aburi.diff.v1.json` — and the
- * `validate` above, which every pre-existing negative test uses — stay exactly
- * as shipped.
- */
 const schemaWithAnchorInvariant = {
   ...diffSchema,
   // Distinct base URI so Ajv does not see two schemas registered under one $id.
@@ -95,8 +68,6 @@ function headIR(): IR {
   })
 }
 
-// The SliceRecord rejections here overlap slice.test.ts on purpose: this layer checks the
-// published schema, that one the pass's own guard (`sliceRecordViolation`).
 describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
   it("validates a `buildDiff` output containing a non-empty slices[]", () => {
     const diff = buildDiff({
@@ -124,9 +95,6 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     expect(validate(diff)).toBe(true)
   })
 
-  // The entry shape this schema had never seen: `changed[]` reports a component whose change is
-  // outside the three axes `delta` names, so all three booleans are `false` (diff-algorithm.md).
-  // Every IR in this file is component-free, so nothing pinned that it validates.
   it("validates a changed component whose three delta booleans are all false", () => {
     const before = component({ id: "billing", name: "Billing" })
     const after = component({ id: "billing", name: "Billing & Invoicing" })
@@ -259,8 +227,6 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
 })
 
 describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
-  // Deliberately looser than `SliceRecord[]`: these cases exist to feed the validator
-  // records the producer could never build, so the ids stay plain strings here.
   function diffWithSlices(slices: Array<{ id: string; members: string[] }>): unknown {
     const diff = buildDiff({
       baseIR: baseIR(),
@@ -287,9 +253,6 @@ describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
     }
     expect(ok).toBe(true)
 
-    // Checked again without going through `sliceRecordViolation`. The keyword
-    // above delegates to that function, so a bug inside it would make the
-    // producer-side and validator-side tests agree on the same wrong answer.
     for (const slice of diff.slices) {
       expect(slice.id).toBe(`slice:${slice.members[0]}`)
       for (let i = 1; i < slice.members.length; i++) {
@@ -303,9 +266,6 @@ describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
       { id: "slice:ts:src/b.ts#B", members: ["ts:src/a.ts#A", "ts:src/b.ts#B"] },
     ])
 
-    // The published schema alone cannot see this: the prefix matches, members
-    // are unique, non-empty, and there is no extra property. Pinning that fact
-    // is the point — it is exactly why the keyword exists.
     expect(validate(malformed)).toBe(true)
 
     expect(validateWithAnchorInvariant(malformed)).toBe(false)

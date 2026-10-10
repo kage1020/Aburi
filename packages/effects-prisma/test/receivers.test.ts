@@ -29,9 +29,6 @@ describe("namesPrismaClient", () => {
   })
 
   it("rejects an SDK client — `<client>.<resource>.<verb>` is a delegate's shape too", () => {
-    // `apiClient.users.update(payload)` reaches the same branch as `prisma.user.update`.
-    // A `client` word in the vocabulary would have handed it `high`, which is the bug
-    // class this module exists to close.
     for (const segment of ["apiClient", "httpClient", "redisClient", "sdkClient", "s3Client"]) {
       expect(namesPrismaClient(segment)).toBe(false)
     }
@@ -43,8 +40,6 @@ describe("namesPrismaClient", () => {
   })
 
   it("rejects the everyday receivers that share Prisma's verb vocabulary", () => {
-    // `delete` / `create` / `update` are Map, Set, DOM and HTTP-router vocabulary too, so
-    // these are exactly the names that must not read as a database client.
     for (const segment of ["cache", "items", "router", "store", "queue", "session", "res"]) {
       expect(namesPrismaClient(segment)).toBe(false)
     }
@@ -74,9 +69,6 @@ describe("classificationConfidence", () => {
   })
 
   it("is medium when the receiver is a name this plugin cannot place", () => {
-    // Not null: a client under a house naming convention and an unrelated object of the
-    // same shape are indistinguishable from the callee string alone, so the tier carries
-    // the uncertainty instead of the classification being invented or dropped.
     expect(
       classificationConfidence(
         "cache",
@@ -90,8 +82,6 @@ describe("classificationConfidence", () => {
   })
 
   it("caps a dynamic receiver at medium however it is spelled", () => {
-    // `getPrisma().user.create()` normalizes to `getPrisma.user.create`: the segment is a
-    // collapsed expression, not a binding, so its spelling is not evidence of anything.
     expect(
       classificationConfidence(
         "prisma",
@@ -102,8 +92,6 @@ describe("classificationConfidence", () => {
   })
 
   it("caps an over-long argument list at medium rather than dropping the call", () => {
-    // `argumentCount` is a syntactic count and this is the first code to read it as a
-    // signature, so an overflow costs the tier instead of erasing the effect.
     expect(
       classificationConfidence(
         "prisma",

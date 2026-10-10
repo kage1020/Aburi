@@ -46,17 +46,6 @@ const SHAPE_ONLY_RULE_FIELDS: ReadonlySet<string> = new Set([
   "loopKind",
 ] satisfies (keyof LogicInput["rules"][number])[])
 
-/**
- * Whether a Symbol's logic axis names nothing: no effect, and no rule carrying anything but its
- * `type` and `loopKind`. Those two say what shape a body has, not what it does, and unrelated
- * bodies share them — every class and every body that only calls something hash to one value,
- * every body that is one `for` loop over calls to another. So two Symbols agreeing on such an
- * axis have not shown they are one, and the diff's logic-fingerprint stage asks their names to
- * (diff-algorithm.md §3.3).
- *
- * Read off the same input the hash is, field by field, so a field this axis gains later counts
- * as naming something until it is added to `SHAPE_ONLY_RULE_FIELDS`.
- */
 export function logicNamesNothing(symbol: IRSymbol): boolean {
   const input = buildLogicInput(symbol)
   return (

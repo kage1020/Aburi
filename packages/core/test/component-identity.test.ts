@@ -5,13 +5,6 @@ import type { Component } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CoreError, detectComponents } from "../src/index"
 
-/**
- * A directory can be claimed by more than one detector, and then more than one manifest
- * describes it. Which of them answers which field is component-detect.md's priority
- * order; these tests are that order applied to the one pair the JS detectors produce today,
- * a `package.json` beside an nx `project.json`.
- */
-
 let tmp = ""
 
 beforeEach(async () => {
@@ -75,9 +68,6 @@ describe("a directory two detectors claim", () => {
   })
 
   it("keeps the npm fields out of reach of a package manifest that declares nothing", async () => {
-    // Valid JSON that is not an object declares nothing, and the project file behind it must
-    // not be promoted into its place: those two fields are npm's, and an nx target option
-    // spelled `dependencies` is not one.
     await writeDualDetectedWorkspace()
     await writeRaw("apps/billing/package.json", "[]")
     await writeJson("apps/billing/project.json", {
@@ -94,9 +84,6 @@ describe("a directory two detectors claim", () => {
   })
 
   it("falls through to the project file for a name the package manifest does not carry", async () => {
-    // Id inference is a priority over sources, not a single source: an absent `name` in the
-    // first is
-    // not an answer, and the directory name is the last resort rather than the second.
     await writeDualDetectedWorkspace()
     await writeJson("apps/billing/package.json", { private: true })
     await writeJson("apps/billing/project.json", { name: "billing-web" })
@@ -108,9 +95,6 @@ describe("a directory two detectors claim", () => {
   })
 
   it("asks the next manifest for a name that answers `name` but yields no id", async () => {
-    // `@scope/` is a name, so `name` inference has its answer — and nothing can be built from
-    // it, so `id` inference does not. Stopping there would take the id from the directory
-    // while a project file beside it names the same directory usably.
     await writeDualDetectedWorkspace()
     await writeJson("apps/billing/package.json", { name: "@scope/" })
     await writeJson("apps/billing/project.json", { name: "billing-web" })
@@ -122,8 +106,6 @@ describe("a directory two detectors claim", () => {
   })
 
   it("passes over a name that is not a string rather than crashing on it", async () => {
-    // A manifest is JSON another tool wrote. An array has a `length`, which is as far as a
-    // truthiness check gets before the id derivation reads it as a string.
     await writeDualDetectedWorkspace()
     await writeJson("apps/billing/package.json", { name: ["billing-api"] })
     await writeJson("apps/billing/project.json", { name: "billing-web" })
@@ -147,8 +129,6 @@ describe("a directory only nx claims", () => {
   })
 
   it("reads the package manifest beside it that no detector reported", async () => {
-    // `detectNx` reports the project file alone. Leaving it at that would make a Component's
-    // identity depend on whether an unrelated manifest exists elsewhere in the workspace.
     await writeJson("nx.json", {})
     await writeJson("apps/billing/project.json", { name: "billing-e2e" })
     await writeJson("apps/billing/package.json", {
@@ -166,9 +146,6 @@ describe("a directory only nx claims", () => {
   })
 
   it("reports no frameworks and no public API from the project file", async () => {
-    // An nx project file holds targets, and its options are arbitrary JSON. A key spelled
-    // `dependencies` or `exports` in one is not the npm field of that name, and the two
-    // Component fields defined over those npm fields have no source here.
     await writeJson("nx.json", {})
     await writeJson("apps/billing/project.json", {
       name: "billing-web",
@@ -184,11 +161,6 @@ describe("a directory only nx claims", () => {
 })
 
 describe("a manifest that cannot be read", () => {
-  /**
-   * Absent is the ordinary case and says nothing. Present and unreadable is a Component whose
-   * identity this run cannot see: answering with the next manifest's name would put the
-   * pre-detection answer back, with nothing anywhere saying the published one was ever there.
-   */
   it("refuses a package manifest that is not JSON", async () => {
     await writeDualDetectedWorkspace()
     await writeRaw("apps/billing/package.json", "{ broken")
@@ -205,9 +177,6 @@ describe("a manifest that cannot be read", () => {
   })
 
   it("refuses a package manifest the filesystem will not hand over", async () => {
-    // Not every failure is a syntax error: the read itself can fail, and only "there is
-    // nothing there" is the ordinary case. A directory of that name is the one such failure
-    // a test can make on every platform — EACCES needs permissions Windows does not have.
     await writeDualDetectedWorkspace()
     await mkdir(join(tmp, "apps/billing/package.json"), { recursive: true })
     await writeJson("apps/billing/project.json", { name: "billing-e2e" })

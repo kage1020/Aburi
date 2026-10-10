@@ -1,26 +1,5 @@
 import type { IntegrityViolation } from "./errors"
 
-/**
- * Invariant #20 (ir-schema.md): the Document has the shape `aburi.ir.v1` requires.
- *
- * The other nineteen invariants, and every consumer that holds the branded `IR` type, are
- * written against a Document of that shape. Nothing in the pipeline establishes it: `readIR`
- * checks `$schema` and hands the parsed object to `checkIRIntegrity`, so this is the only
- * gate a Document read off disk passes. A gate whose answer to a malformed input is a
- * `TypeError` has no answer — the caller asked which invariant broke and got an internal
- * crash, which is the question the list exists to answer.
- *
- * Scoped to the schema's structural requirements rather than to "the fields the invariants
- * happen to read". The narrower reading is tempting and wrong: `readIR` brands its result
- * `IR`, so what this check establishes is what that brand asserts, and a check that covered
- * less would hand `@aburi/diff` an object missing `fingerprint` and let it crash outside
- * anyone's error handling. `test/integrity-shape-drift.test.ts` reads
- * `schema/aburi.ir.v1.json` and fails when a `required` entry has no line here, so the
- * duplication is checked rather than trusted.
- *
- * What is *not* checked: value grammars, enum membership, cross-field relations, array
- * ordering. Those are the other nineteen invariants, and they run once this one is clean.
- */
 type FieldSpec =
   | { kind: "string" }
   | { kind: "number" }
@@ -229,11 +208,6 @@ const DOCUMENT: RecordSpec = {
   stats: record(STATS),
 }
 
-/**
- * The spec, exported for the drift test that compares it against `schema/aburi.ir.v1.json`.
- * Keyed by the schema's `$defs` name, with `$` for the root, so a `required` entry with no
- * line here fails that test rather than being discovered later by a `TypeError`.
- */
 export const DOCUMENT_SHAPE: Readonly<Record<string, RecordSpec>> = {
   $: DOCUMENT,
   Generator: GENERATOR,
@@ -348,19 +322,9 @@ function checkField(
   }
 }
 
-/**
- * The subject a breach at the top level of the Document is attributed to. Exported because
- * `@aburi/diff` prefixes every subject with the side it came from and has to recognise the
- * root to write `baseIR` rather than `baseIR.document`; a hand-copied literal there would go
- * quietly wrong if this were renamed.
- */
 export const DOCUMENT_SUBJECT = "document"
 
 function violation(subject: string, message: string): IntegrityViolation {
-  // The subject names the record, the message names the field inside it, at every depth:
-  // `symbols[0]` / `"name" is absent`, `document` / `"workspace" is absent`. Putting the
-  // field in the subject at the top level and in the message everywhere else would make the
-  // two halves mean different things depending on how deep the breach happened to be.
   return { invariant: 20, subject: subject.replace(`${DOCUMENT_SUBJECT}.`, ""), message }
 }
 
@@ -368,10 +332,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-/**
- * Name a value the way an error message should. `NaN` and `Infinity` get their own answer:
- * `typeof NaN` is `"number"`, so the default would report `is a number, not a finite number`.
- */
 function describe(value: unknown): string {
   if (value === undefined) return "absent"
   if (value === null) return "null"

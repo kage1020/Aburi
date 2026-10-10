@@ -69,9 +69,6 @@ describe("makeSymbolId", () => {
         )
         continue
       }
-      // The reason matters, not just the refusal: `C:notabs.ts` is refused by the absolute
-      // clause and by the separator clause under one shared code, so asserting the code
-      // alone would stay green if the absolute-path pattern stopped covering it.
       let caught: unknown
       try {
         makeSymbolId({ language: "ts", file: path, qualifiedName: "foo" })
@@ -151,18 +148,9 @@ describe("makeTopLevelQname / makeNestedQname", () => {
 })
 
 describe("qualified-name segment grammar", () => {
-  /**
-   * Separators that join nothing. `makeMemberQname` / `makeNestedQname` cannot produce
-   * these, but a plugin that assembles a qname by hand can, and `makeSymbolId` is the last
-   * gate before the id reaches the IR.
-   */
   const emptySegment = ["A.", ".A", "A..B", ".", "..", "::", "A::", "::B", "A.::B", "A::.B"]
 
   it("makeSymbolId rejects a qualified name with an empty segment, and says so", () => {
-    // `QNAME_SEGMENT_PATTERN` refuses the empty string as well, so the dedicated branch
-    // changes only the message. Asserting the message is what makes it load-bearing —
-    // without it the branch could be deleted and every assertion would stay green while the
-    // reader was told `A.` "contains the non-identifier segment """.
     for (const qualifiedName of emptySegment) {
       let caught: unknown
       try {
@@ -177,9 +165,6 @@ describe("qualified-name segment grammar", () => {
   })
 
   it("isSymbolId and trySymbolId refuse them too", () => {
-    // Not a restatement of the case above: an id built elsewhere reaches the codebase
-    // through the guard rather than the constructor, and it is the guard that IR integrity
-    // invariant #17 consults about a document read off disk.
     for (const qualifiedName of emptySegment) {
       expect(isSymbolId(`ts:src/a.ts#${qualifiedName}`), qualifiedName).toBe(false)
       expect(
@@ -211,10 +196,6 @@ describe("qualified-name segment grammar", () => {
 
 describe("toPosixRelative", () => {
   it("refuses a backslash instead of reading it as a separator", () => {
-    // A backslash is a legal POSIX filename character, so rewriting it renames the file: the id
-    // built from the result names a path nothing can open, and `a\b.ts` beside `a/b.ts`
-    // becomes one path with two files claiming its Symbol ids. Converting a native path is the
-    // caller's job, where the platform separator is what makes the conversion unambiguous.
     expect(() => toPosixRelative("src/weird\\name.ts")).toThrowError(
       expect.objectContaining({ code: "non-posix-path" }),
     )
@@ -227,10 +208,6 @@ describe("toPosixRelative", () => {
   })
 
   it("applies the id rule, not only the shared path rule", () => {
-    // Every path this returns becomes a `symbols[].source.file` and the file segment of the
-    // id built beside it, so a path it accepts must be one `makeSymbolId` accepts. Under
-    // the shared rule alone all three pass here and throw one call later, from a constructor
-    // whose input this function is supposed to have already made valid.
     for (const raw of ["src/a:b.ts", "src/a#b.ts", "."]) {
       expect(() => toPosixRelative(raw), raw).toThrowError(
         expect.objectContaining({ code: "non-posix-path" }),
@@ -241,9 +218,6 @@ describe("toPosixRelative", () => {
 
 describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
   it("admits the two characters the id rule refuses", () => {
-    // The Document records paths the id grammar would not accept — `stats.skippedFiles[].path`
-    // is one, and it is how a file no Symbol can name is still named. Integrity #10 holds it to
-    // this rule, so what this returns is what that check will accept.
     for (const raw of ["src/a:b.ts", "src/a#b.ts", "."]) {
       expect(toDocumentPath(raw), raw).toBe(raw)
       expect(() => toPosixRelative(raw), raw).toThrowError(
@@ -253,17 +227,11 @@ describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
   })
 
   it("each describes the path as the thing its caller was building", () => {
-    // The two entry points share one normalizer and then apply their own rule. Composed the
-    // other way — the id rule layered on the document one — a path that breaks the shared rule
-    // is reported by whichever ran first, and a caller assembling a Symbol id is told about a
-    // "path" instead.
     expect(() => toPosixRelative("../outside.ts")).toThrowError(/Symbol id file path/)
     expect(() => toDocumentPath("../outside.ts")).toThrowError(/^path /)
   })
 
   it("still refuses a path that is not workspace-relative at all", () => {
-    // The half that stays fatal. There is nothing to record about a path from outside what the
-    // Document describes, so it is a caller error rather than one file to skip.
     for (const raw of ["C:\\Users\\foo\\a.ts", "../outside.ts", ""]) {
       expect(() => toDocumentPath(raw), raw).toThrowError(
         expect.objectContaining({ code: "non-posix-path" }),
@@ -277,8 +245,6 @@ describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
   })
 
   it("refuses a backslash rather than rewriting it into a separator", () => {
-    // The clause was always in the shared rule and nothing ever reached it: the normalizer
-    // spent the character before the rule ran, so the refusal could not fire.
     expect(() => toDocumentPath("src/weird\\name.ts")).toThrowError(
       expect.objectContaining({ code: "non-posix-path" }),
     )
@@ -286,37 +252,26 @@ describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
   })
 
   it("keeps two files that differ only by a backslash apart", () => {
-    // Rewritten, `a\b.ts` and `a/b.ts` are one path — two files claiming one set of Symbol
-    // ids, which invariant #1 reports as duplicate ids rather than as the names behind them.
     expect(() => toDocumentPath("a\\b.ts")).toThrowError()
     expect(toDocumentPath("a/b.ts")).toBe("a/b.ts")
   })
 
   it("refuses a native Windows path rather than converting it", () => {
-    // Converting is the caller's job, because only the caller knows it holds a native path.
-    // `workspace.ts` does it the way that is unambiguous: on the platform separator, which is
-    // a separator exactly where a filename cannot hold one.
     expect(() => toDocumentPath("C:\\Users\\foo\\a.ts")).toThrowError(/backslash/)
   })
 
   it("names the segment a backslash sits in, and the prefix that locates it", () => {
-    // Per segment for the same reason the id separators are: a backslash in a directory name
-    // disqualifies every file beneath it, and each of those filenames is innocent.
     expect(backslashSite("src/a.ts")).toBeNull()
     expect(backslashSite("src/weird\\name.ts")).toEqual({
       segment: "weird\\name.ts",
       prefix: "src/weird\\name.ts",
     })
     expect(backslashSite("src/v\\1/util.ts")).toEqual({ segment: "v\\1", prefix: "src/v\\1" })
-    // The *first*, and the prefix stops there: two directories may share a segment name, so
-    // the bare segment says what to rename without saying which one.
     expect(backslashSite("a\\1/b\\2/c.ts")).toEqual({ segment: "a\\1", prefix: "a\\1" })
     expect(backslashSite("x/a\\1/y.ts")?.prefix).toBe("x/a\\1")
   })
 
   it("answers exactly what the shared rule refuses on that clause", () => {
-    // One source, so discovery cannot report a file the rule would accept, nor stay quiet about
-    // one it refuses — the arrangement `symbolIdSeparatorSite` has with the id grammar.
     for (const raw of ["src/weird\\name.ts", "C:\\Users\\a.ts", "a\\1/b.ts"]) {
       expect(backslashSite(raw), raw).not.toBeNull()
       expect(() => toDocumentPath(raw), raw).toThrowError(/backslash/)
@@ -336,21 +291,15 @@ describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
       segment: "v#1",
       separators: ["#"],
     })
-    // Both, and `:` first however they sit in the segment — the order is the id's, so the
-    // sentence a skip detail builds from it does not depend on where in the name they are.
     expect(symbolIdSeparatorSite("src/a#b:c.ts")?.separators).toEqual([":", "#"])
   })
 
   it("answers null for a path that holds none but still cannot host an id", () => {
-    // Scoped to separators, and nothing more: `"."` holds neither and `symbolIdPathViolation`
-    // refuses it all the same, because a directory declares no Symbol.
     expect(symbolIdSeparatorSite(".")).toBeNull()
     expect(() => toPosixRelative(".")).toThrowError()
   })
 
   it("is the same rule the id grammar enforces", () => {
-    // One source. A check that drifted from the reporter would let discovery pass a file on
-    // that `makeSymbolId` then refuses, which is the throw this whole split exists to remove.
     for (const raw of ["src/a:b.ts", "src/a#b.ts", "src/a#b:c.ts", "src/v#1/util.ts"]) {
       expect(symbolIdSeparatorSite(raw), raw).not.toBeNull()
       expect(() => toPosixRelative(raw), raw).toThrowError()
@@ -360,10 +309,6 @@ describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
 
 describe("reserved language namespaces", () => {
   it("refuses `slice` as a language token so a Symbol id cannot masquerade as a Slice id", () => {
-    // Slice ids are "slice:" + the anchor Symbol id (slice-view.md). A `slice` language
-    // plugin would mint Symbol ids in that same namespace, and deriving a Slice id from one
-    // would produce "slice:slice:...". The brand keeps the two apart inside typed code; this
-    // keeps them apart on the wire, where the brand is erased.
     expect(() =>
       makeSymbolId({ language: "slice", file: "src/a.ts", qualifiedName: "foo" }),
     ).toThrowError(expect.objectContaining({ code: "invalid-language-id" }))
@@ -383,9 +328,6 @@ describe("trySymbolId", () => {
   })
 
   it("answers null where makeSymbolId throws", () => {
-    // The call-graph resolver and the LSP enrichment pass assemble speculative callee ids
-    // and then test them for existence. Throwing there would turn "no such callee" into a
-    // scan abort, so every rejection makeSymbolId reports has to be available as a null.
     expect(trySymbolId({ language: "TS", file: "src/a.ts", qualifiedName: "foo" })).toBeNull()
     expect(trySymbolId({ language: "slice", file: "src/a.ts", qualifiedName: "foo" })).toBeNull()
     expect(trySymbolId({ language: "ts", file: "src\\a.ts", qualifiedName: "foo" })).toBeNull()
@@ -404,9 +346,6 @@ describe("makeComponentId", () => {
   })
 
   it("accepts a digit-leading segment, because npm package names have them", () => {
-    // Component ids are derived by kebab-casing a package or directory name
-    // (component-detect.md). `3d-force-graph` and `7zip-bin` are real packages; a
-    // letter-first rule would make that derivation partial for no benefit.
     expect(makeComponentId("3d-force-graph")).toBe("3d-force-graph")
     expect(makeComponentId("7zip-bin")).toBe("7zip-bin")
     expect(makeComponentId("billing-2")).toBe("billing-2")
@@ -444,12 +383,7 @@ describe("id guards", () => {
   })
 
   it("isSymbolId refuses everything makeSymbolId refuses", () => {
-    // The predicate and the constructor have to answer the same question, or a string the
-    // constructor would never produce narrows to `SymbolId` anyway. A silhouette-matching
-    // regex accepted all five of these.
     const rejected = [
-      // A well-formed SliceId. `SliceId` is assignable to `string`, so this call compiles;
-      // narrowing it would forge a SymbolId out of an id from another namespace.
       "slice:ts:src/a.ts#foo",
       "ts:/abs/path.ts#foo",
       "ts:../../etc/passwd#foo",
@@ -475,10 +409,6 @@ describe("id guards", () => {
   })
 
   it("symbolIdFile names no file for anything makeSymbolId would refuse", () => {
-    // The whole point of the function: a caller uses the answer to make a positive statement
-    // about a path ("this document never analysed it"), so a string that merely has the
-    // silhouette of an id must not produce one. Every entry here survives a split on the
-    // first `:` and the first `#`, which is what a later simplification would reach for.
     const noFile = [
       "slice:ts:src/a.ts#foo",
       "ts:/abs/path.ts#foo",
@@ -497,8 +427,6 @@ describe("id guards", () => {
   })
 
   it("isComponentId and isSymbolId never both accept the same string", () => {
-    // What the two guards are for: `dependencies[].from`/`.to` hold either kind, and the
-    // kind is recovered from the shape alone (ir-schema.md).
     for (const value of ["ts:src/a.ts#foo", "billing", "not a valid id"]) {
       expect(isSymbolId(value) && isComponentId(value), value).toBe(false)
     }
@@ -513,8 +441,6 @@ describe("makeLanguageId", () => {
   })
 
   it("rejects a plugin manifest name", () => {
-    // The precise value that used to reach `workspace.languages`; hyphens are outside the
-    // grammar, which is what made every produced IR fail its own schema.
     expect(() => makeLanguageId("lang-typescript")).toThrow(CoreError)
   })
 

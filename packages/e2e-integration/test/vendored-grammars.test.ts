@@ -5,19 +5,6 @@ import { pathToFileURL } from "node:url"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { repoRoot } from "../src/packed"
 
-/**
- * `packages/lang-typescript/wasm` is generated, gitignored and published — the one
- * artifact in this repository that is all three at once. Nothing else covers the script
- * that writes it.
- *
- * The script always writes into its own package root, so provisioning is exercised by
- * copying it into a sandbox directory and running it there. That keeps the real `wasm/`
- * untouched: sibling test files in this suite import `@aburi/lang-typescript`, whose
- * `dist/index.mjs` refuses to load without it, and vitest runs test files in parallel.
- * The sandbox sits inside the package so that `createRequire` still resolves
- * `@vscode/tree-sitter-wasm` from its `node_modules`.
- */
-
 const GRAMMARS = ["tree-sitter-typescript.wasm", "tree-sitter-tsx.wasm"]
 
 const packageRoot = join(repoRoot, "packages", "lang-typescript")
@@ -96,9 +83,6 @@ describe("e2e: grammar wasms are reproducible build output", () => {
 
 describe("e2e: the parser's grammar paths and the vendoring script agree", () => {
   it("resolves every grammar the parser dispatches to", async () => {
-    // `src/parser.ts` names the two wasms as `new URL()` literals — they have to stay
-    // literals for a bundler to treat them as assets — so the script's list is a second,
-    // independent copy. This is what catches the two drifting apart.
     const parser = await readFile(join(packageRoot, "src", "parser.ts"), "utf8")
     const referenced = [...parser.matchAll(/new URL\("\.\.\/wasm\/([^"]+)"/g)]
       .map((match) => match[1])

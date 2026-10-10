@@ -62,13 +62,6 @@ function buildApiInput(symbol: IRSymbol): ApiInput {
   }
 }
 
-/**
- * Sort decorators by (name, line) so any two symbols with the same declared set produce
- * the same hash regardless of source order. Line breaks the tie so two decorators with
- * the same name (e.g. multiple `@ApiResponse(...)` calls) still order deterministically.
- * The raw string is canonicalized (NFC + whitespace collapse) so a reformat does not
- * perturb the hash.
- */
 function canonicalizeDecorators(
   decorators: readonly Decorator[],
 ): Array<{ name: string; raw: string; boundary: boolean }> {
@@ -91,8 +84,6 @@ function canonicalizeSignature(signature: Signature | null): ApiInput["signature
     generator: signature.generator,
     inputs: signature.inputs.map(canonicalizeParameter),
     outputs: signature.outputs.map(normalizeFingerprintString),
-    // throws are compared as a set — swapping their order in source should not register
-    // as an api change. Sort by code unit for determinism.
     throws: [...signature.throws].map(normalizeFingerprintString).sort(compareCodeUnit),
     typeParameters: signature.typeParameters.map(normalizeFingerprintString),
   }

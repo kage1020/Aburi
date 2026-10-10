@@ -1,7 +1,5 @@
 import type { DiffResult, Summary } from "@aburi/types"
 
-/** Diff-side builders; the IR builders come from `@aburi/test-support`. */
-
 export function emptySummary(): Summary {
   return {
     added: 0,

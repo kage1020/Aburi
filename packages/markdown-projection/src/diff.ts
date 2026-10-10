@@ -31,32 +31,10 @@ import {
 
 /** Options for {@link projectDiff}. */
 export interface ProjectDiffOptions {
-  /**
-   * markdown-projection.md — hard cap on the document in UTF-8 bytes (GitHub rejects a
-   * comment over 65536), honoured section by section, least important first, never by cutting
-   * the string: each section is kept at its smallest — names and locations, for a section of
-   * whole Symbols — and dropped only when even that does not fit, and the name lists then get
-   * their full entries back from the top. Must be a positive integer (`0` throws `RangeError`);
-   * absent means no cap.
-   */
   readonly maxBytes?: number
-  /**
-   * Where the uncapped report can be read, as a Markdown noun phrase — `` `diff.full.md` beside
-   * `diff.md` `` — for the note a capped document carries (`The full report, the same diff
-   * without a size cap, is <fullReportLocation>.`). It sits inside that one blockquote line, so
-   * it must not contain a line break (`RangeError`), and it counts against `maxBytes` like the
-   * rest of the note. Absent, the note says only that the full report is the same diff rendered
-   * without a cap. Read only when `maxBytes` changed the document.
-   */
   readonly fullReportLocation?: string
 }
 
-/**
- * markdown-projection.md — `out/diff.md`. Sections are emitted in the fixed importance order
- * (API changes → Syntax-only). Moved, Dropped changes and Syntax-only changes are folded
- * inside `<details>`; Moved + Changed is not, because its delta carries semantic impact.
- * Empty sections are dropped.
- */
 export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}): string {
   const { maxBytes, fullReportLocation } = options
   if (maxBytes !== undefined && (!Number.isInteger(maxBytes) || maxBytes <= 0)) {
@@ -109,9 +87,6 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     renderUnknown(buckets.unknown),
     indexUnknown(buckets.unknown),
   )
-  // `?? []` renders nothing for a diff that predates the field, which is the right answer:
-  // such a document cannot say what it missed, and a section built from an assumed empty list
-  // would report "nothing was missed" on every archived diff.
   appendSection(sections, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
   appendSection(
     sections,
@@ -144,24 +119,12 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
   return assemble(heading, sections, maxBytes, fullReportLocation)
 }
 
-/**
- * One rendered `##` block, kept whole so the size cap has something it can drop without
- * leaving half a document behind. `title` is the heading without its `## `, for the note
- * that names what went. `short` is the same section as a names-and-locations list, for the
- * sections whose entries are whole Symbols and only when that list is actually smaller; the
- * size cap falls back to it before it drops the section.
- */
 export interface Section {
   readonly title: string
   readonly lines: readonly string[]
   readonly short?: readonly string[]
 }
 
-/**
- * How the size cap shows one section. `short` carries its lines, so it can only be built from
- * a section that has a names-only form: a section cannot be counted as listed by name in the
- * note and be missing from the body.
- */
 export type Shown =
   | { readonly kind: "full" }
   | { readonly kind: "short"; readonly lines: readonly string[] }
@@ -173,18 +136,6 @@ export type Arrangement = ReadonlyArray<{ readonly section: Section; readonly sh
 const FULL: Shown = { kind: "full" }
 const OMITTED: Shown = { kind: "omitted" }
 
-/**
- * Join the document, shortening and then dropping sections until it fits (markdown-projection.md,
- * `maxBytes`). The section order is the importance order — fixed so a reviewer can read from
- * the top, with API changes first and Syntax-only folded at the bottom — so the bottom is the
- * least important thing in the document.
- *
- * A document that fits whole is returned as it is. Otherwise `arrangeWithin` decides each
- * section's form, re-rendering and re-measuring the whole document at every step, because the
- * note grows with each section it names. The title and Summary line cannot be dropped, so a
- * budget may still be out of reach with every section gone; only that document takes the
- * "could not be brought within" wording.
- */
 function assemble(
   heading: readonly string[],
   sections: readonly Section[],
@@ -212,21 +163,6 @@ function assemble(
   )
 }
 
-/**
- * The form of each section in a capped document, decided in two passes.
- *
- * 1. **Which sections stay.** Most important first, each section is kept in its smallest form —
- *    names-only where it has one, whole where it has not — if it fits beside the ones already
- *    kept, and omitted otherwise. So a section goes only when it cannot fit, at its smallest,
- *    beside every more important section that stayed: the least important go first, and a
- *    names-only list never costs a more important section its place.
- * 2. **How much of them.** The names-only lists become whole again from the top, until one does
- *    not fit. So the sections shown whole among those that have a names-only form are the
- *    first ones, and once one is short every one below it is short or gone.
- *
- * Exported for its tests, which check it against every arrangement of small inputs; it is not
- * part of the package's API.
- */
 export function arrangeWithin(
   sections: readonly Section[],
   fits: (arrangement: Arrangement) => boolean,
@@ -262,11 +198,6 @@ function linesIn(section: Section, shown: Shown): readonly string[] {
   }
 }
 
-/**
- * The line that stands in for what was shortened or dropped, naming sections in document
- * order (the reader is looking for the heading, and that is the order they look in).
- * `unachievable` is the path where every section went and the document is still over budget.
- */
 function omissionNote(
   arrangement: Arrangement,
   maxBytes: number,
@@ -278,8 +209,6 @@ function omissionNote(
   const shortened = titlesShown("short")
   const omitted = titlesShown("omitted")
   if (shortened.length === 0 && omitted.length === 0) {
-    // Nothing to name, but a document over its budget still has to say so: with no sections
-    // at all, the title and Summary line are the whole of it.
     return unachievable
       ? [`> ⚠ This report could not be brought within ${maxBytes} bytes.`, ""]
       : []
@@ -333,11 +262,6 @@ function summaryLine(diff: DiffResult): string {
   )
 }
 
-/**
- * Append the unknown count to a summary line when there is one: the added and removed counts
- * beside it are smaller than the truth by exactly this much. Appended rather than always
- * present, so the line does not grow a permanent `?0` on diffs where nothing was lost.
- */
 function withUnknown(line: string, diff: DiffResult): string {
   const unknown = diff.summary.unknown ?? 0
   return unknown === 0 ? line : `${line} · ?${unknown} unknown`
@@ -356,13 +280,6 @@ interface Buckets {
   unknown: SymbolUnknown[]
 }
 
-/**
- * Section routing (markdown-projection.md). The delta flags overlap, so `routeChanged`
- * applies a priority: `apiChanged` → API changes, else `logicChanged` → Logic changes, else
- * `confidenceChanged` → Confidence changes, else `syntaxChanged` → Syntax-only. Confidence
- * outranks syntax because the Syntax-only section is one folded line per entry, where the
- * before and after would not show. The other buckets are routed by the `status` tag alone.
- */
 function partition(changes: readonly SymbolChange[]): Buckets {
   const out: Buckets = {
     apiChanged: [],
@@ -401,8 +318,6 @@ function partition(changes: readonly SymbolChange[]): Buckets {
         out.unknown.push(c)
         break
       default:
-        // This switch accumulates rather than returns, so without the guard a status added
-        // later would simply vanish from every section of `diff.md`.
         return assertNeverChange(c)
     }
   }
@@ -424,11 +339,6 @@ function routeChanged(
   else if (delta.syntaxChanged) out.syntaxOnly.push(change)
 }
 
-/**
- * `index`, when given, is the section's names-only form (one row per entry) for the size cap
- * to fall back to. It is rendered under the same heading, with a line saying what it is, so a
- * reader who lands on the section rather than on the note still knows the entries are short.
- */
 function appendSection(
   sections: Section[],
   heading: string,
@@ -441,10 +351,6 @@ function appendSection(
   sections.push({
     title: titleOf(heading),
     lines,
-    // A section of one or two thin entries can be longer as a names-only list than in full,
-    // once the line saying what it is has been added. Offering it then would let a step of the
-    // cap grow the document it exists to shrink, so such a section behaves as one with no
-    // names-only form.
     ...(short === undefined || byteLength(short) >= byteLength(lines) ? {} : { short }),
   })
 }
@@ -456,13 +362,6 @@ function byteLength(lines: readonly string[]): number {
 const NAMES_ONLY_LINE =
   "_Names and locations only: the full entries did not fit within the size cap._"
 
-/**
- * §6.1 — three sections (Moved / Dropped / Syntax-only) live inside a `<details>`
- * fold-out. Skipping the wrapper when body is empty keeps the file from carrying dangling
- * empty `<details>` blocks that GitHub still renders as a clickable arrow. `entryCount` is
- * passed separately because Dropped prefixes direction groups with headings and separators,
- * so its rendered row count can exceed the number of entries.
- */
 function appendFolded(
   sections: Section[],
   heading: string,
@@ -525,14 +424,6 @@ function renderDeltaBody(change: SymbolChanged | SymbolMovedChanged): string[] {
   return rows
 }
 
-/**
- * Never let a fingerprint flag go unexplained: a heading with no reason under it reads as "no
- * reason was found". A note rather than a thrown invariant, because the fingerprints cover
- * inputs the structured delta does not model, so a real document can set a flag with every
- * `ArrayDelta` empty. All three flags are covered because `renderMovedChanged` reaches here
- * with syntax-only moves too. The component and confidence rows do not count as an
- * explanation, since neither is a fingerprint input; the visibility row does, as an API one.
- */
 function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
   const which = delta.apiChanged
     ? "API"
@@ -565,9 +456,6 @@ function appendSignatureDelta(
   if (sig.inputs.removed.length > 0) {
     rows.push(`- signature.inputs removed: ${describeInputs(sig.inputs.removed)}`)
   }
-  // `inputs` keys on `${index}:${name}`, so a parameter whose type changed while its name
-  // and position held lands here and only here — the single most common breaking API
-  // change. Rendering a count, as added/removed once did, would say nothing about it.
   if (sig.inputs.modified.length > 0) {
     rows.push(`- signature.inputs modified: ${describeInputs(sig.inputs.modified)}`)
   }
@@ -576,17 +464,6 @@ function appendSignatureDelta(
   if (sig.typeParametersChanged) rows.push(`- signature.typeParameters: changed`)
 }
 
-/**
- * `ArrayDelta` buckets are `unknown[]` because the schema erases the element type, while the
- * runtime shape is fixed per field. The `as*Like` predicates narrow them without casts, so a
- * schema regeneration fails to compile here instead of emitting `@?` placeholders.
- *
- * One row per decorator rather than `appendArrayGroup`'s nested list. `added` and `removed`
- * print `raw`, which quotes the receiver, as the non-delta list does; `modified` drops the
- * arguments, because they may be the change, and keeps the receiver so that it is not the one
- * row that loses it. `modified` holds the head side only, so a receiver lost reads as the bare
- * name.
- */
 function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]): void {
   if (delta === undefined) return
   const buckets: [string, readonly unknown[], (d: DecoratorLike) => string][] = [
@@ -622,11 +499,6 @@ function appendCallDelta(rows: string[], delta: SymbolDelta["calls"]): void {
   appendArrayGroup(rows, "calls", delta, describeCallLike)
 }
 
-/**
- * All three `ArrayDelta` buckets: `@aburi/diff` routes an element whose identity key matched
- * but whose content changed into `modified`, so a rewritten guard condition or a call that
- * stopped resolving arrives there and nowhere else.
- */
 function appendArrayGroup(
   rows: string[],
   label: string,
@@ -738,11 +610,6 @@ function asCallLike(value: unknown): CallLike | null {
   return { target, line }
 }
 
-/**
- * The delta's own rule row, nested under `- rules added:` — not `ruleRow`, and inline however
- * long the condition: a delta bucket lists the rules that moved rather than showing each in
- * full, and a widened code span holds any condition on one line.
- */
 function describeRuleLike(value: unknown): string | null {
   const rule = asRuleLike(value)
   if (rule === null) return null
@@ -813,14 +680,6 @@ function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
     .flatMap((symbol) => symbolEntry(symbol, []))
 }
 
-/**
- * The Symbols one document has and the other never looked for (markdown-projection.md).
- * Apart from Added and Removed because the reader's next action differs: an entry here is a
- * gap to close, and the reason says how — `parse-timeout` and `unreadable` usually clear on
- * a re-run, while
- * `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the file or the
- * plugin set.
- */
 function renderUnknown(items: readonly SymbolUnknown[]): string[] {
   return [...items]
     .sort((a, b) => compareStrings(a.symbol.id, b.symbol.id))
@@ -854,12 +713,6 @@ function skippedFile(item: SymbolUnknown): string {
   return `this file under its ${item.absentFrom} name, ${inlineCode(item.lostPath)}`
 }
 
-/**
- * Files neither revision analysed. Beside Unknown rather than inside it: an Unknown Symbol
- * needs one revision re-scanned, while a file here is a standing property of the workspace
- * every diff will keep missing. Both reasons, never one — `parse-timeout` at the base and
- * `over-size` at the head says whether a re-run is enough, which neither half does alone.
- */
 function renderNotCompared(files: readonly NotComparedFile[]): string[] {
   if (files.length === 0) return []
   const rows: string[] = []
@@ -892,12 +745,6 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   return rows
 }
 
-/**
- * Where a moved Symbol went. Between files, the two paths. Within one file the id changed while the
- * path did not, so the qualified name inside the id did — and the producers carry that qualified
- * name in `Symbol.name` (ir-schema.md §3.1 does not tie the two). The paths would read the same
- * twice, and the old name is the fact a reader needs to recognise the move.
- */
 function moveRoute(before: IRSymbol, after: IRSymbol): string {
   if (before.source.file !== after.source.file) {
     return `${inlineCode(before.source.file)} → ${inlineCode(after.source.file)}`
@@ -987,12 +834,6 @@ function renderSyntaxOnly(items: readonly (SymbolChanged | SymbolMovedChanged)[]
   )
 }
 
-/**
- * slice-view.md — the Slice View section: every non-singleton Slice as a `###` subsection
- * with member bullets, then the singletons folded into one "Standalone changes" `<details>`.
- * Empty input renders nothing. `symbols[]` supplies each member's SymbolChange for the
- * per-bullet detail.
- */
 function renderSliceView(
   slices: readonly SliceRecord[],
   symbols: readonly SymbolChange[],
@@ -1020,10 +861,6 @@ function renderSliceView(
     )
     rows.push("")
     for (const slice of singleton) {
-      // members[0] is the Slice anchor (slice-view.md). Read from members, never by
-      // stripping the `slice:` prefix off `id`: for a record that broke the derivation that
-      // would name a Symbol outside the Slice. (`sliceAnchor` lives in @aburi/diff, which
-      // this package does not depend on.)
       const memberId = slice.members[0]
       if (memberId === undefined) {
         throw new Error(
@@ -1040,11 +877,6 @@ function renderSliceView(
   return rows
 }
 
-/**
- * slice-view.md — one non-singleton Slice: the full slice id in a code span (so viewers do
- * not auto-link the `:` / `/` / `#`) with the member count, then a three-line cluster per
- * member.
- */
 function renderSliceSection(
   slice: SliceRecord,
   changeById: ReadonlyMap<SymbolId, SymbolChange>,
@@ -1063,12 +895,6 @@ function renderSliceSection(
   return rows
 }
 
-/**
- * The note that turns slice-view.md's silent drop into something a reviewer can act on: an
- * unresolved call emits no `CallEdge`, so a Slice that should have bridged two Symbols may
- * show as two singletons. Counting the members' own `calls[].resolved` is sufficient, since
- * the Edge set draws an edge only when both endpoints are Nodes.
- */
 function renderUnresolvedCallNote(
   slices: readonly SliceRecord[],
   changeById: ReadonlyMap<SymbolId, SymbolChange>,
@@ -1121,11 +947,6 @@ function renderSingletonLabel(
   return `${inlineCode(symbol.name)} *(${change.status})*${unresolvedCallMarker(symbol)}`
 }
 
-/**
- * Every Slice member is a Node (slice-view.md) and every Node is a SymbolChange in
- * `diff.symbols[]` (its emission rules), so a missing entry is a producer bug that surfaces
- * here rather than as an "unknown" label.
- */
 function requireChangeForMember(
   memberId: SymbolId,
   sliceId: SliceId,
@@ -1141,17 +962,6 @@ function requireChangeForMember(
   return change
 }
 
-/**
- * The Symbol a change is reported under (slice-view.md's Node set): `after` where both
- * sides exist, otherwise the one side the document holds. Pure `moved` is not a Node but is
- * still indexed.
- *
- * A `switch` rather than the two-way test it reduces to, because the two-way test is a
- * silent default: a status added to `SymbolChange` later that happens to carry an `after`
- * would compile and be reported under the wrong side of itself, with nothing to catch it.
- * Spelling out every status makes the addition a compile error at the one place that has to
- * decide which Symbol the new status is about.
- */
 function symbolForMember(change: SymbolChange): IRSymbol {
   switch (change.status) {
     case "added":
@@ -1226,8 +1036,6 @@ function renderComponentChanges(diff: DiffResult): string[] {
     rows.push("### Changed")
     for (const ch of diff.components.changed) {
       const fields = changedComponentFields(ch.before, ch.after)
-      // Two documents can differ in a field neither this version nor the key sweep's
-      // normalization recognises; naming the component alone is the honest row.
       rows.push(
         fields.length === 0
           ? `- ${inlineCode(ch.after.id)}`
@@ -1239,15 +1047,6 @@ function renderComponentChanges(diff: DiffResult): string[] {
   return rows
 }
 
-/**
- * The fields that differ between the two revisions of one Component, read from `before` /
- * `after` rather than `delta`: the delta summarises three axes, and a change to name,
- * languages or description leaves all three `false` (diff-algorithm.md). Scalars carry
- * their before → after inline through `inlineCode` (free-form config text that reaches a PR
- * comment body); list fields name themselves. The sweep after the six named fields covers a
- * `Component` key added to `aburi.ir.v1` later, which `diffComponents` will report and this
- * version has never heard of.
- */
 function changedComponentFields(before: Component, after: Component): string[] {
   const fields: string[] = []
   if (before.name !== after.name) {
@@ -1257,8 +1056,6 @@ function changedComponentFields(before: Component, after: Component): string[] {
   if (!sameList(before.publicApi ?? [], after.publicApi ?? [])) fields.push("publicApi")
   if (!sameList(before.languages, after.languages)) fields.push("languages")
   if (!sameList(before.frameworks ?? [], after.frameworks ?? [])) fields.push("frameworks")
-  // Class A (ir-schema.md): an absent key and `null` are the same answer, so the `??`
-  // is what keeps an older document that omits the key from reading as a description removal.
   const beforeDescription = before.description ?? null
   const afterDescription = after.description ?? null
   if (beforeDescription !== afterDescription) {
@@ -1270,12 +1067,6 @@ function changedComponentFields(before: Component, after: Component): string[] {
   return fields
 }
 
-/**
- * Field names the two revisions disagree on that `changedComponentFields` has no rendering
- * for. Compared by `JSON.stringify`, since the canonical serializer lives in `@aburi/core`
- * and is not a dependency here; the difference only shows on key order or Unicode form, as a
- * named field a reader can check.
- */
 function unknownChangedFields(before: Component, after: Component): string[] {
   // Widened through `unknown`: the keys being read are by definition not on `Component`.
   const beforeRecord = before as unknown as Record<string, unknown>
@@ -1305,10 +1096,6 @@ const RENDERED_COMPONENT_FIELDS = new Set<string>([
   "description",
 ])
 
-/**
- * A description as a row cell. `null` and `""` are different answers from the config author —
- * "no description" against "a description that is empty" — so they read differently here.
- */
 function renderDescription(description: string | null): string {
   return description === null ? "none" : inlineCode(description)
 }
@@ -1317,12 +1104,6 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((entry, i) => entry === b[i])
 }
 
-/**
- * Dependency changes (markdown-projection.md) — split into component-level (architectural)
- * and symbol-level (implementation) groups under one heading; an empty group collapses. The
- * Unknown group appended last is not level-routed, because only a Symbol endpoint has a file
- * to lose.
- */
 function renderDependencyChanges(diff: DiffResult): string[] {
   const { added, removed } = diff.dependencies
   const rows: string[] = []
@@ -1338,9 +1119,6 @@ function renderDependencyChanges(diff: DiffResult): string[] {
   )
   appendDependencyGroup(rows, "Symbol-level added", added.filter(isSymbolEdge))
   appendDependencyGroup(rows, "Symbol-level removed", removed.filter(isSymbolEdge))
-  // `?? []` for a `diff.json` produced before the field existed: the alternative is a section
-  // saying the diff might be incomplete on every older document, including the ones that
-  // lost nothing.
   appendUnknownDependencies(rows, diff.dependencies.unknown ?? [])
   return rows
 }
@@ -1354,10 +1132,6 @@ function appendDependencyGroup(rows: string[], heading: string, deps: readonly D
   rows.push("")
 }
 
-/**
- * Edges neither revision deleted, each with the lost file and reason, which is what tells a
- * reviewer whether to re-run (`parse-timeout`) or fix something (`parse-failed`).
- */
 function appendUnknownDependencies(rows: string[], unknown: readonly DependencyUnknown[]): void {
   if (unknown.length === 0) return
   rows.push("### Unknown — the other revision never read one end")

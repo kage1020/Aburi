@@ -16,26 +16,10 @@ import {
 } from "./format"
 
 export interface ProjectSymbolExplainContext {
-  /**
-   * Every Dependency in the current IR. When provided, a `## Called by` section lists the
-   * `via: "call"` edges whose `to` is this Symbol. Absent → the section is omitted.
-   */
   dependencies?: readonly Dependency[]
-  /**
-   * Per-call resolution diagnostics for THIS Symbol (call-resolution.md), from the scan
-   * running right now — the IR cannot carry them, since the resolver keeps the reason out of
-   * the document. Supplying them adds a `## Call resolution` section; omitting them leaves the
-   * output as it was before the section existed.
-   */
   unresolvedCalls?: readonly UnresolvedCallDiagnostic[]
 }
 
-/**
- * markdown-projection.md — `aburi explain <id>`. A stand-alone Symbol view that gives every
- * axis its own section (as in the doc's mock) and carries `derivedBy` and the full
- * fingerprint. A `dropped: true` Symbol falls back to a short summary, since it has no
- * rules/effects/calls/fingerprint (ir-schema.md).
- */
 export function projectSymbolExplain(
   symbol: IRSymbol,
   context: ProjectSymbolExplainContext = {},
@@ -128,12 +112,6 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   return renderDocument(lines)
 }
 
-/**
- * `aburi explain --debug-resolution` — the per-Symbol view call-resolution.md promises:
- * one row per call site, ordered by line, with the resolved callee or the bucket that
- * explains the `null`. An empty array is meaningful ("the resolver left nothing unresolved
- * here") and renders the section with a note; `undefined` omits it.
- */
 function renderCallResolution(
   symbol: IRSymbol,
   diagnostics: readonly UnresolvedCallDiagnostic[] | undefined,
@@ -145,9 +123,6 @@ function renderCallResolution(
     lines.push("_(no call sites)_", "")
     return lines
   }
-  // `(line, target)` is not unique — `a(); a()` on one line yields two Call entries — but
-  // classification is a pure function of caller, target and site, so colliding entries carry
-  // the identical verdict.
   const bucketByKey = new Map<string, UnresolvedCallDiagnostic>()
   for (const d of mine) bucketByKey.set(`${d.line}\t${d.target}`, d)
 
@@ -177,20 +152,6 @@ function collectCallers(symbol: IRSymbol, dependencies: readonly Dependency[]): 
   return [...callers].sort(compareStrings)
 }
 
-/**
- * The short summary a `dropped: true` Symbol gets instead of the axis sections, and the one
- * renderer here that does not collapse blank runs.
- *
- * Every other document in this package is assembled from sections that each push their own
- * blank line, so the fold is what keeps two adjacent sections from writing two. This one has
- * no sections: its body is a fixed handful of lines, so there is no spacing of its own left
- * for the fold to tidy. What it does have is `dropReason`, which reaches the document
- * verbatim rather than through `inlineCode` — a reason is prose a reviewer reads, not a value
- * in a code span. Folding here would therefore only ever rewrite somebody else's text, and
- * silently reformat the one field this view exists to show. No producer in the tree emits a
- * reason carrying a blank line, so the two behaviours differ on plugin-written IR alone;
- * that is a reason to be deliberate about which one this is, not a reason to have no answer.
- */
 function renderDroppedExplain(symbol: IRSymbol): string {
   const lines: string[] = []
   lines.push(`# ${symbolTitle(symbol)} — dropped`)

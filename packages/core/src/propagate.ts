@@ -14,18 +14,6 @@ function invariantFailure(message: string): never {
   throw new CoreError(`propagate: ${message}`, { code: "propagation-invariant-violated" })
 }
 
-/**
- * Transitive effect propagation over the resolved call graph. Implements
- * docs/design/effect-propagation.md — SCC (Tarjan) → condensed DAG →
- * reverse-topological sweep → `(effectId, target)` set-union merge with
- * `min`-along-path / `max`-across-paths confidence combination.
- *
- * The pass is a pure function of `(symbols, edges)`. Local (plugin-classified)
- * effects survive verbatim in each Symbol's `effects[]` in original call order;
- * transitively-reachable effects are appended as `propagated: true` entries
- * sorted by `(effectId, target)` ascending, with `line` omitted and
- * `derivedFrom` recording the *direct* upstream callee(s) only.
- */
 export interface PropagateInput {
   /** Symbols returned by `resolveCallGraph` (with `calls[].resolved` filled in). */
   symbols: readonly IRSymbol[]
@@ -38,10 +26,6 @@ export interface PropagateResult {
   stats: EffectPropagationStats
 }
 
-/**
- * Alias for `EffectPropagationStats` re-exported through the propagation module so
- * callers can import stats and pass alongside without also reaching into `@aburi/types`.
- */
 export type PropagationStats = EffectPropagationStats
 
 const CONFIDENCE_RANK: Record<Confidence, number> = { low: 0, medium: 1, high: 2 }
@@ -88,10 +72,6 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
   const aggregateBySccIdx: Map<string, AggregatedEntry>[] = condensed.map(() => new Map())
 
   for (const sccIdx of sweepOrder) {
-    // sweepOrder is a permutation of condensed's indices — every entry MUST index
-    // into both condensed and aggregateBySccIdx. A miss here would mean the DAG
-    // reverse-topo order and the SCC list have desynchronized, and silently
-    // skipping would swallow the whole SCC's effect set. Throw so upstream sees it.
     const scc = condensed[sccIdx] ?? invariantFailure(`sweepOrder references missing SCC ${sccIdx}`)
     const agg =
       aggregateBySccIdx[sccIdx] ?? invariantFailure(`aggregate slot missing for SCC ${sccIdx}`)
@@ -147,12 +127,6 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
           continue
         }
         existing.confidence = maxConfidence(existing.confidence, propagatedConfidence)
-        // Keep `plugin` and `derivedBy` in lock-step. When a local classification is
-        // already present anywhere in the SCC the local's (plugin, derivedBy) pair
-        // wins verbatim per effect-propagation.md — downstream cannot rename
-        // either field. When there is no local, the downstream contribution with
-        // the lexicographically smallest `derivedBy` wins and BOTH fields
-        // move together so a reader never sees "plugin says X, derivedBy says Y".
         if (!existing.hasLocal && downEntry.derivedBy < existing.derivedBy) {
           existing.derivedBy = downEntry.derivedBy
           existing.plugin = downEntry.plugin
@@ -189,9 +163,6 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
         if (localKeys.has(key)) continue
         const derivedFromSet = new Set<SymbolId>()
         for (const callee of outCallees) {
-          // callee came from `adjacency.get(original.id)`, which only contains
-          // nodes present in the input; sccOfNode was populated for every one.
-          // A miss means the SCC book-keeping is inconsistent.
           const calleeSccIdx =
             sccOfNode.get(callee) ??
             invariantFailure(`out-callee ${callee} of ${original.id} has no SCC`)
@@ -244,17 +215,8 @@ function buildAdjacency(
 ): Map<SymbolId, Array<{ to: SymbolId; confidence: Confidence }>> {
   const adj = new Map<SymbolId, Array<{ to: SymbolId; confidence: Confidence }>>()
   for (const id of nodeIds) adj.set(id, [])
-  // Keyed by the `(from, to)` pair for dedup, but the endpoints are carried in the value
-  // rather than recovered by splitting the key: a Symbol id may contain any character the
-  // path and qname allow, so re-deriving the pair from the joined string means asserting a
-  // brand back onto a slice of it. Holding the typed pair keeps the ids the resolver
-  // produced.
   const seen = new Map<string, { from: SymbolId; to: SymbolId; confidence: Confidence }>()
   for (const edge of edges) {
-    // Every CallEdge must reference Symbols in the input set — resolveCallGraph
-    // filters against `keptSymbolIds`. A dangling endpoint here means the caller
-    // passed a `symbols`/`edges` pair that disagrees, and silently dropping the
-    // edge would hide propagation from every path that transits it.
     if (!adj.has(edge.from)) {
       invariantFailure(`CallEdge.from ${edge.from} is not present in input symbols`)
     }
@@ -332,10 +294,6 @@ function tarjanSCC(
           const component: SymbolId[] = []
           while (true) {
             const popped = stack.pop()
-            // Tarjan's contract: the stack must contain at least frame.node when
-            // we detect a root (idx === low), so this can only trigger if the
-            // recursion has a bug. Fail observably rather than treating the
-            // undefined pop as a node, so a future refactor cannot loop forever here.
             if (popped === undefined) {
               invariantFailure(`SCC stack drained before reaching root ${frame.node}`)
             }
@@ -405,25 +363,6 @@ function condense(
   return nodes
 }
 
-/**
- * Kahn's algorithm over the condensed DAG, run backwards so a callee is emitted before
- * every caller that reaches it. Among SCCs ready at the same moment the smallest index
- * wins — the tie-break effect-propagation.md requires.
- *
- * What that tie-break does and does not buy: determinism comes from the sorts around this
- * function — the id-sorted node list, the sorted `outSccs`, and the explicit sorts applied
- * to `derivedFrom` and to the propagated entries — not from the tie-break itself. The SCC
- * aggregation is commutative (every merge is a min, a max, or a lexicographic-min), so any
- * valid topological order would produce the same bytes today. The tie-break is still worth
- * holding, because that commutativity is a property of the current merge steps and nothing
- * forces the next one to preserve it.
- *
- * The ready set is a binary min-heap rather than a re-sorted array. Most symbols call
- * nothing, so nearly every SCC is ready at the start: the set grows to O(V), and
- * re-sorting it on each of the V dequeues made this `O(V² log V)`. A heap brings it to
- * `O((V + E) log V)`; the log factor is unavoidable while effect-propagation.md mandates a
- * min tie-break for SCCs.
- */
 export function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
   const remainingOut = condensed.map((scc) => scc.outSccs.length)
   const reverseAdj: number[][] = condensed.map(() => [])
@@ -449,10 +388,6 @@ export function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
   return order
 }
 
-/**
- * Binary min-heap over SCC indices. Small and local on purpose: the only ordering this
- * needs is numeric ascending, and the only operations are push and pop-min.
- */
 class MinHeap {
   private readonly items: number[] = []
 

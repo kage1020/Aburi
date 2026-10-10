@@ -5,11 +5,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * An Express app whose every route writes to the database reported no effects at all,
- * because the route Symbol had no body and the handler had no Symbol.
- */
-
 const workspace = useScratchWorkspace("route-handler")
 
 const scanWorkspace = () =>
@@ -54,9 +49,6 @@ describe("scan — an Express route whose handler writes to a database", () => {
   })
 
   it("gives the two routes different logic fingerprints", async () => {
-    // The axis is rules plus effects, so while a route had no body every route in a file
-    // hashed identically — a reader diffing two revisions could not see one route's handler
-    // start writing where another only read.
     const result = await scanWorkspace()
     const read = symbolById(result, "ts:src/app.ts#app__get__$users__d0")
     const write = symbolById(result, "ts:src/app.ts#app__post__$users__d0")
@@ -65,8 +57,6 @@ describe("scan — an Express route whose handler writes to a database", () => {
   })
 
   it("leaves the effect on the registration rather than moving it", async () => {
-    // Nothing resolves a call to a route Symbol, so an effect found in a handler sits where
-    // the handler is registered instead of propagating to a caller.
     const result = await scanWorkspace()
 
     expect(result.ir.stats.effectPropagation.symbolsWithPropagatedEffects).toBe(0)

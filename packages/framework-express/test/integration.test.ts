@@ -185,8 +185,6 @@ describe("framework-express — abstains", () => {
       "src/misc.ts",
       `console.log('starting')\nSentry.captureException(new Error('x'))\n`,
     )
-    // These aren't promoted to call symbols in the first place (extractor filter);
-    // even if they were, classifier would still abstain.
     expect(rows.some((r) => r.classification !== null)).toBe(false)
   })
 })

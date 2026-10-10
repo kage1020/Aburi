@@ -6,10 +6,6 @@ import { propagateEffects } from "../src/propagate"
 import { makeSymbol } from "./fixtures/ir"
 import { edge, effect } from "./fixtures/propagate"
 
-/**
- * Object-literal wrapper over the shared `effect` builder, keeping this file's call sites
- * (`local({ id, target, confidence })`) readable where several fields are overridden.
- */
 function local(overrides: Partial<Effect> & { id: string; target: string }): Effect {
   return effect(overrides.id, overrides.target, overrides)
 }
@@ -202,9 +198,6 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
   })
 
   it("PR11: cross-language guard — edges only connect within one language universe", () => {
-    // The propagate pass does not enforce language separation itself — the call-graph
-    // resolver upstream never emits cross-language edges. Emulate: only intra-language
-    // edges are provided, and propagation must still function per-language.
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x" })] }),
@@ -214,8 +207,6 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(bySymbolId(out, "ts:a.ts#A").effects.some((e) => e.propagated === true)).toBe(true)
   })
 
-  // A second pass over the first pass's output, so unlike PR14 it also covers the
-  // `propagated: true` entries being skipped as locals on re-entry.
   it("PR13: idempotence — running propagation twice reproduces the same effects[] byte-for-byte", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
@@ -370,10 +361,6 @@ describe("propagateEffects — additional invariants (effect-propagation.md)", (
 
 describe("propagateEffects — coverage for merge / condense internals", () => {
   it("multiple call sites on the same (from,to) collapse to the max edge confidence", () => {
-    // Two edges A→B with confidences (low, high) MUST be treated as one edge with
-    // confidence=high; the propagated entry then survives min-along-path with B's
-    // high-confidence local at high. If the pair silently kept the first-seen edge
-    // (low), min(low, high) would demote the propagated confidence to low.
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", {
@@ -390,10 +377,6 @@ describe("propagateEffects — coverage for merge / condense internals", () => {
   })
 
   it("condense collapses parallel SCC→SCC edges by max confidence", () => {
-    // Multi-member SCC {A, B} calling out to a downstream SCC {C}, with A→C at
-    // low confidence and B→C at high confidence. `condense()` MUST aggregate the
-    // pair (fromScc=SCC{A,B}, toScc=SCC{C}) with the max, so A's propagated entry
-    // ends up at min(high, high)=high — not min(low, high)=low.
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B"),
@@ -414,9 +397,6 @@ describe("propagateEffects — coverage for merge / condense internals", () => {
   })
 
   it("plugin and derivedBy stay locked together on the winning tie-break", () => {
-    // The invariant: for a purely propagated aggregate entry, `derivedBy` and
-    // `plugin` reflect the SAME upstream classification. A reader must never see
-    // "derivedBy says plugin A, plugin field says plugin B".
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", {
@@ -455,13 +435,6 @@ describe("propagateEffects — coverage for merge / condense internals", () => {
 })
 
 describe("propagateEffects — the sweep order and the written bytes agree", () => {
-  // The failure this guards is the one Unicode normalization exists to prevent, at the one
-  // place it is a sort key. Propagated entries are ordered by `(id, target)`; integrity
-  // invariant #11 verifies that order against the string held in memory, and
-  // `serializeCanonical` writes the normalized string. The two spellings of `é` sort on
-  // opposite sides of `z`: U+00E9 after it, `e`+U+0301 before it. So if the array were
-  // ordered on one form and emitted in the other, the Document would land on disk violating
-  // the order it declares — and it does not, only because the target reaching here is NFC.
   const NFC_CAFE = `caf${"\u00e9"}`
   const NFD_CAFE = NFC_CAFE.normalize("NFD")
 
@@ -482,9 +455,6 @@ describe("propagateEffects — the sweep order and the written bytes agree", () 
   })
 
   it("orders an un-normalized one somewhere else — which is why it never reaches here", () => {
-    // Not an endorsement: `propagateEffects` is public API and cannot police its input, so
-    // this records what a caller that skipped the scan pipeline's boundary would get. The
-    // serializer would emit `caf\u00e9` after `cafz`, inverting this array.
     expect(propagatedTargets(NFD_CAFE)).toEqual([NFD_CAFE, "cafz"])
   })
 

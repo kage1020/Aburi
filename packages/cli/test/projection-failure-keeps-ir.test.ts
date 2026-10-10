@@ -6,16 +6,8 @@ import { runScan } from "../src"
 import { CliError } from "../src/errors"
 import { writeTypeScriptWorkspace } from "./fixtures"
 
-/**
- * The IR is what every page is derived from, so it is written before any of them. Written
- * last, it went down with the first Markdown page that threw: a component page too large to
- * assemble ended `aburi scan` with `workspace.md` on disk and no `aburi.ir.json`. A page fails
- * for real only past the line count `appendAll` names, so the projection is stood in for here.
- */
-
 const FAILURE = "Maximum call stack size exceeded"
 
-/** Which projection the stand-in makes throw; the other renders as it always does. */
 const failing = vi.hoisted(() => ({ page: "component" as "workspace" | "component" }))
 
 vi.mock("@aburi/markdown-projection", async (importOriginal) => {
@@ -85,8 +77,6 @@ describe("a Markdown projection that throws", () => {
   })
 
   it("reports the scan's incidents before it ends the command", async () => {
-    // `explain` trusts an IR it reads from disk to have had its incidents reported by the scan
-    // that wrote it, and the IR is on disk.
     failing.page = "component"
     await writeFile(resolve(scratch, "src/broken.ts"), "export const a = (\n", "utf8")
     const warnings: string[] = []

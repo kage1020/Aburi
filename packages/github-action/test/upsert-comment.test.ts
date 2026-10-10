@@ -35,12 +35,6 @@ interface Reply {
   readonly text?: string
 }
 
-/**
- * The script is exercised as a process against a real HTTP server, not as an imported function
- * with an injected `fetch`: what `action.yml` and `aburi-comment.yml` depend on is the contract
- * between them and a child process — env in, exit code and `$GITHUB_OUTPUT` out — and a unit test
- * of the flow already exists next door in `comment.test.ts`, over the library form.
- */
 function withApi(
   replies: (request: RecordedRequest) => Reply,
   run: (base: string, requests: RecordedRequest[]) => Promise<void>,
@@ -110,12 +104,6 @@ afterAll(async () => {
   await Promise.all(workspaces.map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-/**
- * Run the script with the environment fully spelled out — never inherited. A CI runner has
- * `GITHUB_TOKEN`, `GITHUB_REPOSITORY` and `GITHUB_OUTPUT` of its own, and inheriting them would
- * make the negative cases pass for the wrong reason, and append this test's outputs to the real
- * step's.
- */
 async function runScript(overrides: Record<string, string | undefined>): Promise<RunResult> {
   const dir = await mkdtemp(join(tmpdir(), "aburi-upsert-"))
   workspaces.push(dir)
@@ -161,9 +149,6 @@ async function markdownFile(contents: string): Promise<string> {
   return path
 }
 
-/** `?page=` as the script asked for it. Read off the parsed query, because the literal `page=1`
- * is also a substring of `per_page=100` — a page-1 test that matches on the raw path matches
- * every page and loops until the suite times out. */
 function pageOf(request: RecordedRequest): number {
   return Number(new URL(request.path, "http://localhost").searchParams.get("page") ?? "0")
 }
@@ -187,10 +172,6 @@ function baseEnv(base: string, markdownPath: string): Record<string, string> {
 
 describe("upsert-comment.mjs", () => {
   it("posts the same marker the library prepends", async () => {
-    // Two implementations of one comment: this script (what the action and the `workflow_run`
-    // companion run) and `src/comment.ts` (what an importer calls). A marker that drifts between
-    // them orphans every comment already on a pull request — the update silently becomes a second
-    // comment instead.
     const source = await readFile(SCRIPT, "utf8")
     expect(source).toContain(`const MARKER = "${ABURI_COMMENT_MARKER}"`)
   })
@@ -201,12 +182,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("is exit 2 on a report GitHub would reject, without posting it", async () => {
-    // The 422 this replaces says nothing about size and arrives after the list call has paged
-    // through the whole pull request. Nothing here can re-render the document — that is what
-    // `aburi diff --max-bytes` is for — so it says which file, how big, and what to do.
-    //
-    // One byte over, measured with the marker: `"x".repeat(GITHUB_COMMENT_MAX_BYTES)` would be
-    // the limit plus the marker's 29, and would pass just as well against a `>=` comparison.
     const path = await markdownFile("x".repeat(ABURI_COMMENT_BODY_MAX_BYTES + 1))
     await withApi(
       () => ({ json: [] }),
@@ -223,8 +198,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("posts a report that lands exactly on the limit", async () => {
-    // The other side of the boundary, so `>` cannot drift to `>=` unnoticed: one byte less than
-    // the case above is the largest report the default budget is calculated to allow.
     const body = "x".repeat(ABURI_COMMENT_BODY_MAX_BYTES)
     const path = await markdownFile(body)
     await withApi(
@@ -241,9 +214,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("measures a report that already carries the marker as it stands", async () => {
-    // The other branch of `raw.startsWith(MARKER)`: nothing is prepended, so the whole 65536 is
-    // the report's to use. Prepending a second marker would also be an in-place update that
-    // never finds its own comment again.
     const body = `${ABURI_COMMENT_MARKER}\n\n${"x".repeat(GITHUB_COMMENT_MAX_BYTES - 29)}`
     expect(Buffer.byteLength(body, "utf8")).toBe(GITHUB_COMMENT_MAX_BYTES)
     const path = await markdownFile(body)
@@ -306,8 +276,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("writes nothing when the comment already holds the same bytes", async () => {
-    // A re-run that PATCHes an identical body notifies everyone subscribed to the pull request to
-    // tell them nothing changed.
     const body = `${ABURI_COMMENT_MARKER}\n\nsame report\n`
     const path = await markdownFile("same report\n")
     await withApi(
@@ -322,8 +290,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("never rewrites a person's comment that quotes the marker, and updates its own", async () => {
-    // A human comment older than Aburi's, quoting the marker in a code span; and one opening
-    // with it, as a fork author could plant before the `workflow_run` companion posts.
     const path = await markdownFile("# Aburi diff\n\n1 changed\n")
     const alice = { login: "alice", type: "User" }
     await withApi(
@@ -422,8 +388,6 @@ describe("upsert-comment.mjs", () => {
     ],
     ["a user with no login", { json: { id: 1 } }, "a user without a login"],
   ])("is exit 1 on %s from GET /user, writing nothing", async (_case, user, named) => {
-    // Only the refusal that names an installation token reads as one. Anything else would give
-    // up the login match for a personal token: a duplicate report, or a bot's comment rewritten.
     const path = await markdownFile("report\n")
     await withApiAs(
       user,
@@ -438,8 +402,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("counts a marker comment whose author it cannot read as unreadable, and says so", async () => {
-    // Passed over as a stranger's instead, Aburi's own comment would be replaced by a second one
-    // with nothing in the log.
     const path = await markdownFile("report\n")
     const { user: _user, ...authorless } = comment(9, `${ABURI_COMMENT_MARKER}\n\nold\n`)
     await withApi(
@@ -531,8 +493,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("is exit 2 when the Markdown is not there, naming the path it looked at", async () => {
-    // Exit 2 rather than 1: `diff.md` missing is a statement about the caller's setup — the wrong
-    // `output-dir`, an artifact that did not carry the report — not about this pull request's code.
     await withApi(
       () => ({ json: [] }),
       async (base, requests) => {
@@ -545,9 +505,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("is exit 1 with one line when GitHub refuses the write", async () => {
-    // A read-only token reaching the create is exactly the fork case this script exists for, and
-    // the annotation is where the reader learns it: the Checks UI shows the first line of one, so
-    // there is only ever one.
     const path = await markdownFile("report\n")
     await withApi(
       (request) =>
@@ -566,9 +523,6 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("says how many comments it could not read, rather than skipping them in silence", async () => {
-    // A row the parser rejects is skipped, and if that row was Aburi's own comment the upsert
-    // creates a second one instead of rewriting the first — the in-place update the whole design
-    // rests on, failing with nothing in the log to explain the duplicate.
     const path = await markdownFile("report\n")
     await withApi(
       (request) =>

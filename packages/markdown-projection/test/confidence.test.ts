@@ -11,13 +11,6 @@ import { projectDiff } from "../src/diff"
 import { projectSymbolExplain } from "../src/explain"
 import { emptySummary, makeDiff } from "./fixtures"
 
-/**
- * `Symbol.confidence` is specified to reach the reader as a badge (markdown-projection.md), and
- * the diff reports a Symbol whose confidence moved even when no fingerprint did. Before, the
- * badge was drawn on effect rows only, so a Symbol the machine was unsure of looked exactly
- * like one it was sure of everywhere outside the raw IR.
- */
-
 const unsure = makeSymbol({
   id: "ts:src/x.controller.ts#XController",
   name: "XController",

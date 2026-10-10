@@ -104,9 +104,6 @@ describe("evaluateFailOn — observedCount status matrix", () => {
   const observe = (status: FailOnClause["status"]) =>
     evaluateFailOn({ kind: "bare", status }, summary, breakdown).observed
 
-  // Keyed by the exported union rather than listed by hand: a matrix written out longhand
-  // does not break when the union grows, which is how this test came to be named "all 8
-  // branches" while the switch it covers had nine.
   const expected: Record<FailOnStatus, number> = {
     added: 1,
     removed: 2,
@@ -124,8 +121,6 @@ describe("evaluateFailOn — observedCount status matrix", () => {
   })
 
   it("reports zero unknowns for a diff written before the counter existed", () => {
-    // Absence is a writer that predates the field, not an assertion that there were none —
-    // but a gate must not fail a document that cannot answer, so zero is the answer here.
     const { unknown: _dropped, ...older } = summary
     expect(evaluateFailOn({ kind: "bare", status: "unknown" }, older, breakdown).observed).toBe(0)
   })

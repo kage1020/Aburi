@@ -15,12 +15,6 @@ import { mockServerFactory } from "./fixtures/mock-server"
 const HOVER_METHOD = "textDocument/hover"
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
 
-/**
- * lsp-enrichment.md (LE24..LE27). Every counter above the hint block describes a
- * *request*, and a hover that answers on time with nothing this pass can use is a healthy row
- * in all of them. These cases pin the five places a hint is lost so that a run whose typed
- * tier bought nothing cannot read like one whose server had nothing to say.
- */
 describe("LSP hint accounting (lsp-enrichment.md)", () => {
   it("counts a hint the pass wrote, and nothing else", async () => {
     const enrichment = await enrichThisFoo(() => ({
@@ -166,8 +160,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
   })
 
   it("leaves the hint counters at zero when the untyped tier got there first", () => {
-    // A hint nothing had to consult is neither consumed nor rejected — the LSP tier only
-    // sees the call sites every untyped tier missed (call-resolution.md).
     const callee = makeSymbol("ts:src/a.ts#helper", { kind: "function", name: "helper" })
     const caller = makeSymbol("ts:src/a.ts#caller", {
       kind: "function",
@@ -188,10 +180,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(result.lspHintUsage).toEqual({ consumed: 0, kindMismatch: 0, targetDropped: 0 })
   })
 
-  // Both halves of the accounting over one line that holds two receivers. The key carries the
-  // target (a determinism rule), so neither call borrows the other's hint — and the counters
-  // have to add up
-  // per call site rather than per line for that to be visible.
   it("counts a hint and a consumption for each receiver on a shared line", async () => {
     const base = makeClassSymbol("src/a.ts", "Base", 1)
     const baseFoo = makeMethodSymbol("src/a.ts", "Base", "foo", 2)
@@ -232,14 +220,8 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     ])
   })
 
-  // LE28. Every hint the pass produced is refused, so the run reports the shape the counters
-  // exist for: work was done, nothing was bought. Asserted on the *merged* record, because
-  // `hintsConsumed` and two of the buckets are zero in the producer half by construction —
-  // reading them there would pass against a `withHintUsage` that did nothing.
   it("reports an all-rejected scan as all-rejected, identically on a rerun", async () => {
     const run = async (): Promise<LspEnrichmentStats> => {
-      // The callee is in the Symbol table, so the pass hovers it and writes a hint; a drop
-      // rule removed it, so the resolver refuses every one of those hints.
       const dropped = makeSymbol("ts:src/a.ts#C.foo", {
         kind: "method",
         name: "C.foo",
@@ -283,9 +265,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(await run()).toEqual(first)
   })
 
-  // The producer sum as a sum rather than a bucket at a time, over a run that reaches four
-  // different outcomes. Pinning the buckets one by one fixes the record without fixing the
-  // arithmetic between them, and the arithmetic is what lets a reader reconcile a real scan.
   it("accounts for every hover that came back, in exactly one place", async () => {
     const hovers: string[] = []
     const answers: Record<string, unknown> = {
@@ -336,9 +315,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.hintsRejected).toEqual(
       noRejections({ memberNotFound: 1, unparseableHover: 1, ownerClassNotFound: 1 }),
     )
-    // Every hover that came back is in exactly one of the four. Nothing else reads one, and
-    // no counter in the IR carries this total — the stats extension says so, and this is where
-    // it is held.
     expect(stats.hintsProduced + rejectedByProducer(stats)).toBe(hovers.length)
 
     const result = resolveCallGraph({
@@ -346,8 +322,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
       importsByFile: new Map(),
       receiverHints: enrichment.receiverHints,
     })
-    // The consumer sum over the same run: one call site found a hint at its key, and the
-    // other three found none, so they are outside the identity rather than a zero in it.
     const merged = withHintUsage(stats, result.lspHintUsage)
     expect(merged.hintsConsumed).toBe(1)
     expect((merged.hintsConsumed ?? 0) + rejectedByResolver(merged)).toBe(
@@ -356,9 +330,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
   })
 
   it("folds the resolver's half in without disturbing the producer's", () => {
-    // `withHintUsage` is the only path to a finished `stats.lspEnrichment` record, and it adds
-    // rather than
-    // assigns — so a second fold accumulates instead of overwriting.
     const producer = {
       ...EMPTY_STATS,
       hintsProduced: 7,
@@ -383,11 +354,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
 
 const FILE_WITH_THIS_FOO = "class C {\n  foo() {}\n  bar() {\n    this.foo()\n  }\n}"
 
-/**
- * Typed on `LspHintRejections` rather than `Record<string, number>`: a bucket renamed in the
- * schema has to fail the typecheck here, or these assertions would keep passing against names
- * the IR no longer carries.
- */
 function noRejections(overrides: Partial<LspHintRejections> = {}): LspHintRejections {
   return {
     unparseableHover: 0,
@@ -441,11 +407,6 @@ function rejectedByResolver(stats: LspEnrichmentStats): number {
   return r.kindMismatch + r.targetDropped
 }
 
-/**
- * Call sites that found a hint standing at their key — the right-hand side of the consumer
- * sum, which no counter in the IR carries. Recomputed here from the two things that decide
- * it, so the identity is checked against the input rather than against itself.
- */
 function countHintedCallSites(enrichment: EnrichmentResult): number {
   let hinted = 0
   for (const symbol of enrichment.symbols) {

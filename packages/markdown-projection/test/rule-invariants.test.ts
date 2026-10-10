@@ -2,15 +2,6 @@ import type { Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { ProjectionInvariantError, ruleRow } from "../src"
 
-/**
- * Rule row rendering (markdown-projection.md). Every per-type payload the schema treats as required
- * (guard→condition, throw→what, return→expr, loop→loopKind, switch/match→condition) must
- * be present. When it is not, ruleRow throws ProjectionInvariantError so an upstream
- * extractor bug does not surface as `- guard:  (L5)` in a reviewer's PR.
- *
- * Every row comes back as the lines it occupies, because a fenced payload occupies four.
- */
-
 function base(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
   return {
     type: overrides.type,

@@ -7,12 +7,6 @@ import { IR_JSON_FILENAME } from "../src"
 import { runCli } from "../src/run"
 import { MemStream } from "./fixtures"
 
-/**
- * `frameworkHints` through a real scan: `config.md` §8, with the guide's own example. Each half
- * was unit-tested on its own while the two never met — the synthesized manifest wrote under
- * `framework:hint`, the registry refused it, and no code applied the rules at all.
- */
-
 let workRoot = ""
 
 beforeEach(async () => {

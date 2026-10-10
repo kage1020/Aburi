@@ -3,19 +3,6 @@ import { describe, expect, it } from "vitest"
 import { checkIRIntegrity } from "../src/index"
 import { makeComponent, makeDependency, makeSymbol, minimalIR } from "./fixtures/ir"
 
-/**
- * `checkIRIntegrity` answers "what is wrong with this Document?" and is the only gate
- * `readIR` applies, so it has to have an answer for anything a JSON parse can produce.
- * Nineteen of the twenty invariants dereference fields, and every one of those is a
- * `TypeError` waiting for a Document that does not carry them.
- *
- * A hand-written list of malformed shapes cannot establish that: it pins the cases someone
- * thought of, which is exactly the set already known to work. This walks a well-formed
- * Document instead, replacing each leaf and each container in turn with values a parse can
- * yield, and asserts only that the checker *answers*. The eight crashes this file was
- * written for were all in fields no hand-written case covered.
- */
-
 /** Values a `JSON.parse` can hand back, plus the two non-finite numbers a hand-edit can. */
 const SUBSTITUTES: readonly unknown[] = [
   null,
@@ -80,8 +67,6 @@ function richIR(): IR {
     requestsTimedOut: 0,
     requestsFailed: 0,
     languagesDisabled: [],
-    // The LSP hint counters, so #20 actually walks `LspHintRejections` — the nested record
-    // is the one container in the Document that no other fixture here reaches.
     hintsProduced: 0,
     hintsConsumed: 0,
     hintsRejected: {
@@ -153,9 +138,6 @@ describe("checkIRIntegrity is total", () => {
   })
 
   it("reports something for every corruption that is not a valid Document", () => {
-    // Answering is necessary but not sufficient: a checker that returned `[]` for everything
-    // would also never throw. Each substitution below breaks the schema's own shape, so a
-    // silent pass would mean #20 walked past it.
     const document = richIR()
     const silent: string[] = []
     for (const path of leafPaths(document)) {

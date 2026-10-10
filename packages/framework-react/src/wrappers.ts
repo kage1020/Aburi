@@ -12,10 +12,6 @@ export interface WrapperCall {
   readonly leaf: string
 }
 
-/**
- * The outermost `call_expression` under a `const X = <call>(...)` node, or `null` when there
- * is none. Pre-order finds the wrapping `forwardRef(...)` before any inner render-body call.
- */
 export function extractWrapperCall(fullNode: unknown): WrapperCall | null {
   const node = asSyntaxNode(fullNode)
   if (node === null) return null

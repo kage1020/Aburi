@@ -11,13 +11,6 @@ import { makeLanguageId } from "../../src/id"
 
 const SCHEMA = "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
 
-/**
- * Brand a literal as a Symbol id. Fixtures are one of the boundary layers where an id is
- * asserted rather than constructed: a case that wants a *malformed* id has to be able to
- * write one, so routing these through `makeSymbolId` would make the negative tests
- * unwritable. Production code never has this option — it goes through `makeSymbolId` /
- * `trySymbolId`, which check.
- */
 export function symbolId(raw: string): SymbolId {
   return raw as SymbolId
 }
@@ -27,11 +20,6 @@ export function componentId(raw: string): ComponentId {
   return raw as ComponentId
 }
 
-/**
- * Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md).
- * Fixtures deliberately feed malformed endpoints to the invariants that exist to catch them,
- * so this brands whatever the case wrote rather than discriminating.
- */
 export function endpoint(raw: string): DependencyEndpoint {
   return raw as DependencyEndpoint
 }
@@ -94,11 +82,6 @@ export function minimalIR(): IR {
   }
 }
 
-/**
- * Overrides accepted by `makeSymbol`. The id-shaped fields are widened back to `string` so a
- * case can keep writing `component: "billing"` or `resolved: "ts:src/x.ts#f"` inline; the
- * builder brands them in one place, which is the whole point of a fixture boundary.
- */
 export type SymbolOverrides = Omit<Partial<IRSymbol>, "id" | "component" | "calls"> & {
   component?: string | null
   calls?: Array<{ target: string; line: number; resolved: string | null }>

@@ -164,9 +164,6 @@ describe("LSP fallback", () => {
   })
 
   it("disables the language when didOpen keeps reporting the server is gone", async () => {
-    // The escalation path the per-file design leans on: a transport broken for
-    // good fails every subsequent didOpen, and five such files disable the
-    // language rather than letting the pass talk to a dead server all run.
     const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"]
     const captured: { client: MockLspClient | null } = { client: null }
     const factory = mockServerFactory((_lang, client) => {
@@ -219,8 +216,6 @@ describe("LSP fallback", () => {
   it("spends the file budget without exceeding it when didOpen lands exactly on it", async () => {
     const clock = makeManualClock()
     const factory = mockServerFactory((_lang, client) => {
-      // Exactly fileBudgetMs: the budget is spent, not exceeded, so the file
-      // still gets its documentSymbol round-trip.
       client.installDidOpenOutcome(() => {
         clock.advance(500)
         return null
@@ -258,8 +253,6 @@ describe("LSP fallback", () => {
     expect(enrichment.stats?.filesFellBack).toBe(0)
     // The enrichment the file did earn is kept, not rolled back.
     expect(columnsOf(enrichment, "src/a.ts")).toEqual([null, 3])
-    // Notification bounds come from the existing knobs, not a new one:
-    // didOpen gets the whole file budget, didClose the per-request budget.
     expect(captured.client?.openTimeouts).toEqual([500])
     expect(captured.client?.closeTimeouts).toEqual([100])
   })

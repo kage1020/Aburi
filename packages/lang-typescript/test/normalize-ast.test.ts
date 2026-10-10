@@ -65,16 +65,6 @@ describe("normalizeAst — the language plugin contract (fingerprint.md §7.7.1)
   })
 })
 
-/**
- * Operators, declaration keywords and modifiers are anonymous tokens or keyword leaves in
- * tree-sitter, and an edit to one is a change to what the code says. The tokens a formatter
- * adds or swaps are not.
- *
- * The modifier cases read the owner's normalized form, the class or interface, because that
- * is where a member's modifiers are written. A method's own form is its body, so `private`,
- * `static`, `async` or `get` leave it alone: the member carries them on `api`, through its
- * signature and visibility.
- */
 describe("normalizeAst — operators, keywords and modifiers", () => {
   const changes = (before: string, after: string) => async () => {
     const one = await normalizeFirstSymbol(before)
@@ -163,10 +153,6 @@ describe("normalizeAst — operators, keywords and modifiers", () => {
   )
 })
 
-/**
- * A hole in an array has no node of its own: the commas around it are all that records it, so
- * those commas are kept where every other comma is dropped (LP23c).
- */
 describe("normalizeAst — holes in an array", () => {
   const fn = (body: string) => `export function f(a: any, x: any) { ${body} }`
   const differ = async (before: string, after: string) =>
@@ -202,13 +188,6 @@ describe("normalizeAst — what the parser inserted", () => {
   })
 })
 
-/**
- * The pairs above can only show that two programs differ or agree, and a bracket or a string
- * delimiter always comes in a pair the node type already implies, so letting one back in
- * changes no verdict there while moving the `syntax` fingerprint of nearly every Symbol. The
- * exact string pins what is in it. It is spelled out rather than stored as a snapshot, so
- * updating snapshots cannot rewrite it.
- */
 describe("normalizeAst — the shape of the string", () => {
   it("keeps the tokens a formatter owns out, and every other token in", async () => {
     const source = `export function f(a: any, b: any) { save(a, [, b], { c: 1 }, 'd', \`e\${a}\`, (x: number) => x < 1); }`

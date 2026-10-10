@@ -4,14 +4,6 @@ import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
 import { makeDiff } from "./fixtures"
 
-/**
- * Slice View rendering acceptance tests. Backs the rendering conventions of
- * docs/design/slice-view.md, and its SV19–SV20 test criteria. The pass-side
- * clustering itself is exercised in `packages/diff/test/slice.test.ts`; here we
- * only assert the Markdown projection: section placement, per-Slice bullet
- * shape, singleton fold, empty-section omission.
- */
-
 const changedSym = (id: string, name: string, file: string, line = 10): SymbolChange => ({
   status: "changed",
   before: makeSymbol({ id, name, source: baseSource(file, line) }),
@@ -156,8 +148,6 @@ describe("Slice View Markdown projection", () => {
     )
     // Two multi-member slices → at least one thematic break between them.
     expect(md.split(/\n---\n/).length).toBeGreaterThanOrEqual(2)
-    // And SV13: slices[] order preserved — slice:ts:src/a.ts#A must render
-    // before slice:ts:src/m.ts#Cx.
     expect(md.indexOf(`slice:${A}`)).toBeLessThan(md.indexOf(`slice:${C}`))
   })
 
@@ -206,8 +196,6 @@ describe("Slice View Markdown projection", () => {
     expect(md).toContain("🧵 Slice View")
     expect(md).toContain("### Standalone changes")
     expect(md).toContain("<summary>2 singleton slices")
-    // No thematic break should appear when there are zero multi-member slices —
-    // the fold body has none because singletons are one-line bullets.
   })
 
   it("only-multi-member case emits no Standalone Changes heading", () => {
@@ -224,8 +212,6 @@ describe("Slice View Markdown projection", () => {
   })
 })
 
-// call-resolution.md + slice-view.md — the drop stays silent in the
-// data, but the projection tells the reviewer it happened.
 describe("Slice View — unresolved-call markers", () => {
   const withUnresolved = (
     id: string,

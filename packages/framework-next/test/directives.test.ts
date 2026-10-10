@@ -69,8 +69,6 @@ describe("detectModuleDirective — top-of-module directive detection", () => {
   })
 
   it("transparently skips a leading UTF-8 BOM before the directive", () => {
-    // "﻿" is the encoded BOM; editors often paste one in front of otherwise valid
-    // sources without the writer noticing.
     expect(detectModuleDirective("﻿'use client'\nexport function X() {}")).toBe("client")
   })
 

@@ -55,11 +55,6 @@ describe("classifyNestCall — negative paths (two-signal defense)", () => {
   })
 
   it("returns null when the name segment is not in the recognized identifier set", () => {
-    // Common name-collision culprits: `socket.emit` (@nestjs/websockets), `process.emit`
-    // (Node global), `stream.emit`, arbitrary user-named emitters (`bus.emit`,
-    // `notifier.emit`), and the generic `emitter.emit` / `this.emitter.emit` shape the
-    // docstring calls out as explicitly out of scope. All colocated with a legit
-    // @nestjs/event-emitter import to prove the name gate does the work.
     expect(classifyNestCall(makeCall({ target: "socket.emit" }), ctxWithNest)).toBeNull()
     expect(classifyNestCall(makeCall({ target: "process.emit" }), ctxWithNest)).toBeNull()
     expect(classifyNestCall(makeCall({ target: "stream.emit" }), ctxWithNest)).toBeNull()
@@ -93,16 +88,11 @@ describe("classifyNestCall — malformed input fail-fast", () => {
     [".emit", /empty segment/],
     ["eventBus.", /empty segment/],
   ])("throws for the malformed target %j with or without a Nest emitter import", (target, message) => {
-    // Without the throw, `eventBus..emit` would slip through the name gate. The import gate
-    // must NOT shadow the check, or the same upstream bug would surface only in the few
-    // files that import an emitter — locking the order at the test seam.
     expect(() => classifyNestCall(makeCall({ target }), ctxWithNest)).toThrow(message)
     expect(() => classifyNestCall(makeCall({ target }), ctxNoImport)).toThrow(message)
   })
 
   it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
-    // The name is now an importable const shared by four packages rather than a literal in
-    // this file, so nothing but this assertion catches `EFFECTS_PRISMA_PLUGIN_NAME` here.
     expect(() => classifyNestCall(makeCall({ target: "" }), ctxWithNest)).toThrow(
       /^effects-nest \(/,
     )

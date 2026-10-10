@@ -1,12 +1,6 @@
 import type { Effect } from "@aburi/types"
 import type { CallEdge } from "../../src/callgraph"
 
-/**
- * Builders shared by the effect-propagation tests. They lived in `propagate.test.ts` with
- * one signature and in `propagate-order.test.ts` with another, which made the two files
- * read as though they were testing different things.
- */
-
 /** A locally-detected Effect: `line` present, `propagated` absent (ir-schema.md). */
 export function effect(id: string, target: string, overrides: Partial<Effect> = {}): Effect {
   return {

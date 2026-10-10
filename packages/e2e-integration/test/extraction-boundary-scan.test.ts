@@ -4,21 +4,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * The per-file exception boundary, reached the way a user reaches it: with the real
- * TypeScript plugin and a source file it cannot express.
- *
- * `export const a🙂 = 1` hands `makeSymbolId` a qualified name carrying a character
- * ECMAScript's IdentifierName does not admit, and the id grammar refuses it. That is a
- * `CoreError` thrown from inside `extractSymbols`: tree-sitter parses the name without
- * complaint, the plugin is the real one, and the throw is a property of that one file.
- * Without a boundary it costs the whole workspace. An emoji is a construct no widening of
- * the grammar will make legal, because `tsc` does not accept it either.
- *
- * The IR the surviving files produce still goes through `assertIRIntegrity`, so what comes
- * out of a run with a withdrawn file is a document and not a fragment.
- */
-
 const BAD_SOURCE = ["export const a\u{1F642} = 1", ""].join("\n")
 
 const workspace = useScratchWorkspace("extraction-boundary")
@@ -51,8 +36,6 @@ describe("scan — a file the id grammar cannot express", () => {
       {
         file: "src/route.ts",
         message: expect.stringContaining("a\u{1F642}"),
-        // Separates "this source is something the plugins cannot express" from "a plugin
-        // crashed" without matching on prose.
         code: "anonymous-symbol-id-attempted",
       },
     ])
@@ -74,10 +57,6 @@ describe("scan — a file the id grammar cannot express", () => {
 
 describe("scan — a surviving file that references the withdrawn one", () => {
   it("resolves what it can and leaves no dangling edge behind", async () => {
-    // A partial IR still contains references to a file no longer in it. Everything that reads
-    // those references — LSP enrichment, call resolution, dependency projection, the
-    // integrity check — runs outside the per-file boundary, so a throw there would take the
-    // whole run down after all.
     await workspace.writeSource("src/route.ts", BAD_SOURCE)
     await workspace.writeSource(
       "src/app.ts",

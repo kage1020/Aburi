@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { runScan } from "../src"
 import { populate } from "./stub-language"
 
-/** An `@aburi/core` from before `ScanResult.undeclaredVocab`, as a skewed install would load. */
 vi.mock("@aburi/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aburi/core")>()
   return {

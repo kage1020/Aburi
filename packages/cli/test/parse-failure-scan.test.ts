@@ -5,24 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runCli, runScan } from "../src"
 import { MemStream } from "./fixtures"
 
-/**
- * A file the parse refused is reported as withdrawn, not as a file with warnings.
- *
- * No in-tree language plugin can produce this: `@aburi/lang-typescript` only emits
- * `recoverable: false` when its parser returned nothing, so the tree is null too and the
- * distinction never shows. The fixture therefore writes a language plugin into the
- * workspace and names it by relative path, which is a ref form the loader supports and
- * exactly how a third-party plugin would arrive.
- *
- * Four files, because the subject is a split and the counts have to be wrong separately:
- * `bad.stub` is refused, `notree.stub` comes back with no tree *and no errors*, `warn.stub`
- * carries a recoverable error and stays, `ok.stub` is clean.
- *
- * `notree.stub` is what separates the per-file filter from arithmetic. It is withdrawn but
- * contributes nothing to `parseErrors`, so `parseErrorCount = parseErrors.length -
- * parseFailureCount` would report one file too few while the filter reports the truth.
- */
-
 const STUB_PLUGIN = `
 const manifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
@@ -148,10 +130,6 @@ describe("runScan — a file the language plugin refused", () => {
       ["notree.stub", "parse-failed"],
     ])
     expect(scan.parseFailureCount).toBe(2)
-    // `warn.stub` and nothing else. `bad.stub`'s error is on `ScanResult.parseErrors` too —
-    // it is the account of why the file went — but counting it here would call it
-    // recoverable, which is the opposite of what it said. `notree.stub` contributes no
-    // error at all, which is what makes this count a filter rather than a subtraction.
     expect(scan.parseErrorCount).toBe(1)
   })
 

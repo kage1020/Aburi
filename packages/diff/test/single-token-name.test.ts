@@ -3,32 +3,6 @@ import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageNameSignature } from "../src"
 
-/**
- * diff-algorithm.md's threshold table demands a higher score the less the name has to say, and the
- * row for a one-token name reads 1.0. That was written as an impossible score, but it is a
- * reachable one: an identical name, an identical signature and an identical owner give `0.5 + 0.3 +
- * 0.2`, exactly 1 in IEEE 754. So the row admitted exactly the pairings it meant to refuse — two
- * unrelated top-level `main(x: string): void` joined into one `moved+changed`, which is what
- * `--fail-on moved` gates on.
- *
- * The demand the row wanted to make is off the top of the scale, so it is not a threshold.
- * It is an admissibility rule, alongside the signature-less one: a Symbol whose qualified name
- * says only one thing is not paired in stage 4 at all.
- *
- * What counts as "one thing" is `nameEvidence`, not the distinct-token count. The two agree on
- * a name whose words the tokeniser can find, and part company on a run it cannot segment,
- * where the measure reads the run rather than the token: `ユーザー.取得` is two tokens and
- * two runs, and `获取用户信息` is one token and six characters. A run counts as its characters
- * over the longest a single word of that script runs, which is a floor on the words in it, so
- * a phrase is admitted and a single long word is not. The last two blocks here are that
- * difference and the limit of it.
- *
- * The measure is over the **qualified name**, which is the whole of what stage 4 reads about a
- * Symbol's identity — not over the last segment alone, which is what the threshold table
- * reads. `UserRepo.get` has one token in its last segment and three in its name, and it goes
- * on pairing.
- */
-
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
 const ONE_INPUT = { name: "x", type: "string" } as const
@@ -64,9 +38,6 @@ function pairs(base: IRSymbol[], head: IRSymbol[]): string[] {
 
 describe("a one-token name is not evidence of identity", () => {
   it("does not join two unrelated top-level `main`", () => {
-    // The reported case. Both are `main(x: string): void` at the top level of their file, so
-    // name, signature and owner all agree and the score is exactly 1 — and everything the
-    // score saw was one word and a signature that half a CLI shares.
     expect(
       pairs(
         [fn("src/legacy/runner.ts", "main", "aaa")],
@@ -76,25 +47,18 @@ describe("a one-token name is not evidence of identity", () => {
   })
 
   it("does not pair a set of them in id order", () => {
-    // Three a side, every pairing scoring 1, so the sweep's id keys chose which unrelated `main`
-    // moved into which. The pairing was arbitrary because the candidates were indistinguishable.
     const base = ["p", "q", "r"].map((f) => fn(`src/${f}.ts`, "main", `a${f}`))
     const head = ["x", "y", "z"].map((f) => fn(`src/${f}.ts`, "main", `b${f}`))
     expect(pairs(base, head)).toEqual([])
   })
 
   it("measures distinct tokens, so an owner that repeats the last segment adds nothing", () => {
-    // `Main.main` tokenises to `{main}`: the token sets are deduped, so an owner that repeats
-    // its member name adds nothing a Jaccard can see. The rule measures what the score can.
     expect(
       pairs([method("src/a.ts", "Main.main", "aaa")], [method("src/b.ts", "Main.main", "bbb")]),
     ).toEqual([])
   })
 
   it("covers a name with no tokens at all", () => {
-    // `_` splits away to nothing, and `jaccard` answers 1.0 for two empty token sets, so a
-    // nameless name scored a perfect match against every other. `<= 1` rather than `=== 1`
-    // is what closes that, the same way `thresholdFor` writes it.
     expect(pairs([fn("src/a.ts", "_", "aaa")], [fn("src/b.ts", "_", "bbb")])).toEqual([])
   })
 
@@ -114,8 +78,6 @@ describe("a one-token name is not evidence of identity", () => {
 
 describe("the qualified name is what carries the evidence", () => {
   it("still pairs a method whose last segment alone is one token", () => {
-    // `UserRepo.get`: one token in the last segment, three in the name. Skipping on the last
-    // segment — the measure the threshold table uses — would take this move away.
     expect(
       pairs(
         [method("src/a.ts", "UserRepo.get", "aaa")],
@@ -131,8 +93,6 @@ describe("the qualified name is what carries the evidence", () => {
   })
 
   it("holds those names to an exact match, as the table's first row says", () => {
-    // The row is still live: `UserRepo.get` has a one-token last segment, so it needs the
-    // full 1.0, and a changed signature costs it. Only the admissibility rule moved.
     const head = makeSymbol({
       id: "ts:src/b.ts#UserRepo.get",
       name: "UserRepo.get",
@@ -146,16 +106,6 @@ describe("the qualified name is what carries the evidence", () => {
 })
 
 describe("a name the tokeniser cannot segment still says what it says", () => {
-  // `tokenizeName` finds word boundaries by case, so a name in a script that has no case comes
-  // back whole however much it says. The rule used to read that count as the measure of how
-  // much a name says, and refused `ユーザー情報を取得する` on the same footing as `main` —
-  // which is wrong about it: two unrelated Symbols do not carry that name by coincidence.
-  //
-  // `nameEvidence` measures it instead: a run of such a script counts as its characters over
-  // the longest a single word of it runs — three for Han, six for kana and Hangul — which is
-  // a floor on how many words are in the run. A phrase clears it. A single word does not,
-  // which is the next block.
-
   it("pairs a Japanese name across a file move with an edited body", () => {
     expect(
       pairs(
@@ -180,8 +130,6 @@ describe("a name the tokeniser cannot segment still says what it says", () => {
   })
 
   it("sees the camel hump in a Cyrillic name, which is a second token", () => {
-    // Not the morphemic rule: the case boundary is Unicode now, so this splits into two
-    // tokens the way `getUser` does and is admissible on the count alone.
     expect(
       pairs(
         [fn("src/a.ts", "получитьПользователя", "aaa")],
@@ -191,25 +139,18 @@ describe("a name the tokeniser cannot segment still says what it says", () => {
   })
 
   it("still refuses a single Cyrillic word, as it refuses a single English one", () => {
-    // No hump, so one token and one word. `главная` is Russian for `main` and is treated as
-    // `main` is — the rule is about how much a name says, not about which script says it.
     expect(pairs([fn("src/a.ts", "главная", "aaa")], [fn("src/b.ts", "главная", "bbb")])).toEqual(
       [],
     )
   })
 
   it("still refuses a long single English word", () => {
-    // Length is not the measure. `initialize` is ten characters and one word, and two
-    // unrelated top-level `initialize(x: string)` are exactly the coincidence the rule is for.
     expect(
       pairs([fn("src/a.ts", "initialize", "aaa")], [fn("src/b.ts", "initialize", "bbb")]),
     ).toEqual([])
   })
 
   it("still refuses a single word of a caseless alphabetic script", () => {
-    // Arabic has no case, so this is one token — but its characters are letters rather than
-    // morphemes, so it is one word and the count was already right about it. A multi-word
-    // Arabic identifier separates its words, and the tokeniser splits on the separator.
     expect(pairs([fn("src/a.ts", "مستخدم", "aaa")], [fn("src/b.ts", "مستخدم", "bbb")])).toEqual([])
     expect(
       pairs([method("src/a.ts", "مستخدم.احصل", "aaa")], [method("src/b.ts", "مستخدم.احصل", "bbb")]),
@@ -233,8 +174,6 @@ describe("a name the tokeniser cannot segment still says what it says", () => {
   })
 
   it("does not pair two different names that merely share a script", () => {
-    // Admissibility is not a score. Both say plenty, and they say different things: the
-    // member Jaccard is 0, so the composite cannot reach any row of the table.
     expect(
       pairs(
         [fn("src/a.ts", "ユーザー情報を取得する", "aaa")],
@@ -244,8 +183,6 @@ describe("a name the tokeniser cannot segment still says what it says", () => {
   })
 
   it("leaves stages 1 to 3 where they were", () => {
-    // An unchanged move is still stage 3's, decided on the fingerprint without asking the
-    // name to carry anything.
     expect(
       pairs(
         [fn("src/a.ts", "ユーザー情報を取得する", "same")],
@@ -256,11 +193,6 @@ describe("a name the tokeniser cannot segment still says what it says", () => {
 })
 
 describe("a single word is a single word, however it is written", () => {
-  // The floor is what separates these from the block above. Counting each character as a word
-  // would admit every one of them: `メイン` is `main` in three characters, `초기화` is
-  // `initialize` in three, `ハンドラー` is `handler` in five. Two unrelated Symbols carry
-  // these by coincidence exactly as they carry their English counterparts, so the rule this
-  // file is about has to go on refusing them.
   const oneWord = ["値", "取得", "する", "初期化", "メイン", "초기화", "ユーザー", "ハンドラー"]
 
   it.each(oneWord)("refuses two unrelated top-level `%s`", (name) => {
@@ -284,8 +216,6 @@ describe("a single word is a single word, however it is written", () => {
   })
 
   it("gives the same verdict for either normalisation of the name", () => {
-    // `ガイド取得` decomposed is one more code point than composed. The tokeniser normalises
-    // first, so the measure does not turn on which spelling reached the IR.
     const composed = "\u30AC\u30A4\u30C9\u53D6\u5F97"
     const decomposed = "\u30AB\u3099\u30A4\u30C9\u53D6\u5F97"
     expect(pairs([fn("src/a.ts", composed, "aaa")], [fn("src/b.ts", composed, "bbb")])).toEqual([
@@ -299,10 +229,6 @@ describe("a single word is a single word, however it is written", () => {
 
 describe("what admissibility buys such a name, and what it does not", () => {
   it("recovers the signature-identical move, not the whole band", () => {
-    // Admissibility is stage 4's door, not its threshold. The name is still one token, so
-    // `thresholdFor` reads its last segment as one and demands the full 1.0 — which an
-    // identical signature reaches and an edited one does not. A Latin name of the same
-    // reach has two tokens in its last segment and the 0.95 row to fall back on.
     const added = sig({ inputs: [ONE_INPUT, { name: "y", type: "number" }] })
     const head = (name: string): IRSymbol =>
       makeSymbol({
@@ -323,17 +249,9 @@ describe("what admissibility buys such a name, and what it does not", () => {
 
 describe("the rule is scoped to a pairing, and to stage 4", () => {
   it("reads the base as well as the head", () => {
-    // The property belongs to a pairing. This was once read off the head alone, on the
-    // arithmetic that one token against two or more is a Jaccard of at most 1/2 and so caps
-    // the total at 0.75 whichever side is short. That held while the name axis read the whole
-    // qualified name. The owner gate moved the axis to the last segment, and a one-token base
-    // reaches the top of the scale again: `Main.main` is one deduped token, it clears the gate
-    // against `Mains.main` by inflection, and their member names are identical.
     expect(
       pairs([method("src/a.ts", "Main.main", "aaa")], [method("src/b.ts", "Mains.main", "bbb")]),
     ).toEqual([])
-    // And the mirror, which is a separate skip in a separate loop: the short name on the head
-    // reaches an admissible base the same way round.
     expect(
       pairs([method("src/a.ts", "Mains.main", "aaa")], [method("src/b.ts", "Main.main", "bbb")]),
     ).toEqual([])
@@ -352,9 +270,6 @@ describe("the rule is scoped to a pairing, and to stage 4", () => {
   })
 
   it("leaves stage 3 to pair a one-token name on a logic fingerprint that names something", () => {
-    // An identical logic fingerprint over a body that names something is proof of its own, and
-    // it does not depend on the name carrying anything. Such a `main` that moved file without
-    // changing is still a move. One whose body names nothing is not: stage 3 asks the name there.
     const body = { rules: guardedBody("argv.length === 0") }
     expect(
       pairs([fn("src/a.ts", "main", "same", body)], [fn("src/b.ts", "main", "same", body)]),
@@ -372,9 +287,6 @@ describe("the rule is scoped to a pairing, and to stage 4", () => {
   })
 
   it("still asks a 1-token last segment for the whole scale", () => {
-    // `UserRepo.get` is admissible on its three name tokens, and then the first threshold row
-    // holds it to 1.0. One added `throws` entry drops the signature axis to 5/6 and the total
-    // to 0.95 — which the second row would have accepted. The row is the difference.
     const head = makeSymbol({
       id: "ts:src/b.ts#UserRepo.get",
       name: "UserRepo.get",
@@ -395,8 +307,6 @@ describe("the rule is scoped to a pairing, and to stage 4", () => {
   })
 
   it("holds a 2-token last segment to 0.95, above the default", () => {
-    // Same shapes one token longer, so the second row governs. 0.95 passes and 0.9 — which
-    // the 0.85 default would have taken — does not.
     const at = (file: string, seed: string, signature: ReturnType<typeof sig>): IRSymbol =>
       makeSymbol({
         id: `ts:${file}#UserRepo.getUser`,

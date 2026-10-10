@@ -4,18 +4,6 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { DOCUMENT_SHAPE } from "../src/integrity-shape"
 
-/**
- * Invariant #20 restates the frozen schema's structural requirements in TypeScript, because
- * nothing in the pipeline runs a schema validator and a Document read off disk has to be
- * checked by something. A restatement is a second source of truth, and this is what keeps
- * the two from disagreeing: the schema file is read here, and a `required` entry with no
- * line in the spec fails.
- *
- * The direction matters. The spec is allowed to carry *more* than the schema requires — the
- * schema's optional-but-Class-A fields are checked when present — but never less, because
- * `readIR` brands its result `IR` on the strength of this check alone.
- */
-
 interface SchemaNode {
   required?: string[]
   properties?: Record<string, unknown>
@@ -45,8 +33,6 @@ describe("invariant #20 against schema/aburi.ir.v1.json", () => {
   })
 
   it("describes no field the schema does not declare", async () => {
-    // The other direction: a typo in the spec would silently check a field that never
-    // exists, reporting every valid Document as missing it.
     const { root, defs } = await loadSchema()
     const unknown: string[] = []
     for (const [name, spec] of Object.entries(DOCUMENT_SHAPE)) {
@@ -61,8 +47,6 @@ describe("invariant #20 against schema/aburi.ir.v1.json", () => {
   })
 
   it("names every definition the Document can reach", async () => {
-    // A definition the schema declares but the spec omits is a record #20 walks past. The
-    // exceptions are the two id/scalar aliases, which have no `properties` of their own.
     const { defs } = await loadSchema()
     const structural = Object.entries(defs)
       .filter(([, node]) => node.properties !== undefined)

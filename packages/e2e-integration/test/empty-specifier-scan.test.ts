@@ -4,19 +4,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith, symbolNamed } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * One `import x from ""` must not end the run.
- *
- * `ImportEdge.source` is contractually non-empty, and the guards a plugin uses to read the
- * edge list throw when it is not. So an edge carrying an empty specifier turns syntax a user
- * can legally write into an exception raised inside a classifier — which no part of the scan
- * catches, taking every other file's Symbols down with the offending one's.
- *
- * A decorator-driven framework plugin walks the edge list for every file holding a decorated
- * class or method, which is why the fixture below is a controller: it is the cheapest shape
- * that reaches the guard.
- */
-
 const workspace = useScratchWorkspace("empty-specifier")
 
 const scanWorkspace = () =>
@@ -72,9 +59,6 @@ describe("scan — a file with an empty module specifier", () => {
         recoverable: true,
       },
     ])
-    // Reporting and withdrawing are separate outcomes. `skipped` cannot show it: its reasons
-    // are all discovery-side or budget-side, and a file whose parse returned no tree is
-    // counted rather than listed.
     expect(result.ir.symbols.some((s) => s.source.file === "src/a.controller.ts")).toBe(true)
   })
 

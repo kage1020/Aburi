@@ -7,16 +7,6 @@ import { EXIT, runCli, runDiff, runExplain, runScan, type ScanReport } from "../
 import { incidentLinesFrom, MemStream, scanReportWith } from "./fixtures"
 import { gitWith, populate } from "./stub-language"
 
-/**
- * What a scan that read almost none of the workspace is worth.
- *
- * It used to be worth exit 0. `runScan` consulted `extractionFailures` and nothing else, so a
- * run that discovered 1200 files and withdrew all of them wrote an IR, went green, and diffed
- * against the next one as `+0 -0 ~0` — passing every `--fail-on` gate. `requireLanguagePlugin`
- * closed one route to that shape and its own docblock says why the shape is dangerous; these
- * are the rest of the routes.
- */
-
 let scratch = ""
 
 beforeEach(async () => {
@@ -49,18 +39,12 @@ describe("aburi scan — a workspace it could not read", () => {
 
   it("names the reason that took the most of them", async () => {
     const warnings: string[] = []
-    // Discovery sorts by path, so the minority reason is the one seen first. The line has to
-    // report the majority, not the earliest.
     await scanIn(["bad.stub", "boom-a.stub", "boom-b.stub"], warnings)
     expect(warnings.join("\n")).toContain("3 file(s) discovered, 0 parsed — 2 as extraction-failed")
   })
 
   it("breaks a tie on the reason enum rather than on the order of the walk", async () => {
     const warnings: string[] = []
-    // One file each, and the one that should win is the one discovery reaches second —
-    // `boom.stub` sorts before `zz-bad.stub`. Left to insertion order the line would name
-    // `extraction-failed`, and the same workspace under different filenames would name the
-    // other. A reader comparing two runs needs the sentence to be about the losses.
     await scanIn(["boom.stub", "zz-bad.stub"], warnings)
     expect(warnings.join("\n")).toContain("2 file(s) discovered, 0 parsed — 1 as parse-failed")
   })
@@ -72,9 +56,6 @@ describe("aburi scan — a workspace it could not read", () => {
   })
 
   it("gates when discovery found nothing to scan at all", async () => {
-    // A language plugin is configured and claims `.stub`; the workspace has none. An `ignore`
-    // glob that ate the tree, a `components[].roots` that matches nothing, and a plugin set
-    // that claims no extension in this repository all land here.
     const warnings: string[] = []
     const report = await scanIn([], warnings)
     expect(report.totalFiles).toBe(0)
@@ -83,20 +64,15 @@ describe("aburi scan — a workspace it could not read", () => {
     expect(line).toContain("No file was discovered")
     expect(line).toContain("ignore")
     expect(line).toContain("components[].roots")
-    // Not the "discovered, 0 parsed" wording: there is nothing to name a reason for, and the
-    // first move is discovery rather than a plugin.
     expect(line).not.toContain("0 parsed")
   })
 
   it("stays green for a scan that lost most of the workspace but not all of it", async () => {
-    // The unconditional gate is `parsedFiles === 0` and nothing else. Anything above that is
-    // the opt-in floor's business, which this workspace does not set.
     const warnings: string[] = []
     const report = await scanIn(["bad.stub", "boom.stub", "ok.stub"], warnings)
     expect(report.parsedFiles).toBe(1)
     expect(report.totalFiles).toBe(3)
     expect(report.coverageFault).toBeNull()
-    // Still exits 3 — but for the plugin exception, which is a different clause.
     expect(report.exitCode).toBe(EXIT.GATE)
     expect(warnings.join("\n")).not.toContain("discovered, 0 parsed")
   })
@@ -112,18 +88,7 @@ describe("aburi scan — a workspace it could not read", () => {
 
 describe("aburi scan — a name no Symbol id can hold", () => {
   it("lists it, keeps the rest, and lets explain answer out of it", async () => {
-    // End to end: discovery records the file instead of ending the walk, the report groups it
-    // under `unroutable` with its detail, and the Document names it — so `explain` asked about
-    // something that would have lived there says the IR never analysed it rather than "no
-    // matches". None of that needed a diff-side change: `stats.skippedFiles[].path` is held to
-    // the shared path rule, which admits `#`.
-    //
-    // `#` and not `:` in the fixture: both are refused by the grammar, but NTFS reads `:` as an
-    // alternate-data-stream separator, so a `:` file would pass here and be a different file on
-    // Windows. `id.test.ts` covers `:` without touching a filesystem.
     await populate(scratch, ["ok.stub"])
-    // Under a directory, so `explain` routes it as a path rather than as a name to match on
-    // (`docs/reference/cli.md` — the file arm wants a `/`).
     await mkdir(resolve(scratch, "src"), { recursive: true })
     await writeFile(resolve(scratch, "src", "od#d.stub"), "odd", "utf8")
     const warnings: string[] = []
@@ -207,17 +172,12 @@ describe("config.minParsedFileRatio — the floor a workspace opts into", () => 
   })
 
   it("does not gate at the floor exactly", async () => {
-    // `<` and not `<=`: a floor of 0.5 is a statement about what is unacceptable, and half
-    // is not below half. The same reading `--fail-on`'s thresholds already use.
     const report = await scanWithFloor(["bad.stub", "ok.stub"], 0.5)
     expect(report.coverageFault).toBeNull()
     expect(report.exitCode).toBe(EXIT.SUCCESS)
   })
 
   it("counts every reason a file went missing, not the machine-dependent one only", async () => {
-    // `parse-timeout` is the reason whose loss varies by machine, which is why it is the one
-    // a floor is usually reached for. It is not the only one that hides a blind spot, and
-    // which reason produced the loss decides the fix rather than whether coverage collapsed.
     const warnings: string[] = []
     const report = await scanWithFloor(["boom.stub", "ok.stub"], 1, warnings)
     expect(report.exitCode).toBe(EXIT.GATE)
@@ -239,7 +199,6 @@ describe("config.minParsedFileRatio — the floor a workspace opts into", () => 
   })
 })
 
-/** The union's first member, which every fixture here but the collision ones wants. */
 function unspellable(fsPath: string, unnameablePrefix: string): UnrepresentableFile {
   return { fsPath, reason: "unspellable-name", unnameablePrefix }
 }
@@ -271,13 +230,6 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
   })
 
   it("names what has to be renamed, once, however many files sit under it", () => {
-    // No fixture needed and none possible on Windows: the report is assembled here, so what a
-    // reader is told about a file the artifact cannot hold is pinned on every platform.
-    //
-    // The directory, not the files. A backslash in a directory name disqualifies every file
-    // beneath it and each of those filenames is innocent, so a line blaming `util.stub` sends
-    // the reader to rename the wrong thing — and two lines saying the same rename twice is a
-    // list of the damage rather than a list of the work.
     const lines = incidentLinesFrom(
       scanReportWith({
         totalFiles: 3,
@@ -293,17 +245,12 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     )
     expect(lines[0]).toContain("3 file(s) were left out of the IR and out of its counts")
     expect(lines[0]).toContain("under 2 name(s) with no spelling here")
-    // A file whose own basename offends is itself the rename, so it is not described as a
-    // directory with files under it.
     expect(lines[1]).toBe("    odd\\name.stub")
     expect(lines[2]).toBe("    src/v\\1 — a directory, and the 2 file(s) under it")
     expect(lines).toHaveLength(3)
   })
 
   it("puts the one record nothing else holds above the census that is recoverable", () => {
-    // The sink these go through has its failure deliberately swallowed, and the census under it
-    // can run to six reasons of eleven lines. Last is the wrong place for the only account of a
-    // file the artifact does not mention.
     const lines = incidentLinesFrom(
       scanReportWith({
         totalFiles: 1,
@@ -321,9 +268,6 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
   })
 
   it("tells the reader the ignore spelling that actually matches", () => {
-    // Measured: picomatch spends a lone backslash as an escape, so `src/v\1/**` does not match
-    // `src/v\1/util.ts` while `src/v\\1/**` does. Advice naming the printed spelling would send
-    // a reader round the loop to an identical exit 3, with nothing on screen to say why.
     const lines = incidentLinesFrom(
       scanReportWith({
         unrepresentableFiles: [unspellable("odd\\name.stub", "odd\\name.stub")],
@@ -336,9 +280,6 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
   })
 
   it("does not cap the list, because nothing else holds a copy of it", () => {
-    // Every other listing here is capped at ten with a `…and N more`, and can be: the files are
-    // in `stats.skippedFiles[]`. These are in no artifact at all, so a tail would be the tool
-    // declining to say the one thing only it knows. Grouping is what keeps the length sane.
     const lines = incidentLinesFrom(
       scanReportWith({
         unrepresentableFiles: Array.from({ length: 12 }, (_, i) =>
@@ -353,10 +294,6 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
   })
 
   it("never prints a percentage as being below itself", () => {
-    // 899/1000 is 89.9% against a floor of 90%. Rounding both to nearest gives
-    // `parsed (90%), below the … floor of 90%`, which reads as a bug in the tool rather than
-    // as a finding about the workspace. Rounding away from each other keeps the sentence true
-    // for every pair that can reach this line.
     const lines = incidentLinesFrom(
       scanReportWith({
         totalFiles: 1000,
@@ -373,11 +310,6 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
   })
 
   it("keeps the two apart wherever the pair sits", () => {
-    // Each row collapses under a different rounding mistake. 199/200 against a floor of 1 is
-    // the top of the range, where rounding the *share* to nearest prints `(100%), below … 100%`.
-    // 902/1000 against 0.904 is where rounding the *floor* to nearest does the same — which
-    // neither that row nor the one above can show, since 0.9 and 1 land on the same integer
-    // whichever way they are rounded.
     const cases = [
       {
         parsedFiles: 199,
@@ -438,8 +370,6 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
     })
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
-    // `cli-spec.md` says the wording is derived from what the scan actually reported "so a second
-    // reason arrives with the code right and the message still true". This is that reason.
     expect(warnings.join("\n")).toContain("base: none of the 1 file(s) it found parsed")
     expect(warnings.join("\n")).not.toContain("plugin exception")
   })
@@ -458,9 +388,6 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
   })
 
   it("says each faulted side's own cause rather than one side's about both", async () => {
-    // The base threw; the head found files and parsed none of them. A cross-side count, or the
-    // first side's fault, stated about "the base and head scan" is a false sentence — and this
-    // is the line a reader greps out of a CI log to account for the exit code.
     await populate(scratch, ["bad.stub", "zz-bad.stub"])
     const warnings: string[] = []
     const report = await runDiff({
@@ -504,9 +431,6 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
   })
 })
 
-// Windows has no filename that holds a backslash — the character is its path separator — so the
-// fixture can only exist on POSIX. `@aburi/core`'s own suite pins the classification on every
-// platform; these pin what the CLI does with a scan that found one.
 const onPosix = it.skipIf(process.platform === "win32")
 
 describe("aburi scan — a file no Document path can name", () => {
@@ -517,9 +441,6 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(report.unrepresentableFiles).toEqual([
       unspellable("weird\\name.stub", "weird\\name.stub"),
     ])
-    // Neither counted nor skipped, and that pairing is forced: the path a skip entry needs is
-    // one the shared rule refuses, and a file counted while absent from the skip list breaks
-    // integrity #21. The artifact is therefore silent about it, which is why the code is not.
     expect(report.totalFiles).toBe(1)
     expect(report.parsedFiles).toBe(1)
     expect(report.skipped).toEqual([])
@@ -528,8 +449,6 @@ describe("aburi scan — a file no Document path can name", () => {
   })
 
   onPosix("adds them back to the stdout summary, which counts what it could name", async () => {
-    // `totalFiles` excludes them by design, so the summary alone reads as a whole workspace
-    // beside an exit code saying otherwise.
     await populate(scratch, ["ok.stub", "weird\\name.stub"])
     const stdout = new MemStream()
     const stderr = new MemStream()
@@ -545,8 +464,6 @@ describe("aburi scan — a file no Document path can name", () => {
   })
 
   onPosix("still writes the IR, so a reader gets the artifact and the code", async () => {
-    // And the IR passes `assertIRIntegrity` on the way out, which is the census this file is
-    // kept out of in order not to break.
     const report = await scanIn(["ok.stub", "weird\\name.stub"])
     expect(report.irPath).not.toBeNull()
   })
@@ -563,9 +480,6 @@ describe("aburi scan — a file no Document path can name", () => {
   onPosix(
     "yields to a plugin exception, which says the run is broken rather than partial",
     async () => {
-      // Both on one side. The exception is the reason that says something in the run is broken,
-      // and it is the older of the two claims on this line, so the arm for this one sits behind
-      // it rather than in front.
       await populate(scratch, ["ok.stub"])
       const warnings: string[] = []
       await runDiff({
@@ -581,10 +495,6 @@ describe("aburi scan — a file no Document path can name", () => {
   )
 
   onPosix("yields to a coverage fault it did not cause", async () => {
-    // An unnameable file leaves `totalFiles`, so it cannot push a scan below a floor or leave
-    // files unparsed — leaving the denominator only raises the ratio. Where such a fault holds
-    // it is its own cause, and naming this instead would send the reader to rename a file while
-    // every file that *was* read failed to parse.
     await populate(scratch, ["ok.stub"])
     const warnings: string[] = []
     await runDiff({
@@ -594,18 +504,12 @@ describe("aburi scan — a file no Document path can name", () => {
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnings.push(m),
     })
-    // Named second, not dropped. This is the line a reader greps out of a CI log to account
-    // for the exit code, and the cause that lost the contest is the one with no other trace.
     expect(warnings.join("\n")).toContain(
       "base: none of the 1 file(s) it found parsed (and 1 more have names no Document path can spell)",
     )
   })
 
   onPosix("outranks the fault it caused, when it took the whole candidate set", async () => {
-    // The other side of the guard. Every candidate unnameable means `totalFiles` is zero and
-    // the scan reports "discovered no file to read" — true, and the consequence rather than the
-    // cause. A reader sent to check `ignore` and `components[].roots` would find nothing wrong
-    // with either.
     await populate(scratch, ["ok.stub"])
     const warnings: string[] = []
     await runDiff({
@@ -635,18 +539,10 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(warnings.join("\n")).toContain("base: 1 file(s) have names no Document path can spell")
   })
 })
-// A collision needs two names on disk that normalize to one, and a filesystem that keeps both.
-// APFS resolves them to a single file, so the second write overwrites the first and the pair
-// the test is about never exists. NTFS and ext4 both store the codepoints they are given.
 const onCollidingFs = it.skipIf(process.platform === "darwin")
 
 describe("aburi scan — two spellings of one name", () => {
   onCollidingFs("reports both instead of ending the scan on a duplicate id", async () => {
-    // Before this, the two were one `DiscoveredFile` path twice: the pipeline read whichever
-    // file the lookup found, twice, and minted its Symbol id twice — so `assertIRIntegrity`
-    // ended the run on `[#1] duplicate Symbol id`, naming neither filename. Still the
-    // document-wide check rather than the scan's per-file one, which cannot see this pair:
-    // each read's ids name its own Document path and are unique among its own candidates.
     const warnings: string[] = []
     await populate(scratch, ["ok.stub"])
     await writeFile(resolve(scratch, "caf\u0065\u0301.stub"), "a", "utf8")
@@ -667,7 +563,6 @@ describe("aburi scan — two spellings of one name", () => {
       },
       { fsPath: "caf\u00e9.stub", reason: "colliding-spelling", documentPath: "caf\u00e9.stub" },
     ])
-    // Neither counted nor skipped, so the census stays exact and the document validates.
     expect(report.totalFiles).toBe(1)
     expect(report.parsedFiles).toBe(1)
     expect(report.skipped).toEqual([])
@@ -692,15 +587,11 @@ describe("aburi scan — two spellings of one name", () => {
     expect(text).toContain("path(s) more than one name claims")
     expect(text).toContain("U+0065 U+0301")
     expect(text).toContain("U+00E9")
-    // Both outcomes named, because the two patterns do different things and the reader has to
-    // pick: the header keeps a file, the wildcard keeps none.
     expect(text).toContain("excludes whichever claimant is spelled that way")
     expect(text).toContain("a wildcard over it excludes them all")
   })
 
   onCollidingFs("catches a collision between a skipped candidate and a parsed one", async () => {
-    // One path in `stats.skippedFiles[]` and on `symbols[].source.file` is the contradiction
-    // `buildDiff` resolves as a deletion. The pair has to be decided over both lists.
     const warnings: string[] = []
     await populate(scratch, ["ok.stub"])
     await writeFile(resolve(scratch, "b\u0061\u0301d.stub"), "a", "utf8")
@@ -720,8 +611,6 @@ describe("aburi scan — two spellings of one name", () => {
 })
 describe("aburi scan — a name the filesystem and the Document spell differently", () => {
   it("reads it, parses it, and records the normalized spelling", async () => {
-    // It used to be `unreadable`: the `stat` and the `readFile` both went out under the
-    // spelling the Document records, which is not the one the filesystem stores.
     const warnings: string[] = []
     await populate(scratch, ["ok.stub"])
     await writeFile(resolve(scratch, "caf\u0065\u0301.stub"), "hello", "utf8")
@@ -738,8 +627,6 @@ describe("aburi scan — a name the filesystem and the Document spell differentl
     expect(report.parsedFiles).toBe(2)
     expect(report.exitCode).toBe(EXIT.SUCCESS)
 
-    // And the Document holds one spelling of it, the composed one, which invariant #19 is
-    // about — the filesystem's spelling stops at the read.
     const ir = JSON.parse(await readFile(resolve(scratch, "out/aburi.ir.json"), "utf8")) as {
       symbols: { source: { file: string } }[]
     }

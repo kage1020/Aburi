@@ -10,12 +10,6 @@ import {
 import { makeTsSymbolId, nestedQname } from "./qname"
 import { readStaticString } from "./string-escape"
 
-/**
- * Framework-level method vocabulary that promotes a module-level chained call
- * (`app.get('/foo', handler)`) into a Symbol. This is deliberately Express-shaped
- * today — the extractor is language-generic, but no other framework is registered
- * against this surface yet. Additions land here as new frameworks come online.
- */
 const PROMOTABLE_METHOD_NAMES: ReadonlySet<string> = new Set([
   "get",
   "post",
@@ -101,8 +95,6 @@ export function visitCallStatement(
     name: qname,
     visibility: "internal",
     decorators: [],
-    // The registration's own API, which is nothing: a route has no parameters, and reading
-    // the handler's would publish the framework's callback shape as the route's signature.
     signature: null,
     source: makeSourceRange(call, ctx),
     derivedBy: makeDerivedBy(parsed, path, names, lead !== undefined),
@@ -113,36 +105,6 @@ export function visitCallStatement(
   }
 }
 
-/**
- * Every function written as a direct argument of a call on `call`'s spine, as the bodies it
- * contributes to `declaration`, in source order.
- *
- * Two declarations hold such a function where no other declaration does: a registration
- * statement (`app.post('/x', async (req) => …)`, LP20g), whose Symbol is the call itself, and a
- * `const` initialised by a call (`const POST = withAuth(async (req) => …)`, LP7c). Either way the
- * Symbol stands for the whole declaration, so the scan covers every call on the spine, not only
- * the outermost: `app.route('/x').get(h1).post(h2)` registers two handlers and produces one
- * Symbol, and reading only the leaf's arguments would leave `h1` in no Symbol at all.
- *
- * Each body is paired with `declaration` rather than with the function it is the body of. The
- * bodies are further bodies of that one declaration (LP20h), and `normalizeAst` describes a
- * declaration once however many bodies it has, which it can only do if they all name it.
- *
- * **Direct** arguments only. A function inside an argument (`app.get('/x', wrap(() => …))`) is
- * a call's return value, which is the line `asFunctionValue` draws: reading through a call
- * would be a guess about what it returns. `asFunctionValue`'s set is also the answer to what
- * counts as a function here — an arrow or a function expression, wrapped or not. A generator
- * argument (Koa's `app.use(function* (ctx, next) {…})`) is outside it at every site that reads
- * the predicate, so it contributes no body.
- *
- * A body of no width is refused. A half-written function (`withAuth(async (req) =>)`) still
- * parses as an arrow whose `body` field is a zero-width error node. There is nothing in it to
- * walk, and adopting it would have the Symbol's `derivedBy` say it carries a function's body —
- * `inline-handler` on a registration, `call-argument-function` on a const — when it carries none.
- *
- * Ordered on `startIndex` because the spine is walked right-to-left, which is the reverse of
- * how the declaration is written.
- */
 export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration<Node>[] {
   const bodies: Node[] = []
   for (const step of spineCalls(call)) {
@@ -162,17 +124,6 @@ export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration
     .map((body) => ({ bodyNode: body, fullNode: declaration }))
 }
 
-/**
- * Every call on the statement's spine, outermost first.
- *
- * The spine is what `rootReceiver` walks to find the receiver, and this walks it for the same
- * reason: one statement is one Symbol, so every registration written in it belongs to that
- * Symbol. `app.use(h0).router.get(h1)` reaches `.use`'s call through a member step, and
- * stopping at that step would leave `h0` in no Symbol at all.
- *
- * Read through the same wrappers a value is read through, so a chain does not end at a
- * parenthesis or a type assertion written in the middle of it.
- */
 function* spineCalls(call: Node): Iterable<Node> {
   let cursor: Node | null = call
   while (cursor !== null) {
@@ -195,9 +146,6 @@ interface MemberCall {
   receiver: string
   /** Leaf method name (e.g. `get`). */
   method: string
-  /** True when the receiver was reached through one or more intermediate `.call()` steps
-   * (e.g. `app.route('/x').get(h)` — the receiver `app` is the root, but the immediate
-   * left of `.get` is a call expression). */
   chained: boolean
 }
 
@@ -216,21 +164,11 @@ function parseMemberCallee(callee: Node): MemberCall | null {
   return { receiver: root.name, method, chained: root.chained }
 }
 
-/**
- * The identifier the statement's chain starts from, and whether a call stands between it and
- * the leaf method.
- *
- * Wrappers are read through by the same reader the value side uses, so `(app as Express).get()`
- * and `app!.get()` name the same receiver `app.get()` does. Hand-unwrapping only parentheses
- * here left the two readers disagreeing about what a wrapper is (LP7a).
- */
 function rootReceiver(node: Node): { name: string; chained: boolean } | null {
   let cursor: Node = unwrapValue(node)
   let chained = false
   while (true) {
     if (cursor.type === "identifier") {
-      // Reject empty identifier text (malformed AST). Manufacturing a placeholder here
-      // would silently collide with every other broken identifier in the workspace.
       if (cursor.text.length === 0) return null
       return { name: cursor.text, chained }
     }
@@ -421,11 +359,6 @@ function slugifyPath(path: string): string {
   return toNfc(out)
 }
 
-/**
- * The receiver identifier folded into a segment-safe form. Null on empty input — unreachable,
- * since `rootReceiver` already rejects an empty identifier, but kept so a future grammar
- * change cannot silently fabricate a shared placeholder qname.
- */
 function receiverSegment(name: string): string | null {
   if (name.length === 0) return null
   return toNfc(

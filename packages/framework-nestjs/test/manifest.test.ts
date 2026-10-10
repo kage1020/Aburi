@@ -8,10 +8,6 @@ describe("frameworkNestjsManifest", () => {
   })
 
   it("owns the framework:nestjs extKind prefix + individual entries for baseKind fallback", () => {
-    // Prefix ownership keeps the manifest open to future decorator support without a
-    // manifest bump; individual enumeration gives VocabRegistry.findExtKind() a baseKind
-    // fallback so consumers that only understand core SymbolKind can still render the
-    // Symbol as class / method.
     expect(frameworkNestjsManifest.provides.extKindPrefixes).toEqual(["framework:nestjs"])
     const ids = frameworkNestjsManifest.provides.extKinds.map((e) => e.id).sort()
     expect(ids).toEqual([

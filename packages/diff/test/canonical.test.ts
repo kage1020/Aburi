@@ -29,8 +29,6 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
   })
 
   it("serialises unknown edges byte-identically however the inputs are ordered", () => {
-    // The array is built by walking two Maps, so without the explicit sort its order follows
-    // insertion order and the same two revisions produce two different files.
     const gone = makeSymbol({ id: "ts:src/gone.ts#gone", name: "gone" })
     const also = makeSymbol({ id: "ts:src/also.ts#also", name: "also" })
     const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
@@ -74,10 +72,6 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
   })
 
   it("writes the empty notCompared array rather than dropping the key", () => {
-    // The reason the key is emitted at all: a reader must be able to tell "the comparison
-    // covered everything" from "this writer predates the field", and only the bytes on disk
-    // can carry that. A serialiser that pruned empty arrays would leave every unit test green
-    // and take the distinction with it.
     const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
     const clean = buildDiff({
       baseIR: makeIR({ symbols: [kept] }),
@@ -90,9 +84,6 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
   })
 
   it("serialises notCompared byte-identically however the skip lists are ordered", () => {
-    // Same hazard as the unknown edges above: the array is built by walking a Map, so without
-    // the explicit sort its order follows whatever order the two scans happened to record
-    // their losses in, and one workspace produces two different files.
     const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
     const losses = [
       { path: "z/last.ts", reason: "over-size" as const },

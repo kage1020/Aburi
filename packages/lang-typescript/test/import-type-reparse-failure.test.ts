@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { parseSource } from "./fixtures/ctx"
 
-/** LP27b — the reparse only improves a usable tree, so its failure must not cost the file. */
-
 vi.mock("../src/import-type-reparse", async (importActual) => ({
   ...(await importActual<typeof import("../src/import-type-reparse")>()),
   reparseImportTypes: () => {

@@ -65,8 +65,6 @@ describe("an overload declaration folds into its implementation's Symbol", () =>
   })
 
   it("takes the signature and the body from the implementation", async () => {
-    // The overload sits first in source order, so a rule that kept the first declaration
-    // would report the Symbol as bodyless and give it the overload's parameter types.
     const source = "export class Repo { find(id: string): number; find(id: any) { return 1 } }"
     const symbol = await symbolOf(source, "ts:src/a.ts#Repo.find")
 
@@ -107,8 +105,6 @@ describe("a getter and a setter declare one member", () => {
   })
 
   it("takes the signature from the getter", async () => {
-    // A property's type is what reading it answers. Taking the setter's signature would
-    // report the member as `(n) => void`, which is the type of writing it.
     const symbol = await symbolOf(PAIR, "ts:src/a.ts#Box.value")
     expect(symbol.signature?.inputs).toEqual([])
   })
@@ -166,8 +162,6 @@ describe("a getter and a setter declare one member", () => {
   })
 
   it("folds two members that share a name even when neither is an accessor", async () => {
-    // `tsc` calls this TS2393; tree-sitter accepts it, and a half-edited file is exactly
-    // where a duplicate id used to end the whole run.
     const source = "export class M { m() { a() } m() { b() } }"
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#M", "ts:src/a.ts#M.m"])
     const { calls } = await walkOf(source, "ts:src/a.ts#M.m")
@@ -175,9 +169,6 @@ describe("a getter and a setter declare one member", () => {
   })
 
   it("orders the joined decorators by source position, not by which declaration leads", async () => {
-    // The getter leads the pair wherever it is written, so a fold that visited the lead first
-    // would answer `[Memo, Validate]` here \u2014 descending, against `lang-plugin.md` LP15. Scalars
-    // come from the lead; lists are joined by walking the declarations in source order.
     const symbol = await symbolOf(SETTER_FIRST_DECORATED, "ts:src/a.ts#A.v")
 
     expect(symbol.decorators.map((d) => d.name)).toEqual(["Validate", "Memo"])
@@ -197,9 +188,6 @@ describe("a getter and a setter declare one member", () => {
   })
 
   it("keeps a private-name member apart from the public one of the same name", async () => {
-    // `v` and `#v` are two members and `tsc` accepts both. The shape this replaces: the `#`
-    // was dropped, both were spelled `Q.v`, and they folded into one Symbol that reported both
-    // bodies' calls.
     const source = "export class Q { v() { a() } #v() { b() } }"
     const symbol = await symbolOf(source, "ts:src/a.ts#Q.v")
 
@@ -274,8 +262,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("gives the merged Symbol the first declaration's kind and range", async () => {
-    // TypeScript requires the class or function to precede the namespace it merges with, so
-    // source order already names which declaration carries the value.
     const source = "export class C {}\nexport namespace C { export const a = 1 }"
     const symbol = await symbolOf(source, "ts:src/a.ts#C")
 
@@ -293,10 +279,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("records the export keyword once when both declarations carry it", async () => {
-    // Legal source requires a merge's declarations to agree about being exported, so both
-    // contribute the same token — and a Symbol claiming the same evidence twice says something
-    // about the source that is not there. Every kind emits the token now (LP6b), which is what
-    // makes a reopened `interface` reach the fold with it on both declarations.
     const source = "export interface I { a: 1 }\nexport interface I { b: 2 }"
     const symbol = await symbolOf(source, "ts:src/a.ts#I")
 
@@ -305,17 +287,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("keeps the leading declaration's visibility when a merge disagrees about the export", async () => {
-    // TS2395, and the grammar accepts it — so the two answers a reader has for "was this
-    // exported?" come apart here: `visibility` is the lead's scalar and `derivedBy` is the
-    // union, which is the fold's rule for every list it joins (`lang-plugin.md`). Legal source
-    // cannot reach this, which is why the rule stands rather than growing an exception for one
-    // scalar:
-    // deriving `visibility` from the union instead would change the answer for every merged
-    // Symbol, including the cross-kind merges that have carried a leading declaration's
-    // visibility since before this token existed.
-    //
-    // Reachable for an interface-interface merge only since LP6b: before it the four
-    // type-side kinds emitted no token for the union to carry.
     const source = "interface I { a: 1 }\nexport interface I { b: 2 }"
     const symbol = await symbolOf(source, "ts:src/a.ts#I")
 
@@ -324,11 +295,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("keeps the boundary evidence of a class an interface was declared before", async () => {
-    // The one merge whose declarations can disagree about something that matters: an
-    // interface may be written before the class it merges with, and a decorator kept only
-    // from the leading declaration would be gone. `decideSymbolDrop` reads boundary
-    // decorators before it drops anything of kind `interface`, so losing one is the
-    // difference between a controller in the IR and a Symbol dropped as a data model.
     const source = ["export interface P {}", "@Controller()", "export class P {}"].join("\n")
     const symbol = await symbolOf(source, "ts:src/a.ts#P")
 
@@ -348,9 +314,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("puts a reopened enum's members into the fingerprint input", async () => {
-    // An enum candidate has no `bodyNode` — its members are not Symbols — so a merged
-    // declaration reaches the fingerprint only through its `fullNode`. Carrying bodies alone
-    // made adding, editing or deleting the second `enum E {}` change nothing at all.
     const one = await symbolOf("export enum E { A }", "ts:src/a.ts#E")
     const two = await symbolOf(TWO_ENUMS, "ts:src/a.ts#E")
     const other = await symbolOf(TWO_ENUMS.replace("B", "ZZZ"), "ts:src/a.ts#E")
@@ -360,8 +323,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("keeps an instance member apart from a namespace export of the same name", async () => {
-    // `C.prototype.m` and `C.m` are two entities. Spelled `#C.m` both, they folded into one
-    // Symbol whose calls reached past its own range.
     const ids = await idsOf(CLASS_AND_NAMESPACE_MEMBER)
     const method = await symbolOf(CLASS_AND_NAMESPACE_MEMBER, "ts:src/a.ts#C.m")
     const exported = await symbolOf(CLASS_AND_NAMESPACE_MEMBER, "ts:src/a.ts#C::m")
@@ -378,10 +339,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("does not walk a merged namespace, whose statements are Symbols of their own", async () => {
-    // A namespace candidate has no `bodyNode`, and that is what keeps it out of the walk. Take
-    // its `fullNode` instead and every call inside it lands on the class as well as on the
-    // Symbol its own statement already produced \u2014 the same double count a class body would
-    // cause if members were walked twice.
     const owner = await walkOf(CLASS_AND_NAMESPACE_FUNCTION, "ts:src/a.ts#C")
     const inner = await walkOf(CLASS_AND_NAMESPACE_FUNCTION, "ts:src/a.ts#C::go")
 
@@ -390,10 +347,6 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("says nothing about merging on a file that merges nothing", async () => {
-    // The call statement and the wrapped const are here because each carries its further bodies
-    // on the same field (LP20h, LP7c), so they are the two producers with no reason of their own
-    // to keep the key absent — without them this fixture enforced the invariant everywhere else.
-    // The object's members are folded per id the way a class's are, through their own path.
     const symbols = await symbolsOf(
       [
         "export class A { m() {} }",
@@ -507,8 +460,6 @@ describe("a namespace merged into a class declares static members", () => {
   })
 
   it("folds a static member and an exported type of the same name, as a value and a type fold", async () => {
-    // Legal TypeScript: a value and a type do not collide. They share a qualified name all the
-    // same, as `const X` and `type X` do at module level, so the member leads one Symbol.
     const source =
       "export class C { static m() { helper() } }\nexport namespace C { export type m = string }"
     const m = await symbolOf(source, "ts:src/a.ts#C::m")
@@ -530,8 +481,6 @@ describe("a namespace merged into a class declares static members", () => {
   })
 
   it("still folds an instance member and a namespace local of the same name", async () => {
-    // Not the intent. The local is no member of `C`, so it keeps the dot and shares the
-    // method's name; the fold absorbs it.
     const source = "export class C { m() { helper() } }\nexport namespace C { const m = 1 }"
     const m = await symbolOf(source, "ts:src/a.ts#C.m")
     expect([m.kind, m.derivedBy]).toEqual(["method", ["class-method", "declaration-merged"]])
@@ -539,10 +488,6 @@ describe("a namespace merged into a class declares static members", () => {
 })
 
 describe("an unexported namespace is a declaration, not an expression", () => {
-  // Measured: at statement position tree-sitter parents an unexported `namespace` under
-  // `expression_statement` — not only a repeated one, and not only after a `}`. The
-  // statement switch never saw it, so every unexported namespace lost its own Symbol and
-  // its whole body with it.
   it("extracts a lone unexported namespace and its members", async () => {
     expect(await idsOf("namespace N { export const a = 1 }\n")).toEqual([
       "ts:src/a.ts#N",
@@ -568,8 +513,6 @@ describe("an unexported namespace is a declaration, not an expression", () => {
   })
 
   it("reads a namespace nested inside another one", async () => {
-    // Load-bearing ordering: the unwrap runs before the guard that stops a namespace-scoped
-    // expression statement from being read as a call, so an inner namespace is reached.
     expect(await idsOf(NESTED_NAMESPACE)).toEqual([
       "ts:src/a.ts#Outer",
       "ts:src/a.ts#Outer.Inner",
@@ -578,19 +521,12 @@ describe("an unexported namespace is a declaration, not an expression", () => {
   })
 
   it("does not shadow call extraction on an ordinary expression statement", async () => {
-    // The unwrap is why an expression statement is looked at twice, so the reading it was
-    // already there for has to survive it: a promoted call is the other thing an expression
-    // statement can be.
     const source = "import { app } from './app'\napp.get('/users', () => 1)\n"
     expect(await idsOf(source)).toContain("ts:src/a.ts#app__get__$users__d0")
   })
 })
 
 describe("a dotted namespace declares each of its segments", () => {
-  // `namespace A.B {}` is sugar for `namespace A { namespace B {} }`, and reading the dotted
-  // text as one qualified-name segment is what the id builder refuses. Two of the three
-  // spellings threw before this change and cost the file every Symbol it had; the unexported
-  // one produced nothing at all, which is how it went unnoticed for so long.
   it.each([
     ["unexported", "namespace A.B { export const x = 1 }"],
     ["exported", "export namespace A.B { export const x = 1 }"],

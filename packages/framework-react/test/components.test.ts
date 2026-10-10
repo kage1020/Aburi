@@ -8,8 +8,6 @@ import {
   returnsJsx,
 } from "../src/index"
 
-/** Return the body node of the first function-like declaration — matches how the plugin
- * hands `symbol.bodyNode` to `returnsContextProvider` in production. */
 async function parseFunctionBody(source: string): Promise<unknown> {
   const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
   if (result.tree === null) throw new Error("parse returned null")
@@ -67,12 +65,6 @@ describe("matchesHocNaming", () => {
   })
 })
 
-// `returnsJsx` is a one-line alias of `hasJsxReturn`, whose walker jsx.test.ts already covers
-// form by form — repeating that table here would pin the same behaviour twice. What only this
-// file can pin is the alias: it is part of the package's public surface, so a barrel that
-// dropped it or an alias re-pointed at the neighbouring `returnsContextProvider` would break
-// consumers with nothing else going red. Hence both directions plus the agreement check: one
-// case alone would still pass against a predicate that is constantly true or constantly false.
 describe("returnsJsx", () => {
   it("is true when the function returns JSX, and agrees with hasJsxReturn", async () => {
     const body = await parseFunctionBody("function C() { return <div /> }")
@@ -111,8 +103,6 @@ describe("returnsContextProvider", () => {
   })
 
   it("is true even when a JSX helper is defined above the returned Provider", async () => {
-    // Regression guard: pre-order walkers would surface the helper's <div/> first and
-    // miss the actual returned Provider. The returned-JSX walker must ignore the helper.
     const body = await parseFunctionBody(
       "function Provider({ children }) { const badge = <div /> ; return <MyCtx.Provider>{children}</MyCtx.Provider> }",
     )

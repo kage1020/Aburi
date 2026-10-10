@@ -19,15 +19,6 @@ export interface PackedPackage {
   paths: readonly string[]
 }
 
-/**
- * Every workspace package that `changeset publish` would push to npm, with the file list
- * `npm pack` would put in each tarball.
- *
- * `--dry-run` builds the same list the real pack does — it reads `files`, the root
- * `.gitignore` is deliberately not consulted (npm-packlist only reads ignore files inside
- * the package directory), so a gitignored-but-published directory like
- * `lang-typescript/wasm` shows up here exactly as a consumer would receive it.
- */
 export async function packPublishedPackages(): Promise<PackedPackage[]> {
   const packagesDir = join(repoRoot, "packages")
   const candidates = readdirSync(packagesDir).filter((name) => {

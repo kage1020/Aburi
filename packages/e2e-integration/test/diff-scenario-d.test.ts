@@ -5,22 +5,6 @@ import { describe, expect, it } from "vitest"
 import { useFixtureCheckout } from "../src/fixture"
 import { scanFixture, symbolById } from "../src/scan-helper"
 
-/**
- * Scenario D — a controller inherits a `db.write` transitively.
- *
- * The scenario chains three top-level functions across three files so the untyped
- * call-graph resolver (call-resolution.md, the file, import, component and workspace scope
- * steps) can link them without needing LSP-tier `this.<method>` support (which its
- * normalized-target rules deliberately leave unresolved).
- *
- *   controller.persistedRoute → service.persistInvoiceService → repo.writeInvoice
- *                                                                    ↓
- *                                                        prisma.invoice.create (db.write)
- *
- * The boundary controller method carries a `propagated: true` `db.write` entry whose
- * `derivedFrom` names the *direct* upstream callee (the service function), not the
- * repository — effect-propagation.md.
- */
 const INVOICE_REPOSITORY_TS = `import type { PrismaClient } from "@prisma/client"
 
 export async function writeInvoice(
@@ -118,8 +102,6 @@ describe("e2e scenario D — controller inherits db.write via propagation", () =
     expect(controllerPropagated?.line).toBeUndefined()
     expect(controllerPropagated?.derivedFrom).toEqual([servicePersist.id])
 
-    // The framework plugin still classified the new handler as boundary
-    // (effect-propagation.md — boundary is not a stop).
     expect(controllerCreate.decorators.some((d) => d.boundary === true)).toBe(true)
 
     expect(ir.stats.effectPropagation).toBeDefined()

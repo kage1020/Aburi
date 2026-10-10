@@ -21,17 +21,10 @@ describe("schema codegen", () => {
     expect(b).toEqual(a)
   })
 
-  // The equality check above only catches drift -- it cannot detect a regression where
-  // codegen and committed file both end up in the same broken state (e.g. json-schema-to-typescript
-  // changes its output and rewriteCrossRefs silently misses a placeholder). The structural
-  // assertions below codify the post-conditions that crossRef + intersection-strip must hold.
-
   it("diff.ts has no empty placeholder interfaces left over from cross-ref rewrite", async () => {
     const generated = await generateAll()
     const diff = generated["diff.ts"]
     expect(diff).toBeDefined()
-    // If rewriteCrossRefs misses a Symbol/Component/Dependency placeholder, we get a local
-    // `interface Symbol {}` colliding with the re-exported one from ./ir.
     for (const name of ["Symbol", "Component", "Dependency"]) {
       const orphanPattern = new RegExp(String.raw`export interface ${name}\s*\{\s*\}`)
       expect(diff, `diff.ts must not contain placeholder \`interface ${name} {}\``).not.toMatch(
@@ -49,8 +42,6 @@ describe("schema codegen", () => {
   })
 
   it("no generated file leaks the JST permissive wrapper", async () => {
-    // `({\n[k: string]: unknown | undefined\n} & {...})` defeats noUncheckedIndexedAccess and lets
-    // consumers add undeclared keys. stripPermissiveIntersection must clear it for every entry.
     const generated = await generateAll()
     const wrapper = /\(\{\s*\[k: string\]: unknown \| undefined\s*\} & \{/
     for (const entry of ENTRIES) {
@@ -78,8 +69,6 @@ describe("schema codegen", () => {
 
   it("crossRef rewrite strips string-alias placeholders as well as object ones", async () => {
     const { rewriteCrossRefsForTest } = await import("../scripts/codegen-lib")
-    // A `$def` of `{"type": "string"}` lands as a type alias, not an empty interface. The
-    // diff schema's SymbolId is exactly that shape and must still be re-exported from ./ir.
     const out = rewriteCrossRefsForTest(
       "synthetic.json",
       "export type Foo = string\nexport interface Bar {\n}\n",
@@ -89,11 +78,6 @@ describe("schema codegen", () => {
     expect(out).not.toMatch(/export interface Bar/)
     expect(out).toMatch(/import type \{ Bar, Foo \} from "\.\/x"/)
   })
-
-  // The brand pass is what turns `SymbolId` / `ComponentId` / `SliceId` from interchangeable
-  // string aliases into separate namespaces. The equality check at the top of this file cannot
-  // notice if it silently stops firing -- codegen and the committed file would go unbranded
-  // together -- so the post-conditions are asserted directly.
 
   it("every id that owns a namespace is generated as a nominal type", async () => {
     const generated = await generateAll()
@@ -113,8 +97,6 @@ describe("schema codegen", () => {
 
   it("no id alias is left as a bare string", async () => {
     const generated = await generateAll()
-    // A bare `= string` here means the alias override silently missed: the type would still
-    // compile everywhere, and every accidental cross-assignment would still be accepted.
     for (const name of ["SymbolId", "ComponentId"]) {
       expect(generated["ir.ts"], `ir.ts leaves ${name} unbranded`).not.toMatch(
         new RegExp(`^export type ${name} = string$`, "m"),
@@ -136,8 +118,6 @@ describe("schema codegen", () => {
     const generated = await generateAll()
     const diff = generated["diff.ts"]
     expect(diff).toBeDefined()
-    // A local alias here would shadow the branded one and make SliceRecord.members
-    // structurally compatible with any string array again.
     expect(diff).not.toMatch(/^export type SymbolId =/m)
     expect(diff).toMatch(/import type \{[^}]*SymbolId[^}]*\} from "\.\/ir"/)
     expect(diff).toMatch(/export type \{[^}]*SymbolId[^}]*\} from "\.\/ir"/)
@@ -146,10 +126,6 @@ describe("schema codegen", () => {
   })
 
   it("every id-shaped $def is accounted for by the brand table", async () => {
-    // The equality check cannot see this one either: add `$defs.TenantId` to a schema,
-    // forget to touch ENTRIES, and codegen emits `export type TenantId = string` into a
-    // committed file that also says `= string`. Both sides agree and the drift test passes,
-    // while the new id silently joins the set of interchangeable strings.
     for (const entry of ENTRIES) {
       const defs = await readDefNames(entry.schema)
       const accountedFor = new Set([

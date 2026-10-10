@@ -154,8 +154,6 @@ describe("classifyNestjsSymbol — method decorators", () => {
     )
     expect(result?.extKind).toBe("framework:nestjs:route")
     expect(result?.decoratorBoundaries).toEqual({ UseGuards: true, Post: true })
-    // The route extKind is what a user actually sees, so the derivedBy anchors on that.
-    // derivedBy preserves the source decorator identifier verbatim (no case transform).
     expect(result?.derivedBy).toBe("framework:nestjs:route:Post")
   })
 

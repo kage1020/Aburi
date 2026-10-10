@@ -38,17 +38,12 @@ describe("hasDrizzleImport", () => {
     "drizzle-orm/aws-data-api/mysql",
     "drizzle-orm/neon-http/driver",
   ])("returns true for multi-segment subpath %s", (source) => {
-    // The prefix match is intentionally permissive — anything under `drizzle-orm/` is
-    // accepted regardless of how many path segments follow. Guards against future
-    // driver reorganizations that nest further.
     expect(
       hasDrizzleImport([{ source, symbols: ["drizzle"], line: 1, dynamic: false }], PATH),
     ).toBe(true)
   })
 
   it("returns true for a side-effect-only import (empty symbols array)", () => {
-    // `import "drizzle-orm/foo"` is legal ESM — the file may only import for side
-    // effects. `symbols: []` MUST still count as a Drizzle-consuming file.
     expect(
       hasDrizzleImport([{ source: "drizzle-orm", symbols: [], line: 1, dynamic: false }], PATH),
     ).toBe(true)
@@ -71,10 +66,6 @@ describe("hasDrizzleImport", () => {
   })
 
   it("returns false for lookalike specifiers that are not real drizzle-orm modules", () => {
-    // `drizzle` (bare, no `-orm`) is a different package.
-    // `drizzle-orm-mock` / `drizzle-orm-lite` are third-party lookalikes — the trailing
-    // slash in the subpath check prevents them from matching.
-    // `@drizzle/kit` is drizzle-kit (the CLI), not drizzle-orm — no runtime call surface.
     expect(
       hasDrizzleImport(
         [
@@ -102,10 +93,6 @@ describe("hasDrizzleImport", () => {
   })
 
   it("throws when the language plugin emits an empty ImportEdge.source, including the file path in the message", () => {
-    // ImportEdge.source is contract-guaranteed to be normalized and non-empty. Getting
-    // `""` here means the upstream language plugin failed to normalize — silently
-    // returning false would mask the bug. The file path is threaded so caught
-    // exceptions in production tooling point at the offending source file.
     expect(() =>
       hasDrizzleImport([{ source: "", symbols: ["sql"], line: 3, dynamic: false }], PATH),
     ).toThrow(/ImportEdge\.source is empty/)
@@ -115,8 +102,6 @@ describe("hasDrizzleImport", () => {
   })
 
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
-    // Order-independence pin — using `.some()` alone would short-circuit on the first
-    // match and silently accept a broken edge later in the list.
     expect(() =>
       hasDrizzleImport(
         [

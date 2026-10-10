@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { BACKSLASH, callsOf, hintOf, symbolOf, symbolsOf, walkOf } from "./fixtures/ctx"
 
-/**
- * A function an object literal holds is a member of the binding that holds the object.
- * Defining the object creates the closure and does not enter it; the body is what calling the
- * property runs — so it belongs to a Symbol of its own, `api.get`, and the binding keeps only
- * what defining the object runs. That is LP20a and LP20f read for an object rather than a class,
- * and the name gate is the class member's, but for a `#` name.
- */
-
 const API = [
   "export const api = {",
   "  client: makeClient(),",
@@ -123,8 +115,6 @@ describe("a function an object literal holds is a member Symbol", () => {
   })
 
   it("reports the entry's own range, not the function's", async () => {
-    // The member is declared where its name is written, and a key on a line of its own is the
-    // one spelling that puts the two ranges on different lines.
     const source = ["export const api = {", "  get:", "    () => {", "      q()", "    },", "}"]
     const { source: range } = await symbolOf(source.join("\n"), "ts:src/a.ts#api.get")
 

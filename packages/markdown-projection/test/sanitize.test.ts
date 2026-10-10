@@ -30,12 +30,6 @@ describe("collisionSuffix", () => {
   })
 })
 
-/**
- * The always-append composition, which `assignSymbolFilenames` reaches for only on a
- * collision. It is a public export for callers that want the suffix on every file rather
- * than on the pairs that happen to clash, so the shape of what it appends is pinned here
- * rather than left to the collision cases below.
- */
 describe("withCollisionSuffix", () => {
   it("always appends the deterministic suffix", () => {
     const value = withCollisionSuffix("ts:src/a.ts#Foo")

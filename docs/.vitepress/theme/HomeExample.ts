@@ -1,16 +1,5 @@
 import { h } from "vue"
 
-/**
- * The comparison that sits under the home hero: the same commit as `git diff`
- * renders it, and as Aburi reports it.
- *
- * Built with render functions rather than a single-file component for two
- * reasons. Biome reads a `.vue` script block without its template, so every
- * binding in one looks unused to the linter. And inside a `pre`, the newlines
- * an SFC template puts between sibling elements survive as text nodes, so each
- * rendered line arrives with a blank one under it.
- */
-
 type Line = { kind: string; text: string }
 
 const GIT_LINES: Line[] = [

@@ -4,19 +4,6 @@ import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runInit } from "../src"
 
-/**
- * `aburi.json` uses two different vocabularies under the same key name:
- *
- * - top-level `languages` / `frameworks` hold **plugin refs** (`PluginRef`), which the
- *   plugin loader resolves as module specifiers;
- * - `components[].languages` holds **language ids** (`LanguageId`, `^[a-z][a-z0-9]*$`),
- *   which cannot express a hyphenated manifest name.
- *
- * A detector id in the top-level array is refused by the loader (exit 2), and a
- * manifest name inside `components[]` fails the `LanguageId` pattern, so neither field
- * tolerates the other's vocabulary. These tests pin the split at both ends.
- */
-
 let scratch = ""
 
 async function makeWorkspace(dependencies: Record<string, string>): Promise<void> {
@@ -107,9 +94,6 @@ describe("runInit — detected ids with no first-party plugin", () => {
   })
 
   it("reports an unmapped language, which is what leaves `languages` empty", async () => {
-    // Ten-plus files of one extension is what the detector needs before it records the
-    // language at all (`LANGUAGE_MIN_FILES`), so a smaller sample would fall back to `ts`
-    // and never exercise this branch.
     await writeFile(
       resolve(scratch, "package.json"),
       JSON.stringify({ name: "app", private: true }),
@@ -126,7 +110,6 @@ describe("runInit — detected ids with no first-party plugin", () => {
     expect(report.detectedLanguages).toContain("py")
     expect(report.unmappedLanguages).toEqual(["py"])
     expect(config.languages).toEqual([])
-    // The detector's own vocabulary stays accurate; only the plugin-ref array is empty.
     expect(config.components[0]?.languages).toContain("py")
   })
 })

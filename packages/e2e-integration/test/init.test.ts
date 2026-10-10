@@ -37,8 +37,6 @@ describe("e2e: aburi init on fixtures/nestjs-billing", () => {
       }[]
     }
     expect(parsed.$schema).toBe("https://aburi.kage1020.com/schema/aburi.config.v1.json")
-    // Top-level `languages` / `frameworks` are PluginRefs the loader resolves as module
-    // specifiers; `components[].languages` stays in the LanguageId vocabulary.
     expect(parsed.languages).toContain("lang-typescript")
     expect(parsed.frameworks).toContain("framework-nestjs")
     expect(parsed.components).toHaveLength(1)

@@ -1,8 +1,3 @@
-/**
- * Both of the pipeline's budgets are read from the `Config` it is handed, and from nowhere
- * else — so a test cannot exercise a budget by a path the CLI does not use.
- */
-
 import { noopRegistry, silentLogger } from "@aburi/test-support"
 import type {
   BodyExtraction,
@@ -77,8 +72,6 @@ function run(config: { parseTimeoutMs?: number; classifyTimeoutMs?: number }, ef
 
 describe("the classify budget comes from the config", () => {
   it("lets a classifier past the default run to completion when the config raised the budget", async () => {
-    // The direction that cannot be faked: this classifier spends longer than the default, so
-    // a pipeline reading anything but the config would record a timeout here.
     const slower = DEFAULT_CLASSIFY_TIMEOUT_MS + 30
     const result = await run({ classifyTimeoutMs: 5000 }, slower)
 

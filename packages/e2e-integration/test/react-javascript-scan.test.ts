@@ -4,16 +4,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { scanWith } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * The reason the JavaScript extensions are covered at all: a React app whose sources are
- * `.js` — a `create-next-app` JavaScript project, or a CRA app.
- *
- * A grammar that refuses JSX recovers past it, so the file still reached the IR and the
- * declarations mostly survived. What did not: the JSX a classifier reads to recognise a
- * component, every call written inside the markup, and a clean parse-error count — the one
- * signal a reader has that a Symbol set may be short.
- */
-
 const workspace = useScratchWorkspace("react-js")
 
 const scanWorkspace = () =>
@@ -59,9 +49,6 @@ describe("scan — a React app written in plain JavaScript", () => {
   })
 
   it("classifies a component written in a .js file", async () => {
-    // A component is recognised by the JSX it returns, so under a grammar that refuses JSX all
-    // three of these were `null`; `OldButton` had no Symbol at all, because nothing survived
-    // recovery on a one-line file.
     const result = await scanWorkspace()
     const byName = new Map(result.ir.symbols.map((symbol) => [symbol.name, symbol]))
 
@@ -73,11 +60,6 @@ describe("scan — a React app written in plain JavaScript", () => {
   })
 
   it("walks the calls written inside the markup", async () => {
-    // `useCounter` is before the first tag and survived recovery either way. `track` and
-    // `format` are inside the JSX, which is where the calls actually went missing.
-    //
-    // Sorted, because two calls on one line reach the IR in an order this test has no reason
-    // to hold. The plugin's own source order is pinned in `javascript-with-jsx.test.ts`.
     const result = await scanWorkspace()
     const home = result.ir.symbols.find((symbol) => symbol.name === "Home")
 
@@ -85,8 +67,6 @@ describe("scan — a React app written in plain JavaScript", () => {
   })
 
   it("reports no parse error, so the files are not counted as doubtful", async () => {
-    // A recoverable error leaves the file in the IR rather than in `stats.skippedFiles`, so
-    // the parse-error count is the only thing that says the Symbol set may be short.
     const result = await scanWorkspace()
 
     expect(result.parseErrors).toEqual([])

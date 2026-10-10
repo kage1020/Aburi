@@ -2,17 +2,6 @@ import { describe, expect, it } from "vitest"
 import { langTypescriptManifest } from "../src/index"
 import { idsOf, importsOf, symbolsOf } from "./fixtures/ctx"
 
-/**
- * Three legal shapes fed something that is not a name into the Symbol-id builder, which
- * throws — and the throw costs the whole file, not the one declaration. A `class A` with a
- * computed member lost `A` and every other method with it.
- *
- * A destructuring declaration declares its *bindings*, so that is what comes out of it. A
- * computed member name is not a name static analysis can record, so nothing comes out of that
- * — the same position `lang-plugin.md` LP26e takes on a computed module specifier, and for
- * the same reason: it is not a fault in the source.
- */
-
 describe("a destructuring declaration declares its bindings", () => {
   it.each([
     ["shorthand properties", "export const { GET, POST } = handlers", ["GET", "POST"]],
@@ -34,8 +23,6 @@ describe("a destructuring declaration declares its bindings", () => {
   })
 
   it("reads the value side of a rename, not the key being read from", async () => {
-    // `{ a: b }` binds `b`. `a` is a property name on the right-hand side's type — nothing is
-    // declared under it, and a Symbol called `a` would be a name this file does not define.
     expect(await idsOf("export const { a: b } = m")).toEqual(["ts:src/a.ts#b"])
   })
 
@@ -44,11 +31,6 @@ describe("a destructuring declaration declares its bindings", () => {
     ["an array default", "export const [a = fallback] = pair"],
     ["a renamed default", "export const { z: a = fallback } = m"],
   ])("does not mistake %s's expression for a binding", async (_label, source) => {
-    // These bind `a` and *read* `fallback`. Walking the whole pattern for identifiers would
-    // declare a Symbol for a name that lives in another file. Three forms because the
-    // grammar has two node types for a default — `object_assignment_pattern` for the object
-    // shorthand and `assignment_pattern` everywhere else — and covering only the first is
-    // how the array and renamed forms came to bind nothing at all.
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#a"])
   })
 
@@ -57,11 +39,6 @@ describe("a destructuring declaration declares its bindings", () => {
     ["an array element", "export const [obj.a] = pair"],
     ["a rest element", "export const [...obj.a] = pair"],
   ])("refuses a pattern it cannot read, rather than binding nothing — %s", async (_l, source) => {
-    // A `member_expression` is a legal destructuring *assignment* target, and the grammar
-    // shares the node with a declaration's pattern — `tsc` says TS1005 here, tree-sitter
-    // says nothing. Passing over it would drop the declaration with no Symbol and no word,
-    // which is the failure this whole change is about; refusing sends the file to the
-    // per-file boundary, which names it.
     await expect(idsOf(source)).rejects.toThrow(/Unmodelled node "member_expression"/)
   })
 
@@ -69,9 +46,6 @@ describe("a destructuring declaration declares its bindings", () => {
     ["an object pattern", "export const { a, /* c */ b } = m"],
     ["an array pattern", "export const [a, /* c */ b] = pair"],
   ])("reads past a comment written inside %s", async (_label, source) => {
-    // A comment is a named child of both pattern kinds, and the walk refuses a node type it
-    // does not model rather than passing over it — so this is the case that keeps the
-    // refusal from firing on ordinary source.
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#a", "ts:src/a.ts#b"])
   })
 
@@ -80,8 +54,6 @@ describe("a destructuring declaration declares its bindings", () => {
 
     expect(symbols.map((s) => s.kind)).toEqual(["const", "const"])
     expect(symbols.map((s) => s.visibility)).toEqual(["public", "public"])
-    // One declaration, so one range: the `derivedBy` token is what tells a reader why two
-    // Symbols point at the same lines.
     expect(symbols[0]?.source.startLine).toBe(1)
     expect(symbols[1]?.source.startLine).toBe(1)
     for (const symbol of symbols) {
@@ -98,9 +70,6 @@ describe("a destructuring declaration declares its bindings", () => {
   })
 
   it("is a const even when the value is a function, because nothing matches key to value", async () => {
-    // Pairing `{ GET }` with the `GET:` property of the initializer is analysis this plugin
-    // does not do for anything else. Claiming `function` here would make the two paths
-    // disagree about what evidence a kind needs.
     const symbols = await symbolsOf("export const { GET } = { GET: () => 1 }")
 
     expect(symbols.map((s) => s.kind)).toEqual(["const"])
@@ -158,11 +127,6 @@ describe("every rationale extraction emits is one the manifest declares", () => 
       ["object-literal-initializer", "object-method", "property-assigned-function"],
     ],
   ])("declares the rationales %s produces", async (source, expected) => {
-    // `fp-extension-impl.md` FP-A3 wants at least one entry per Symbol to identify the
-    // emitting plugin under a prefix it owns, and `findDerivedByOwner` resolves it from this
-    // list. Nothing enforces it at load time — the manifest comment used to claim otherwise —
-    // so this is where the list is held to what extraction actually emits. A token missing
-    // here is a Symbol no plugin owns.
     const declared = new Set(langTypescriptManifest.provides.derivedByPrefixes)
     const emitted = (await symbolsOf(source)).flatMap((s) => s.derivedBy)
 
@@ -177,8 +141,6 @@ describe("a computed member name costs its member and nothing else", () => {
   it("keeps the class and every member that has a name", async () => {
     const ids = await idsOf("export class A { [Symbol.iterator]() {} m() {} }")
 
-    // Before, the whole file was lost — `A` and `m` with it — because the id builder was
-    // handed `[Symbol.iterator]` and refused it.
     expect(ids).toEqual(["ts:src/a.ts#A", "ts:src/a.ts#A.m"])
   })
 
@@ -188,9 +150,6 @@ describe("a computed member name costs its member and nothing else", () => {
     ["an expression", "export class A { [key + 1]() {} }"],
     ["a static computed member", "export class A { static [Symbol.iterator]() {} }"],
   ])("produces nothing for %s, and says nothing", async (_label, source) => {
-    // Normalising the brackets into a segment is refused rather than deferred: any mangling
-    // invents a name the source does not contain, two different computed keys can collapse
-    // onto one segment, and nothing can read it back to what was written.
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#A"])
     expect((await importsOf(source)).errors).toEqual([])
   })

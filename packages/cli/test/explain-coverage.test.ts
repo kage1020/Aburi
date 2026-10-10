@@ -7,16 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runCli, runExplain } from "../src"
 import { MemStream, symbolId } from "./fixtures"
 
-/**
- * `aburi explain` answering out of an IR that records what its scan never read.
- *
- * `No matches` is an assertion of absence, and a document carrying `stats.skippedFiles` can
- * contradict it: the file that would declare the Symbol was withdrawn, so the document does
- * not know. The split this file pins is between a doubt the document can attach to the
- * question — the file arm and the id arm name a file, and the skip list either holds it or
- * does not — and a doubt it can only state about the run, which is every other case.
- */
-
 function makeSymbol(id: string, file: string): IRSymbol {
   return {
     id: symbolId(id),
@@ -42,17 +32,10 @@ function makeSymbol(id: string, file: string): IRSymbol {
 
 interface IRShape {
   symbols: readonly IRSymbol[]
-  /** `stats.skippedFiles`; omitted entirely when absent, as a Class B field is. */
   skipped?: readonly SkippedFile[]
-  /** Losses a document written before `stats.skippedFiles` can count but not name. */
   unnamedLosses?: number
 }
 
-/**
- * Every document here goes through `readIR`, so invariant #21 applies: the skip list is
- * exactly as long as `totalFiles - parsedFiles`. One file per Symbol keeps that arithmetic
- * honest without the fixtures having to state it.
- */
 function makeIR(shape: IRShape): IR {
   const skipped = shape.skipped ?? null
   const lost = skipped === null ? (shape.unnamedLosses ?? 0) : skipped.length
@@ -104,9 +87,6 @@ beforeEach(async () => {
     JSON.stringify({ name: "explain-coverage-fixture", private: true }),
     "utf8",
   )
-  // A real workspace marker, not just the `package.json`: a lone manifest with no `workspaces`
-  // field is not one, and the root would then be wherever the command was invoked — which is
-  // the difference the run-from-a-subdirectory case below is about.
   await writeFile(resolve(scratch, ".aburi-workspace"), "", "utf8")
 })
 
@@ -130,10 +110,6 @@ describe("runExplain — the id arm", () => {
   })
 
   it("answers a Symbol whose id names a lost file but whose source.file does not", async () => {
-    // The id records where the Symbol was declared to live when it was minted; `source.file`
-    // is where the document says it is, and a re-export or a generated file pulls them apart.
-    // The check therefore runs on a miss only — this Symbol is right here, and the head of
-    // the arm must not consult the skip list before looking for it.
     await writeIR({
       symbols: [makeSymbol("ts:src/route.ts#relocated", "src/actual.ts")],
       skipped: [ROUTE_LOST],
@@ -162,9 +138,6 @@ describe("runExplain — the id arm", () => {
   })
 
   it("claims no file for an argument that is not a well-formed Symbol id", async () => {
-    // The arm dispatches on a `#` — a silhouette, not the grammar. `3bad` is not a legal
-    // qualified name, so this string names no file, and attributing `src/route.ts` to it
-    // would let a typo produce a positive statement about coverage.
     await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
     const outcome = await runExplain({
       cwd: scratch,
@@ -180,10 +153,6 @@ describe("runExplain — the id arm", () => {
 
 describe("runExplain — an argument that holds a `#` without being an id", () => {
   it("falls through to the file arm instead of claiming it as a missed id", async () => {
-    // `#` is what makes the id arm worth trying, not proof that it applies. A file whose name
-    // holds one is recorded in `stats.skippedFiles` — the Document's path rule admits both id
-    // separators and only the id grammar refuses them — so answering "no such Symbol id" here
-    // would make the file arm unreachable for exactly the files that most need it.
     const lost = { path: "src/od#d.ts", reason: "unroutable" as const }
     await writeIR({ symbols: [KEPT], skipped: [lost] })
     const outcome = await runExplain({
@@ -210,9 +179,6 @@ describe("runExplain — an argument that holds a `#` without being an id", () =
   })
 
   it("hands a pattern holding a `#` on rather than answering for it", async () => {
-    // Nothing can match it — a qualified name cannot hold a `#` (invariant #17), so the
-    // substring arm finds nothing and the answer is `not-found` either way. What changed is
-    // that the two arms below now get to say so: before, the id arm returned first.
     await writeIR({ symbols: [KEPT] })
     const outcome = await runExplain({ cwd: scratch, argument: "odd#name", noRescan: true })
     expect(outcome.kind).toBe("not-found")
@@ -232,9 +198,6 @@ describe("runExplain — the file arm", () => {
   })
 
   it("reaches the arm for a file the working tree does not hold", async () => {
-    // The pinned-artifact case `--ir` and `--no-rescan` exist for: the document names the
-    // file, and requiring it on disk too would drop the question into the substring arm and
-    // answer it with the diffuse message.
     await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
     const outcome = await runExplain({ cwd: scratch, argument: "src/route.ts", noRescan: true })
     expect(outcome.kind).toBe("unknown")
@@ -244,8 +207,6 @@ describe("runExplain — the file arm", () => {
   })
 
   it("makes no positive claim about a path the document cannot tie to a loss", async () => {
-    // Which arm answered is not observable and is not the subject: a path-shaped argument the
-    // skip list does not hold gets the doubt about the run, never a statement about the file.
     await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
     const outcome = await runExplain({ cwd: scratch, argument: "src/never.ts", noRescan: true })
     expect(outcome.kind).toBe("not-found")
@@ -281,10 +242,6 @@ describe("runExplain — the file arm", () => {
   })
 
   it("matches a decomposed argument against the composed path the document holds", async () => {
-    // `SkippedFile.path` is NFC by schema and by invariant #19, while the argument is
-    // whatever the shell handed over — a name carrying a combining mark survives an archive
-    // or a rename in decomposed form. Spelled as escapes here because the difference is one
-    // the editor is free to hide.
     const composed = "src/caf\u00e9.ts"
     const decomposed = "src/cafe\u0301.ts"
     await writeIR({ symbols: [KEPT], skipped: [{ path: composed, reason: "parse-failed" }] })
@@ -295,9 +252,6 @@ describe("runExplain — the file arm", () => {
   })
 
   it("finds the Symbols of a decomposed argument the document composed", async () => {
-    // The file on disk carries the decomposed name, which is what an archive leaves behind,
-    // while the scan recorded it composed as `ir-schema.md` requires. The disk probe finds it under
-    // the name it was given; the comparison against `source.file` must not depend on that.
     const composed = "src/caf\u00e9.ts"
     const decomposed = "src/cafe\u0301.ts"
     await put(decomposed, "export function read() {}\n")
@@ -309,8 +263,6 @@ describe("runExplain — the file arm", () => {
   })
 
   it("leaves an --output file alone when it has no answer to write", async () => {
-    // A previous good answer sits in the file. `unknown` must not open it: truncating it would
-    // replace an answer with nothing at all, and the exit code is the only other signal.
     const output = resolve(scratch, "out/explain.md")
     await mkdir(resolve(scratch, "out"), { recursive: true })
     await writeFile(output, "# a previous answer\n", "utf8")
@@ -338,8 +290,6 @@ describe("runExplain — the file arm", () => {
 
 describe("runExplain — a pinned artifact", () => {
   it("answers out of an --ir document that is not the one scan writes", async () => {
-    // CL21 is written in terms of `--ir`, and `resolveIR` takes a different branch for it than
-    // for the default path every other case here uses.
     const pinned = resolve(scratch, "pinned.ir.json")
     await writeFile(
       pinned,
@@ -384,8 +334,6 @@ describe("runExplain — the substring arm", () => {
   })
 
   it("attaches nothing to a document that spells its empty skip list out", async () => {
-    // Class B says a writer omits the key rather than emitting `[]`, but a document that
-    // writes it is still saying the scan covered everything — which is not a doubt.
     await writeIR({ symbols: [KEPT], skipped: [] })
     const outcome = await runExplain({ cwd: scratch, argument: "handleRequest", noRescan: true })
     expect(outcome.kind).toBe("not-found")
@@ -402,9 +350,6 @@ describe("runExplain — the substring arm", () => {
   })
 
   it("leaves a hit alone in a document that lost a file", async () => {
-    // The non-goal, pinned: a hit is the document speaking about a Symbol it holds. An
-    // `over-size` file is skipped on every run, so caveating hits would caveat this
-    // workspace's every answer forever.
     await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
     const outcome = await runExplain({ cwd: scratch, argument: "kept", noRescan: true })
     expect(outcome.kind).toBe("single")
@@ -434,12 +379,6 @@ describe("runExplain — the substring arm", () => {
   })
 })
 
-/**
- * A language plugin that withdraws `bad.stub` and nothing else. No in-tree plugin refuses a
- * file to order, and the refusal has to leave the scan **green** — an unparseable file is a
- * property of the source, so `aburi scan` stays at exit 0 and `withScanFault` sees nothing.
- * That is what makes the case below a test of the document rather than of the scan's exit code.
- */
 const STUB_PLUGIN = `
 const manifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
@@ -539,8 +478,6 @@ describe("runExplain — the scan this command runs", () => {
   })
 
   it("answers the file that scan did read, which is what makes the scan green", async () => {
-    // The control for the case above: were the scan itself faulted, `withScanFault` would
-    // have made this exit 3 as well, and the gate above would prove nothing about coverage.
     const outcome = await runExplain({ cwd: scratch, argument: "stub:ok.stub#ok_stub" })
     expect(outcome.kind).toBe("single")
     if (outcome.kind !== "single") throw new Error("unreachable")
@@ -592,8 +529,6 @@ describe("aburi explain — what the user reads", () => {
     expect(stderr.text()).toContain('No matches for "handleRequest".')
     expect(stderr.text()).toContain("1 file(s)")
     expect(stderr.text()).toContain("stats.skippedFiles")
-    // The discriminator between the two doubts, which is the contract; the sentence carrying
-    // it is the wrapper's to reword.
     expect(stderr.text()).not.toContain("predates")
   })
 
@@ -626,32 +561,22 @@ describe("aburi explain — what the user reads", () => {
   })
 })
 
-// Windows has no filename that holds a backslash — the character is its path separator — so the
-// fixture can only exist on POSIX.
 const onPosix = it.skipIf(process.platform === "win32")
 
 describe("runExplain — the path arm converts a native path the way the core does", () => {
   onPosix("does not answer for the file the old conversion turned the argument into", async () => {
-    // The argument is a native path, and the conversion used to rewrite every backslash into a
-    // separator whatever the platform. That turns `src/weird\name.stub` — a real file — into
-    // `src/weird/name.stub`, which here is a *different* real file the document does hold a
-    // Symbol for, so the answer was another file's API with nothing saying so.
     await put("src/weird/name.stub", "1")
     await put("src/weird\\name.stub", "1")
     await writeIR({
       symbols: [makeSymbol("ts:src/weird/name.stub#neighbour", "src/weird/name.stub")],
     })
 
-    // The forward slash is what puts the argument in this arm at all; a bare basename goes to
-    // the substring arm and never reaches the conversion.
     const outcome = await runExplain({
       cwd: scratch,
       argument: "src/weird\\name.stub",
       noRescan: true,
     })
 
-    // Stated positively. `not.toBe("single")` passed against the old code too — this arm
-    // returns "file", never "single" — so it pinned nothing on its own.
     expect(outcome.kind).toBe("unnameable")
     if (outcome.kind !== "unnameable") throw new Error("unreachable")
     expect(outcome.unnameablePrefix).toBe("src/weird\\name.stub")
@@ -660,8 +585,6 @@ describe("runExplain — the path arm converts a native path the way the core do
   })
 
   onPosix("says so for a name that is not on disk either, since no IR could hold it", async () => {
-    // Decided from the argument, not from the filesystem and not from the skip list: neither
-    // can answer, and both would answer `No matches` about a file the format cannot describe.
     await writeIR({ symbols: [KEPT] })
 
     const outcome = await runExplain({

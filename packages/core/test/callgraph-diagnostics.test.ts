@@ -4,9 +4,6 @@ import { makeCallSiteKey } from "../src/call-site"
 import { resolveCallGraph } from "../src/callgraph"
 import { makeSymbol, type SymbolOverrides, symbolId } from "./fixtures/ir"
 
-// call-resolution.md — every `resolved: null` is a first-class outcome and the
-// resolver reports WHY it declined. CR27 / CR28 / CR29 are covered here.
-
 function withCalls(
   id: string,
   calls: Array<{ target: string; line: number }>,
@@ -265,9 +262,6 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
   })
 
   it("`dynamicCallSites` on an UNRESOLVED call moves only the bucket", () => {
-    // The resolved-call guard above proves the flag cannot manufacture an edge.
-    // This one proves the converse: on a call that stays null either way, the
-    // flag must not change `resolved`, the edges, or anything but the bucket.
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "factory.save", line: 4 }])
     const symbols = [caller]
     const plain = resolveCallGraph({ symbols, importsByFile: new Map() })
@@ -290,11 +284,6 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
   })
 
   it("an LSP hint pointing at a dropped Symbol keeps the call in `dynamic`", () => {
-    // Receiver hints are only ever built for `this.` / `super.` call sites, so
-    // when the hinted target turns out to be dropped the special-target guard has already
-    // marked the receiver unnamed and `dynamic` is the honest bucket. Pinning it
-    // here so the fallback can never quietly become `no-match`, which would send
-    // a reviewer hunting for a typo that does not exist.
     const caller = withCalls("ts:src/a.ts#Svc.run", [{ target: "this.helper", line: 6 }])
     const droppedTarget = makeSymbol("ts:src/a.ts#Svc.helper", {
       kind: "method",
@@ -315,12 +304,6 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
   })
 
-  // call-resolution.md fixes the tie-break order — `local-scope` → `dynamic` →
-  // `ambiguous` → `external` → `no-match` — because a call can honestly answer to several
-  // descriptions at once and the reviewer needs one stable verdict. Each case
-  // below constructs a genuine two-way tie; without them a reordering of
-  // `classifyUnresolved` would move counts between buckets on unchanged code
-  // and every single-cause test above would still pass.
   describe("bucket precedence tie-breaks", () => {
     it("`local-scope` beats `external` when a parameter shadows an imported name", () => {
       const caller = makeSymbol("ts:src/a.ts#caller", {
@@ -413,12 +396,6 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
   })
 
   it("counts by calls[], not by the `dropped` flag", () => {
-    // The extraction pipeline gives dropped Symbols an empty `calls[]`, so in
-    // practice they contribute nothing. This fixture violates that on purpose to
-    // pin down which rule the counters actually follow: a call site is counted
-    // because it is in `calls[]`, full stop. If the counters ever started
-    // skipping dropped Symbols, `totalCalls` would silently disagree with
-    // integrity invariant #15, which counts the same way.
     const dropped = withCalls("ts:src/a.ts#gone", [{ target: "typoed", line: 1 }], {
       dropped: true,
       dropReason: "cat-b:trivial",

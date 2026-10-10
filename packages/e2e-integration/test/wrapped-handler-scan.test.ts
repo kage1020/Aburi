@@ -5,13 +5,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A handler behind an auth wrapper — `export const POST = withAuth(async (id) => …)` — is the
- * usual shape of a route, and the const it is written in had nothing from it: no rules, no
- * calls, no effects, and no other Symbol held the code either. An edit to it reached no `logic`
- * fingerprint, so `--fail-on logic-changed` passed it. This runs the real pipeline.
- */
-
 const workspace = useScratchWorkspace("wrapped-handler")
 
 const lineup = {

@@ -16,11 +16,6 @@ const SCRIPT = resolve(
   "resolve-max-bytes.mjs",
 )
 
-/**
- * Run as a process against a real CLI, because that is what `action.yml` does with it: stdout is
- * captured into `budget`, stderr becomes annotations in the job log, and a non-zero exit fails
- * the step. A unit test of the same decision would prove none of those three.
- */
 interface RunResult {
   readonly status: number
   readonly stdout: string
@@ -131,9 +126,6 @@ describe("resolve-max-bytes.mjs", () => {
   })
 
   it("does not blame the CLI for a probe that could not run", async () => {
-    // A registry outage and a missing flag are not the same finding. Saying the second when the
-    // first happened is how a green job under `comment: false` ends up publishing an oversized
-    // artefact with a log that explains it wrongly.
     const cli = await brokenCli()
     const result = await run({ MAX_BYTES: "", FORMAT: "both" }, [process.execPath, cli])
     expect(result.status).toBe(0)
@@ -144,9 +136,6 @@ describe("resolve-max-bytes.mjs", () => {
   })
 
   it("matches the flag however long the help text is", async () => {
-    // The `grep -q` pipeline this replaces inverted its own result once the writer outran the
-    // pipe buffer: `grep` exits at the first match, the writer takes SIGPIPE, and `pipefail`
-    // reports the successful match as a failure.
     const cli = await fakeCli(
       `process.stdout.write("  --max-bytes <n>\\n" + "x".repeat(2_000_000) + "\\n")\n`,
     )

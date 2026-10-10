@@ -12,10 +12,6 @@ export function matchesHocNaming(leaf: string): boolean {
   return /^with[A-Z]/.test(leaf)
 }
 
-/**
- * True when the function actually **returns** `<X.Provider>`. Uses the returned element, not
- * any JSX descendant, so a helper JSX literal above the `return` does not shadow it.
- */
 export function returnsContextProvider(body: unknown): boolean {
   return isProviderElementName(findReturnedJsxElementName(body))
 }

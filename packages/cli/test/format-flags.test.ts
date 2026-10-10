@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runCli } from "../src"
 import { MemStream, writeTypeScriptWorkspace } from "./fixtures"
 
-/** `scan`'s `--format`, `--no-md` and `--no-json`: one output taken away, never a guess. */
-
 let scratch = ""
 
 beforeEach(async () => {
@@ -32,13 +30,11 @@ async function scan(
     cwd: scratch,
   })
   if (!existsSync(out)) return { code, stderr: stderr.text(), wrote: null }
-  // `readdir` joins nested entries with the platform separator.
   const wrote = (await readdir(out, { recursive: true })).map((entry) => entry.replaceAll(sep, "/"))
   return { code, stderr: stderr.text(), wrote: wrote.sort() }
 }
 
 const IR = ["aburi.ir.json"]
-// `components/*.md` is written with `workspace.md` and governed by the same format.
 const MARKDOWN = ["components", "components/format-flags.md", "workspace.md"]
 const BOTH = [...IR, ...MARKDOWN].sort()
 
@@ -71,7 +67,6 @@ describe("scan format flags", () => {
       "--format both and --no-json contradict each other: drop one",
     ],
     [
-      // Only the flag that contradicts is named; `--no-md` agrees with `--format json`.
       ["--format", "json", "--no-md", "--no-json"],
       "--format json and --no-json contradict each other: drop one",
     ],

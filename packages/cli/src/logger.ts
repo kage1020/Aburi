@@ -4,12 +4,6 @@ import type { LogLevel } from "./env"
 const LOG_LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
 
 export interface LoggerOptions {
-  /**
-   * Lowest level that reaches the sink. Defaults to `warn`, which is what the
-   * CLI has always printed; `ABURI_LOG_LEVEL` (`cli-spec.md`) raises or lowers it. Until
-   * that variable was wired through, `debug` and `info` were hard-coded no-ops
-   * and a pass logging at those levels could not be heard from at all.
-   */
   minimum?: LogLevel
   /** Sink for a fully formatted line, newline included. Defaults to stderr. */
   write?: (line: string) => void

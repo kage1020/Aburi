@@ -74,11 +74,6 @@ export const EMPTY_BODY: BodyExtraction = { rules: [], calls: [] }
 /** The one file a `.stub` plugin is handed when the test is not about the file. */
 export const stubFile: SourceFile = { path: "test.stub", content: "" }
 
-/**
- * A `.stub` language plugin whose every stage is a no-op (an empty tree, no candidates, an
- * empty body, `"stub-ast"`), with `overrides` layered on top. The plugin is built as a real
- * `LanguagePlugin` rather than cast to one, so a required member the contract gains surfaces here.
- */
 export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): LanguagePlugin {
   return {
     manifest: langManifest(),
@@ -98,10 +93,6 @@ export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): Lan
   }
 }
 
-/**
- * A function candidate in `file` (default `test.stub`) named `name`, with a schema-satisfying
- * default for everything else. The id is `stub:<file>#<name>` unless overridden.
- */
 export function stubCandidate(
   name: string,
   overrides: Omit<Partial<SymbolCandidate<OpaqueAstNode>>, "id"> & {
@@ -151,17 +142,6 @@ export function capturingLogger(): {
   }
 }
 
-/**
- * A scratch workspace of three `.stub` files, `a` / `bad` / `c`, torn down after each test.
- *
- * Three rather than one because the tests that use it are about blast radius: a check that
- * withdrew the run rather than the offending file shows up as a missing `a.stub` *and* a
- * missing `c.stub`, one either side of `bad.stub` in discovery order (which is ascending by
- * path). The names are load-bearing for that reason, so the caller does not choose them.
- *
- * Call it at the top of a `describe`; it registers its own `beforeEach` / `afterEach` and
- * hands back an object whose `root` is the current test's directory.
- */
 export function useStubWorkspace(prefix: string): { readonly root: string } {
   const handle = { root: "" }
   beforeEach(async () => {

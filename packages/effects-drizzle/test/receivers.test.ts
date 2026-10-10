@@ -26,8 +26,6 @@ describe("namesDrizzleClient", () => {
   })
 
   it("rejects an SDK client — `client` alone would hand every one of these `high`", () => {
-    // `httpClient.delete(url)` is 2 segments with a write terminal and one non-literal
-    // argument: everything `db.delete(users)` is, on a receiver that is not a database.
     for (const segment of ["httpClient", "apiClient", "redisClient", "sdkClient", "s3Client"]) {
       expect(namesDrizzleClient(segment)).toBe(false)
     }
@@ -39,9 +37,6 @@ describe("namesDrizzleClient", () => {
   })
 
   it("rejects the everyday receivers that share Drizzle's terminal vocabulary", () => {
-    // `router.delete` (Express) and `store.select` (RxJS) are the two collisions the
-    // package's own docstring names; the file-level import gate does not separate them
-    // because Express + Drizzle is a common pairing inside one file.
     for (const segment of ["router", "app", "store", "queue", "cache", "form", "list"]) {
       expect(namesDrizzleClient(segment)).toBe(false)
     }
@@ -74,16 +69,12 @@ describe("classificationConfidence", () => {
   })
 
   it("caps a dynamic receiver at medium however it is spelled", () => {
-    // `getDb().select()` normalizes to `getDb.select`: a collapsed expression, not a
-    // binding, so its spelling is not evidence of anything.
     expect(
       classificationConfidence("db", makeCall({ target: "db.select", dynamicReceiver: true }), 1),
     ).toBe("medium")
   })
 
   it("caps an over-long argument list at medium rather than dropping the call", () => {
-    // `argumentCount` is a syntactic count and this is the first code to read it as a
-    // signature, so an overflow costs the tier instead of erasing the effect.
     expect(
       classificationConfidence(
         "db",

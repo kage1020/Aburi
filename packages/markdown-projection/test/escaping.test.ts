@@ -13,24 +13,10 @@ import {
   tableCell,
 } from "../src"
 
-/**
- * Code fragment and Rule row display (markdown-projection.md) — the three ways a value out
- * of the IR used to escape the construct that was meant to contain it: a fence opened at
- * column 0 inside a list item, a backtick closing a code span early, and a `|` opening a
- * table column the header never declared.
- *
- * Every value asserted here is ordinary source text — a boolean condition long enough to
- * fence, a template literal, a path with a pipe in it — not a crafted hostile string.
- */
-
 function longCondition(): string {
   return "user.role === 'admin' && flags.enabled && !session.expired && ctx.tenant === wantedTenantName"
 }
 
-/**
- * Values whose `${...}` belongs to the source being described, not to this file. Written as
- * escaped template literals so they read as the TypeScript they stand for.
- */
 const THROWN_TEMPLATE = `new Error(\`unknown kind: \${k}\`)`
 const CACHE_KEY_TEMPLATE = `redis.get(\`k:\${id}\`)`
 
@@ -67,9 +53,6 @@ describe("inlineCode", () => {
   })
 
   it("cannot round-trip a value that is only spaces", () => {
-    // CommonMark strips one space from each end only when the content is not entirely
-    // spaces, so the padding stays visible here. Recorded rather than fixed: no span can
-    // carry this value exactly, and no IR field this package renders holds one.
     expect(inlineCode(" ")).toBe("`   `")
   })
 })
@@ -129,8 +112,6 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
   })
 
   it("names an empty payload instead of rendering a row that trails off", () => {
-    // `Rule.condition` carries a maxLength and no minLength in aburi.ir.v1, so this is a
-    // document to render, not an invariant to throw on.
     expect(ruleRow(rule({ type: "guard", line: 5, condition: "" }))).toEqual([
       "- guard: (empty) (L5)",
     ])
@@ -143,8 +124,6 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
   })
 
   it("fences a multiline condition under the item as well", () => {
-    // ir-schema.md has the extractor strip newlines from this field; a writer that did
-    // not is the reason the branch exists, so the row still has to hold together.
     expect(ruleRow(rule({ type: "switch", line: 9, condition: "a\nb" }))).toEqual([
       "- switch (L9):",
       "  ```",
@@ -170,8 +149,6 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
       ],
       dependencies: [],
     })
-    // Every line between the label and the last rule belongs to the list: either a
-    // top-level item or the indented fence of one. A column-0 fence would end it.
     const body = md.slice(md.indexOf("**Rules**:"), md.indexOf("- loop"))
     for (const line of body.split("\n").slice(1)) {
       if (line === "") continue
@@ -195,12 +172,6 @@ describe("inline code spans elsewhere in the row", () => {
 })
 
 describe("table cells keep their column count", () => {
-  /**
-   * How many cells GFM reads in this row, scanned the way cmark-gfm does rather than the way
-   * `tableCell` writes: a backslash and the character after it are one escape pair and neither
-   * can delimit, so `\\|` is an escaped backslash followed by a live delimiter. A lookbehind on
-   * the pipe would instead share `tableCell`'s own assumption and pass on output GFM splits.
-   */
   function cellCount(row: string): number {
     let cells = 1
     for (let i = 0; i < row.length; i++) {
@@ -214,8 +185,6 @@ describe("table cells keep their column count", () => {
   }
 
   it("holds the Components table to five columns when a root carries a pipe", () => {
-    // `RelativePath` forbids a backslash and nothing else, so a root is the cell in this table
-    // that can carry a pipe. `ComponentId` is kebab-case and cannot.
     const md = projectWorkspace(
       makeIR({
         components: [component({ id: "web", name: "Web", roots: ["apps/a|b"] })],
@@ -253,9 +222,6 @@ describe("table cells keep their column count", () => {
   })
 
   it("holds it when the target carries a backslash in front of the pipe", () => {
-    // `Call.target` is `minLength: 1` and nothing else — the one cell in any of these tables
-    // that can hold both characters. A single backslash before the escape would pair with it
-    // and hand the pipe back to the row scanner.
     const target = "pipe(a\\|b)"
     const caller = makeSymbol({
       id: "ts:src/ctl.ts#Ctl.route",

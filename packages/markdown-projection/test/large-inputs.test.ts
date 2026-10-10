@@ -14,20 +14,6 @@ import { projectComponent, projectWorkspace } from "../src"
 import { projectDiff } from "../src/diff"
 import { makeDiff } from "./fixtures"
 
-/**
- * Lists whose length the workspace decides, sized past the point where appending them with
- * `push(...lines)` overflows the stack (`appendAll` says where). The throw ended `aburi scan` on
- * a 1,500-file repository with no workspaces, so every Symbol landed in one component. Nothing
- * here caps a component, a Slice or the list of skipped files: the mermaid limit and the top-N
- * effect surface apply to neither, and `--max-bytes` cannot help, because `assemble` measures a
- * page after every section's lines already exist. So a page has to render at any of these sizes.
- */
-
-/**
- * A spread of `lines` overflows here. Each case checks its own section with this, so a Node,
- * vitest or `--stack-size` change that lifts the limit past the fixture fails the case rather
- * than leaving it green with nothing to guard.
- */
 function expectPastSpreadLimit(lines: readonly string[]): void {
   expect(() => {
     const probe: string[] = []
@@ -63,12 +49,6 @@ describe("projections of workspace-sized lists", () => {
   })
 
   it("renders a boundary effect surface of 200,000 Symbols", { timeout: 30_000 }, () => {
-    // The surface takes one line per boundary Symbol, and each of them renders in the Symbols
-    // section too, so that block is kept short: one file, a framework extKind rather than a
-    // decorator row, and a zero fingerprint. These Symbols are not dropped; a zero fingerprint is
-    // simply what `fingerprintLine` omits the `<sub>` line for. With a file and a decorator per
-    // Symbol the page took more than twice as long, past this package's 30 s `testTimeout` on a
-    // loaded macOS runner.
     const reads = [effect({ id: "db.read", target: "db.user.find", plugin: "effects-prisma" })]
     const symbols = Array.from({ length: 200_000 }, (_, i) =>
       makeSymbol({
@@ -115,9 +95,6 @@ describe("projections of workspace-sized lists", () => {
   })
 
   it("renders a workspace page of 200,000 component dependencies", () => {
-    // The fallback list has no cap: above the mermaid limit it is the only record of the edges.
-    // The projection trusts `assertIRIntegrity` for the endpoints, so only the hub is listed;
-    // the components table has a case of its own above.
     const dependencies = Array.from({ length: 200_000 }, (_, i) =>
       dependency({ from: `c${i}`, to: "hub" }),
     )
@@ -130,9 +107,6 @@ describe("projections of workspace-sized lists", () => {
   })
 
   it("renders a Slice of 50,000 members", { timeout: 30_000 }, () => {
-    // Every member is also an added Symbol, so it renders a full block in the Added section as
-    // well as its lines in the Slice View. That block is kept short the way the boundary case's
-    // is: one file and a zero fingerprint.
     const memberAt = (i: number) =>
       makeSymbol({ id: `ts:src/a.ts#f${i}`, name: `f${i}`, fingerprint: zeroFp() })
     const changes: SymbolChange[] = Array.from({ length: 50_000 }, (_, i) => ({

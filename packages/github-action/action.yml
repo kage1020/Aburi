@@ -16,9 +16,6 @@ inputs:
       lockfile decides the version.
     required: false
     default: "latest"
-  # The context paths below are written as prose on purpose. The runner parses a description as a
-  # template, with a context set that has no `github` in it, so an expression here fails the whole
-  # manifest to load. `test/action-yml.test.ts` holds the line.
   refspec:
     description: >-
       `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls back to the
@@ -184,10 +181,6 @@ runs:
         fi
         echo "value=${PR_BASE_SHA}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
-    # Only the dlx path needs a toolchain of its own. Under `cli: workspace` the caller
-    # has already installed the workspace, which they could not have done without Node and
-    # pnpm; re-running these would swap that toolchain out from under the install and run
-    # the CLI on a Node it was never built against.
     - name: "Setup pnpm"
       if: inputs.cli == 'dlx'
       uses: "pnpm/action-setup@v4"
@@ -219,23 +212,13 @@ runs:
         if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
         if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
 
-        # `workspace` runs the CLI the project installed, which is the only way a config naming a
-        # plugin by package can work: the CLI resolves that plugin from its own location, and under
-        # `pnpm dlx` that location is the pnpm store, not the checkout. The resolver is a script
-        # rather than an inline heredoc so it can be tested; `docs/design/github-action.md` is
-        # the contract it implements, and `test/resolve-cli-bin.test.ts` runs it.
         if [ "$CLI" = "workspace" ]; then
-          # stderr goes to a file, never merged into the captured stdout: a Node warning on the
-          # success path (an `ExperimentalWarning` from the caller's NODE_OPTIONS, say) would
-          # otherwise be prepended to the path and run as one.
           resolve_error="${RUNNER_TEMP:-/tmp}/aburi-resolve-cli-bin.err"
           set +e
           cli_bin=$(node "$GITHUB_ACTION_PATH/scripts/resolve-cli-bin.mjs" 2>"$resolve_error")
           resolve_status=$?
           set -e
           if [ "$resolve_status" != "0" ]; then
-            # Written before the exit so a caller reading `cli-exit-code` gets the 2 this is,
-            # rather than the empty string an early exit would leave behind.
             echo "diff-json-path=" >> "$GITHUB_OUTPUT"
             echo "diff-md-path=" >> "$GITHUB_OUTPUT"
             echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"
@@ -247,28 +230,11 @@ runs:
           runner=(pnpm dlx "@aburi/cli@$VERSION")
         fi
 
-        # The size cap. 65536 is GitHub's comment-body limit and the upsert prepends a 29-byte
-        # marker line, which leaves 65507 for the report — the default the script below holds,
-        # against `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`. Applied even under
-        # `comment: false`, and deliberately: that is the mode a fork's pull request runs in,
-        # where the Markdown goes up as an artefact for the `workflow_run` companion to post
-        # (`docs/design/github-action.md`) — a file capped only when this job was the one posting would be rejected there
-        # instead, which is the same 422 on the one pull request whose author cannot see the
-        # companion's log. `diff.json` is uncapped, and so is `diff.md` under `max-bytes: 0`.
-        #
-        # A script rather than a branch here, for the reason the CLI resolver above is one: this
-        # decision has four outcomes and a subprocess in the middle of it, and a `run:` block
-        # cannot be tested. `test/resolve-max-bytes.test.ts` runs it.
-        #
-        # stderr is left alone so its `::warning::` annotations reach the log; only stdout, which
-        # carries the budget, is captured.
         set +e
         budget=$(node "$GITHUB_ACTION_PATH/scripts/resolve-max-bytes.mjs" "${runner[@]}")
         budget_status=$?
         set -e
         if [ "$budget_status" != "0" ]; then
-          # Same shape as the resolver's failure above: the outputs are written before the exit,
-          # so a caller reading `cli-exit-code` gets the 2 this is rather than an empty string.
           echo "diff-json-path=" >> "$GITHUB_OUTPUT"
           echo "diff-md-path=" >> "$GITHUB_OUTPUT"
           echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"
@@ -341,10 +307,6 @@ runs:
       run: node "$GITHUB_ACTION_PATH/scripts/upsert-comment.mjs"
 
     - name: "Aburi: propagate CLI exit code"
-      # `always()` because a composite action stops at its first failing step: without it, a 403 or
-      # a rate limit in the comment step would end the job on a GitHub API error and never say that
-      # the gate had fired, which is the one fact that run existed to report. An empty CLI_EXIT
-      # (an earlier step failed on its own terms) reads as 0 here and leaves that failure standing.
       if: always()
       shell: bash
       env:

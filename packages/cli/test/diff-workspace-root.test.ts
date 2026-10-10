@@ -6,18 +6,11 @@ import { EXIT, runDiff } from "../src"
 import { CliError } from "../src/errors"
 import { fakeGit, realGit as git, probeRealGit } from "./fixtures"
 
-/**
- * A ref diff checks the base revision out as a worktree of the repository and scans the head in
- * the caller's directory, so both sides have to root at that repository. These are the layouts
- * that rooted them apart (`component-detect.md` §11.1), run against real git.
- */
-
 let scratch = ""
 const TEMP_VARIABLES = ["TMPDIR", "TEMP", "TMP"] as const
 let savedTemp: Partial<Record<(typeof TEMP_VARIABLES)[number], string>> = {}
 let gitProbeError: unknown = null
 
-/** A one-commit repository with one function, ignoring what the layouts below put inside it. */
 async function repository(directory: string): Promise<void> {
   await mkdir(resolve(directory, "src"), { recursive: true })
   await git(["init", "-q", "-b", "main"], directory)
@@ -29,22 +22,16 @@ async function repository(directory: string): Promise<void> {
   await git(["commit", "-q", "-m", "c1"], directory)
 }
 
-/** Commit one more function, so the head adds exactly one Symbol. */
 async function addFunction(directory: string, file: string, name: string): Promise<void> {
   await appendFile(resolve(directory, file), `export function ${name}(): number { return 2 }\n`)
   await git(["add", "-A"], directory)
   await git(["commit", "-q", "-m", `add ${name}`], directory)
 }
 
-/** Put the temporary directory, and so the base worktree, at `directory`. */
 function tempAt(directory: string): void {
   for (const name of TEMP_VARIABLES) process.env[name] = directory
 }
 
-/**
- * One ref diff, with its warnings kept: a worktree that would not come off, or a scan incident
- * on either side, would otherwise leave a degraded run looking clean.
- */
 async function diffIn(cwd: string, refSpec: string, failOn: string) {
   const warnings: string[] = []
   const result = await runDiff({
@@ -134,9 +121,6 @@ describe("aburi diff in a repository with something above it", () => {
 
 describe("aburi diff whose base scan roots outside its worktree", () => {
   it("refuses the diff as a bug in Aburi, naming both directories", async () => {
-    // git always leaves the worktree a `.git` file, so the base walk cannot climb out of a real
-    // one. This worktree has none, under a temporary directory with a marker above it, which is
-    // the only way left to make the base scan root somewhere else.
     const demo = resolve(scratch, "demo")
     await mkdir(resolve(demo, ".git"), { recursive: true })
     await writeFile(resolve(demo, "aburi.json"), '{"languages":["lang-typescript"]}\n')

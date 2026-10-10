@@ -14,13 +14,6 @@ import { projectDiff } from "../src"
 import { type Arrangement, arrangeWithin, type Section } from "../src/diff"
 import { emptySummary, makeDiff } from "./fixtures"
 
-/**
- * `maxBytes` (markdown-projection.md). The document GitHub takes as a PR comment body has a
- * 65536-byte ceiling, and `projectDiff` used to emit whatever the diff was worth: roughly
- * 210 bytes per added symbol, so a pull request adding ~310 symbols produced a body the API
- * rejected with a 422 and nothing was posted at all.
- */
-
 const GITHUB_LIMIT = 65536
 
 function bytes(markdown: string): number {
@@ -156,9 +149,6 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("keeps what it keeps in document order, within the budget, at every budget", () => {
-    // The byte assertion rides along, because "in order" alone is satisfied by dropping
-    // everything at every budget — and because an implementation that built the note once,
-    // while it was still empty, and measured before appending it would pass the rest of this.
     const diff = crowdedDiff(40)
     const order = headings(projectDiff(diff))
     const full = bytes(projectDiff(diff))
@@ -175,8 +165,6 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("keeps what fits below a section too large to fit even as names", () => {
-    // 400 added names cannot fit in 2000 bytes beside anything, and dropping the sections under
-    // them would not make them fit: those stay.
     const md = projectDiff(crowdedDiff(400), { maxBytes: 2000 })
     expect(headings(md)).toEqual([
       "## ⚠ API changes",
@@ -192,8 +180,6 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("drops only what the budget requires", () => {
-    // Syntax-only carries 300 symbols and everything else is a handful: a budget with room for
-    // the rest takes that one section and stops.
     const diff = makeDiff({
       summary: { ...emptySummary(), changed: 301, moved: 1 },
       symbols: [
@@ -219,9 +205,6 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("never cuts a `<details>` block in half", () => {
-    // Every budget from "everything fits" down to "nothing does" leaves the folds balanced.
-    // Counted against the folds the document actually has, so a run that dropped every folded
-    // section does not pass this by having none.
     const diff = crowdedDiff(40)
     const full = bytes(projectDiff(diff))
     expect(projectDiff(diff).split("<details>").length - 1).toBeGreaterThan(0)
@@ -240,9 +223,6 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("says it could not fit, rather than claiming a budget it missed", () => {
-    // The one document that comes back over budget is the one that cannot do better. A note
-    // reading "to keep this report within 1 bytes" on a 300-byte document is the report
-    // contradicting itself at the one moment a reader needs it to be exact.
     const md = projectDiff(crowdedDiff(400), { maxBytes: 1 })
     expect(bytes(md)).toBeGreaterThan(1)
     expect(md).toContain("could not be brought within 1 bytes")
@@ -250,11 +230,7 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("keeps the ordinary wording when nothing is left but the document still fits", () => {
-    // Every section dropped is not the same answer as "impossible": with room for the heading
-    // and the note, the budget was met, and the note should say so.
     const diff = crowdedDiff(400)
-    // The floor: what the document weighs once every section is gone. Budgeting exactly that
-    // drops them all and still fits, because the note that says "could not" is the longer one.
     const floor = bytes(projectDiff(diff, { maxBytes: 1 }))
     const md = projectDiff(diff, { maxBytes: floor })
     expect(headings(md)).toEqual([])
@@ -278,9 +254,6 @@ describe("projectDiff — maxBytes", () => {
 })
 
 describe("projectDiff — maxBytes degrades a section before dropping it", () => {
-  // A large refactor: `+142 added · -302 removed · ~326 changed · 25 moved · 44 moved+changed`.
-  // Dropping whole sections left API changes standing alone, and the 302 deleted symbols — the
-  // ones `--fail-on removed` gates on — were named nowhere.
   const COMMENT_BUDGET = 65507
 
   /** A symbol heavy enough that a few hundred of them cannot all be rendered in full. */
@@ -405,8 +378,6 @@ describe("projectDiff — maxBytes degrades a section before dropping it", () =>
   })
 
   it("shows whole only a top run of the lists it names, at every budget", () => {
-    // Once one list is names-only, every list below it is names-only or gone: a reader who
-    // meets the first short section knows the rest of the document is short too.
     const full = bytes(projectDiff(diffOf302Removed))
     const shortenable = [
       "⚠ API changes",
@@ -434,8 +405,6 @@ describe("projectDiff — maxBytes degrades a section before dropping it", () =>
   })
 
   it("keeps each list whose names still fit beside the more important ones", () => {
-    // 12000 bytes holds the 60 API names, not the 180 Logic ones beside them; the 44 moved and
-    // changed names still fit below the lists that went, so they stay.
     const md = projectDiff(diffOf302Removed, { maxBytes: 12000 })
     expect(bytes(md)).toBeLessThanOrEqual(12000)
     expect(headings(md)).toEqual(["## ⚠ API changes", "## 🔀 Moved + Changed"])
@@ -471,9 +440,6 @@ describe("projectDiff — maxBytes degrades a section before dropping it", () =>
 
 describe("projectDiff — maxBytes against the sections above", () => {
   it("keeps a section with no names-only form rather than make room for names below it", () => {
-    // Thirty files not compared, then three moved and changed Symbols. One byte over, the only
-    // way to name the three is to drop the thirty, which would trade the more important section
-    // for the less.
     const blank: SymbolDelta = delta()
     const movedChangedThin = (name: string): SymbolMovedChanged => {
       const before = makeSymbol({ id: `ts:src/${name}.ts#${name}`, name, fingerprint: fp(name) })
@@ -501,10 +467,6 @@ describe("projectDiff — maxBytes against the sections above", () => {
   })
 
   it("never offers a names-only list longer than the section it stands for", () => {
-    // One changed Symbol with nothing in its delta is shorter whole than as a list with the line
-    // saying it is one. Offered anyway, it would be kept in that longer form while the cap
-    // decides what else fits, and at a budget with no byte to spare the section below it would
-    // go to pay for it.
     const diff = makeDiff({
       summary: { ...emptySummary(), changed: 21 },
       symbols: [
@@ -568,8 +530,6 @@ describe("projectDiff — maxBytes against the sections above", () => {
 })
 
 describe("arrangeWithin — checked against every arrangement of small inputs", () => {
-  // Sizes are line counts and the budget a line count, so what fits is plain arithmetic and
-  // every arrangement of five sections (at most 3^5) can be listed and ranked.
   function section(title: string, full: number, short: number | null): Section {
     const lines = (count: number) => Array.from({ length: count }, () => title)
     return { title, lines: lines(full), ...(short === null ? {} : { short: lines(short) }) }

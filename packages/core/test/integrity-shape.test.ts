@@ -2,14 +2,6 @@ import { describe, expect, it } from "vitest"
 import { assertIRIntegrity, CoreError, checkIRIntegrity } from "../src/index"
 import { makeComponent, makeSymbol, minimalIR } from "./fixtures/ir"
 
-/**
- * `checkIRIntegrity` is the only gate `readIR` applies to a Document it reads off disk, so
- * "what is wrong with this Document?" has to have an answer for every input — including one
- * that is not shaped like a Document at all. It used to dereference its way into a
- * `TypeError`, which the CLI then reported as "failed to load" with no indication of what
- * broke, which is the one thing the invariant list exists to say.
- */
-
 /** Build a Document with one top-level key removed. */
 function without(key: string): unknown {
   const ir = minimalIR() as unknown as Record<string, unknown>
@@ -78,8 +70,6 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
       expect(violation.subject).toBe("symbols[0]")
     }
     const messages = violations.map((v) => v.message)
-    // `fingerprint` and `visibility` are read by `@aburi/diff` rather than by any invariant.
-    // They are here because `readIR` brands its result `IR`, and that is what the brand says.
     for (const field of [
       "id",
       "name",
@@ -116,8 +106,6 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
   })
 
   it("names the element, not the array, when a string array holds a non-string", () => {
-    // `components[].roots` and `workspace.managers[].roots` reach `posixWorkspaceRelative-
-    // Violation`, which calls `.includes` on each entry; `publicApi` reaches `.normalize`.
     const violations = shapeViolations(
       withField("components", [{ ...makeComponent("a"), roots: [7] }]),
     )
@@ -198,8 +186,6 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
   })
 
   it("reports the shape alone, without the invariants derived from what is missing", () => {
-    // Running the relational checks against fields the shape check just called absent
-    // produces violations about `undefined`, which bury the one fact the reader needs.
     const violations = checkIRIntegrity(withField("symbols", [{}]))
     expect(violations.every((v) => v.invariant === 20)).toBe(true)
   })

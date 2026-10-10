@@ -4,16 +4,6 @@ import { describe, expect, it } from "vitest"
 import { scanWith, symbolNamed } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * Where a decorator is written must not change what the Symbol is classified as. `@Controller`
- * on the far side of `export` is the case that makes this visible: read it and the class is a
- * controller, miss it and the IR carries framework routes under an owner with no boundary.
- * Two decorators sharing a line is the other: `classifyClass` takes the first in source order,
- * so an order that does not survive extraction is a different `extKind`.
- *
- * This is the whole chain — parse, extract, classify — not `readDecorators` in isolation.
- */
-
 const workspace = useScratchWorkspace("decorator-placement")
 
 const scanWorkspace = () =>
@@ -43,8 +33,6 @@ describe("scan — decorator placement through @aburi/framework-nestjs", () => {
   })
 
   it("takes the first class-level decorator in source order when two share a line", async () => {
-    // Two on one line have no line number to separate them, so the extracted order is the
-    // whole of the contract; getting it wrong is a different `extKind` at `confidence: "high"`.
     await workspace.writeSource(
       "src/b.controller.ts",
       [

@@ -6,10 +6,6 @@ import { describe, expect, it } from "vitest"
 import { classifyNestjsSymbol } from "../src/index"
 import { makeCtx } from "./fixtures/symbol"
 
-// End-to-end: real TypeScript through `@aburi/lang-typescript`, then `classifyNestjsSymbol`.
-// The import edges come from the same parse, so aliased cases exercise the real
-// `ImportEdge.symbols` encoding rather than a fixture's idea of it.
-
 async function classifyEach(source: string) {
   const parseResult = await parseTypescriptFile({ path: "src/x.ts", content: source })
   const tree = parseResult.tree
@@ -122,11 +118,6 @@ describe("integration — lang-typescript → framework-nestjs", () => {
   })
 
   it("lets a re-export edge from @nestjs/* outrank the binding the file actually uses", async () => {
-    // A re-export names a symbol without binding it, so this compiles: `Controller` resolves
-    // to `routing-controllers`, while the `@nestjs/common` edge only re-publishes the name.
-    // The duplicate rule prefers the NestJS edge, so the competing library's decorator is
-    // claimed at full confidence — the one way past the middle tier, pinned so a later change
-    // to that rule shows up here rather than in someone's IR.
     const results = await classifyEach(
       [
         'import { Controller } from "routing-controllers"',
@@ -143,8 +134,6 @@ describe("integration — lang-typescript → framework-nestjs", () => {
   it("hybrid class with both @Controller and @Injectable flags both boundaries", async () => {
     const results = await classifyEach("@Controller('/x')\n@Injectable()\nexport class Hybrid {}")
     const cls = results.find((r) => r.id.endsWith("#Hybrid"))
-    // Source-order winner is Controller (line 1), so extKind takes controller
-    // and both boundaries flip.
     expect(cls?.classification?.extKind).toBe("framework:nestjs:controller")
     expect(cls?.classification?.decoratorBoundaries).toEqual({
       Controller: true,

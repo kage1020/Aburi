@@ -3,33 +3,6 @@ import { resolve } from "node:path"
 import type { GitRunner } from "../src"
 import { fakeGit } from "./fixtures"
 
-/**
- * A workspace whose only language plugin is written by the test.
- *
- * Shared because it is the only way to produce a refusal or an extraction throw on demand —
- * no in-tree plugin will do either to order — and because a second copy of it would be a
- * second definition of what `bad.stub` means, kept in step by hand.
- *
- * The plugin is named by relative path, a ref form the loader supports.
- */
-
-/**
- * A file is refused outright if its path contains `bad`, keeps a recoverable error and its
- * Symbol if it contains `warn`, makes extraction throw if it contains `boom`, emits two
- * Symbols under one id if it contains `twin`, gives its Symbol an extKind the manifest does
- * not declare if it contains `odd`, and is clean otherwise — so `ok.stub` is the quiet one.
- * Which of them exist is up to the caller, so a fixture can differ between the base worktree
- * and the working tree.
- *
- * `twin` and `boom` are the two ways into `extraction-failed`, and only `boom` throws. The
- * CLI reports them identically on purpose (`cli-spec.md` §5.6), so a fixture that needs to
- * show the non-throwing one reaching those lines names a file `twin`.
- *
- * By substring rather than by exact name because discovery sorts by path, and a fixture that
- * needs two files of one behaviour, or needs a given behaviour to arrive second, has to be
- * free to name them — which a prefix rule is not enough for, since `bad` sorts before `boom`
- * whatever follows it.
- */
 export const STUB_PLUGIN = `
 const manifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
@@ -75,9 +48,6 @@ export const plugin = {
       }
     }
     if (file.path.includes("noisy")) {
-      // More than one recoverable error on a single file, which is what a real grammar
-      // produces: tree-sitter raises an ERROR per construct it could not place, so the CLI's
-      // per-file line has to summarize rather than print them all.
       return {
         tree,
         errors: [
@@ -118,8 +88,6 @@ export const plugin = {
       bodyNode: tree,
       fullNode: tree,
     })
-    // One id, two declarations — the shape a plugin that forgot to fold merged declarations
-    // produces. Nothing throws; the core refuses the pair.
     return ctx.file.path.includes("twin") ? [at(1), at(7)] : [at(1)]
   },
   walkBody: () => ({ rules: [], calls: [] }),
@@ -151,12 +119,6 @@ export async function populate(
   for (const file of files) await writeFile(resolve(dir, file), file, "utf8")
 }
 
-/**
- * A `git` that materialises the base worktree for real, so the base scan has something to
- * scan. `makeGit`-style handlers taking no arguments cannot: the destination directory
- * arrives as `worktree add --detach <dir> <ref>`, and without creating it the base scan runs
- * against a path that does not exist.
- */
 export function gitWith(baseFiles: readonly string[]): GitRunner {
   return fakeGit({ onWorktreeAdd: (dir) => populate(dir, baseFiles) }).runner
 }

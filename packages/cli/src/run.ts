@@ -20,11 +20,6 @@ export interface RunCliOptions {
   cwd?: string
 }
 
-/**
- * Entry-point that the `bin/aburi.ts` shim invokes and that the test suite calls with a
- * synthetic argv + captured streams. Never calls `process.exit` directly — returns the
- * exit code so the caller (or the tests) decide.
- */
 export async function runCli(options: RunCliOptions): Promise<ExitCode> {
   const stdout = options.stdout ?? process.stdout
   const stderr = options.stderr ?? process.stderr
@@ -67,10 +62,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--output <path>", "output path (default: ./aburi.json)")
     .option("--force", "overwrite existing config")
     .option("--with-suggestions", "include plugin install suggestions as comments")
-    // The pair rather than the negative alone, for the reason `scan` states: a run that typed
-    // neither has to be distinguishable from one that asked for the default. There is no config
-    // to fall through to here — this command writes the first one — so the default is honouring
-    // `.gitignore`, and the negative is the only way out of a `.gitignore` that cannot be read.
     .option("--respect-gitignore", "honour .gitignore while counting a component's languages")
     .option("--no-respect-gitignore", "ignore .gitignore while counting a component's languages")
     .action(
@@ -106,9 +97,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           )) {
             stderr.write(`⚠ ${line}\n`)
           }
-          // An unmapped language leaves `languages` empty, and `aburi scan` refuses to run
-          // without a language plugin — so this is the difference between the next command
-          // working and it stopping, not a nicety.
           if (report.unmappedLanguages.length > 0) {
             stderr.write(
               `⚠ No language plugin ships for: ${report.unmappedLanguages.join(", ")}. ` +
@@ -129,18 +117,10 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .command("scan")
     .description("Generate IR from the current workspace")
     .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
-    // No commander default: `deriveFormat` has to tell a typed `--format both` from nothing.
-    // `diff` keeps its default, having no `--no-*` flags to weigh it against.
     .option("--format <format>", "json | md | both (default: both)", parseFormat)
     .option("--no-md", "drop the Markdown output (conflicts with --format both/md)")
     .option("--no-json", "drop the IR JSON output (conflicts with --format both/json)")
     .option("--ignore <glob>", "additional ignore glob (repeatable)", collect, [])
-    // Declared as a pair, like `--lsp` / `--no-lsp` below. A lone `--no-x` makes commander
-    // materialise `true` for every run that did not pass it, and the option object then cannot
-    // say whether the caller asked for `true` or said nothing — so the override was applied
-    // unconditionally and a config that turned `.gitignore` off got it back on. With both
-    // spellings declared the value is absent until one of them is typed, which is what the
-    // forwarding below already assumes.
     .option("--respect-gitignore", "honour .gitignore patterns (overrides config)")
     .option("--no-respect-gitignore", "ignore .gitignore patterns (overrides config)")
     .option("--compact", "compact JSON output")
@@ -148,7 +128,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--config <path>", "config file path")
     .option("--lsp", "enable optional LSP enrichment (overrides config lsp.enabled=true)")
     .option("--no-lsp", "disable LSP enrichment (overrides config lsp.enabled=false)")
-    // A pair for the reason `--respect-gitignore` is one: absent until typed.
     .option("--strict", "stop at a value no plugin manifest declares (overrides config strict)")
     .option("--no-strict", "keep and record such values instead (overrides config strict)")
     .option(
@@ -190,11 +169,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             }),
             incidents: { warn },
           })
-          // `totalFiles` excludes the files no Document path can name, by design
-          // (`cli-spec.md`), so on its own this line moves in the flattering direction: a
-          // workspace of 200 with 15 unnameable ones reads `185 files` and looks whole. The
-          // other two gate reasons leave their mark in these numbers; this one has to be added
-          // back or the summary contradicts the exit code beside it.
           const unnameable = report.unrepresentableFiles.length
           stdout.write(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files` +
@@ -304,8 +278,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           switch (outcome.kind) {
             case "single":
             case "file":
-              // `cli-spec.md` — when --output is set the markdown lives in the file only.
-              // Otherwise mirror to stdout so the user can `aburi explain foo | less`.
               if (outcome.writtenTo === null) {
                 stdout.write(outcome.markdown)
                 if (!outcome.markdown.endsWith("\n")) stdout.write("\n")
@@ -325,16 +297,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               }
               break
             case "unnameable":
-              // Not `No matches`, for the reason `unknown` is not: the absence is the format's
-              // and not the workspace's, and no rescan or re-ask changes it.
               stderr.write(
                 `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" holds a backslash, and "/" is the only separator a Document path has, so nothing Aburi writes can refer to it. Rename it.\n`,
               )
               break
             case "unknown": {
-              // Not a match failure, so it does not start with `No matches`: the document
-              // holds no answer to give, and saying otherwise would assert an absence it
-              // cannot support.
               const trailer =
                 outcome.namedBy === "id"
                   ? ", the file that id names, so it cannot say whether that Symbol exists."
@@ -365,17 +332,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
   return capturedExitCode
 }
 
-/**
- * The second line under `No matches`, on every miss the document could not tie to the file the
- * question named — which includes the id and file arms when the path they name was analysed
- * after all.
- *
- * Counted, not listed, even though `named-losses` carries the entries. The question was about
- * one Symbol, and answering it with an inventory of the run buries it; the document is where
- * the list lives, and the line says so. No per-reason next step here: the reasons call for
- * different actions, and that mapping belongs in one place for the scan report and this line
- * alike rather than being invented twice.
- */
 function coverageLine(doubt: CoverageDoubt): string {
   if (doubt.kind === "named-losses") {
     return `⚠ This IR names ${doubt.files.length} file(s) the scan never analysed in stats.skippedFiles, so a match may be in one of them.`
@@ -387,14 +343,6 @@ function isCommanderError(value: unknown): value is { code: string; message: str
   return errorCode(value)?.startsWith("commander.") === true
 }
 
-/**
- * Error mapping (see docs/design/cli-spec.md for the exit-code contract):
- *   - `input-error` / `config-error` → EXIT.INPUT_ERROR
- *   - `runtime-error`                → EXIT.RUNTIME
- *   - `plugin-error`                 → EXIT.GATE
- *   - FailOnParseError               → EXIT.INPUT_ERROR (grammar mistake, not a runtime bug)
- *   - Any other Error                → EXIT.RUNTIME
- */
 function handleError(error: unknown, stderr: NodeJS.WritableStream): ExitCode {
   if (error instanceof FailOnParseError) {
     stderr.write(`${error.message}\n`)
@@ -420,11 +368,6 @@ function handleError(error: unknown, stderr: NodeJS.WritableStream): ExitCode {
   return EXIT.RUNTIME
 }
 
-/**
- * The entries of `fields` whose value is defined, so a flag that was not typed contributes no
- * key at all: under `exactOptionalPropertyTypes` a command option spelled `x?: T` refuses an
- * explicit `undefined`, and every command distinguishes "absent" from "default".
- */
 function definedOnly<T extends object>(fields: T): { [K in keyof T]-?: Exclude<T[K], undefined> } {
   const present: Partial<Record<keyof T, unknown>> = {}
   for (const key of Object.keys(fields) as (keyof T)[]) {
@@ -438,11 +381,6 @@ function parseFormat(value: string): "json" | "md" | "both" {
   throw new InvalidArgumentError(`--format must be one of: json | md | both`)
 }
 
-/**
- * `--max-bytes`. Parsed strictly rather than with `Number()`: `64kb` reads as `NaN` there and
- * would reach the projection as "no cap", which is the one answer a caller passing this flag
- * has ruled out — their comment would be posted oversized and rejected by GitHub instead.
- */
 function parseMaxBytes(value: string): number {
   if (!/^[1-9][0-9]*$/.test(value)) {
     throw new InvalidArgumentError(`--max-bytes must be a positive integer (got "${value}")`)
@@ -467,12 +405,6 @@ function deriveStrict(cmdOptions: { strict?: boolean; discover?: boolean }): boo
   return false
 }
 
-/**
- * The outputs `scan` writes. With no `--format`, each `--no-*` drops one output. With `--format`
- * typed, a `--no-*` that would change the set is refused rather than settled by which flag wins;
- * one that would not (`--format json --no-md`) is merely redundant. Dropping everything is
- * refused too.
- */
 function deriveFormat(cmdOptions: {
   format?: "json" | "md" | "both"
   md?: boolean

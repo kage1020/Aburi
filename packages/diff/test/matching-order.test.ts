@@ -10,24 +10,6 @@ import {
   writeCanonicalDiff,
 } from "../src"
 
-/**
- * Two properties the matcher owes its callers, neither of which it held.
- *
- * **The answer does not depend on the order of the input arrays.** Stages 2 to 4.5 all
- * resolved ties by whichever candidate came first, so permuting `symbols[]` changed the
- * canonical bytes of the diff. `scan` emits id-sorted symbols, which was no protection:
- * `buildDiff` is public API, and stage 3 used to rebuild `remainingBase` in
- * fingerprint-bucket order, so even the CLI path did not reach stage 4 in id order.
- *
- * **A better pair is not discarded for a worse one.** Stages 3 and 4 consumed a base the
- * moment some head wanted it, so an earlier head could take a base that was a later head's
- * exact match — putting one name in the output as both `added` and a move source.
- *
- * The tie-break is `(base.id, head.id)` ascending, which is a total order only because ids
- * are unique within a Document (ir-schema.md #1) and `buildDiff` establishes that before
- * the first stage runs.
- */
-
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
 /** Every change as `status base -> head`, in the diff's own canonical order. */
@@ -80,11 +62,6 @@ function dropped(file: string, name: string): IRSymbol {
 }
 
 describe("stage 4 keeps the better pair", () => {
-  // Scores for these four names, with identical signatures and owners:
-  //   ByEmailAddress x ByEmailAddress = 1.0000   <- the optimum
-  //   ByEmailAddress x ByEmail        = 0.9167
-  //   ById           x ByEmail        = 0.8333   (below the 0.85 threshold)
-  //   ById           x ByEmailAddress = 0.7857
   const base = () => [
     method("src/r.ts", "Repo.findUserById", "a"),
     method("src/r.ts", "Repo.findUserByEmailAddress", "b"),
@@ -95,9 +72,6 @@ describe("stage 4 keeps the better pair", () => {
   ]
 
   it("pairs the exact match rather than letting an earlier head consume it", () => {
-    // Head-driven greedy took `findUserByEmail` first — it sorts earlier — and consumed the
-    // base `findUserByEmailAddress` at 0.9167, leaving the head of the same name with only
-    // `findUserById` at 0.7857 and reporting it as `added`.
     expect(changes(base(), head())).toEqual([
       "added ts:src/q.ts#Repo.findUserByEmail",
       "moved+changed ts:src/r.ts#Repo.findUserByEmailAddress -> ts:src/q.ts#Repo.findUserByEmailAddress",
@@ -106,8 +80,6 @@ describe("stage 4 keeps the better pair", () => {
   })
 
   it("does not report one qualified name as both added and a move source", () => {
-    // The symptom that makes the loss visible in a review: `Repo.findUserByEmailAddress`
-    // appeared as an addition and as the source of a move at the same time.
     const roles = new Map<string, Set<string>>()
     for (const line of changes(base(), head())) {
       const [status, ...ids] = line.split(" ")
@@ -153,8 +125,6 @@ describe("stage 4 does not depend on input order", () => {
   })
 
   it("prefers the higher score over the lower id", () => {
-    // The tie-break is only reached at equal scores: a lower-id candidate that scores worse
-    // must still lose, or the sort has the two keys the wrong way round.
     const bases = [
       method("src/aaa.ts", "Alpha.createInvoiceRecord", "p"),
       method("src/zzz.ts", "Alpha.createOrderRecord", "q"),
@@ -168,8 +138,6 @@ describe("stage 4 does not depend on input order", () => {
 
 describe("stage 4 thresholds are unchanged", () => {
   it("still refuses a pair below the head's threshold", () => {
-    // `getUser` vs `getUsers`: two tokens, so the threshold is 0.95 and the pair is refused —
-    // the threshold table's worked example, which the reordering must not weaken.
     const changed = changes(
       [method("src/a.ts", "Repo.getUser", "a")],
       [method("src/b.ts", "Repo.getUsers", "b")],
@@ -217,8 +185,6 @@ describe("stage 3 disambiguation does not depend on input order", () => {
 
 describe("stage 3 keeps its unconditional single-candidate branch", () => {
   it("pairs one base with one head however unlike their names are", () => {
-    // Stage 3: a lone candidate pairs with no similarity test at all. The reordering must not
-    // quietly introduce the 0.85 threshold here.
     const changed = changes(
       [withLogic("src/a.ts", "Svc.alpha", "111111111111")],
       [withLogic("src/b.ts", "Other.omega", "111111111111")],
@@ -239,9 +205,6 @@ describe("stage 3 keeps its unconditional single-candidate branch", () => {
   })
 
   it("still cascades: the pair left over after a scored match pairs unconditionally", () => {
-    // Two bases and two heads on one fingerprint, of which only one pairing clears 0.85.
-    // Stage 3 pairs the leftovers anyway: once a round leaves a single base, it is the lone
-    // candidate and the branch above applies. Both pair, and neither similarity is tested.
     const base = [
       withLogic("src/a.ts", "Svc.createOrder", "111111111111"),
       withLogic("src/b.ts", "Svc.zzz", "111111111111"),
@@ -259,10 +222,6 @@ describe("stage 3 keeps its unconditional single-candidate branch", () => {
 
 describe("the thresholds moved into the candidate filter still hold", () => {
   it("stage 3 leaves a group whose names cannot reach 0.85", () => {
-    // Two bases and one head on one fingerprint, so the lone-candidate branch does not apply
-    // and the 0.85 test is the only thing standing between them. All three are
-    // signature-less, which keeps stage 4 out of it and makes the outcome
-    // stage 3's alone.
     const body = (file: string, name: string) =>
       makeSymbol({
         id: `ts:${file}#${name}`,
@@ -277,8 +236,6 @@ describe("the thresholds moved into the candidate filter still hold", () => {
   })
 
   it("stage 4.5 refuses a pair that hits neither the name nor the basename", () => {
-    // Stage 4.5 accepts a one-sided hit and nothing less. With the threshold gone every dropped
-    // symbol of the same kind becomes a candidate, and the sweep pairs them at score 0.
     const diff = buildDiff({
       baseIR: makeIR({ symbols: [dropped("src/a/One.ts", "Svc.alpha")] }),
       headIR: makeIR({ symbols: [dropped("src/b/Two.ts", "Svc.beta")] }),
@@ -293,12 +250,6 @@ describe("the thresholds moved into the candidate filter still hold", () => {
 })
 
 describe("stage 4.5 against a direct reading of diff-algorithm.md", () => {
-  // Checking the stage against a second implementation of the same algorithm proves only
-  // that it was written twice. These are the three things the doc actually claims, each
-  // established by something structurally unlike the code under test: the candidates come
-  // from a brute-force cross-product, and the size they can reach comes from Kuhn’s
-  // augmenting-path search rather than a component walk.
-
   /** Every pairing stage 4.5 identifies, from the cross-product rather than from a lookup. */
   function identifiedPairings(base: IRSymbol[], head: IRSymbol[]): [string, string][] {
     const droppedBase = base.filter((s) => s.dropped)
@@ -400,8 +351,6 @@ describe("stage 4.5 against a direct reading of diff-algorithm.md", () => {
   })
 
   it("pairs as many as can hold at once", () => {
-    // The property the component walk exists for. A sweep that settles conflicts by id
-    // satisfies every other assertion in this file and fails this one.
     for (const { base, head } of corpora()) {
       const { matched } = matchStageDroppedWeak(base, head)
       expect(matched.length).toBe(maximumSize(identifiedPairings(base, head)))
@@ -426,9 +375,6 @@ describe("stage 4.5 against a direct reading of diff-algorithm.md", () => {
 
 describe("stage 4.5 does not depend on input order", () => {
   it("resolves a tie to the lower base id", () => {
-    // Two bases identified by different halves of stage 4.5's score, both offering the same
-    // head: `Svc.handle` by the trailing name segment, `Shared.ts` by the file basename.
-    // Every candidate carries the same weight there, so the id keys decide.
     const head = () => [dropped("src/mid/Shared.ts", "Svc.handle")]
     const a = () => dropped("src/aaa/Alpha.ts", "Svc.handle")
     const z = () => dropped("src/zzz/Shared.ts", "Svc.other")
@@ -439,9 +385,6 @@ describe("stage 4.5 does not depend on input order", () => {
 })
 
 describe("every stage hands on what it did not claim, in the caller's order", () => {
-  // `buildDiff` sorts `symbols[]` at the end, so a stage that rebuilt its leftovers in some
-  // other order would be invisible through it — and stage 3 did exactly that, handing stage 4
-  // a `remainingBase` in fingerprint-bucket order. These call the stages directly.
   const symbols = [
     method("src/z.ts", "Svc.zeta", "z"),
     method("src/a.ts", "Svc.alpha", "a"),
@@ -462,8 +405,6 @@ describe("every stage hands on what it did not claim, in the caller's order", ()
   })
 
   it("stage 3 keeps the order of what it did not pair", () => {
-    // One head shares `src/m.ts`'s fingerprint, so `Svc.mu` is claimed and the other two come
-    // back in the order they went in — not grouped by fingerprint.
     const heads = [method("src/n.ts", "Svc.mu", "m")]
     const result = matchStageLogicFingerprint(symbols, heads)
     expect(result.matched).toHaveLength(1)
@@ -525,9 +466,6 @@ describe("stage 2 does not depend on input order", () => {
   })
 
   it("leaves a base whose predicted id the grammar cannot express", () => {
-    // The rewriter goes back through the id constructor rather than concatenating, so a
-    // rename target the grammar rejects yields no prediction at all. That has to read as a
-    // lookup miss — minting an id no head can equal would be worse than not guessing.
     const base = makeSymbol({ id: "ts:src/a.ts#foo", name: "foo", fingerprint: fp("a") })
     const head = makeSymbol({ id: "ts:src/b.ts#foo", name: "foo", fingerprint: fp("b") })
     const result = matchStageGitRename([base], [head], new Map([["src/a.ts", "..\\out\\b.ts"]]))
@@ -538,12 +476,6 @@ describe("stage 2 does not depend on input order", () => {
 })
 
 describe("the diff is a function of the two Documents, not of their array order", () => {
-  // The measurement behind this: shuffling the input arrays changed the canonical bytes in
-  // 207 of 400 randomised cases. One deterministic sweep over the permutations of a fixture
-  // built entirely out of ties is a sharper version of the same check.
-  // Three bases and three heads under one name: every one of the nine scores is 1.0, so the
-  // pairing is decided by the tie-break alone. A fixture of *distinct* names would not test
-  // anything — each head's exact match already wins on score.
   const files = ["aaa", "mmm", "zzz"]
 
   function permutations<T>(items: readonly T[]): T[][] {
@@ -557,8 +489,6 @@ describe("the diff is a function of the two Documents, not of their array order"
   }
 
   it("produces identical canonical bytes for every permutation of both sides", () => {
-    // Distinct fingerprints on every symbol, so stage 3 resolves none of them and all nine
-    // pairings are stage 4's to decide.
     const base = files.map((f) => method(`src/base/${f}.ts`, "Svc.createOrderRecord", `b${f}`))
     const head = files.map((f) => method(`src/head/${f}.ts`, "Svc.createOrderRecord", `h${f}`))
     const canonical = new Set<string>()

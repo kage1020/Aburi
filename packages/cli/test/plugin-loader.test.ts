@@ -155,7 +155,6 @@ describe("loadPlugins — module resolution and bucketing", () => {
   })
 
   it("reports a frameworkHints entry the registry refuses as a config error naming the entry", async () => {
-    // Both entries write the vendor `acme`, so both derive `framework:hint:acme` (config.md §8.4).
     const error = await loadPlugins({
       config: {},
       workspaceRoot: "/tmp",
@@ -231,14 +230,10 @@ describe("loadPlugins — module resolution and bucketing", () => {
     return seen
   }
 
-  // On POSIX `absolutePath` is `/tmp/…`, rooted with no drive, which Windows refuses: this case
-  // also fails if the Windows-only refusal ever stops checking the platform.
   it("resolves an absolute ref to its own location, not under the plugin ref root", async () => {
     expect(await specifierFor(absolutePath)).toBe(pathToFileURL(absolutePath).href)
   })
 
-  // `C:/plugins/x.mjs` is what people write in JSON to avoid escaping backslashes. On POSIX
-  // `absolutePath` has no backslash, so this case would be the one above.
   it.runIf(process.platform === "win32")(
     "resolves a Windows absolute ref written with forward slashes",
     async () => {
@@ -260,7 +255,6 @@ describe("loadPlugins — module resolution and bucketing", () => {
   })
 
   it("refuses a Windows-drive ref before importing any plugin, even one listed earlier", async () => {
-    // A ref each platform refuses: driveless on Windows, a drive letter anywhere else.
     const refused = process.platform === "win32" ? "/opt/plugins/x.mjs" : "C:/plugins/x.mjs"
     const imported: string[] = []
     const error = await loadPlugins({
@@ -394,8 +388,6 @@ describe("loadPlugins — module resolution and bucketing", () => {
     try {
       const pluginPath = resolve(scratch, "local #100%.mjs")
       await writeFile(pluginPath, STUB_PLUGIN, "utf8")
-      // Use Node's ESM loader directly: Vitest's module runner does not decode the file URL, and
-      // reports `Cannot find module 'file:///…/local%20%23100%25.mjs'` for a file Node loads.
       const loaderUrl = new URL("../src/plugin-loader.ts", import.meta.url).href
       const { stdout, stderr } = await promisify(execFile)(
         process.execPath,
@@ -411,11 +403,8 @@ describe("loadPlugins — module resolution and bucketing", () => {
           })});
           console.log(${JSON.stringify(RESULT)} + JSON.stringify(loaded.languages.map(plugin => plugin.manifest.name)));`,
         ],
-        // The package directory, so `tsx` and the loader's own imports resolve from this
-        // package whatever directory the test runner was started in.
         { cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 20_000 },
       )
-      // Anything tsx or Node prints besides the result is noise, not a loader failure.
       const line = stdout.split("\n").find((l) => l.startsWith(RESULT))
       expect(line, `no result line.\nstdout:\n${stdout}\nstderr:\n${stderr}`).toBeDefined()
       expect(JSON.parse((line as string).slice(RESULT.length))).toEqual(["lang-stub"])

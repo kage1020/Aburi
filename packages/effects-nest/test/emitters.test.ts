@@ -33,8 +33,6 @@ describe("hasNestEmitterImport", () => {
   })
 
   it("returns false for Node's built-in `events` module (intentional exclusion)", () => {
-    // Node's EventEmitter has different semantics (per-instance state, not DI'd
-    // application-wide bus) — classifying stream emitters would drown the report.
     expect(
       hasNestEmitterImport(
         [{ source: "events", symbols: ["EventEmitter"], line: 1, dynamic: false }],
@@ -74,8 +72,6 @@ describe("hasNestEmitterImport", () => {
   })
 
   it("names the plugin, the file, and the offending line in the thrown message", () => {
-    // `filePath` is the whole reason the parameter exists — an assertion on the
-    // "is empty" text alone would pass against an implementation that ignored it.
     expect(() =>
       hasNestEmitterImport(
         [{ source: "", symbols: ["EventEmitter2"], line: 9, dynamic: false }],
@@ -85,8 +81,6 @@ describe("hasNestEmitterImport", () => {
   })
 
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
-    // Order-independence pin — using `.some()` alone would short-circuit on the first
-    // match and silently accept a broken edge later in the list.
     expect(() =>
       hasNestEmitterImport(
         [
@@ -137,9 +131,6 @@ describe("emit method sentinel", () => {
   })
 
   it("rejects `.emitAsync` — a real EventEmitter2 API that is not classified yet", () => {
-    // `.emitAsync` and `.emitAsyncSerial` are legitimate publish APIs on EventEmitter2.
-    // they are not classified yet (see NEST_EMIT_METHOD docstring). This test pins the
-    // scope so a future change that widens it does so deliberately.
     expect(isNestEmitMethod("emitAsync")).toBe(false)
     expect(isNestEmitMethod("emitAsyncSerial")).toBe(false)
   })

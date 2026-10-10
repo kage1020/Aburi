@@ -18,11 +18,6 @@ import type { ReceiverHint } from "./lsp/enrich"
 import { emptyHintUsage, type LspConsumerRejection, type LspHintUsage } from "./lsp/stats"
 import { compareCodeUnit } from "./order"
 
-/**
- * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md;
- * see the doc for confidence semantics. This is NOT serialized to the IR — the caller
- * projects it into `Dependency` (ir-schema.md) after resolution.
- */
 export interface CallEdge {
   from: SymbolId
   to: SymbolId
@@ -34,115 +29,29 @@ export interface CallEdge {
 export interface ResolveCallGraphInput {
   /** Every Symbol produced by the scan, in any order. */
   symbols: readonly IRSymbol[]
-  /**
-   * Per-file `ImportEdge[]` keyed by the file's POSIX-relative path (must match
-   * `Symbol.source.file`). Files with no imports may be absent from the map.
-   */
   importsByFile: ReadonlyMap<string, readonly ImportEdge[]>
-  /**
-   * The extensions relative import resolution probes, dot-less (`"ts"`, where a language
-   * plugin's `fileExtensions` writes `".ts"`). Defaults to
-   * `["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]` — the standard
-   * TypeScript / JavaScript set — and `scan` does not set it. For a specifier written without
-   * an extension the order matters: the first extension whose candidate file appears in
-   * `symbols[]` wins. For one written with an emitted extension (`./repo.js`) the order is
-   * `EMITTED_EXTENSION_SOURCES`'s, and this list only filters it. The file a specifier names
-   * as written (`./repo.js` → `repo.js`, `./repo.ts` → `repo.ts`) is probed whatever this list
-   * says.
-   */
   fileExtensions?: readonly string[]
-  /**
-   * LSP-derived per-call-site hints (call-resolution.md). Keys are
-   * `makeCallSiteKey(file, line, target)` — the same identity the hint producer
-   * files them under, so a hint reaches the one call it was resolved for and no
-   * other call sharing its line. Present only when the LSP enrichment pass ran;
-   * consulted as the LSP tier before the resolver would otherwise return
-   * `null`. Non-null `Call.resolved` values are still never overwritten.
-   * A non-empty map keyed any other way raises `receiver-hint-key-malformed`
-   * rather than missing every lookup in silence — see `assertReceiverHintKeys`.
-   */
   receiverHints?: ReadonlyMap<string, ReceiverHint>
-  /**
-   * LSP-derived interface implementers, keyed by interface Symbol id and
-   * lex-sorted so consumption order is deterministic. Used together
-   * with `receiverHints` to promote a single-implementer interface call to a
-   * `medium`-confidence edge.
-   */
   implementerHints?: ReadonlyMap<SymbolId, readonly SymbolId[]>
-  /**
-   * Call sites whose receiver was an expression rather than a name, keyed by
-   * `makeCallSiteKey`. Normalization collapses `getRepo().save()` to the target
-   * `getRepo.save`, which reads exactly like a qualified name, so only the
-   * language plugin can tell the two apart (`CallCandidate.dynamicReceiver`).
-   * The set feeds diagnostics only — it never changes which calls resolve.
-   */
   dynamicCallSites?: ReadonlySet<string>
 }
 
 export interface ResolveCallGraphResult {
-  /**
-   * Symbols with `calls[].resolved` filled in where the resolver produced a
-   * non-null identity. Call entries otherwise keep their original ordering and
-   * per-entry `target` / `line` values.
-   */
   symbols: IRSymbol[]
-  /**
-   * Directed call edges, one per resolved call site. Multiple edges may share
-   * the same `(from, to)` when the caller invokes the callee on more than one
-   * line. Sorted by `(from, to, line)` ascending for byte-stability.
-   */
   edges: CallEdge[]
-  /**
-   * Aggregate outcome counters for `IR.stats.callResolution`. Always populated,
-   * so a workspace with zero call sites still reports the shape it observed.
-   */
   stats: CallResolutionStats
-  /**
-   * One entry per call left `resolved: null`, sorted by
-   * `(symbolId, line, target)` ascending. Not serialized into the IR — see
-   * `UnresolvedCallDiagnostic`.
-   */
   diagnostics: UnresolvedCallDiagnostic[]
-  /**
-   * What the LSP tier did with the hints it was handed — the consumer half of
-   * `stats.lspEnrichment` (lsp-enrichment.md). All zero when no hints were
-   * supplied. See `LspHintUsage` for why it comes back as a value; the caller
-   * folds it into the producer half with `withHintUsage`.
-   */
   lspHintUsage: Readonly<LspHintUsage>
 }
 
 const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]
 
-/**
- * Resolve every `Symbol.calls[]` entry against the workspace Symbol table using the
- * untyped resolution tiers from `call-resolution.md`: local shadow (parameter
- * subset), file scope, import scope, component scope, workspace scope. Each tier
- * is tried in order and the first hit wins; the confidence of the emitted edge
- * reflects the tier that produced it. A call the untyped tiers all miss gets one
- * last attempt at the LSP tier through `receiverHints` — see `resolveViaLspHint`
- * for why that attempt can only ever add an edge. Whatever still fails stays
- * `resolved: null`, exactly as the edge shape requires, and is bucketed into
- * `diagnostics`.
- *
- * Determinism: the resolver reads `symbols` and `importsByFile` and no filesystem
- * state, so the same inputs always produce the same outputs. Ambiguous matches
- * (two same-named top-level Symbols in the same file, two importable candidates
- * for the same specifier, two qname candidates in the same component, two globally
- * unique-name candidates) are conservatively left null — never silently picked —
- * so the caller never sees an edge that the resolver could not justify.
- */
 export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraphResult {
   const extensions = input.fileExtensions ?? DEFAULT_EXTENSIONS
   const receiverHints = input.receiverHints ?? EMPTY_RECEIVER_HINTS
   assertReceiverHintKeys(receiverHints)
   const implementerHints = input.implementerHints ?? EMPTY_IMPLEMENTER_HINTS
 
-  // Every downstream lookup uses `keptSymbolIds` (i.e. `dropped: false`) so
-  // the resolver never fabricates an edge into a Symbol body that was dropped
-  // by Category B/C rules. The body of a dropped Symbol is intentionally
-  // empty and its fingerprints are zeroed — pretending calls target it would
-  // mislead the reviewer.
   const keptSymbolIds = new Set<SymbolId>(input.symbols.filter((s) => !s.dropped).map((s) => s.id))
   const topLevelByFile = indexTopLevelByFile(input.symbols)
   const filesByLanguage = indexFilesByLanguage(input.symbols)
@@ -251,11 +160,6 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
 
 const EMPTY_CALL_SITE_KEYS: ReadonlySet<string> = new Set()
 
-/**
- * What the resolution attempt observed on its way to `null`. Populated as the
- * untyped tiers run so the miss can be bucketed afterwards without re-running
- * any of them — and without any tier changing the answer it already gave.
- */
 interface ResolutionTrace {
   /** Candidates seen by a tier that found more than one match. */
   ambiguousCandidates: Set<SymbolId>
@@ -278,18 +182,6 @@ interface ClassifyUnresolvedInput {
   dynamicReceiver: boolean
 }
 
-/**
- * Bucket one unresolved call per `call-resolution.md`. The order below is
- * the tie-break: a call can satisfy several descriptions at once (a parameter
- * named after an imported package, say) and the reviewer needs one stable
- * answer, so the most specific cause wins.
- *
- *   1. `local-scope` — the resolver never even looked outward.
- *   2. `dynamic`     — the receiver is not a name, so no tier could have won.
- *   3. `ambiguous`   — a tier found the callee but refused to choose.
- *   4. `external`    — the binding leaves the workspace through a bare import.
- *   5. `no-match`    — nothing matched anywhere.
- */
 function classifyUnresolved(input: ClassifyUnresolvedInput): UnresolvedCallDiagnostic {
   const base = {
     symbolId: input.caller.id,
@@ -315,13 +207,6 @@ function classifyUnresolved(input: ClassifyUnresolvedInput): UnresolvedCallDiagn
   return { ...base, bucket: "no-match", candidates: [] }
 }
 
-/**
- * True when the head of `target` is bound by an import whose specifier is not
- * relative — a bare package, a path alias, or a workspace package. Import specifier
- * resolution only resolves relative specifiers today, so such a head is out of reach by
- * construction rather than by accident, and calling it `no-match` would send a
- * reviewer looking for a typo that does not exist.
- */
 function bindsToExternalImport(target: string, imports: readonly ImportEdge[]): boolean {
   const segments = splitTargetSegments(target)
   const head = segments[0]
@@ -358,10 +243,6 @@ function buildCallResolutionStats(
   return { totalCalls, resolvedCalls, unresolved }
 }
 
-/**
- * call-resolution.md spells the buckets kebab-case; the JSON Schema spells every property
- * camelCase. This table is the single place the two conventions meet.
- */
 const BUCKET_TO_STATS_KEY: Record<UnresolvedCallBucket, keyof UnresolvedCallBuckets> = {
   "local-scope": "localScope",
   external: "external",
@@ -378,21 +259,6 @@ function compareDiagnostic(a: UnresolvedCallDiagnostic, b: UnresolvedCallDiagnos
   )
 }
 
-/**
- * Refuse a `receiverHints` map keyed by anything but `makeCallSiteKey`.
- *
- * Every other way this could go wrong announces itself: a hint for a call that
- * is not there is simply never read, a `kind` that disagrees is refused, a
- * dropped target falls through to the diagnostics. A map keyed the wrong way
- * announces nothing — every lookup misses, so the LSP tier contributes no edges
- * and the run is indistinguishable from one where the language server had
- * nothing to say. There is no counter for hints consumed, so nobody finds out.
- *
- * That failure is reachable by ordinary means: the keys were `${file}:${line}`
- * through @aburi/core 0.3.0, both spellings are `string`, and a caller who
- * upgrades keeps compiling. Better to name it once, at the entry, than to hand
- * back a graph that is quietly missing its typed tier.
- */
 function assertReceiverHintKeys(hints: ReadonlyMap<string, ReceiverHint>): void {
   for (const key of hints.keys()) {
     if (key.includes(CALL_SITE_KEY_SEPARATOR)) continue
@@ -406,33 +272,6 @@ function assertReceiverHintKeys(hints: ReadonlyMap<string, ReceiverHint>): void 
 const EMPTY_RECEIVER_HINTS: ReadonlyMap<string, ReceiverHint> = new Map()
 const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new Map()
 
-/**
- * Resolve a call left null by the untyped tier using LSP-derived hints (call-resolution.md).
- * `this.*` / `super.*` with a hint present resolve at `high` confidence — a known
- * simplification of confidence propagation, which rates an inherited hit `medium`:
- * `ReceiverHint` does not carry
- * how far the lookup travelled, so the two cases are indistinguishable here.
- *
- * A hint is looked up by the full call-site key and then checked against the call it would
- * resolve: `ReceiverHint.kind` must match `receiverHead(target)`, the producer's own
- * derivation. Neither check is redundant — the key stops a producer keyed to the line rather
- * than the call site (see `makeCallSiteKey` for the edge that fabricates), the `kind` check
- * stops a hand-built hint aimed at a target it does not describe. Neither can vouch for a hint
- * whose position was wrong, which is why `buildRequestJobs` declines that shape up front.
- *
- * Both refusals are reported rather than merely taken, so `resolveCallGraph` can count them
- * into `stats.lspEnrichment.hintsRejected` (lsp-enrichment.md); a hint the key never
- * reaches is the ordinary case, not a refusal. The order of the two checks is part of the
- * stats contract: a hint that fails both is counted as `kindMismatch` alone, so the same input
- * cannot be bucketed two ways (LE15).
- *
- * Two further invariants hold by the shape of the surrounding pass: an already-resolved call
- * is never overwritten (`resolveCallGraph` returns before reaching here, unconditionally,
- * even when the incoming `resolved` names no Symbol), and confidence only ever rises (LE16 —
- * the LSP tier fires solely where the untyped tier produced no edge). A hint whose target is
- * not in `keptSymbolIds` produces no edge, for the reason `keptSymbolIds` exists. Interface-tier
- * resolution is out of scope until the IR carries `implements` edges.
- */
 function resolveViaLspHint(input: {
   caller: IRSymbol
   call: { target: string; line: number; resolved: SymbolId | null }
@@ -453,13 +292,6 @@ function resolveViaLspHint(input: {
   return { outcome: "hit", hit: { id: target, confidence: "high" } }
 }
 
-/**
- * What the LSP tier made of one call site: an edge, no hint at all, or a hint it
- * refused and the bucket that refusal belongs in. The third case is why this is
- * a variant rather than `ResolutionHit | null` — the caller has to tell "no hint
- * was offered" apart from "a hint was offered and declined", and only the second
- * is worth counting.
- */
 type LspHintOutcome =
   | { outcome: "hit"; hit: ResolutionHit }
   | { outcome: "absent" }
@@ -467,28 +299,6 @@ type LspHintOutcome =
 
 const NO_HINT: LspHintOutcome = { outcome: "absent" }
 
-/**
- * Rebuild the resolved `CallEdge[]` for an already-scanned IR by walking every
- * Symbol's `calls[].resolved` field. `resolveCallGraph` runs at scan time and
- * writes its resolutions back into the IR, but the rich `CallEdge[]` array
- * itself is not serialised (only a collapsed `Dependency[]` projection lands in
- * `IR.dependencies`). Downstream passes — Slice View (docs/design/slice-view.md)
- * most notably — need the edges again after loading the IR from disk, and
- * reconstructing from `resolved` gives them the exact edge shape
- * `call-resolution.md` specifies (via = "call", per-call `line`, per-call
- * `confidence`). Unresolved calls (`resolved: null`) emit no edge — same rule
- * as at scan time.
- *
- * Confidence is inherited from the containing Symbol's own `confidence` field,
- * because the per-call confidence produced at scan time by `resolveCallGraph`
- * is not persisted (`ir-schema.md` does not model it on `Call`). This is a
- * conservative floor: a Symbol scanned with `high` confidence contributes edges
- * at `high`, while a `low`-confidence Symbol contributes `low` edges. Slice
- * View edge selection does not read `confidence`, so this floor is invisible in practice —
- * but it keeps the reconstructed edge shape structurally identical to what
- * `resolveCallGraph` returned, so future consumers that DO care about
- * confidence get a defensible answer.
- */
 export function reconstructCallEdgesFromIR(ir: IR): CallEdge[] {
   const edges: CallEdge[] = []
   for (const symbol of ir.symbols) {
@@ -565,21 +375,11 @@ function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): Resol
   const head = segments[0] as string
   const tail = segments.slice(1)
 
-  // Step 1: local scope shadows every outer binding. A caller parameter
-  // named `helper` invoked as `helper(...)` — or as `helper.method(...)` —
-  // is a runtime value, not a Symbol reference, so the correct outcome is a
-  // null resolution and no edge.
   if (ctx.parameterNames.has(head)) {
     trace.parameterShadow = true
     return null
   }
 
-  // Special normalized targets: `this.<method>` / `super.<method>` MUST
-  // stay unresolved in the untyped tier because the receiver identity depends
-  // on the caller's class hierarchy, which only the LSP tier can see. Even if
-  // a Symbol whose `name` happens to be `this.method` appeared in the table,
-  // it would not be a legitimate call target — never fabricate a name for a
-  // receiver that isn't a name.
   if (head === "this" || head === "super") {
     trace.unnamedReceiver = true
     return null
@@ -591,11 +391,6 @@ function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): Resol
   const importHit = resolveInImportScope(ctx, head, tail, trace)
   if (importHit !== null) return importHit
 
-  // Component / workspace scope only apply to qualified names ("Cls.method",
-  // "Namespace.Cls.method"). A single identifier that missed file / import scope is
-  // either a local, an external, or a genuine miss — resolving it via
-  // workspace search would just produce weak-evidence edges to unrelated
-  // Symbols that happen to share the name.
   if (tail.length === 0) return null
 
   const componentHit = resolveInComponentScope(ctx, trace)
@@ -607,12 +402,6 @@ function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): Resol
   return null
 }
 
-/**
- * Step 2 of call-resolution.md's untyped step order: resolve `head` against the top-level
- * Symbols declared in the caller's own file. For a dotted target the head must match a
- * top-level Symbol and the member the tail names must itself exist as a Symbol in the same
- * file (`memberId`).
- */
 function resolveInFileScope(
   ctx: ResolveTargetContext,
   head: string,
@@ -636,14 +425,6 @@ function resolveInFileScope(
   return id === null ? null : { id, confidence: "high" }
 }
 
-/**
- * The kept Symbol `first.tail[0].tail[1]…` names in `file`, or null. A dot in a call target
- * joins a receiver to a member, and the separator in the member's qualified name depends on the
- * receiver: through a class's name the member is on the static side, which ir-schema.md §3.2
- * spells `::` (`C.m()` calls `C::m`, not the instance member `C.m`). So each step takes the
- * `::` member when one is kept, and otherwise joins with `.` as a namespace's member does
- * (`C::Inner.g`).
- */
 function memberId(
   ctx: ResolveTargetContext,
   file: string,
@@ -680,10 +461,6 @@ function resolveInImportScope(
   tail: readonly string[],
   trace: ResolutionTrace,
 ): ResolutionHit | null {
-  // Collect every candidate id that the imports of this file could bind `head`
-  // to. Multiple hits (re-export barrel forwarding the same name from two
-  // sources, generated code, ...) is an ambiguity — call-resolution.md requires the
-  // resolver to yield null rather than silently picking the first one.
   const candidates = new Set<SymbolId>()
   for (const edge of ctx.imports) {
     if (edge.dynamic) continue
@@ -773,25 +550,11 @@ function resolveRelativeSpecifierOnce(ctx: ResolveTargetContext, specifier: stri
   return resolved
 }
 
-/**
- * Record the competing Symbols a tier refused to choose between. Only genuine
- * ambiguity (two or more) counts — a single-entry bucket that failed a later
- * check is a miss, not a conflict.
- */
 function recordAmbiguity(trace: ResolutionTrace, bucket: readonly IRSymbol[]): void {
   if (bucket.length < 2) return
   for (const symbol of bucket) trace.ambiguousCandidates.add(symbol.id)
 }
 
-/**
- * Step 4 of call-resolution.md's untyped step order: if steps 1–3 miss and `target` is a
- * qualified name, search Symbols within the caller's component whose `name`
- * equals `target`. Unique match → medium confidence; ambiguous → null. The cross-language
- * filter is enforced by `ComponentIndex`'s own outer language key, so cross-language buckets
- * never share a `(component, name)` cell.
- * Component-scope search ignores `import` bindings — that is the whole point
- * of component scope (barrel re-exports, inheritance-style references).
- */
 function resolveInComponentScope(
   ctx: ResolveTargetContext,
   trace: ResolutionTrace,
@@ -812,11 +575,6 @@ function resolveInComponentScope(
   return { id: hit.id, confidence: "medium" }
 }
 
-/**
- * Step 5 of call-resolution.md's untyped step order: same as component scope but
- * workspace-wide within a single language (cross-language edges are not emitted by the
- * untyped tier). Unique match → low confidence; ambiguous → null; no match → null.
- */
 function resolveInWorkspaceScope(
   ctx: ResolveTargetContext,
   trace: ResolutionTrace,
@@ -834,12 +592,6 @@ function resolveInWorkspaceScope(
   return { id: hit.id, confidence: "low" }
 }
 
-/**
- * Split a normalized callee target (`"foo"`, `"foo.bar"`, `"Cls.method"`) into
- * dotted segments. Empty segments — the ones a leading/trailing dot would
- * produce — are dropped so a malformed target still yields something safe to
- * probe against the Symbol table.
- */
 function splitTargetSegments(target: string): string[] {
   if (target.length === 0) return []
   return target.split(".").filter((s) => s.length > 0)
@@ -854,19 +606,6 @@ function isRelativeSpecifier(specifier: string): boolean {
   )
 }
 
-/**
- * The source extensions TypeScript tries, in its order, for a relative specifier written with
- * an emitted-JavaScript extension. Under `node16`/`nodenext` a relative import of `repo.ts`
- * has to be written `./repo.js`, and TypeScript resolves it to `repo.ts` ahead of a `repo.js`
- * beside it: the written extension is probed only after the sources that compile to it.
- * The declaration extensions TypeScript probes between the source and the emitted file
- * (`.d.ts`, `.d.mts`, `.d.cts`) are left out on purpose: drop-list.md removes those files
- * before extraction, so none of them can be in the Symbol table.
- *
- * Kept here beside `DEFAULT_EXTENSIONS`, the other TypeScript / JavaScript knowledge the
- * resolver holds, because the language plugin contract has no surface for resolution rules:
- * its `fileExtensions` decides which plugin parses a file, not how a specifier reaches one.
- */
 const EMITTED_EXTENSION_SOURCES: ReadonlyMap<string, readonly string[]> = new Map([
   ["js", ["ts", "tsx", "js", "jsx"]],
   ["jsx", ["tsx", "ts", "jsx", "js"]],
@@ -882,22 +621,6 @@ interface ResolveSpecifierInput {
   filesByLanguage: Map<string, Set<string>>
 }
 
-/**
- * Resolve `./y` / `../y` against the caller file's directory, then probe
- * candidate extensions until one lands on a file that actually declares any
- * Symbol. Directory targets probe `<path>/index.<ext>` per call-resolution.md
- * import specifier resolution, step 3.
- *
- * A specifier that names a directory outright — one whose last segment is empty, `.` or `..`
- * (`.`, `..`, `./`, `../`, `./repo/..`) — probes the directory's index only, never
- * `<dir>.<ext>`: `./` must not reach a sibling `src.ts`. One written with an emitted extension
- * (`./repo.js`) probes the sources that compile to it, in `EMITTED_EXTENSION_SOURCES` order,
- * in place of the path as written, and still reaches a directory's index when no file matches
- * (`repo.js/index.ts`). TypeScript resolves a directory to its index only outside ESM mode (in
- * ESM mode none of these resolve, nor does `./util`); the resolver carries no per-file module
- * mode, so it always takes the answer outside ESM mode, which `./util` → `util/index.ts`
- * already follows.
- */
 function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
   const known = input.filesByLanguage.get(input.language)
   if (known === undefined || known.size === 0) return null
@@ -925,15 +648,6 @@ function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
   return null
 }
 
-/**
- * `src/repo.js` → `src/repo.ts`, `src/repo.tsx`, `src/repo.js`, `src/repo.jsx`: the files a
- * specifier with an emitted extension can name, in order. Every row holds the written
- * extension itself, so the file as written is reached in its row's place and only after the
- * sources that compile to it. The other extensions are limited to the resolver's probe list
- * (`ResolveCallGraphInput.fileExtensions`, dot-less); the written one is kept whatever the
- * list says, as a path probed as written always was. Null for any other spelling, so `./repo`
- * and `./repo.ts` are probed as written.
- */
 function emittedExtensionSources(joined: string, extensions: readonly string[]): string[] | null {
   const dot = joined.lastIndexOf(".")
   if (dot <= joined.lastIndexOf("/") + 1) return null
@@ -952,11 +666,6 @@ function dirname(posixPath: string): string {
   return posixPath.slice(0, idx)
 }
 
-/**
- * Join a POSIX directory with a `./` / `../` specifier, collapsing `.` and `..`
- * segments. Returns null when `..` climbs above the workspace root — those
- * specifiers cannot map to a workspace file and must not be silently clamped.
- */
 function joinPosix(base: string, specifier: string): string | null {
   const baseSegments = base === "" ? [] : base.split("/")
   const relSegments = specifier.split("/")
@@ -975,16 +684,6 @@ function joinPosix(base: string, specifier: string): string | null {
 
 type TopLevelIndex = Map<string, Map<string, IRSymbol[]>>
 
-/**
- * Build `Map<file, Map<top-level-name, Symbol[]>>`. Only genuine top-level
- * Symbols (whose `Symbol.name` has no `.` — no member accessor) participate.
- * Method-level Symbols (`Cls.method`) are already reachable through the
- * separate `symbolIds` set for the dotted-target composite id lookup, so
- * indexing them here would spuriously inflate the ambiguity check that guards
- * `bucket.length !== 1`. Dropped Symbols are skipped: their bodies are empty
- * and their fingerprints are zeroed, so fabricating an edge into a dropped
- * body would be misleading downstream.
- */
 function indexTopLevelByFile(symbols: readonly IRSymbol[]): TopLevelIndex {
   const topLevel = symbols.filter((symbol) => !symbol.dropped && !symbol.name.includes("."))
   return mapValues(
@@ -1000,16 +699,6 @@ function indexFilesByLanguage(symbols: readonly IRSymbol[]): Map<string, Set<str
   )
 }
 
-/**
- * `language → componentKey → Symbol.name → Symbol[]`. Used by component scope to search
- * for a qualified name within the caller's component boundary. `componentKey`
- * folds `null`/`undefined` into a single "no component" bucket (see
- * `componentKeyOf`) so callers with `component: null` still resolve against
- * peers that also have `component: null`. Dropped Symbols are skipped — they
- * are never valid callees. The final list is left in the original input order;
- * `resolveInComponentScope` treats a `length !== 1` bucket as ambiguous, so no
- * tiebreak is needed to keep the result deterministic.
- */
 type ComponentIndex = Map<string, Map<string, Map<string, IRSymbol[]>>>
 
 function indexByComponent(symbols: readonly IRSymbol[]): ComponentIndex {
@@ -1024,13 +713,6 @@ function indexByComponent(symbols: readonly IRSymbol[]): ComponentIndex {
   )
 }
 
-/**
- * `language → Symbol.name → Symbol[]`. Used by workspace scope to search the whole
- * workspace within a single language. Cross-language matches are prevented by
- * the outer language key — call-resolution.md defers cross-language
- * resolution to a follow-up phase. Dropped Symbols are skipped for the same
- * reason as in `indexByComponent`.
- */
 type WorkspaceIndex = Map<string, Map<string, IRSymbol[]>>
 
 function indexByWorkspace(symbols: readonly IRSymbol[]): WorkspaceIndex {
@@ -1046,12 +728,6 @@ function mapValues<K, V, W>(map: ReadonlyMap<K, V>, transform: (value: V) => W):
   return new Map([...map].map(([key, value]) => [key, transform(value)]))
 }
 
-/**
- * Fold `Symbol.component` (`ComponentId | null | undefined`) into a stable
- * string key. An empty-string key represents "no component" and can never
- * collide with a real component id (which per `ir-schema.md` is required to be
- * ASCII kebab-case — non-empty).
- */
 function componentKeyOf(component: string | null): string {
   return component ?? ""
 }

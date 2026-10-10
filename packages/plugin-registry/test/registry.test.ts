@@ -79,8 +79,6 @@ describe("VocabRegistry.register (AC2 reserved namespace)", () => {
   })
 
   it("lets a frameworkHints manifest hold a namespace under framework:hint", () => {
-    // The reservation exists so that a hint can own `framework:hint:acme`; `registerHint` is
-    // the one path that grants it, and the same manifest through `register` is still refused.
     const reg = new VocabRegistry()
     const hint = frameworkManifest({ name: "hint-acme" })
     hint.provides.extKindPrefixes.push("framework:hint:acme")
@@ -112,8 +110,6 @@ describe("VocabRegistry.register (AC2 reserved namespace)", () => {
   })
 
   it("rejects derivedBy prefix under reserved _:* namespace (T1)", () => {
-    // _ is reserved for tests / private use; covered alongside core / aburi /
-    // framework:hint, but had no dedicated test until reviewer T1 surfaced the gap.
     const reg = new VocabRegistry()
     const m = langManifest()
     m.provides.derivedByPrefixes.push("_:scratch")
@@ -154,9 +150,6 @@ describe("VocabRegistry.register (AC3 xPrefix consistency, V8)", () => {
 
 describe("VocabRegistry.register (AC4 namespace-type mismatch, V5)", () => {
   it("rejects effects plugin that declares framework:* extKinds (schema-then-registry)", () => {
-    // The schema's allOf if/then would catch this in real loadPluginManifest, but the
-    // registry must still reject it defensively when callers hand it a manifest object
-    // constructed in TypeScript without ajv validation.
     const reg = new VocabRegistry()
     const m = effectsManifest({ name: "effects-foo", xPrefix: "foo" })
     m.provides.extKinds.push({ id: "framework:foo:bar", baseKind: "class", description: "x" })
@@ -293,8 +286,6 @@ describe("VocabRegistry.register (V11a one manifest declaring prefixes that nest
   })
 
   it("compares each list with itself, not the extKind and derivedBy lists with each other", () => {
-    // Every shipped framework plugin writes one string in both lists, and a prefix in one list may
-    // nest under a prefix in the other: the two maps are looked up apart.
     const reg = new VocabRegistry()
     const m = frameworkManifest({ name: "framework-acme" })
     m.provides.extKindPrefixes.push("framework:acme", "framework:beta:jobs")
@@ -333,8 +324,6 @@ describe("VocabRegistry.register (AC6 prefix vs existing id shadow)", () => {
     const a = effectsManifest({ name: "effects-acme", xPrefix: "acme" })
     a.provides.effectPrefixes.push("x-acme")
     reg.register(a)
-    // b owns x-acme conceptually too, but actually the registry should detect ANY new id
-    // falling under an existing prefix from another plugin.
     const b = effectsManifest({ name: "effects-other", xPrefix: "acme" })
     b.provides.effects.push({ id: "x-acme:charge", description: "x" })
     expectRegistryError(() => reg.register(b), "prefix-shadow-id")
@@ -523,10 +512,6 @@ describe("VocabRegistry.isEffectOwnedBy / isExtKindOwnedBy (T4)", () => {
     const m = effectsManifest({ name: "effects-acme", xPrefix: "acme" })
     m.provides.effects.push({ id: "x-acme:charge", description: "x" })
     m.provides.effectPrefixes.push("x-acme")
-    // duplicate-prefix-id shadow would block this if effects also had prefix:
-    // but here we have prefix only listed, no extra effects in prefix range to shadow.
-    // Actually push removes shadow concern? Let me drop the direct effect since
-    // it's under the prefix and would self-shadow.
     m.provides.effects.length = 0
     reg.register(m)
     expect(reg.isEffectOwnedBy("x-acme:custom", "effects-acme")).toBe(true)
@@ -588,9 +573,6 @@ describe("VocabRegistry.register (stableStringify hardening — C1)", () => {
   it("rejects non-JSON values (Date) in the manifest so equality cannot lie", () => {
     const reg = new VocabRegistry()
     const m = langManifest()
-    // Cast around the type system to simulate a hand-built object that bypassed
-    // ajv. stableStringify must throw rather than coerce Date → {} and pretend
-    // two distinct manifests are equal.
     const withDate = {
       ...m,
       capabilities: { wasmHeapPerWorkerMB: new Date(0) },

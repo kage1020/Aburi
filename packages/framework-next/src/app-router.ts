@@ -7,11 +7,6 @@ export type AppRouterRole =
   | "not-found"
   | "route"
 
-/**
- * App Router special file base names → the role they play. Not covered yet: `default`,
- * `global-error`, `middleware`, `instrumentation` and the metadata files (`sitemap`, `icon`,
- * `opengraph-image`, …); adding one is a table extension here, not a classifier change.
- */
 export const NEXT_APP_ROUTER_ROLES: ReadonlyMap<string, AppRouterRole> = new Map([
   ["page", "page"],
   ["layout", "layout"],
@@ -35,12 +30,6 @@ const NEXT_APP_ROUTER_ROUTE_EXTENSIONS: ReadonlySet<string> = new Set([".ts", ".
 /** Result of `recognizeAppRouterFile`; callers branch on `role`. */
 export type AppRouterFile = { readonly role: AppRouterRole }
 
-/**
- * Whether a Symbol's source file is an App Router special file: a POSIX path (the Symbol ID
- * contract forbids backslashes) with an `app` segment somewhere among its parents, ending
- * in `<role>.<ext>` with `<ext>` accepted for that role. Filename-based because the App
- * Router itself keys off the filename.
- */
 export function recognizeAppRouterFile(path: string): AppRouterFile | null {
   const segments = path.split("/")
   const lastSegment = segments.at(-1)

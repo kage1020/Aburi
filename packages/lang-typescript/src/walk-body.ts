@@ -38,8 +38,6 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
   const calls: CallCandidate[] = []
   // Every body the Symbol was declared with, not just the leading declaration's.
   for (const body of bodyNodesOf(symbol)) {
-    // The class is read off the body, not off the Symbol: `fullNode` is the **leading**
-    // declaration, and a fold can put a class body on a Symbol another declaration heads.
     const owner = body.type === "class_body" ? body.parent : null
     if (owner !== null) {
       visitOwnClassBody(owner, body, rules, calls)
@@ -59,12 +57,6 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
   return { rules, calls }
 }
 
-/**
- * A function's parameter list, less its parameters' decorators: a default runs on every call
- * that omits its argument, so it is the function's (LP20d). A decorator's arguments run where
- * the decorator is applied, when the class is defined, so they are left for the class's walk
- * (`visitParameterDecorators`); a function outside a class has none to leave.
- */
 function visitParameterDefaults(parameters: Node, rules: Rule[], calls: CallCandidate[]): void {
   for (const parameter of parameters.namedChildren) {
     if (parameter === null) continue
@@ -110,8 +102,6 @@ function visitOwnClassBody(
       visitNode(member, rules, calls)
       continue
     }
-    // The parameters sit beside the body in the same function, and the member's own walk covers
-    // both (LP20d).
     const parameters = memberBody.parent?.childForFieldName("parameters") ?? null
     if (parameters === null) {
       visitExcluding(member, [memberBody], rules, calls)
@@ -122,14 +112,6 @@ function visitOwnClassBody(
   }
 }
 
-/**
- * A binding's object literal: what **defining** the object runs, LP20a read for an object. The
- * values it evaluates stay — `client: makeClient()`, a function the object holds where
- * `objectEntryOf` gives it no Symbol (a computed key, `withAuth(() => …)`) — and a member's body
- * and parameter list are skipped, since its own Symbol walks them and defining the object only
- * creates the closure. An object nested under a named entry is the same question one level
- * down, which is where `objectEntryOf` finds that object's members.
- */
 function visitOwnObjectBody(object: Node, rules: Rule[], calls: CallCandidate[]): void {
   for (const entry of object.namedChildren) {
     if (entry === null) continue
@@ -139,10 +121,6 @@ function visitOwnObjectBody(object: Node, rules: Rule[], calls: CallCandidate[])
       continue
     }
     if (read.object !== null) {
-      // Inert today: beside the object, a `pair` holds only its key and a wrapper's type, and
-      // neither has anything to walk. It is kept so that every admitted entry is walked less
-      // only what is read elsewhere, as `visitOwnClassBody` walks a member, and a node that
-      // becomes walkable there is not lost.
       visitExcluding(entry, [read.object], rules, calls)
       visitOwnObjectBody(read.object, rules, calls)
       continue
@@ -155,19 +133,6 @@ function visitOwnObjectBody(object: Node, rules: Rule[], calls: CallCandidate[])
   }
 }
 
-/**
- * Everything under `node` except the subtrees in `skipped`.
- *
- * A method's body and parameters are direct children of the member. A field's are children of
- * the function the field holds, one level further down — so the walk follows the path to them
- * rather than filtering direct children, which covers both depths with one rule and keeps
- * whatever surrounds them on the class: a field's decorator and the field's type annotation, a
- * method's return type.
- *
- * Descending an ancestor instead of visiting it reports nothing for the ancestor itself, which
- * is what is wanted: the only nodes on the path are the member and the function it holds, and
- * `visitNode` has no arm for either.
- */
 function visitExcluding(
   node: Node,
   skipped: readonly Node[],
@@ -175,12 +140,6 @@ function visitExcluding(
   calls: CallCandidate[],
 ): void {
   for (const part of node.namedChildren) {
-    // By `id`, not by reference: a field read and a children read of the same node hand back
-    // different JS wrappers, so `===` never matches. `Node.equals()` answers the same question
-    // and would do; `id` is a field read rather than a call across the WASM boundary
-    // (`lang-plugin.md`). Not by type: a `method_definition` has exactly one
-    // `statement_block` today, but a member shape carrying a second would start dropping it
-    // without a word.
     if (part === null || skipped.some((s) => s.id === part.id)) continue
     if (skipped.some((s) => isAncestorOf(part, s))) visitExcluding(part, skipped, rules, calls)
     else visitNode(part, rules, calls)
@@ -207,8 +166,6 @@ function isAncestorOf(node: Node, descendant: Node): boolean {
 /** The member's body when this class does not walk it, or null when the class still owns it. */
 function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
   if (memberSymbolSegment(classNode, member) === null) return null
-  // The constructor is recorded on `#C.constructor` too, and stays here anyway: `new C()` runs
-  // it and resolves to this Symbol (LP20b).
   if (isConstructorMember(member)) return null
   // A field's body belongs to the function it holds; a method's, to the method itself.
   return (functionValuedField(member) ?? member).childForFieldName("body")
@@ -291,8 +248,6 @@ function handleIfStatement(node: Node, rules: Rule[], calls: CallCandidate[]): v
       }),
     )
   }
-  // Even when the `if` is a plain branch, its consequence still contributes to the same
-  // Symbol's logic (nested guards / calls / loops).
   visitChildren(node, rules, calls)
 }
 
@@ -300,10 +255,6 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
   const value = node.namedChildren[0] ?? null
   if (value === null) return
   if (isCallOnly(value)) {
-    // Call-only return: no rule, but the call still goes into calls[] so effect plugins
-    // can inspect it. Descend into the callee and arguments so nested calls like the
-    // `bar()` in `return foo(bar())` are recorded too — otherwise the outer call would
-    // shadow every inner one.
     handleCall(value, calls)
     visitChildren(value, rules, calls)
     return
@@ -316,15 +267,6 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
   visitChildren(value, rules, calls)
 }
 
-/**
- * An arrow's expression body: the arrow returns it, so it is read as `return <expr>` — the
- * same rule, or the same absence of one, the block spelling `{ return <expr> }` gets. Without
- * this an edit to `(u) => u.role === "admin"` moved no rule and so no `logic` fingerprint,
- * where the block-bodied twin is a logic change.
- *
- * The rule is the only thing added. Calls are collected by the walk the body always had, so a
- * concise body records exactly the calls it did before.
- */
 function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): void {
   const value = unparenthesized(body)
   if (!isCallOnly(value) && !isTrivialExpr(value)) {
@@ -333,27 +275,10 @@ function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): vo
   visitNode(body, rules, calls)
 }
 
-/**
- * A body that is an expression rather than a block. Only an arrow can have one, and a walk root
- * is only ever a declaration's `body` field, so the parent's kind settles it.
- */
 function isConciseBody(body: Node): boolean {
   return body.parent?.type === "arrow_function" && body.type !== "statement_block"
 }
 
-/**
- * The expression inside one pair of parentheses. A concise body that returns an object literal
- * must be wrapped — `() => ({ a: 1 })` — and the block spelling `return { a: 1 }` has nothing
- * to match them, so they are not part of what is returned. A comment written inside the pair
- * is not what is returned either, so a pair holding an object literal and a comment answers
- * with the object. A pair holding anything else besides its one expression — a type annotation
- * written inside it, `(x: T)` — answers with the parenthesis, since there is no one expression
- * to answer with.
- *
- * Only one pair is required, so only one is taken off: `((a + b))` answers with `(a + b)`. A
- * redundant second pair therefore stays in `expr`, and adding or removing one still moves the
- * `logic` fingerprint.
- */
 function unparenthesized(node: Node): Node {
   if (node.type !== "parenthesized_expression") return node
   const [only, ...rest] = node.namedChildren.filter(
@@ -401,11 +326,6 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
   const shape = describeCallee(callee)
   if (shape === null) return
   const argsNode = node.childForFieldName("arguments") ?? findChild(node, "arguments") ?? null
-  // Comments are `extras` in the grammar, so tree-sitter hangs them wherever they were
-  // written — including between the parentheses of a call. They are named children like
-  // any other, so `f(\n  x, // why\n)` would otherwise report two arguments and give
-  // `literalArgs` a slot that belongs to no argument at all, shifting every later one.
-  // An effect plugin reading either as a signature is then reading the source's comments.
   const argChildren = (argsNode !== null ? argsNode.namedChildren : []).filter(
     (arg) => arg !== null && arg.type !== "comment",
   )
@@ -421,8 +341,6 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
     inAwait,
     inNew: isNew,
     literalArgs,
-    // Only set when positively true so the field stays absent on the
-    // overwhelming majority of calls and existing IR bytes do not move.
     ...(shape.dynamic ? { dynamicReceiver: true } : {}),
   })
 }
@@ -596,20 +514,7 @@ function scopeInside(node: Node, scope: ExitScope): ExitScope {
  */
 interface CalleeShape {
   readonly target: string
-  /**
-   * The receiver was positively identified as an expression rather than a name
-   * (`getRepo().save()`, `items[0].save()`, `(a ?? b).save()`). Such a call can
-   * never resolve in the untyped tier, and `call-resolution.md` wants it
-   * reported as `dynamic` rather than lumped in with genuine typos.
-   */
   readonly dynamic: boolean
-  /**
-   * The node is a type-level wrapper around a name, and its source text was
-   * taken verbatim (`svc!`, `x as Foo`). Opaque is deliberately NOT treated as
-   * dynamic on its own: a non-null assertion still names a binding. It only
-   * becomes evidence of an expression receiver when it sits inside explicit
-   * parentheses, which is how expression receivers have to be written.
-   */
   readonly opaque: boolean
 }
 
@@ -630,13 +535,6 @@ const TYPE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "type_assertion",
 ])
 
-/**
- * What an unmodelled expression contributes: the reserved segment, never its source text.
- * `[...names].sort()` would otherwise put `[...names]` in the target, whose `...` is two empty
- * segments (`lang-plugin.md`, "Normalized-callee contract"), and an IIFE would put its whole
- * body there, indentation included. No name spells such a receiver, which is what
- * `COMPUTED_TARGET_SEGMENT` stands for, and a call on it can only be reached by evaluating it.
- */
 const UNMODELLED_EXPRESSION: CalleeShape = {
   target: COMPUTED_TARGET_SEGMENT,
   dynamic: true,
@@ -648,14 +546,6 @@ const META_PROPERTIES: ReadonlySet<string> = new Set(["import.meta", "new.target
 /** ECMAScript's line terminators: LF, CR, LINE SEPARATOR and PARAGRAPH SEPARATOR. */
 const LINE_BREAK = /[\n\r\u2028\u2029]/
 
-/**
- * A type wrapper answers with its own text only around a name. Around anything else it
- * answers what the wrapped expression does, so `([...a] as T).m()` cannot bring the literal's
- * text back and `getRepo()!.save()` is the dynamic call `getRepo().save()` is. Text that would
- * still break the segment rule — a type such as `[...T]`, or `a["x.."]` — is refused, and so is
- * text holding a line break (a type literal written over several lines): a target is read as a
- * name, and reformatting must not change it.
- */
 function describeTypeWrapper(node: Node): CalleeShape | null {
   const innerNode = wrappedExpression(node)
   if (innerNode === null) return null
@@ -745,30 +635,7 @@ function describeCallee(node: Node): CalleeShape | null {
   }
 }
 
-/**
- * The target segment a bracket access contributes, or null when the index names none.
- *
- * `prisma["user"]` addresses the property `prisma.user` addresses, so it answers the same
- * segment — decoded rather than unquoted, so `prisma["us\u0065r"]` answers `user` too, and
- * refused when the parser guessed at any of it, which is the rule a class member's written
- * name already follows (`memberNameSegment`): both of its guards, not just the one on the
- * literal's own children.
- *
- * Position is not part of the question. The index of `handlers["run"]()` names the property
- * being called exactly as the one in `prisma["user"].create()` names the receiver, so the
- * terminal slot folds by the same rule (`lang-plugin.md`).
- *
- * Everything else — an identifier, a number, a substituting template, a string the
- * qualified-name grammar has no segment for — is null, and the caller writes
- * `COMPUTED_TARGET_SEGMENT` in its place. `obj["#v"]` is null too: `isQnameSegment` admits
- * `#v` only when asked, because that segment names the `#`-private member and `"#v"` is a
- * public property.
- */
 function subscriptSegment(node: Node): string | null {
-  // Both halves of the refusal `memberNameSegment` makes, and neither covers the other: a
-  // literal that parsed in part answers `whole: false`, while `prisma["user" "audit"]` parses
-  // its second literal as the index and drops an ERROR *beside* it, so the index reads whole
-  // and spells a model the source does not name.
   if (hasErrorChild(node)) return null
   const index = node.childForFieldName("index")
   if (index === null) return null

@@ -12,13 +12,6 @@ import type {
 } from "@aburi/types"
 import { ConfigError } from "./errors"
 
-/**
- * Reserved root that consumers must NOT write directly in HintRule.extKind. The loader
- * always injects "hint" as the second segment, so a user who already wrote "framework:hint:*"
- * would either double-prefix or collide with another hint entry's auto-derived prefix.
- * derivedBy has no equivalent reservation: "framework-hint:*" (note the hyphen) is the
- * legitimate user-written shape and the synthesized plugin owns its parent namespace.
- */
 const RESERVED_EXT_KIND_PREFIX = "framework:hint:"
 
 const PLUGIN_SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
@@ -44,30 +37,6 @@ interface RuleHit {
   decorator: Decorator | null
 }
 
-/**
- * Build the framework plugin each frameworkHints[] entry stands for (`config.md` §8.3): its
- * synthesized manifest, and the rules applied to every Symbol in the framework stage.
- *
- * Manifest:
- * - `extKind: "framework:<vendor>:<rest>"` → `"framework:hint:<vendor>:<rest>"`. The schema
- *   guarantees at least three segments, so the post-injection value has at least four and
- *   its parent prefix has at least three (`framework:hint:<vendor>`). Two entries that write
- *   the same vendor derive the same prefix, which the registry refuses (`config.md` §8.4).
- * - `derivedBy` is taken verbatim. The synthesized plugin claims ownership of each value's
- *   parent prefix (or the value itself when single-segment).
- * - `frameworks: [hint.name]`.
- * - `name: "hint-<hint.name>"`.
- *
- * Rules (`config.md` §8.1, §8.2):
- * - A decorator rule applies to a Symbol carrying a decorator of that name, matched on the
- *   leaf, so `@acme.AcmeController()` meets `AcmeController` as well. Its `boundary` is filed
- *   under the decorator as written, which is how the framework stage matches it back.
- * - A class-name rule applies to a class whose name matches the glob (`*` any run of
- *   characters, `?` one), and has no `boundary` to give.
- * - Decorator rules come first, in the order the decorators are written, then class-name
- *   rules in config order. The first `extKind` among them is the Symbol's; every `derivedBy`
- *   is appended. `drop` goes through `symbolDropHint`, since a drop is not a classification.
- */
 export function frameworkHintPlugins(config: Config): FrameworkPlugin[] {
   return (config.frameworkHints ?? []).map(buildHintPlugin)
 }
@@ -122,11 +91,6 @@ function buildHintPlugin(hint: FrameworkHint): FrameworkPlugin {
   }
 }
 
-/**
- * `null` when the rules that apply give nothing to merge: no rule at all, or rules that only
- * drop. A non-null answer ends the framework stage for the Symbol, so an empty one would take
- * the turn from a later `frameworkHints` entry for nothing.
- */
 function classify(hits: readonly RuleHit[]): SymbolClassification | null {
   let extKind: string | undefined
   const derivedBy: string[] = []
@@ -225,23 +189,12 @@ function hintExtKind(extKind: string, hintName: string): string {
   return injectHintSegment(extKind)
 }
 
-/**
- * "framework:acme:controller" → "framework:hint:acme:controller". Splits on ":", inserts
- * "hint" as the second segment, rejoins. The schema guarantees extKind starts with
- * "framework:" and has at least three segments, so the result has at least four and the
- * caller can safely derive its parent prefix.
- */
 function injectHintSegment(extKind: string): string {
   const segments = extKind.split(":")
   segments.splice(1, 0, "hint")
   return segments.join(":")
 }
 
-/**
- * Drop the last segment of each value (the leaf id) to obtain the ownership prefix; values
- * with a single segment are kept as-is so derivedBy "myhint" still produces a valid one-
- * segment prefix. Deduplicates and sorts lexicographically.
- */
 function uniqueSortedParentPrefixes(values: Set<string>): string[] {
   const prefixes = new Set<string>()
   for (const value of values) {

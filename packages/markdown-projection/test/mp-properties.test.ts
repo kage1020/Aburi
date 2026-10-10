@@ -22,10 +22,6 @@ import {
 } from "../src"
 import { emptySummary, makeDiff } from "./fixtures"
 
-// -----------------------------------------------------------------------------
-// MP1: same IR → same Markdown (determinism)
-// -----------------------------------------------------------------------------
-
 describe("MP1 — projection is deterministic", () => {
   it("workspace renders identical bytes for identical input", () => {
     const ir = makeIR({
@@ -51,10 +47,6 @@ describe("MP1 — projection is deterministic", () => {
   })
 })
 
-// -----------------------------------------------------------------------------
-// MP2: pre-shuffled arrays produce the same output (sort-neutrality)
-// -----------------------------------------------------------------------------
-
 describe("MP2 — component projection normalises input order", () => {
   it("emits identical Markdown when symbols come in reverse order", () => {
     const s1 = makeSymbol({
@@ -74,10 +66,6 @@ describe("MP2 — component projection normalises input order", () => {
   })
 })
 
-// -----------------------------------------------------------------------------
-// MP3: empty effects[] → Effects section omitted
-// -----------------------------------------------------------------------------
-
 describe("MP3 — Effects section is omitted when empty", () => {
   it("does not emit `**Effects**` for a Symbol with no effects", () => {
     const s = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo" })
@@ -91,10 +79,6 @@ describe("MP3 — Effects section is omitted when empty", () => {
     expect(md).not.toContain("**Calls**")
   })
 })
-
-// -----------------------------------------------------------------------------
-// MP4: dropped Symbol → folded ## Dropped section
-// -----------------------------------------------------------------------------
 
 describe("MP4 — Dropped section is a <details> fold-out", () => {
   it("renders dropped symbols under a <details> block", () => {
@@ -117,10 +101,6 @@ describe("MP4 — Dropped section is a <details> fold-out", () => {
     expect(md).toContain("DTO shape")
   })
 })
-
-// -----------------------------------------------------------------------------
-// MP5 / MP6: confidence badges
-// -----------------------------------------------------------------------------
 
 describe("MP5 / MP6 — confidence badge visibility", () => {
   it("MP5: medium confidence Effect gets ⚠ medium badge", () => {
@@ -205,10 +185,6 @@ describe("MP6a / MP6b — a Symbol's confidence on every heading that names it",
   })
 })
 
-// -----------------------------------------------------------------------------
-// MP8: aburi explain on dropped Symbol
-// -----------------------------------------------------------------------------
-
 describe("MP8 — explain a dropped Symbol shows drop reason only", () => {
   it("emits drop reason and omits detail sections", () => {
     const s = makeSymbol({
@@ -228,10 +204,6 @@ describe("MP8 — explain a dropped Symbol shows drop reason only", () => {
     expect(md).not.toContain("## Fingerprint")
   })
 
-  // The dropped view is the one renderer here that does not fold a run of blank lines, so a
-  // `dropReason` reaches the document exactly as its producer wrote it. Only a plugin can
-  // construct this — nothing in the tree emits a reason spanning lines — which is why it is
-  // pinned rather than left to be rediscovered by whoever merges the renderers next.
   it("leaves a multi-line drop reason exactly as the producer wrote it", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Dto",
@@ -244,10 +216,6 @@ describe("MP8 — explain a dropped Symbol shows drop reason only", () => {
     expect(projectSymbolExplain(s)).toContain("matched rule A\n\n\nmatched rule B")
   })
 })
-
-// -----------------------------------------------------------------------------
-// MP10: syntax-only change → Syntax-only fold-out
-// -----------------------------------------------------------------------------
 
 describe("MP10 — syntax-only changes end up in the Syntax-only fold-out", () => {
   it("routes delta.syntaxChanged (and only syntaxChanged) to the Syntax-only section", () => {
@@ -313,10 +281,6 @@ describe("MP10a — a confidence-only change gets its own section", () => {
     expect(md).not.toContain("## 🎨 Syntax-only changes")
   })
 })
-
-// -----------------------------------------------------------------------------
-// Folded summary counts source entries, not rendered Markdown rows (§6.1)
-// -----------------------------------------------------------------------------
 
 describe("Folded section summary counts (§6.1)", () => {
   it("counts entries in all three folded sections", () => {
@@ -392,10 +356,6 @@ describe("Folded section summary counts (§6.1)", () => {
   })
 })
 
-// -----------------------------------------------------------------------------
-// MP11: moved+changed → dedicated section, not folded
-// -----------------------------------------------------------------------------
-
 describe("MP11 — moved+changed renders outside the Moved fold-out", () => {
   it("emits a full detail block, not a bullet inside <details>", () => {
     const before = makeSymbol({
@@ -437,16 +397,10 @@ describe("MP11 — moved+changed renders outside the Moved fold-out", () => {
     // Look for the block heading rather than the <details> fold-out.
     const movedSectionIdx = md.indexOf("## 🔀 Moved + Changed")
     const foldSectionIdx = md.indexOf("## 🔀 Moved\n")
-    // Moved + Changed comes strictly before Moved when both exist; here the Moved-only
-    // section is empty so it must be absent.
     expect(movedSectionIdx).toBeGreaterThan(-1)
     expect(foldSectionIdx).toBe(-1)
   })
 })
-
-// -----------------------------------------------------------------------------
-// MP12: empty IR still produces a workspace.md
-// -----------------------------------------------------------------------------
 
 describe("MP12 — empty IR still projects workspace.md", () => {
   it("emits a Components section that acknowledges emptiness", () => {
@@ -456,10 +410,6 @@ describe("MP12 — empty IR still projects workspace.md", () => {
     expect(md).toContain("_No components defined._")
   })
 })
-
-// -----------------------------------------------------------------------------
-// Diff summary 1-line stdout
-// -----------------------------------------------------------------------------
 
 describe("projectDiffSummaryLine — CLI stdout summary", () => {
   it("emits `+A -R ~C ↔M ⤴MC` shape", () => {
@@ -477,10 +427,6 @@ describe("projectDiffSummaryLine — CLI stdout summary", () => {
   })
 })
 
-// -----------------------------------------------------------------------------
-// Section-omit — rules row rendering
-// -----------------------------------------------------------------------------
-
 describe("Rule row rendering", () => {
   it("renders loop with kind", () => {
     const s = makeSymbol({
@@ -496,10 +442,6 @@ describe("Rule row rendering", () => {
     expect(md).toContain("- loop (`for`) (L10)")
   })
 })
-
-// -----------------------------------------------------------------------------
-// Fingerprint <sub> row is omitted for dropped
-// -----------------------------------------------------------------------------
 
 describe("Fingerprint row", () => {
   it("emits <sub> row for kept Symbol", () => {
@@ -529,10 +471,6 @@ describe("Fingerprint row", () => {
     expect(md).not.toContain("<sub>api=")
   })
 })
-
-// -----------------------------------------------------------------------------
-// Explain: full detail with derivedBy list
-// -----------------------------------------------------------------------------
 
 describe("projectSymbolExplain kept-symbol layout", () => {
   it("emits Boundary, Signature, Rules, Effects, Calls, Derived by, Fingerprint sections", () => {

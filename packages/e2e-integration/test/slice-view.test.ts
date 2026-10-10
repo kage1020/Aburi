@@ -5,16 +5,6 @@ import { describe, expect, it } from "vitest"
 import { useFixtureCheckout } from "../src/fixture"
 import { diffIRs, scanFixture, symbolById } from "../src/scan-helper"
 
-/**
- * Slice View e2e — the "3-layer feature addition" scenario. Starts from the empty
- * `slice-view-3layer` fixture (three placeholder files with no top-level functions), then
- * rewrites the three files to a Controller → Service → Repository chain where the caller in
- * each layer imports and calls the next.
- *
- * The design-doc requirement: a feature addition touching 3 layers must produce 1 slice,
- * not 3 scattered rows — one Slice, all three members, no bridging, no phantom cluster, and
- * a `## 🧵 Slice View` section in the Markdown projection rendering them as one block.
- */
 const REPO_HEAD = `export function writeRecord(input: { amount: number }): { id: string; amount: number } {
   return { id: "r1", amount: input.amount }
 }
@@ -43,12 +33,6 @@ async function writeHead(files: { repo: string; svc: string; ctl: string }): Pro
   await writeFile(resolve(fixture.root, "src/ctl.ts"), files.ctl, "utf8")
 }
 
-/**
- * The `## 🧵 Slice View` section alone. Contain-checks must be scoped to it because the
- * flat `## ➕ Added` section lists the same symbols (Slice View is additive per
- * slice-view.md), so a naive `md.toContain("handleRequest")` would pass even if the
- * Slice View rendering broke entirely.
- */
 function sliceViewSection(md: string): string {
   const start = md.indexOf("🧵 Slice View")
   const nextSectionStart = md.indexOf("\n## ", start + 1)
@@ -69,8 +53,6 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
 
     const diff = diffIRs(baseScan.ir, headScan.ir)
 
-    // Exactly one Slice, containing all three added Symbols in ascending id order, anchored
-    // by the lex-smallest member.
     expect(diff.slices).toHaveLength(1)
     const slice = diff.slices[0]
     if (slice === undefined) throw new Error("unreachable: length 1 checked above")
@@ -87,8 +69,6 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     expect(section).toContain("writeRecord")
     expect(section).toContain("(3 members)")
 
-    // Every call in this chain resolves, so `slice-view.md`'s unresolved-call marker must stay
-    // silent. A false-positive warning here would train reviewers to ignore it.
     expect(section).not.toContain("unresolved call")
     expect(headScan.ir.stats.callResolution?.unresolved).toEqual({
       localScope: 0,
@@ -102,9 +82,6 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
   it("marks the singleton a dynamic-dispatch call splits off (issue acceptance case)", async () => {
     const baseScan = await scanFixture(fixture.root)
 
-    // Same three-layer feature, except the controller reaches the service through a factory
-    // call. Normalization collapses `getService().save(...)` to the target `getService.save`,
-    // the resolver declines it, and the Controller → Service edge never exists.
     await writeHead({
       repo: REPO_HEAD,
       svc: SVC_HEAD,
@@ -121,8 +98,6 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
 
     const diff = diffIRs(baseScan.ir, headScan.ir)
 
-    // The controller is now its own Slice: a singleton that looks architecturally
-    // disconnected but is not. slice-view.md is the marker that tells the two apart.
     const ctlSlice = diff.slices.find(
       (s) => s.members.length === 1 && s.members[0]?.endsWith("ctl.ts#handleRequest") === true,
     )
@@ -130,8 +105,6 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
 
     const section = sliceViewSection(projectDiff(diff))
     expect(section).toContain("the resolver could not identify")
-    // Two call sites, both unresolved: the factory `getService()` itself (`no-match`) and the
-    // method invoked on its result (`dynamic`).
     expect(section).toContain("⚠ 2 unresolved calls")
   })
 })

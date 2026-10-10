@@ -1,32 +1,6 @@
 import type { Node, Parser, Tree } from "web-tree-sitter"
 import { decodeStringLiteralOrRaw } from "./string-escape"
 
-/**
- * A second parse for the `import("…")` types the grammar reads as a call and cannot place
- * (`lang-plugin.md` LP27b).
- *
- * Every other type position accepts a bare name, so the file is parsed once more with each such
- * `import(…)` replaced by an identifier exactly as long: `typeof $____________`,
- * `$____________.Rule[]`. Same length, so every offset, line and column is the original's. The
- * parse reads the masked text, and the tree it returns reads the original: web-tree-sitter keeps
- * the input callback on the Tree and answers `node.text` through it, so the callback serves the
- * masked text while the parser runs and the original from then on.
- *
- * So anything that reads `node.text` — this plugin, `@aburi/core`, a framework plugin — sees
- * `typeof import("./m")`. Node kinds are the masked parse's: a reader matching `call_expression`
- * finds an `identifier` there, which is why the `import(…)` contributes no `import` call and why
- * the masked shape is what `normalizeAst` serialises. The import edge is the exception, kept by
- * `maskedImportSpecifier`, because type-only imports produce edges wherever they are written.
- *
- * Only an `import(…)` under an error is masked, so a Symbol's fingerprint does not move because
- * another statement in the file carries the idiom. A mask the second parse does not read as a
- * type is withdrawn, since `await import("./m")` masked would stop being a dynamic import.
- */
-
-/**
- * The tree to use instead of `tree`, or `null` to keep it. Never deletes `tree`; a returned tree
- * is the caller's to delete.
- */
 export function reparseImportTypes(
   parser: Parser,
   tree: Tree,
@@ -55,10 +29,6 @@ export function reparseImportTypes(
   return null
 }
 
-/**
- * The module an identifier `reparseImportTypes` wrote in place of an `import("…")` names, or
- * `undefined` for any other node.
- */
 export function maskedImportSpecifier(node: Node): string | undefined {
   return MASKS.get(node.tree)?.get(node.startIndex)
 }
@@ -72,14 +42,6 @@ interface Span {
   specifier: string
 }
 
-/**
- * Every `import("…")` call in a statement that holds an error, or inside an ERROR node, as a span
- * of the source. "Statement" is the nearest enclosing statement, declaration, member definition
- * or signature (`STATEMENT`), so a type alias that parsed keeps its tree even in a body broken
- * elsewhere; an ERROR at module level has no statement around it, and the well-formed pieces
- * recovery keeps as its children are searched too. When recovery makes the root itself the ERROR,
- * as it can for a run of such declarations, the whole file is under it.
- */
 function maskableImportTypes(tree: Tree): Span[] {
   const spans: Span[] = []
   const root = tree.rootNode
@@ -99,12 +61,6 @@ function maskableImportTypes(tree: Tree): Span[] {
 
 const STATEMENT = /_(statement|declaration|definition|signature)$/
 
-/**
- * The specifier of an `import("…")` that can be a type, else `null`. A type names its module with
- * a non-empty string, optionally followed by import attributes (`{ with: … }`); an `import("")`
- * is left to the empty-specifier diagnostic. One spanning a line break could not become one
- * identifier without moving the lines after it.
- */
 function maskableSpecifier(node: Node): string | null {
   if (node.type !== "call_expression") return null
   if (node.childForFieldName("function")?.type !== "import") return null
@@ -133,10 +89,6 @@ function parseMasked(parser: Parser, source: string, spans: readonly Span[]): Tr
   return tree
 }
 
-/**
- * Whether the mask at `span` reads as the module of a type: the operand of `typeof`, or the head
- * of a qualified type name (`$___.Rule`, `$___.a.B`), directly or through a member access.
- */
 function readsAsType(tree: Tree, span: Span): boolean {
   let node: Node | null = tree.rootNode.namedDescendantForIndex(span.start, span.end)
   if (node === null || node.type !== "identifier") return false

@@ -3,10 +3,6 @@ import { CoreError } from "../errors"
 import { isCoreEffectId } from "../integrity"
 import { describeThrown, errorCode } from "./faults"
 
-/**
- * One value a plugin emitted that its manifest does not claim (`extension-vocab.md`). Recorded
- * only in a run that is not strict; a strict run ends at the first one instead.
- */
 export interface UndeclaredVocabOccurrence {
   kind: "effect" | "extKind"
   value: string
@@ -23,13 +19,6 @@ export function isStrict(config: Pick<Config, "strict">): boolean {
   return config.strict !== false
 }
 
-/**
- * The check each emitted effect id and extKind passes through. An effect id from the core
- * vocabulary is owned by no plugin, so it passes whoever emits it; anything else has to be
- * claimed by the emitting plugin itself, directly or through a prefix it owns, which is the
- * registry's `assert*Declared` to decide. A run that is not strict keeps what they refuse in
- * `occurrences` instead of ending.
- */
 export class VocabCheck {
   readonly #registry: VocabRegistry
   readonly #strict: boolean

@@ -78,10 +78,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   const ctx = makeCtx({ imports: [makePrismaImport()] })
 
   it("does not claim `high` for a Map call that shares the delegate vocabulary", () => {
-    // The bug this suite exists for: a repository that holds both a PrismaClient and a
-    // plain `Map` cache made `this.cache.items.delete(key)` a high-confidence db.write,
-    // because the file imports Prisma and the target has three segments and a write verb.
-    // The receiver is what separates them, so the receiver is what sets the tier.
     const result = classifyPrismaCall(
       makeCall({ target: "this.cache.items.delete", argumentCount: 1, literalArgs: [null] }),
       ctx,
@@ -103,9 +99,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("still classifies an unrecognized receiver, at medium — recall is not the price", () => {
-    // A client bound under a house convention (`this.repo.user.create`) is not
-    // distinguishable from an unrelated object with the same shape, so the effect is
-    // recorded with the uncertainty stated rather than dropped.
     const result = classifyPrismaCall(makeCall({ target: "this.repo.user.create" }), ctx)
     expect(result?.effectId).toBe("db.write")
     expect(result?.confidence).toBe("medium")
@@ -113,8 +106,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("caps a dynamic receiver at medium", () => {
-    // `getPrisma().user.create()` normalizes to `getPrisma.user.create`. The name is a
-    // collapsed expression rather than a binding, so it is not evidence of a client.
     const result = classifyPrismaCall(
       makeCall({ target: "getPrisma.user.create", dynamicReceiver: true }),
       ctx,
@@ -133,9 +124,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("returns null for a delegate verb called with a literal — no delegate takes one", () => {
-    // `map.delete("session")` / `set.delete("id")`: a Prisma delegate takes an options
-    // object or nothing, so a literal first argument rules the call out entirely rather
-    // than leaving it to the receiver's name.
     expect(
       classifyPrismaCall(
         makeCall({ target: "this.cache.items.delete", argumentCount: 1, literalArgs: ["session"] }),
@@ -145,10 +133,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("downgrades a delegate verb called with two arguments rather than dropping it", () => {
-    // A delegate takes one options object, so a second argument is evidence against — but
-    // `argumentCount` is a syntactic count (a comment inside the parentheses used to
-    // inflate it), and a miscount that erases a write logs nothing at all. The tier pays
-    // for the doubt instead.
     const result = classifyPrismaCall(
       makeCall({ target: "prisma.user.update", argumentCount: 2, literalArgs: [null, null] }),
       ctx,
@@ -158,9 +142,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("keeps a write whose argument list carries a comment", () => {
-    // `prisma.user.delete(\n  // hard delete\n  { where: { id } },\n)` reached this
-    // classifier as argumentCount=2 before `walkBody` stopped counting comments; the
-    // effect survives either way now.
     const result = classifyPrismaCall(
       makeCall({ target: "prisma.user.delete", argumentCount: 1, literalArgs: [null] }),
       ctx,
@@ -170,8 +151,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("leaves $transaction's own argument shapes alone", () => {
-    // `$transaction(fn, { timeout })` takes two arguments, which the delegate shape check
-    // would reject — the transaction branch deliberately does not run it.
     expect(
       classifyPrismaCall(
         makeCall({ target: "prisma.$transaction", argumentCount: 2, literalArgs: [null, null] }),
@@ -201,8 +180,6 @@ describe("classifyPrismaCall — negative paths", () => {
   })
 
   it("returns null for two-segment method calls that happen to reuse Prisma verb names", () => {
-    // Express `router.create(...)`, Array `.findMany` (hypothetical), etc. — files
-    // that colocate Prisma alongside these libraries would otherwise false-positive.
     expect(classifyPrismaCall(makeCall({ target: "router.create" }), ctxWithPrisma)).toBeNull()
     expect(classifyPrismaCall(makeCall({ target: "list.findMany" }), ctxWithPrisma)).toBeNull()
     expect(classifyPrismaCall(makeCall({ target: "queue.upsert" }), ctxWithPrisma)).toBeNull()
@@ -218,9 +195,6 @@ describe("classifyPrismaCall — negative paths", () => {
   })
 
   it("returns null for raw SQL escapes ($queryRaw / $executeRaw / $queryRawUnsafe)", () => {
-    // These are Prisma Client methods, but they do not fit the model.<verb> shape and
-    // they are deliberately not classified. Locking as regression pins so a future
-    // change that adds them cannot silently start matching them here first.
     expect(classifyPrismaCall(makeCall({ target: "prisma.$queryRaw" }), ctxWithPrisma)).toBeNull()
     expect(classifyPrismaCall(makeCall({ target: "prisma.$executeRaw" }), ctxWithPrisma)).toBeNull()
     expect(
@@ -235,8 +209,6 @@ describe("classifyPrismaCall — negative paths", () => {
   })
 
   it("returns null for a bare `$transaction` (no client segment)", () => {
-    // Naked `$transaction()` is not a Prisma call — the transaction API is a method on
-    // the client. Locking the 2-segment minimum for the transaction path.
     expect(classifyPrismaCall(makeCall({ target: "$transaction" }), ctxWithPrisma)).toBeNull()
   })
 
@@ -258,16 +230,11 @@ describe("classifyPrismaCall — malformed input fail-fast", () => {
     [".create", /empty segment/],
     ["prisma.user.", /empty segment/],
   ])("throws for the malformed target %j with or without a Prisma import", (target, message) => {
-    // Without the throw, `prisma..create` would false-classify as db.write. The import gate
-    // must NOT shadow the check, or the same upstream bug would surface only in
-    // Prisma-consuming files — locking the order at the test seam.
     expect(() => classifyPrismaCall(makeCall({ target }), ctxWithPrisma)).toThrow(message)
     expect(() => classifyPrismaCall(makeCall({ target }), ctxNoImport)).toThrow(message)
   })
 
   it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
-    // The name is now an importable const shared by four packages rather than a literal in
-    // this file, so nothing but this assertion catches `EFFECTS_DRIZZLE_PLUGIN_NAME` here.
     expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPrisma)).toThrow(
       /^effects-prisma \(/,
     )
@@ -305,9 +272,6 @@ describe("classifyPrismaCall — malformed input fail-fast", () => {
 
 describe("classifyPrismaCall — purity", () => {
   it("does not mutate the input CallCandidate or the observable data slices of ClassifyContext", () => {
-    // structuredClone would reject the VocabRegistry's function properties, so clone
-    // the data slices the classifier actually reads (file + owner + language) plus the
-    // CallCandidate. If any of those change, we know the classifier mutated its input.
     const ctx = makeCtx({ imports: [makePrismaImport()] })
     const call = makeCall({ target: "prisma.user.findMany", literalArgs: ["value"] })
     const fileSnapshot = structuredClone(ctx.file)
@@ -322,10 +286,6 @@ describe("classifyPrismaCall — purity", () => {
   })
 })
 
-// A model addressed through brackets arrives as `<computed>` in the model slot
-// (`lang-plugin.md`). That restores the third segment the delegate shape needs, and
-// segment count is exactly what keeps `queue.upsert(job)` unclassified — so the receiver
-// has to carry the claim alone.
 describe("classifyPrismaCall — a model segment that names nothing", () => {
   const ctx = makeCtx({ imports: [makePrismaImport()] })
 
@@ -348,8 +308,6 @@ describe("classifyPrismaCall — a model segment that names nothing", () => {
   })
 
   it("does not let the sentinel buy the delegate shape for an unrelated receiver", () => {
-    // The same three two-segment calls the gate above already refuses, written with
-    // brackets: `queues[id].upsert(job)`, `sets[key].delete(item)`, `router[name].create(x)`.
     for (const target of [
       "queues.<computed>.upsert",
       "sets.<computed>.delete",

@@ -4,21 +4,6 @@ import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { detectComponents } from "../src/index"
 
-/**
- * Detection decides `Component.languages` by counting file extensions, and it used to count
- * files the workspace had excluded: it carried a shorter copy of part of the core drop list and
- * read no `.gitignore` at all. A vendored copy or a generated client then put a language on a
- * component whose files this run never opened — a label that reaches the IR and is compared
- * against the next revision.
- *
- * What is aligned is the *drop* decision, not the routing one. The census counts every
- * extension it knows whether or not a plugin claims it, because `Component.languages` answers
- * what a component is written in rather than what a run parsed (component-detect.md).
- *
- * The threshold is ten files and a five-percent share, so every fixture here writes enough of
- * one language to clear it and enough of another to be the thing under test.
- */
-
 let workRoot: string
 
 /** Ten files of `extension` under `directory`, which is what the frequency filter needs. */
@@ -59,8 +44,6 @@ afterEach(async () => {
 
 describe("detection drops what discovery drops", () => {
   it("does not count a directory only the shared core list names", async () => {
-    // `out/` is one of the patterns detection's own list lacked — and it is where `aburi scan`
-    // puts its own artefacts, so a second run counted the first run's output.
     await writeLanguage("src", ".ts")
     await writeLanguage("out", ".py")
 
@@ -120,9 +103,6 @@ describe("what the drop decision is relative to", () => {
   }
 
   it("reads an ignore glob against the workspace root, not each component root", async () => {
-    // The reason the walk is one glob from the workspace root: `packages/app/fixtures/**`
-    // matches nothing when matched against a walk rooted at `packages/app`, and `fixtures/**`
-    // would then match both packages. `config.ignore` is documented workspace-root relative.
     await makeMonorepo()
 
     const components = await detectComponents({
@@ -136,13 +116,6 @@ describe("what the drop decision is relative to", () => {
   })
 
   it("counts three levels below each root, whichever root, with roots at different depths", async () => {
-    // One walk serves every root, so its depth is the deepest root's — which admits files that
-    // are too deep for a shallower one. The limit is per root, and only a layout whose roots
-    // disagree about depth can tell that apart from the walk's own cutoff.
-    //
-    // Both sides of the limit are here on purpose. A fixture that only ever asserts what is
-    // *excluded* is satisfied by a limit that is too small, which is how the depth spent this
-    // change one level shallower than every document said.
     await writeWorkspaceManifest(["packages/*", "packages/app/inner/*"])
     await writeFileAt("package.json", JSON.stringify({ name: "root", private: true }))
     await writeFileAt(join("packages", "app", "package.json"), JSON.stringify({ name: "app" }))
@@ -155,9 +128,6 @@ describe("what the drop decision is relative to", () => {
       join("packages", "app", "inner", "deep", "package.json"),
       JSON.stringify({ name: "deep" }),
     )
-    // Three below the deepest root and seven from the workspace root, so it is counted only if
-    // the walk went as deep as that root needed — and five below `packages/app`, so it must not
-    // reach the shallower component that contains it.
     await writeLanguage(join("packages", "app", "inner", "deep", "p", "q", "r"), ".rs")
 
     const components = await detectComponents({ workspaceRoot: workRoot })
@@ -168,9 +138,6 @@ describe("what the drop decision is relative to", () => {
   })
 
   it("holds the depth limit for the workspace root when it is one root among several", async () => {
-    // `.` is a component root beside deeper ones whenever an nx workspace has a `project.json`
-    // at the top as well as inside its packages. The walk then runs deeper than three levels
-    // for the deeper root's sake, and the root component must still not count what it reaches.
     await writeFileAt("nx.json", JSON.stringify({ version: 2 }))
     await writeFileAt("project.json", JSON.stringify({ name: "root" }))
     await writeFileAt("package.json", JSON.stringify({ name: "root", private: true }))
@@ -178,9 +145,6 @@ describe("what the drop decision is relative to", () => {
     await writeFileAt(join("packages", "app", "project.json"), JSON.stringify({ name: "app" }))
     await writeFileAt(join("packages", "app", "package.json"), JSON.stringify({ name: "app" }))
     await writeLanguage(join("packages", "app", "src"), ".ts")
-    // The `.` arm has its own limit and needs its own pair: three directories down is the last
-    // depth it counts, four the first it does not — and the walk reaches both for
-    // `packages/app`'s sake.
     await writeLanguage(join("a", "b", "c"), ".go")
     await writeLanguage(join("x", "y", "z", "w"), ".rb")
 
@@ -191,8 +155,6 @@ describe("what the drop decision is relative to", () => {
   })
 
   it("collects the files of a component root whose name is decomposed", async () => {
-    // The component root arrives NFC-normalized and the walk returns the filesystem's own
-    // spelling, so the two only meet if the comparison normalizes.
     const decomposed = "café".normalize("NFD")
     await writeFileAt("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n")
     await writeFileAt("package.json", JSON.stringify({ name: "root", private: true }))

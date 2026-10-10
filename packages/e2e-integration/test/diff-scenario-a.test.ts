@@ -5,15 +5,6 @@ import { describe, expect, it } from "vitest"
 import { useFixtureCheckout } from "../src/fixture"
 import { diffIRs, scanFixture } from "../src/scan-helper"
 
-/**
- * Scenario A — a PR that adds a validation Rule to an existing service method.
- *
- * The mutation edits `BillingService.applyRefund` so that it rejects a negative
- * `amountCents` before touching the invoice: one `throw` Rule added to the Symbol's body, so
- * `status: "changed"`, `delta.rules.added: 1`, `delta.logicChanged: true`, and the
- * `--fail-on changed` gate trips.
- */
-
 const fixture = useFixtureCheckout()
 
 describe("e2e diff — scenario A: single rule added to BillingService.applyRefund", () => {
@@ -22,8 +13,6 @@ describe("e2e diff — scenario A: single rule added to BillingService.applyRefu
 
     const target = resolve(fixture.root, "src/billing/billing.service.ts")
     const original = await readFile(target, "utf8")
-    // The inserted line embeds `${amountCents}` as literal source; built by concatenation so
-    // biome's `noTemplateCurlyInString` does not misread the intent.
     const dollar = "$"
     const guardLine = `    if (amountCents < 0) throw new Error(\`refund amount must be non-negative: ${dollar}{amountCents}\`)`
     const searchAnchor =
@@ -36,9 +25,6 @@ describe("e2e diff — scenario A: single rule added to BillingService.applyRefu
     const headIR = (await scanFixture(fixture.root)).ir
     const diff = diffIRs(baseIR, headIR)
 
-    // Two changes propagate from the mutation: the applyRefund method itself, and the
-    // enclosing BillingService class Symbol, whose fingerprint mixes the member Symbols.
-    // Everything else must be zero — the mutation is scoped to one method body.
     expect(diff.summary.changed).toBe(2)
     expect(diff.summary.added).toBe(0)
     expect(diff.summary.removed).toBe(0)

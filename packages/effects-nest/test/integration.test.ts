@@ -15,12 +15,6 @@ import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { classifyNestCall } from "../src/index"
 
-/**
- * End-to-end: parse a TypeScript source through `@aburi/lang-typescript`, walk each
- * Symbol's body to produce CallCandidate[], and confirm that the Nest classifier
- * assigns `event.publish` for the right shapes and null for false-positive lookalikes.
- */
-
 async function classifyCalls(
   path: string,
   source: string,
@@ -94,8 +88,6 @@ export function publish(eventBus: EventEmitter2) {
   })
 
   it("returns null for socket.emit(...) even inside a file that also imports @nestjs/event-emitter", async () => {
-    // socket.emit is the @nestjs/websockets API — same method name, different meaning.
-    // The name-hint gate is what stops this from false-classifying.
     const results = await classifyCalls(
       "src/gateway.ts",
       `import { EventEmitter2 } from "@nestjs/event-emitter"

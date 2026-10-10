@@ -6,11 +6,6 @@ import { IR_JSON_FILENAME } from "../src"
 import { runCli } from "../src/run"
 import { MemStream } from "./fixtures"
 
-/**
- * The two places a config can hold the wrong vocabulary and still pass the schema: a detector
- * id where a plugin ref belongs, and a plugin name where a framework id belongs.
- */
-
 let workRoot = ""
 
 beforeEach(async () => {

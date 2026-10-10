@@ -5,32 +5,11 @@ import { findChild, firstNonCommentChild, walkDescendants } from "./ast-helpers"
 import { maskedImportSpecifier } from "./import-type-reparse"
 import { readStaticString } from "./string-escape"
 
-/**
- * The import sites a file declares, and what was wrong with the ones that could not become
- * edges.
- *
- * The two travel together because an edge withdrawn without a diagnostic is indistinguishable
- * from a file that never had the import — and a specifier the reader refuses is exactly the
- * case where the author needs to hear about it.
- */
 export interface ImportExtraction {
   edges: ImportEdge[]
   errors: ParseError[]
 }
 
-/**
- * Walk the top level of the parsed module and produce an ImportEdge per import site.
- *
- * Covers the shapes the design contract enumerates:
- *   - Static named / default / mixed:  `import Foo, { A as B, C } from './x'`
- *   - Namespace:                       `import * as Foo from 'z'`
- *   - CommonJS interop:                `import Foo = require('./x')`
- *   - Dynamic:                         `await import('./x')`, `import('./x').then(...)`
- *
- * Type-only imports (`import type {...}`) still produce an ImportEdge — the design does not
- * separate value and type edges, and downstream consumers can use component / language
- * information if they need to filter.
- */
 export function extractImports(tree: Tree, _source: string): ImportExtraction {
   const edges: ImportEdge[] = []
   const errors: ParseError[] = []
@@ -51,26 +30,10 @@ export function extractImports(tree: Tree, _source: string): ImportExtraction {
   walkForDynamicImports(root, edges, errors)
 
   edges.sort((a, b) => a.line - b.line || compareCodeUnit(a.source, b.source))
-  // Both lists are put in source order, and for the same reason: the dynamic-import pass runs
-  // after the statement pass, so its findings would otherwise trail the file's static imports
-  // whatever line they were written on.
   errors.sort((a, b) => a.line - b.line || a.column - b.column)
-  // Errors are not deduplicated the way edges are. `dedupeEdges` keys on the line among other
-  // things, so it only ever collapses two writings on one line — and two broken specifiers on
-  // one line are still two places to go and fix.
   return { edges: dedupeEdges(edges), errors }
 }
 
-/**
- * `import ... from '...'` — read the module specifier and every imported symbol shape.
- * A single import statement can produce more than one ImportEdge when a namespace binding
- * co-occurs with named or default bindings: keeping both edges preserves the "this module
- * is referenced wholesale" signal (`*`) alongside the concrete bindings (`Foo`, `A`, `B`)
- * that downstream dependency analysis needs.
- *
- * Missing clauses (bare `import './side-effect'`) still produce a `"*"` edge so the
- * dependency relationship is visible in the IR.
- */
 function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
   const requireClause = findChild(node, "import_require_clause")
   if (requireClause !== null) return readRequireClause(node, requireClause, errors)
@@ -123,11 +86,6 @@ function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
  * edge no binding is needed to state.
  */
 function readRequireClause(statement: Node, clause: Node, errors: ParseError[]): ImportEdge[] {
-  // The grammar admits nothing but a string literal for the specifier, so a computed
-  // argument is a syntax error the parser reports for itself — but error recovery leaves the
-  // operand it could read as a direct child of the clause, with the `source` field attached
-  // to it. `require("a" + b)` would answer `a`, and `require('./m', 'y')` would answer the
-  // second argument. A clause that did not parse is not read at all.
   if (clause.hasError) return []
   const source = readModuleSpecifier(findChild(clause, "string"), "import", errors)
   if (source === null) return []
@@ -137,23 +95,6 @@ function readRequireClause(statement: Node, clause: Node, errors: ParseError[]):
   return [{ source, symbols: "*", line, dynamic: false, namespaceBinding: binding.text }]
 }
 
-/**
- * Break an import_clause into its named identifiers and namespace binding.
- * `readImportStatement` turns the pair into one or two edges depending on
- * which shapes are present.
- *
- * Aliased named imports (`{ A as B }`) are emitted as the composite string
- * `"A as B"` so downstream consumers see BOTH the exported name (A — the one
- * that matches the target module's Symbol id) and the local rebind (B — the
- * one the caller writes at the call site). Splitting on ` as ` recovers both
- * halves without a second AST pass. Un-aliased entries stay as the plain
- * exported name.
- *
- * Namespace imports (`* as N`) carry the local binding N on
- * `ImportEdge.namespaceBinding` — recovering it from the module specifier
- * (`./util-helpers` → `helpers`?) is guesswork that fails on every renamed or
- * kebab-cased module.
- */
 function readImportClauseParts(clause: Node): {
   names: string[]
   namespaceBinding: string | null
@@ -178,8 +119,6 @@ function readImportClauseParts(clause: Node): {
       case "named_imports":
         for (const spec of child.namedChildren) {
           if (spec === null || spec.type !== "import_specifier") continue
-          // `{ A }` or `{ A as B }` — grammar exposes both `name` (imported) and `alias`
-          // (local). Emit "A as B" when the alias differs; otherwise emit the bare name.
           const exportedName = spec.childForFieldName("name")
           if (exportedName === null || exportedName.type !== "identifier") continue
           const aliasNode = spec.childForFieldName("alias")
@@ -195,10 +134,6 @@ function readImportClauseParts(clause: Node): {
   return { names, namespaceBinding }
 }
 
-/**
- * `export { X } from './y'` — a re-export is functionally a dependency on `./y`, so surface
- * it as a static ImportEdge. `export * from './y'` collapses to `"*"`.
- */
 function readReExport(node: Node, errors: ParseError[]): ImportEdge | null {
   const source = readModuleSpecifier(node.childForFieldName("source"), "re-export", errors)
   if (source === null) return null
@@ -222,11 +157,6 @@ function readReExport(node: Node, errors: ParseError[]): ImportEdge | null {
   return { source, symbols: names.length > 0 ? names : "*", line, dynamic: false }
 }
 
-/**
- * Dynamic imports use the `import(...)` grammar (a call expression whose callee is the
- * `import` keyword). Walk the tree and emit an edge for every one we find, and for every
- * `import("…")` type the reparse stood a name in for, which a clean parse would have read as one.
- */
 function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseError[]): void {
   for (const node of walkDescendants(root)) {
     const masked = node.type === "identifier" ? maskedImportSpecifier(node) : undefined
@@ -237,9 +167,6 @@ function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseErr
     const callee = node.childForFieldName("function")
     if (callee === null || callee.type !== "import") continue
     const args = node.childForFieldName("arguments")
-    // The specifier is the first argument that is not a comment. A magic comment
-    // (`import(/* webpackChunkName */ './m')`) is a named node sitting in front of it,
-    // and reading child zero unconditionally would hand the reader the comment.
     const specifier =
       args !== null
         ? readModuleSpecifier(firstNonCommentChild(args), "dynamic import", errors)
@@ -300,11 +227,6 @@ function readModuleSpecifier(
   return null
 }
 
-/**
- * Which construct the specifier belonged to, so the diagnostic names what the reader is
- * looking at. `export * from ""` is not an import, and being told it is sends the author
- * looking at the wrong line.
- */
 type ImportSite = "import" | "re-export" | "dynamic import"
 
 /**

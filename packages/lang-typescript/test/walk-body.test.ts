@@ -92,10 +92,6 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 
   it("counts arguments, not the comments written between them", async () => {
-    // Comments are grammar `extras`, so tree-sitter hangs them wherever they were
-    // written — a comment inside the parentheses is a named child of the argument list
-    // like any argument is. Counting it made `db.delete(\n  users, // why\n)` a
-    // two-argument call, which an effect plugin reads as a different API entirely.
     const { calls } = await walkFirstSymbol(
       "export function f() { doThing(\n  users, // soft delete is not used\n) }",
     )
@@ -105,8 +101,6 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 
   it("keeps literalArgs aligned when a comment leads the argument list", async () => {
-    // The positional damage is the worse half: a leading comment took slot 0, so a
-    // reader asking whether the first argument is a literal was asking about a comment.
     const { calls } = await walkFirstSymbol(
       "export function f() { doThing(/* the table */ 'users', x) }",
     )
@@ -130,9 +124,6 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 
   it("records a literal argument's escapes as the characters they name", async () => {
-    // The argument is read through the string decoder, so `\t` is a tab. Dropping the escape
-    // answered `SELECT\\t1` — the author's source text with a backslash still in it, which is
-    // not a query anything runs and reads in the IR exactly like one that is.
     const { calls } = await walkFirstSymbol(
       `export function f() { db.query("SELECT${BACKSLASH}t1") }`,
     )
@@ -142,10 +133,6 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 
   it("keeps two literal arguments apart when neither could be read at all", async () => {
-    // `"\u12b"` is an invalid escape, so each literal's whole contents parse as an ERROR node
-    // and decode to nothing. Recording both as `""` reports two calls made with the same
-    // argument, which is what a reader of `literalArgs` goes on; the literal's own text is
-    // what the author wrote, and it keeps the two apart.
     const { calls } = await walkFirstSymbol(
       [
         "export function f() {",
@@ -162,17 +149,10 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 })
 
-/**
- * An arrow written with an expression body returns that expression. Reading it as anything
- * other than `return <expr>` makes one function report differently by spelling: the block
- * twin gets a `return` rule, and an edit to the concise one moves no `logic` fingerprint.
- */
 describe("walkBody — a concise arrow body (LP19a)", () => {
   const rulesOf = async (source: string, path?: string) =>
     (await walkFirstSymbol(source, path)).rules
 
-  // Each row spells its block twin out rather than deriving it from the arrow, so a row whose
-  // two spellings genuinely differ fails instead of being rewritten into agreement.
   it.each([
     [
       "a comparison",
@@ -263,9 +243,6 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     expect(calls.map((c) => c.target)).toEqual(targets)
   })
 
-  // Only a walk root's body is read as a returned value. An arrow inside another body is walked
-  // as part of it, so its expression adds nothing, even where a block-bodied callback's
-  // `return` would land on the enclosing Symbol.
   it.each([
     [
       "a callback inside the body",
@@ -377,8 +354,6 @@ describe("walkBody — parameter defaults (LP20d)", () => {
     return (await walkFirstSymbol(source)).calls.map((c) => c.target)
   }
 
-  // Everything on one line, so the line sort keeps the order the walk visited in and a default
-  // ahead of the body is observable.
   it.each([
     ["a function", "export function f(x = g()) { h() }", ["g", "h"]],
     ["an arrow", "export const a = (y = k()) => l()", ["k", "l"]],
@@ -410,10 +385,6 @@ describe("walkBody — parameter defaults (LP20d)", () => {
   })
 })
 
-// The `dynamic` diagnostic bucket of call-resolution.md cannot be recovered
-// from `target` alone: `getRepo().save()` normalizes to "getRepo.save", which is
-// spelled exactly like a genuine `Class.method` qname. `dynamicReceiver` keeps
-// the distinction alive across the AST boundary.
 describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", () => {
   it("flags a call-expression receiver", async () => {
     const { calls } = await walkFirstSymbol("export function f() { getRepo().save(x) }")
@@ -459,12 +430,6 @@ describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", (
     expect(call?.dynamicReceiver).toBe(true)
   })
 
-  // A receiver shape the normalizer does not model ("opaque") is NOT evidence of
-  // dynamic dispatch on its own — `svc!` still names a binding. It only counts
-  // once it appears inside explicit parentheses, which is how a real expression
-  // receiver has to be written. These two cases keep the `opaque` and
-  // `parenthesized` branches honest; without them either could collapse into the
-  // other and every test above would still pass.
   it("does not flag a non-null assertion — it still names a binding", async () => {
     const { calls } = await walkFirstSymbol("export function f(svc?: any) { svc!.save() }")
     const call = calls.find((c) => c.target.endsWith(".save"))
@@ -493,11 +458,6 @@ describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", (
   })
 })
 
-/**
- * A receiver the normalizer does not model contributes the reserved `<computed>` segment, never
- * its source text: the text of `[...names]` holds `...`, which is two empty segments under the
- * normalized-callee contract, and every effect plugin's guard throws on one.
- */
 describe("walkBody — unmodelled receivers answer `<computed>`", () => {
   it.each([
     ["an array literal", "return [...names].sort()", "<computed>.sort"],
@@ -554,9 +514,6 @@ describe("walkBody — unmodelled receivers answer `<computed>`", () => {
     expect(calls.map((c) => c.target)).toEqual(["this.repo!.save", "svc!.save"])
   })
 
-  // A wrapper other than `!` binds looser than `.`, so as a receiver it is always parenthesized,
-  // and a parenthesized wrapper reads as an expression receiver. `<Foo>x` keeps the value last,
-  // which is why it has its own branch; `src/a.ts` routes to the grammar that parses it.
   it.each([
     ["`as`", "(x as Foo).m()", "x as Foo.m"],
     ["`satisfies`", "(x satisfies Foo).m()", "x satisfies Foo.m"],
@@ -573,12 +530,6 @@ describe("walkBody — unmodelled receivers answer `<computed>`", () => {
   })
 })
 
-// A bracket access in a callee (`lang-plugin.md`, LP20j / LP20k). Reading only the
-// object part answered `prisma.create` for `prisma["user"].create()` — a call that is
-// nowhere in the program, spelled like an ordinary two-segment method call, and one
-// segment short of the delegate shape `effects-prisma` needs, so the `db.write` went with
-// it. A literal index is the segment it spells; anything else is the `<computed>` segment,
-// which no id and no Symbol name can hold.
 describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
   it("folds a string-literal index into the target as its own segment", async () => {
     const { calls } = await walkFirstSymbol(
@@ -654,9 +605,6 @@ describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
   })
 
   it("refuses an index the parser recovered rather than read", async () => {
-    // `prisma["user" "audit"]` is a missing operator. Recovery drops an ERROR beside the
-    // literals and leaves `"audit"` in the index field, whole and spelling a model the
-    // source does not name — which would otherwise be a write on `prisma.audit` at `high`.
     const { calls } = await walkFirstSymbol(
       'export function f(prisma: any) { prisma["user" "audit"].create({}) }',
     )
@@ -666,8 +614,6 @@ describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
   })
 
   it("refuses a literal only half of which parsed", async () => {
-    // `"a\\u12b"` is an ill-formed unicode escape: the grammar reads `a` and stands the rest
-    // as an ERROR *inside* the literal, so the decode is partial rather than absent.
     const { calls } = await walkFirstSymbol('export function f(obj: any) { obj["a\\u12b"].m() }')
     const call = calls.find((c) => c.target.endsWith(".m"))
     expect(call?.target).toBe("obj.<computed>.m")
@@ -675,9 +621,6 @@ describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
   })
 
   it("refuses a literal that spells a whole qualified name rather than one segment", async () => {
-    // The predicate is `isQnameSegment`, not `isQualifiedName`: `obj["a.b"]` addresses one
-    // property whose name contains a dot, and folding it would mint the two segments
-    // `obj.a.b` out of it — a receiver `a` the source never wrote.
     const { calls } = await walkFirstSymbol('export function f(obj: any) { obj["a.b"].m() }')
     const call = calls.find((c) => c.target.endsWith(".m"))
     expect(call?.target).toBe("obj.<computed>.m")
@@ -685,8 +628,6 @@ describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
   })
 
   it("refuses a literal that spells a private name", async () => {
-    // `obj["#v"]` is the public property with those characters; `obj.#v` is another member.
-    // `isQnameSegment` admits `#v` only when asked, and a decoded string never asks.
     const { calls } = await walkFirstSymbol('export function f(obj: any) { obj["#v"].m() }')
     const call = calls.find((c) => c.target.endsWith(".m"))
     expect(call?.target).toBe("obj.<computed>.m")
@@ -719,8 +660,6 @@ describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
   })
 
   it("reports a computed callee as `<computed>` and marks it dynamic", async () => {
-    // The name of the function being called is what the brackets hid, so there is no name
-    // to record — and no tier could resolve one.
     const { calls } = await walkFirstSymbol(
       "export function f(handlers: any, name: string) { handlers[name]() }",
     )

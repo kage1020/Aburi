@@ -1,8 +1,3 @@
-/**
- * Typed wrappers around the 4 LSP requests the enrichment pass uses
- * (lsp-enrichment.md). Every wrapper takes an explicit `timeoutMs` so callers
- * can enforce per-request budgets uniformly.
- */
 import {
   type DocumentSymbol,
   DocumentSymbolRequest,

@@ -6,27 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, type GitRunner, runDiff } from "../src"
 import { fakeGit } from "./fixtures"
 
-/**
- * A ref diff scans two checkouts of one workspace, and the temporary directory the base one
- * lives in must not change what that workspace is called. Component detection reads the
- * directory name for a Component rooted at the workspace root (component-detect.md), so a
- * worktree at a fixed path named `base` gave the two sides different Component ids: a workspace
- * declaring neither a package name nor explicit `components[]` reported one Component added and
- * one removed on every run. The rule and its two exceptions are cli-spec.md step 2.
- */
-
 let scratch = ""
 
 const CONFIG_SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
-/**
- * A workspace with no `package.json`, so nothing declares a Component name and detection has
- * only the directory to go on — the case the phantom add/remove was visible in.
- *
- * The `.git` file is what a real `git worktree add` leaves behind, and it is what stops
- * `detectWorkspaceRoot` walking above the checkout. Without it the fixture relies on there
- * being no marker anywhere above `tmpdir`, which is a property of the machine, not the test.
- */
 async function writeWorkspace(directory: string): Promise<void> {
   await mkdir(resolve(directory, "src"), { recursive: true })
   await writeFile(
@@ -42,11 +25,6 @@ async function writeWorkspace(directory: string): Promise<void> {
   await writeFile(resolve(directory, "src/a.ts"), "export function alpha() { return 1 }\n", "utf8")
 }
 
-/**
- * `git` far enough to materialise the base revision: the two sides hold the same source.
- * Anything `resolveViaGit` does not issue today throws rather than answering success, so a
- * newly added git call is not covered by a fake that cannot fail.
- */
 function makeGit(onAdd?: (worktreeDir: string) => void): GitRunner {
   return fakeGit({
     unmodelled: "throw",
@@ -59,20 +37,11 @@ function makeGit(onAdd?: (worktreeDir: string) => void): GitRunner {
 
 interface DiffRun {
   diff: DiffResult
-  /** Every path handed to `worktree add`, in order. */
   worktreePaths: string[]
   warnings: string[]
   exitCode: number
 }
 
-/**
- * One ref diff, with everything the command says collected rather than discarded.
- *
- * `warn` is the sink for cleanup failures, rename-collection failures and — through
- * `runScanInDir` — every scan incident from both sides. Dropping it would leave
- * `componentsAdded: 0` to be satisfied just as well by two sides that are equally broken, so
- * the warnings and the exit code are asserted beside the counts.
- */
 async function runRefDiff(cwd: string, outputDir: string): Promise<DiffRun> {
   const worktreePaths: string[] = []
   const warnings: string[] = []
@@ -112,9 +81,6 @@ describe("runDiff refspec mode — Component identity across the two checkouts",
   })
 
   it("materialises the base under `base/`, named after the head workspace directory", async () => {
-    // Both halves of the path are asserted: the leaf is what Component detection reads, and the
-    // `base/` level above it is what keeps the checkout from landing on the run's own temporary
-    // output directories. Flattening the path back would leave the leaf assertion green.
     await writeWorkspace(scratch)
 
     const run = await runRefDiff(scratch, resolve(scratch, "out"))
@@ -125,8 +91,6 @@ describe("runDiff refspec mode — Component identity across the two checkouts",
   })
 
   it("keeps the base checkout clear of the run's own output directories", async () => {
-    // The one workspace name that collides: flat, the base checkout and the base scan's output
-    // directory would be the same path, so the scan would write its IR into its own checkout.
     const workspace = resolve(scratch, "base-out")
     await writeWorkspace(workspace)
 
@@ -141,10 +105,6 @@ describe("runDiff refspec mode — Component identity across the two checkouts",
   })
 
   it("substitutes the one leaf git cannot spell, so the reader gets the scan's error", async () => {
-    // `git worktree add <parent>/@` fails with `fatal: not a git repository:
-    // <repo>/.git/worktrees/@`, which reads as the reader's own repository being broken.
-    // Substituting is safe rather than lucky: `@` kebab-cases to nothing, so this workspace has
-    // no valid Component id from detection either way, and the head scan says exactly that.
     const workspace = resolve(scratch, "@")
     await writeWorkspace(workspace)
     const worktreePaths: string[] = []
@@ -166,10 +126,6 @@ describe("runDiff refspec mode — Component identity across the two checkouts",
   })
 
   it("names the worktree after the workspace root, not the directory the command ran in", async () => {
-    // `resolveWorkspaceRoot(cwd)` rather than `cwd`: the head scan mints its ids from the
-    // workspace root, so a run started in a subdirectory has to name the root too. Under
-    // `basename(cwd)` the base side would be a Component called `sub` and the defect would be
-    // back for anyone running `aburi diff` from inside a package.
     await writeWorkspace(scratch)
     const inner = resolve(scratch, "sub")
     await mkdir(inner, { recursive: true })

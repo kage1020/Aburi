@@ -4,13 +4,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A handler map — behaviour grouped under one exported constant — had no Symbol for any of its
- * handlers: the constant was a `const` with no body, so a write inside a handler was reported
- * nowhere, an edit to one moved no fingerprint, and a call through the map resolved to nothing.
- * This runs the real pipeline.
- */
-
 const workspace = useScratchWorkspace("object-of-handlers")
 
 const lineup = { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] }
@@ -60,8 +53,6 @@ const VERSIONED = [
   "",
 ].join("\n")
 
-// Imported under another name, so the target names no Symbol and only the import can resolve it:
-// spelled `api.v1.users.remove`, it would also match the member's own name.
 const VERSIONED_ROUTE = [
   'import { api as routes } from "./api"',
   "",
@@ -117,9 +108,6 @@ describe("scan — a handler map", () => {
   })
 
   it("reports an edit to one handler as its logic change, and the map's as syntax only", async () => {
-    // The map is described by its whole declaration, as it was while it had no body, so the
-    // edit is in its syntax — as a method's edit is in its class's, whose string is the
-    // `class_body`. Its logic is what defining the object runs, which the edit does not touch.
     await workspace.writeSource("src/users.ts", api(DELETE))
     const baseIR = (await scanWith(workspace.root, lineup)).ir
     await workspace.writeSource("src/users.ts", api(SOFT_DELETE))
