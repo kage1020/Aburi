@@ -174,7 +174,7 @@ function dedupeEdges(edges: readonly ImportEdge[]): ImportEdge[] {
   for (const edge of edges) {
     const symbolsKey =
       edge.symbols === "*" ? '"*"' : JSON.stringify([...edge.symbols].sort(compareCodeUnit))
-    const key = `${edge.line}\t${edge.source}\t${edge.dynamic}\t${symbolsKey}`
+    const key = `${edge.line}\t${edge.source}\t${edge.dynamic}\t${symbolsKey}\t${edge.namespaceBinding ?? ""}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(edge)

@@ -2,55 +2,24 @@ import { describe, expect, it } from "vitest"
 import { BACKSLASH, emptySpecifierErrors, importsOf } from "./fixtures/ctx"
 
 describe("an escaped specifier names the module the author wrote", () => {
-  it("keeps a sibling file relative when its leading dot is escaped", async () => {
-    const { imports, errors } = await importsOf(`import x from "${BACKSLASH}x2E/e"`)
-
-    expect(imports).toEqual([{ source: "./e", symbols: ["default as x"], line: 1, dynamic: false }])
-    expect(errors).toEqual([])
-  })
-
   it.each([
-    ["a hex escape", `${BACKSLASH}x2E/e`, "./e"],
-    ["a four-digit unicode escape", `${BACKSLASH}u002E/e`, "./e"],
-    ["a braced unicode escape", `${BACKSLASH}u{2E}/e`, "./e"],
-  ])("restores the leading dot from %s", async (_label, written, expected) => {
-    const { imports } = await importsOf(`import x from "${written}"`)
-
-    expect(imports).toEqual([
-      { source: expected, symbols: ["default as x"], line: 1, dynamic: false },
-    ])
-  })
-
-  it("keeps a separator that was written as an escape", async () => {
-    // `./a/b` and `./ab` are two different files, and the old reader could not tell them apart.
-    const { imports } = await importsOf(`import x from "./a${BACKSLASH}u002Fb"`)
-
-    expect(imports).toEqual([
-      { source: "./a/b", symbols: ["default as x"], line: 1, dynamic: false },
-    ])
-  })
-
-  it.each([
+    ["a leading dot written as a hex escape", `${BACKSLASH}x2E/e`, "./e"],
+    ["a leading dot written as a four-digit unicode escape", `${BACKSLASH}u002E/e`, "./e"],
+    ["a leading dot written as a braced unicode escape", `${BACKSLASH}u{2E}/e`, "./e"],
+    ["a separator written as an escape, which `./ab` is not", `./a${BACKSLASH}u002Fb`, "./a/b"],
+    ["an escape after the dot-slash", `./${BACKSLASH}te`, "./\te"],
     ["a tab", `./a${BACKSLASH}tb`, "./a\tb"],
     ["a newline", `./g${BACKSLASH}nh`, "./g\nh"],
     ["a quote", `./a${BACKSLASH}"b`, './a"b'],
     ["a backslash", `./a${BACKSLASH}${BACKSLASH}b`, `./a${BACKSLASH}b`],
     ["an identity escape", `./${BACKSLASH}ab`, "./ab"],
-  ])("carries %s through instead of deleting it", async (_label, written, expected) => {
+  ])("decodes %s", async (_label, written, expected) => {
     const { imports, errors } = await importsOf(`import x from "${written}"`)
 
     expect(imports).toEqual([
       { source: expected, symbols: ["default as x"], line: 1, dynamic: false },
     ])
     expect(errors).toEqual([])
-  })
-
-  it("stays relative when the escape sits after the dot-slash", async () => {
-    const { imports } = await importsOf(`import x from "./${BACKSLASH}te"`)
-
-    expect(imports).toEqual([
-      { source: "./\te", symbols: ["default as x"], line: 1, dynamic: false },
-    ])
   })
 
   it("decodes on the dynamic path too", async () => {

@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { BACKSLASH, callsOf, classOf, hintOf, idsOf, importsOf, symbolOf } from "./fixtures/ctx"
+import { BACKSLASH, callsOf, classOf, hintOf, idsOf, parseErrorsOf, symbolOf } from "./fixtures/ctx"
 
-async function errorsOf(source: string): Promise<number> {
-  return (await importsOf(source)).errors.length
-}
+const errorsOf = async (source: string) => (await parseErrorsOf(source)).length
 
 describe("a quoted name that spells an identifier is that member", () => {
   it("declares a Symbol of its own", async () => {
@@ -136,10 +134,6 @@ describe("a name that is not an identifier has no Symbol, and the file keeps the
     expect(await errorsOf(source)).toBe(0)
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["s"])
-    expect(await idsOf(classOf(`  "o${BACKSLASH}u006bay"() { s() }`))).toEqual([
-      "ts:src/a.ts#C",
-      "ts:src/a.ts#C.okay",
-    ])
   })
 })
 

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeAst } from "../src/index"
-import { symbolOf } from "./fixtures/ctx"
+import { normalizedOf } from "./fixtures/ctx"
 
 /** The node type a normalized string opens with: `(statement_block (…))` → `statement_block`. */
 function headOf(normalized: string): string | undefined {
@@ -8,7 +7,7 @@ function headOf(normalized: string): string | undefined {
 }
 
 async function normalizedHead(source: string, name: string): Promise<string | undefined> {
-  return headOf(normalizeAst(await symbolOf(source, `ts:src/a.ts#${name}`)))
+  return headOf(await normalizedOf(source, `ts:src/a.ts#${name}`))
 }
 
 describe("a declaration with a body of its own is described by the body", () => {
@@ -137,9 +136,7 @@ describe("a declaration whose body is a function written inside it is described 
 })
 
 describe("a Symbol several declarations wrote describes each of them once", () => {
-  async function alone(source: string, name: string): Promise<string> {
-    return normalizeAst(await symbolOf(source, `ts:src/a.ts#${name}`))
-  }
+  const alone = (source: string, name: string) => normalizedOf(source, `ts:src/a.ts#${name}`)
 
   it.each([
     [

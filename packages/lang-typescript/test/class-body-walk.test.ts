@@ -1,15 +1,5 @@
-import type { WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { extractSymbols, walkBody } from "../src/index"
-import {
-  callsOf,
-  classOf,
-  makeExtractionCtx,
-  parseSource,
-  requireTree,
-  walkOf,
-} from "./fixtures/ctx"
+import { callsOf, classOf, walkOf, walksOf } from "./fixtures/ctx"
 
 const MERGED_METHODS = [
   "export class C {",
@@ -264,16 +254,9 @@ describe("the two readers of “does this member have a Symbol?” agree", () =>
   ].join("\n")
 
   it("walks every member body exactly once, and the constructor's on the class as well", async () => {
-    const result = await parseSource(EVERY_MEMBER_SHAPE)
-    const ctx = makeExtractionCtx("src/a.ts", EVERY_MEMBER_SHAPE)
-    const symbols = extractSymbols(requireTree(result.tree), ctx)
-
     const owners = new Map<string, string[]>()
-    for (const symbol of symbols) {
-      const walkCtx: WalkContext<Node> = { ...ctx, symbol }
-      for (const call of walkBody(symbol, walkCtx).calls) {
-        owners.set(call.target, [...(owners.get(call.target) ?? []), symbol.id])
-      }
+    for (const [id, { calls }] of await walksOf(EVERY_MEMBER_SHAPE)) {
+      for (const { target } of calls) owners.set(target, [...(owners.get(target) ?? []), id])
     }
 
     const written = [

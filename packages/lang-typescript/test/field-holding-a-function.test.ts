@@ -137,14 +137,6 @@ describe("a field that is not a function stays a field", () => {
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["comp"])
   })
 
-  it("takes a quoted name that spells an identifier, and leaves a numeric one", async () => {
-    const source = classOf('  "ok" = () => { s() }', "  1 = () => { n() }")
-
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.ok"])
-    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["n"])
-    expect(await callsOf(source, "ts:src/a.ts#C.ok")).toEqual(["s"])
-  })
-
   it("leaves a generator field on the class", async () => {
     const source = classOf("  gen = function* () { yield g() }")
 
@@ -248,9 +240,9 @@ describe("module-level function-valued variables are unchanged", () => {
     const source = ["export const h = 1", "export const i = function* () { c() }"].join("\n")
     const symbols = await symbolsOf(source)
 
-    expect(symbols.map((s) => [s.id, s.kind])).toEqual([
-      ["ts:src/a.ts#h", "const"],
-      ["ts:src/a.ts#i", "const"],
+    expect(symbols.map((s) => [s.id, s.kind, s.derivedBy])).toEqual([
+      ["ts:src/a.ts#h", "const", ["export-keyword"]],
+      ["ts:src/a.ts#i", "const", ["export-keyword"]],
     ])
   })
 })

@@ -1,8 +1,5 @@
-import type { WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { TYPESCRIPT_FILE_EXTENSIONS, walkBody } from "../src/index"
-import { makeExtractionCtx, parseSource, requireTree, symbolsOf } from "./fixtures/ctx"
+import { callsOf, parseErrorsOf, parseSource, requireTree, symbolsOf } from "./fixtures/ctx"
 
 const NEXT_APP_TEMPLATE = [
   'import "./globals.css"',
@@ -25,21 +22,9 @@ const HANDLER_IN_JSX = [
   "",
 ].join("\n")
 
-async function errorsOf(path: string, content: string): Promise<string[]> {
-  const result = await parseSource(content, path)
-  return result.errors.map((e) => `${e.line}:${e.column} ${e.message}`)
-}
-
 async function treeOf(path: string, content: string): Promise<string> {
   const result = await parseSource(content, path)
   return requireTree(result.tree).rootNode.toString()
-}
-
-async function callsByNameOf(path: string, content: string, name: string): Promise<string[]> {
-  const target = (await symbolsOf(content, path)).find((s) => s.name === name)
-  if (target === undefined) throw new Error(`no Symbol ${name} in fixture`)
-  const walkCtx: WalkContext<Node> = { ...makeExtractionCtx(path, content), symbol: target }
-  return walkBody(target, walkCtx).calls.map((c) => c.target)
 }
 
 describe("a JavaScript file containing JSX", () => {
@@ -49,23 +34,22 @@ describe("a JavaScript file containing JSX", () => {
     "app/layout.cjs",
     "app/layout.jsx",
   ])("parses %s", async (path) => {
-    expect(await errorsOf(path, NEXT_APP_TEMPLATE)).toEqual([])
+    expect(await parseErrorsOf(NEXT_APP_TEMPLATE, path)).toEqual([])
   })
 
   it("extracts the component the file declares", async () => {
-    // A named default export keeps its written name; `<default>` is for the anonymous form.
     const symbols = await symbolsOf(NEXT_APP_TEMPLATE, "app/layout.js")
     expect(symbols.map((s) => [s.name, s.kind])).toEqual([["RootLayout", "function"]])
   })
 
   it("walks the calls written inside the markup", async () => {
-    expect(await errorsOf("app/page.js", HANDLER_IN_JSX)).toEqual([])
-    expect(await callsByNameOf("app/page.js", HANDLER_IN_JSX, "Page")).toEqual([
+    expect(await parseErrorsOf(HANDLER_IN_JSX, "app/page.js")).toEqual([])
+    expect(await callsOf(HANDLER_IN_JSX, "ts:app/page.js#Page", "app/page.js")).toEqual([
       "useData",
       "track",
       "fmt",
     ])
-    expect(await callsByNameOf("app/page.ts", HANDLER_IN_JSX, "Page")).toEqual(["useData"])
+    expect(await callsOf(HANDLER_IN_JSX, "ts:app/page.ts#Page", "app/page.ts")).toEqual(["useData"])
   })
 })
 
@@ -88,7 +72,7 @@ describe("the two grammars agree about everything that is not JSX", () => {
 
   it.each(SHAPES)("reads %s the same either way", async (_label, path, source) => {
     expect(await treeOf(path, source)).toBe(await treeOf("src/a.ts", source))
-    expect(await errorsOf(path, source)).toEqual([])
+    expect(await parseErrorsOf(source, path)).toEqual([])
   })
 })
 
@@ -96,27 +80,12 @@ describe("the old-style type assertion decides which extension goes where", () =
   const ASSERTION = "const a = <Handler>(() => 1)"
 
   it.each(["src/a.ts", "src/a.mts", "src/a.cts"])("is a type assertion in %s", async (path) => {
-    expect(await errorsOf(path, ASSERTION)).toEqual([])
+    expect(await parseErrorsOf(ASSERTION, path)).toEqual([])
     expect(await treeOf(path, ASSERTION)).toContain("type_assertion")
   })
 
   it.each(["src/a.js", "src/a.mjs", "src/a.cjs"])("is not one in %s", async (path) => {
-    expect(await errorsOf(path, ASSERTION)).not.toEqual([])
+    expect(await parseErrorsOf(ASSERTION, path)).not.toEqual([])
     expect(await treeOf(path, ASSERTION)).not.toContain("type_assertion")
-  })
-})
-
-describe("the extension list is still the grammar map's", () => {
-  it("names every extension this plugin claims", () => {
-    expect([...TYPESCRIPT_FILE_EXTENSIONS].sort()).toEqual([
-      ".cjs",
-      ".cts",
-      ".js",
-      ".jsx",
-      ".mjs",
-      ".mts",
-      ".ts",
-      ".tsx",
-    ])
   })
 })

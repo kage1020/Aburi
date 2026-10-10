@@ -118,9 +118,7 @@ function* spineCalls(call: Node): Iterable<Node> {
 }
 
 interface MemberCall {
-  /** Root identifier on the left of the chain (e.g. `app` in `app.route('/x').get(h)`). */
   receiver: string
-  /** Leaf method name (e.g. `get`). */
   method: string
   chained: boolean
 }
@@ -177,7 +175,6 @@ function firstCallExpression(exprStatement: Node): Node | null {
   return null
 }
 
-/** A call's argument list, or null when the parser recovered a call without one. */
 function argumentsOf(call: Node): Node | null {
   return call.childForFieldName("arguments") ?? findChild(call, "arguments")
 }
@@ -277,7 +274,6 @@ function makeDerivedBy(
   if (parsed.chained) tags.push("chained-call")
   if (path !== null) tags.push(`path-literal:${path}`)
   else if (names !== "") tags.push(`argument-names:${names}`)
-  // Says why a Symbol whose declaration is a call has a body at all.
   if (hasInlineHandler) tags.push("inline-handler")
   return tags
 }

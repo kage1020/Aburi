@@ -53,7 +53,6 @@ export function hasErrorChild(node: Node): boolean {
   )
 }
 
-/** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */
 export function hasChildOfType(node: Node, typeName: string): boolean {
   for (const child of node.children) {
     if (child !== null && child.type === typeName) return true
@@ -61,7 +60,6 @@ export function hasChildOfType(node: Node, typeName: string): boolean {
   return false
 }
 
-/** The first named child whose type matches `typeName`, or null. */
 export function findChild(node: Node, typeName: string): Node | null {
   for (const child of node.namedChildren) {
     if (child !== null && child.type === typeName) return child
@@ -78,13 +76,10 @@ export function firstNonCommentChild(node: Node): Node | null {
 }
 
 export interface WalkOptions {
-  /** Visit anonymous children too — a MISSING `)` is one. Named children only by default. */
   anonymous?: boolean
-  /** When it answers false for a node, that node's subtree is skipped; the node itself is still yielded. */
   descend?: (node: Node) => boolean
 }
 
-/** Every descendant of `root`, `root` first, in pre-order source order. */
 export function* walkDescendants(root: Node, options: WalkOptions = {}): Iterable<Node> {
   const anonymous = options.anonymous === true
   const stack: Node[] = [root]
@@ -101,7 +96,6 @@ export function* walkDescendants(root: Node, options: WalkOptions = {}): Iterabl
   }
 }
 
-/** What a `throw` statement throws; for `throw new X(…)` the constructor `X`, with `viaNew` set. */
 export interface ThrownValue {
   node: Node
   viaNew: boolean
@@ -127,7 +121,6 @@ export function inAmbientContext(node: Node): boolean {
   return false
 }
 
-/** Return the identifier text of a node's `name` field, or null when absent. */
 export function nameFieldText(node: Node): string | null {
   const name = node.childForFieldName("name")
   if (name === null) return null

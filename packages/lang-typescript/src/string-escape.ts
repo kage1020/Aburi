@@ -1,9 +1,7 @@
 import type { Node } from "web-tree-sitter"
 
 export interface DecodedLiteral {
-  /** The characters the literal's `string_fragment`s and `escape_sequence`s name, in order. */
   value: string
-  /** True when every named child read was a `string_fragment` or an `escape_sequence`. */
   whole: boolean
 }
 
@@ -26,7 +24,6 @@ export function decodeStringLiteralOrRaw(node: Node): string {
   return raw.length >= 2 && QUOTE.test(raw) ? raw.slice(1, -1) : raw
 }
 
-/** The quotes a literal can open with — a template's is the backtick. */
 const QUOTE = /^["'`]/
 
 export function decodeEscapeSequence(raw: string): string {
@@ -51,10 +48,8 @@ export function decodeEscapeSequence(raw: string): string {
   return body
 }
 
-/** The largest code point ECMAScript defines. The grammar admits braced escapes above it. */
 const MAX_CODE_POINT = 0x10ffff
 
-/** `\0` is NUL only on its own; `\01` is legacy octal and falls to the identity arm. */
 const NAMED_ESCAPES: ReadonlyMap<string, string> = new Map([
   ["n", "\n"],
   ["t", "\t"],

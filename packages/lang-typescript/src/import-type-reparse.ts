@@ -33,7 +33,6 @@ export function maskedImportSpecifier(node: Node): string | undefined {
   return MASKS.get(node.tree)?.get(node.startIndex)
 }
 
-/** Per adopted tree, the specifier of each mask by its start offset. */
 const MASKS = new WeakMap<Tree, Map<number, string>>()
 
 interface Span {

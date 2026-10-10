@@ -52,7 +52,6 @@ describe("a destructuring parameter lists the names it binds", () => {
     expect(method?.[0]?.bindings).toEqual(["save"])
   })
 
-  // `.tsx`, `.jsx` and every `.js` load the tsx grammar rather than the typescript one.
   it.each(["src/a.tsx", "src/a.jsx", "src/a.js"])("reads %s the same way", async (path) => {
     const source = "export function Card({ children }) { return <div>{children}</div> }"
     const card = (await symbolsOf(source, path)).find((s) => s.id === `ts:${path}#Card`)

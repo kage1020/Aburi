@@ -35,7 +35,6 @@ function readDecorator(node: Node): Decorator | null {
   if (written === null) return null
   const inner = throughParentheses(written)
   const line = node.startPosition.row + 1
-  // `raw` quotes what was written, parentheses included, whatever `inner` reads through.
   const raw = written.text
 
   if (inner.type === "call_expression") {
@@ -54,7 +53,6 @@ function readDecorator(node: Node): Decorator | null {
     }
   }
 
-  // Bare `@Foo` or `@Ns.Foo` — no arguments.
   const name = leafIdentifier(inner)
   return {
     name,

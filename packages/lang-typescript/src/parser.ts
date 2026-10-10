@@ -174,7 +174,6 @@ function isJsxEntityArtifact(node: Node): boolean {
   return parent.type === "string" && parent.parent?.type === "jsx_attribute"
 }
 
-/** Whether any token directly in this run is one of the four characters JSX text cannot hold. */
 function holdsJsxTextDelimiter(node: Node): boolean {
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i)
@@ -183,7 +182,6 @@ function holdsJsxTextDelimiter(node: Node): boolean {
   return false
 }
 
-/** The node types whose type parameters TypeScript lets carry `in` and `out`. */
 const VARIANCE_OWNERS: ReadonlySet<string> = new Set([
   "interface_declaration",
   "class_declaration",
@@ -192,7 +190,6 @@ const VARIANCE_OWNERS: ReadonlySet<string> = new Set([
   "type_alias_declaration",
 ])
 
-/** Of the owners above, the ones that also admit `const` on a type parameter (TS1277). */
 const CONST_OWNERS: ReadonlySet<string> = new Set([
   "class_declaration",
   "abstract_class_declaration",

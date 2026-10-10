@@ -2,12 +2,7 @@ import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { normalizeAst } from "../src/index"
-import { callsOf, parseSource, symbolOf, symbolsOf } from "./fixtures/ctx"
-
-async function errorsOf(content: string, path = "src/a.ts"): Promise<string[]> {
-  const result = await parseSource(content, path)
-  return result.errors.map((e) => `${e.line}:${e.column} ${e.message}`)
-}
+import { callsOf, parseErrorsOf, parseSource, symbolOf, symbolsOf } from "./fixtures/ctx"
 
 describe("a variance modifier is not reported as a parse error", () => {
   it.each([
@@ -42,7 +37,7 @@ describe("a variance modifier is not reported as a parse error", () => {
       "export class Ze<out T> extends D<T> implements E<T> { v!: T }",
     ],
   ])("%s", async (_label, source) => {
-    expect(await errorsOf(source)).toEqual([])
+    expect(await parseErrorsOf(source)).toEqual([])
   })
 
   it.each([
@@ -50,7 +45,7 @@ describe("a variance modifier is not reported as a parse error", () => {
     ["a variable named `out`", "export const out = 1"],
     ["`out` as the name after an `out` modifier", "export interface B<out out> { v: out }"],
   ])("never reported %s either", async (_label, source) => {
-    expect(await errorsOf(source)).toEqual([])
+    expect(await parseErrorsOf(source)).toEqual([])
   })
 })
 
@@ -75,13 +70,10 @@ describe("a list where recovery makes the modifier the ERROR", () => {
   it.each([
     ["`out`", "out Output = unknown"],
     ["`in out`", "in out Output = unknown"],
-    [
-      "a comment before the modifier",
-      "\n  /** @ts-ignore Cast variance */\n  out Output = unknown",
-    ],
+    ["a comment before the modifier", "\n  /** Cast variance */\n  out Output = unknown"],
     ["a comment after the parameter", "out Output = unknown /* first */"],
   ])("is silent for %s", async (_label, first) => {
-    expect(await errorsOf(listOf(first))).toEqual([])
+    expect(await parseErrorsOf(listOf(first))).toEqual([])
   })
 
   it.each([
@@ -89,12 +81,12 @@ describe("a list where recovery makes the modifier the ERROR", () => {
     ["`in` after `out`", "out in Output = unknown"],
     ["a word that is not a modifier", "foo Output = unknown"],
   ])("reports %s, and only that parameter", async (_label, first) => {
-    expect(await errorsOf(listOf(first))).toEqual(["1:20 syntax error"])
+    expect(await parseErrorsOf(listOf(first))).toEqual(["1:20 syntax error"])
   })
 
   it("reports every modifier in a method's list", async () => {
     const source = listOf("out Output = unknown", "export class F { m<", ">() {} }")
-    expect(await errorsOf(source)).toHaveLength(3)
+    expect(await parseErrorsOf(source)).toHaveLength(3)
   })
 })
 
@@ -109,19 +101,21 @@ describe("a `.tsx` file, whose grammar has the same gap", () => {
     ],
     ["a class expression", "export const Q = class<out T> {}"],
   ])("is silent for %s", async (_label, source) => {
-    expect(await errorsOf(source, TSX)).toEqual([])
+    expect(await parseErrorsOf(source, TSX)).toEqual([])
   })
 
   it("reports a repeated modifier", async () => {
-    expect(await errorsOf("export interface A<out out T> { v: T }", TSX)).toEqual([
+    expect(await parseErrorsOf("export interface A<out out T> { v: T }", TSX)).toEqual([
       "1:24 syntax error",
     ])
   })
 
   it("keeps the JSX `&` rule and this one apart in a file that has both", async () => {
     const both = "export interface A<out T> { v: T }\nexport const C = () => <div>a & b</div>"
-    expect(await errorsOf(both, TSX)).toEqual([])
-    expect(await errorsOf(both.replace("a & b", "a & } b"), TSX)).toEqual(["2:31 syntax error"])
+    expect(await parseErrorsOf(both, TSX)).toEqual([])
+    expect(await parseErrorsOf(both.replace("a & b", "a & } b"), TSX)).toEqual([
+      "2:31 syntax error",
+    ])
   })
 })
 
@@ -143,24 +137,24 @@ describe("a file `tsc`'s parser rejects still reports", () => {
     ["a modifier on a function's type parameter", "export function g<out T>(t: T) {}"],
     ["a truncation after a modifier", "export interface H<out T> { v: T"],
   ])("reports %s", async (_label, source) => {
-    expect(await errorsOf(source)).not.toEqual([])
+    expect(await parseErrorsOf(source)).not.toEqual([])
   })
 
   it("reports a name after a modifier's constraint, where the parameter already closed", async () => {
-    expect(await errorsOf("export interface I<out extends X T> { v: T }")).toEqual([
+    expect(await parseErrorsOf("export interface I<out extends X T> { v: T }")).toEqual([
       "1:34 syntax error",
     ])
   })
 
   it("reports a name between a constraint and a default, outside the parameter's head", async () => {
-    expect(await errorsOf("export interface O<out T extends X Y = Z> { v: T }")).toEqual([
+    expect(await parseErrorsOf("export interface O<out T extends X Y = Z> { v: T }")).toEqual([
       "1:36 syntax error",
     ])
   })
 
   it("reports a name after a constraint, and the modifier's error in the same parameter", async () => {
     // A stray piece after the parameter closed refuses the whole parameter, not only itself.
-    expect(await errorsOf("export interface J<out T extends X Y> { v: T }")).toEqual([
+    expect(await parseErrorsOf("export interface J<out T extends X Y> { v: T }")).toEqual([
       "1:24 syntax error",
       "1:36 syntax error",
     ])
@@ -180,7 +174,7 @@ describe("a file `tsc`'s parser rejects still reports", () => {
     ["`in`, on a type alias", "export type A<out in> = { v: number }"],
   ])("reports a modifier before a name `tsc` refuses: %s", async (_label, source) => {
     // `<out in>` and `<in in>` are the likely typos for `<in out T>`.
-    expect(await errorsOf(source)).not.toEqual([])
+    expect(await parseErrorsOf(source)).not.toEqual([])
   })
 
   it.each([
@@ -188,21 +182,20 @@ describe("a file `tsc`'s parser rejects still reports", () => {
     ["`out const` on an interface", "export interface A<out const T> { v: T }"],
     ["`in const out` on an interface", "export interface A<in const out T> { v: T }"],
     ["`const out` on a type alias", "export type S<const out T> = { v: T }"],
-  ])("reports %s, where `const` is refused (TS1277)", async (_label, source) => {
-    expect(await errorsOf(source)).not.toEqual([])
+  ])("reports %s, where tsc refuses `const`", async (_label, source) => {
+    expect(await parseErrorsOf(source)).not.toEqual([])
   })
 
   it("drops only the modifier's own error in a file that also has a real one", async () => {
-    // The modifier on line 1 is the grammar's; the unclosed call on line 2 is the file's.
-    expect(await errorsOf("export interface A<out T> { v: T }\nexport const b = f(")).toEqual([
+    expect(await parseErrorsOf("export interface A<out T> { v: T }\nexport const b = f(")).toEqual([
       "2:1 syntax error",
     ])
   })
 
   it("is counted the same way where the file is parsed twice for an `import(…)` type", async () => {
     const withImport = 'type T = import("./m").X\nexport interface A<out U> { v: U }'
-    expect(await errorsOf(withImport)).toEqual([])
-    expect(await errorsOf(`${withImport}\nexport const b = f(`)).toEqual(["3:1 syntax error"])
+    expect(await parseErrorsOf(withImport)).toEqual([])
+    expect(await parseErrorsOf(`${withImport}\nexport const b = f(`)).toEqual(["3:1 syntax error"])
   })
 })
 
@@ -243,8 +236,8 @@ describe("the Symbols are the same with the modifiers as without them", () => {
 
   it("parses the twin cleanly, so the comparison is against a tree with no error in it", async () => {
     expect(WITHOUT_MODIFIERS).not.toMatch(/\b(in|out) /)
-    expect(await errorsOf(WITHOUT_MODIFIERS)).toEqual([])
-    expect(await errorsOf(WITH_MODIFIERS)).toEqual([])
+    expect(await parseErrorsOf(WITHOUT_MODIFIERS)).toEqual([])
+    expect(await parseErrorsOf(WITH_MODIFIERS)).toEqual([])
   })
 
   it("extracts the same ids, kinds and signatures, through both recovery shapes", async () => {
@@ -298,7 +291,7 @@ describe("where the rule stops", () => {
     ["a union", "export type H<out T> = T | Promise<T>"],
     ["`in out` before a parameter named `out`", "export interface Z<in out> { v: out }"],
   ])("drops the modifier on %s, which only `tsc`'s checker refuses", async (_label, source) => {
-    expect(await errorsOf(source)).toEqual([])
+    expect(await parseErrorsOf(source)).toEqual([])
   })
 
   const astOf = async (source: string) => {

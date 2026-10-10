@@ -1,13 +1,5 @@
-import type { WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { walkBody } from "../src/index"
-import { makeExtractionCtx, parseSource, symbolsOf } from "./fixtures/ctx"
-
-async function errorsOf(path: string, content: string): Promise<string[]> {
-  const result = await parseSource(content, path)
-  return result.errors.map((e) => `${e.line}:${e.column} ${e.message}`)
-}
+import { callsOf, parseErrorsOf, symbolsOf } from "./fixtures/ctx"
 
 describe("the grammar's `&` in JSX is not reported as a parse error", () => {
   it.each([
@@ -24,11 +16,11 @@ describe("the grammar's `&` in JSX is not reported as a parse error", () => {
     ["a query string inside an attribute", 'export const E = () => <a href="/x?a=1&b=2">go</a>'],
     ["inside a self-closing element's attribute", 'export const P = () => <img alt="a&b" />'],
   ])("%s", async (_label, source) => {
-    expect(await errorsOf("src/a.tsx", source)).toEqual([])
+    expect(await parseErrorsOf(source, "src/a.tsx")).toEqual([])
   })
 
   it("is silent on `.jsx` too, which routes to the same grammar", async () => {
-    expect(await errorsOf("src/a.jsx", "export const A = () => <p>a & b</p>")).toEqual([])
+    expect(await parseErrorsOf("export const A = () => <p>a & b</p>", "src/a.jsx")).toEqual([])
   })
 
   it.each([
@@ -47,13 +39,13 @@ describe("the grammar's `&` in JSX is not reported as a parse error", () => {
     ],
     ["a `.ts` file's bitwise `&`", "src/a.ts", "export const i = (a: number, b: number) => a & b"],
   ])("never reported it for %s either", async (_label, path, source) => {
-    expect(await errorsOf(path, source)).toEqual([])
+    expect(await parseErrorsOf(source, path)).toEqual([])
   })
 })
 
 describe("a file that really is broken still reports", () => {
   it("reports a truncation that carries an ampersand of its own", async () => {
-    expect(await errorsOf("src/a.tsx", "export const U = () => <div><p>a & b</p>")).toEqual([
+    expect(await parseErrorsOf("export const U = () => <div><p>a & b</p>", "src/a.tsx")).toEqual([
       "1:1 syntax error",
     ])
   })
@@ -63,11 +55,6 @@ describe("a file that really is broken still reports", () => {
     ["a stray `<` among the children", "export const V = () => <div><p>x</p><</div>"],
     ["an unclosed call before the markup closes", "export const W = () => <div><p>{foo(</p></div>"],
     ["an attribute whose quote never closes", 'export const X = () => <p title="a>x</p>'],
-  ])("reports %s", async (_label, source) => {
-    expect(await errorsOf("src/a.tsx", source)).not.toEqual([])
-  })
-
-  it.each([
     ["a stray brace after an ampersand", "export const A = () => <div>a & } b</div>"],
     ["a stray angle bracket after an ampersand", "export const B = () => <div>a & > b</div>"],
     [
@@ -75,29 +62,21 @@ describe("a file that really is broken still reports", () => {
       "export const C = () => (\n  <p>\n    a & b\n    {foo(}\n  </p>\n)",
     ],
   ])("reports %s", async (_label, source) => {
-    expect(await errorsOf("src/a.tsx", source)).not.toEqual([])
+    expect(await parseErrorsOf(source, "src/a.tsx")).not.toEqual([])
   })
 
   it("keeps the delimiter rule out of an attribute's string, where all four are ordinary", async () => {
     expect(
-      await errorsOf("src/a.tsx", 'export const D = () => <a href="/x?a=1&b=2}">go</a>'),
+      await parseErrorsOf('export const D = () => <a href="/x?a=1&b=2}">go</a>', "src/a.tsx"),
     ).toEqual([])
   })
 })
 
-/** The ids extraction produced, and the calls a walk of `name`'s body found. */
-async function shapeOf(
-  source: string,
-  name: string,
-  path: string,
-): Promise<{ symbols: string[]; calls: string[] }> {
-  const symbols = await symbolsOf(source, path)
-  const target = symbols.find((s) => s.name === name)
-  if (target === undefined) throw new Error(`no Symbol ${name} in fixture`)
-  const walkCtx: WalkContext<Node> = { ...makeExtractionCtx(path, source), symbol: target }
+/** The ids and kinds extraction produced, and the calls a walk of `id`'s body found. */
+async function shapeOf(source: string, id: string, path: string) {
   return {
-    symbols: symbols.map((s) => `${s.id} ${s.kind}`),
-    calls: walkBody(target, walkCtx).calls.map((c) => c.target),
+    symbols: (await symbolsOf(source, path)).map((s) => `${s.id} ${s.kind}`),
+    calls: await callsOf(source, id, path),
   }
 }
 
@@ -118,9 +97,10 @@ describe("the Symbols are the same with `&` as with `&amp;`", () => {
   const ESCAPED = WITH_AMPERSAND.replace("Subscription & Billing", "Subscription &amp; Billing")
 
   it("extracts the same ids and the same calls, including one sited after the `&`", async () => {
-    const withAmpersand = await shapeOf(WITH_AMPERSAND, "Card", "src/card.tsx")
+    const card = "ts:src/card.tsx#Card"
+    const withAmpersand = await shapeOf(WITH_AMPERSAND, card, "src/card.tsx")
     expect(withAmpersand.calls).toContain("format")
-    expect(withAmpersand).toEqual(await shapeOf(ESCAPED, "Card", "src/card.tsx"))
+    expect(withAmpersand).toEqual(await shapeOf(ESCAPED, card, "src/card.tsx"))
   })
 })
 
@@ -129,14 +109,16 @@ describe("where the lossless claim stops", () => {
   const BROKEN_WITHOUT_AMPERSAND = BROKEN_WITH_AMPERSAND.replace("a & b", "a b")
 
   it("reports either way, and extracts the same ids", async () => {
-    expect(await errorsOf("src/a.tsx", BROKEN_WITH_AMPERSAND)).not.toEqual([])
-    expect((await shapeOf(BROKEN_WITH_AMPERSAND, "C", "src/a.tsx")).symbols).toEqual(
-      (await shapeOf(BROKEN_WITHOUT_AMPERSAND, "C", "src/a.tsx")).symbols,
+    expect(await parseErrorsOf(BROKEN_WITH_AMPERSAND, "src/a.tsx")).not.toEqual([])
+    expect((await shapeOf(BROKEN_WITH_AMPERSAND, "ts:src/a.tsx#C", "src/a.tsx")).symbols).toEqual(
+      (await shapeOf(BROKEN_WITHOUT_AMPERSAND, "ts:src/a.tsx#C", "src/a.tsx")).symbols,
     )
   })
 
   it("loses the call written below the `&`, which the ampersand-free twin keeps", async () => {
-    expect((await shapeOf(BROKEN_WITHOUT_AMPERSAND, "C", "src/a.tsx")).calls).toEqual(["foo"])
-    expect((await shapeOf(BROKEN_WITH_AMPERSAND, "C", "src/a.tsx")).calls).toEqual([])
+    expect((await shapeOf(BROKEN_WITHOUT_AMPERSAND, "ts:src/a.tsx#C", "src/a.tsx")).calls).toEqual([
+      "foo",
+    ])
+    expect((await shapeOf(BROKEN_WITH_AMPERSAND, "ts:src/a.tsx#C", "src/a.tsx")).calls).toEqual([])
   })
 })

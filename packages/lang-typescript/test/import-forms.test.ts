@@ -2,35 +2,21 @@ import { describe, expect, it } from "vitest"
 import { importsOf } from "./fixtures/ctx"
 
 describe("import-equals-require binds the module object", () => {
-  it("produces a namespace edge carrying the local binding", async () => {
-    const { imports, errors } = await importsOf("import x = require('./mod')")
+  it.each([
+    ["the plain form", "import x = require('./mod')", "src/a.ts"],
+    ["a type-only form", "import type x = require('./mod')", "src/a.ts"],
+    [
+      "the CommonJS extension it is the ordinary form for",
+      "import x = require('./mod')",
+      "src/a.cts",
+    ],
+  ])("as a static namespace edge carrying the local binding, in %s", async (_label, source, path) => {
+    const { imports, errors } = await importsOf(source, path)
 
     expect(imports).toEqual([
       { source: "./mod", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x" },
     ])
     expect(errors).toEqual([])
-  })
-
-  it("is a static edge, which is what makes it reachable by call resolution", async () => {
-    const { imports } = await importsOf("import x = require('./mod')")
-
-    expect(imports[0]?.dynamic).toBe(false)
-  })
-
-  it("reads a type-only require-equals on the same terms", async () => {
-    const { imports } = await importsOf("import type x = require('./mod')")
-
-    expect(imports).toEqual([
-      { source: "./mod", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x" },
-    ])
-  })
-
-  it("reads it under the CommonJS extension it is the ordinary form for", async () => {
-    const { imports } = await importsOf("import x = require('./mod')", "src/a.cts")
-
-    expect(imports).toEqual([
-      { source: "./mod", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x" },
-    ])
   })
 
   it("says nothing about an alias that renames a local namespace", async () => {
@@ -62,41 +48,22 @@ describe("import-equals-require binds the module object", () => {
   })
 })
 
-describe("a comment among the arguments of import()", () => {
-  it("reads the specifier past a webpack magic comment", async () => {
-    const { imports, errors } = await importsOf(
-      'const m = import(/* webpackChunkName: "x" */ "./mod")',
-    )
-
-    expect(imports).toEqual([{ source: "./mod", symbols: "*", line: 1, dynamic: true }])
-    expect(errors).toEqual([])
-  })
-
-  it("reads past two of them", async () => {
-    const { imports } = await importsOf("const m = import(/* a */ /* b */ './mod')")
-
-    expect(imports).toEqual([{ source: "./mod", symbols: "*", line: 1, dynamic: true }])
-  })
-
-  it("says nothing when the comment is all there is", async () => {
-    const { imports, errors } = await importsOf("const m = import(/* nothing here */)")
-
-    expect(imports).toEqual([])
-    expect(errors).toEqual([])
-  })
-})
-
-describe("a template specifier with nothing substituted into it", () => {
-  it("is read as the static specifier it is", async () => {
-    const { imports, errors } = await importsOf("const m = import(`./mod`)")
-
-    expect(imports).toEqual([{ source: "./mod", symbols: "*", line: 1, dynamic: true }])
-    expect(errors).toEqual([])
-  })
-})
-
-describe("a template the author computes stays computed", () => {
+describe("the specifier of import()", () => {
   it.each([
+    ["past a webpack magic comment", 'const m = import(/* webpackChunkName: "x" */ "./mod")'],
+    ["past two comments", "const m = import(/* a */ /* b */ './mod')"],
+    ["in a template with nothing substituted into it", "const m = import(`./mod`)"],
+  ])("is read %s", async (_label, source) => {
+    const { imports, errors } = await importsOf(source)
+
+    expect(imports).toEqual([{ source: "./mod", symbols: "*", line: 1, dynamic: true }])
+    expect(errors).toEqual([])
+  })
+
+  it.each([
+    ["a comment that is all there is", "const m = import(/* nothing here */)"],
+    ["a variable", "const m = import(p)"],
+    ["a concatenation", 'const m = import("" + x)'],
     ["a trailing substitution", `const m = import(\`./\${p}\`)`],
     ["a substitution in the middle", `const m = import(\`./a\${p}/b\`)`],
     ["a leading substitution", `const m = import(\`\${dir}/b\`)`],

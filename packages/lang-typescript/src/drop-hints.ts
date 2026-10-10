@@ -66,7 +66,6 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
   return null
 }
 
-/** A field that is `static` **or** `readonly` and holds a literal — what "pure constants" counts. */
 function isConstantLikeField(field: Node): boolean {
   let hasStatic = false
   let hasReadonly = false

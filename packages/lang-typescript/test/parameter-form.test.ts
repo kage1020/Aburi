@@ -1,5 +1,6 @@
 import type { Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import { normalizeAst } from "../src/index"
 import { symbolOf } from "./fixtures/ctx"
 
 type Input = Signature["inputs"][number]
@@ -77,6 +78,10 @@ describe("readParameters — the form of a parameter", () => {
     expect(await inputsOf("a?: string")).toStrictEqual(await inputsOf('a: string = "x"'))
   })
 
+  it("records a defaulted parameter the same whatever its default", async () => {
+    expect(await inputsOf("limit = 20")).toStrictEqual(await inputsOf("limit = 10"))
+  })
+
   it("reads an abstract method's parameters", async () => {
     const source = "export abstract class A {\n  abstract m(a?: string, ...ids: string[]): void\n}"
     const symbol = await symbolOf(source, "ts:src/a.ts#A.m")
@@ -93,6 +98,28 @@ describe("readParameters — the form of a parameter", () => {
       { name: "limit", type: "number", optional: true },
       { name: "rest", type: "T[]", rest: true },
     ])
+  })
+})
+
+describe("readParameters — a parenthesis-free arrow's parameter", () => {
+  it.each([
+    ["a const's arrow", "export const f = x => x + 1", "ts:src/a.ts#f"],
+    ["an async arrow", "export const f = async x => x + 1", "ts:src/a.ts#f"],
+    ["a class field's arrow", "export class C { f = x => x }", "ts:src/a.ts#C.f"],
+  ])("is recorded for %s", async (_label, source, id) => {
+    expect((await symbolOf(source, id)).signature?.inputs).toStrictEqual([{ name: "x", type: "" }])
+  })
+
+  it("reads as its parenthesised spelling does, in the signature and the normalized string", async () => {
+    const bare = await symbolOf("export const f = x => x + 1", "ts:src/a.ts#f")
+    const parenthesised = await symbolOf("export const f = (x) => x + 1", "ts:src/a.ts#f")
+
+    expect(bare.signature).toStrictEqual(parenthesised.signature)
+    expect(normalizeAst(bare)).toBe(normalizeAst(parenthesised))
+  })
+
+  it("is not invented for an arrow with none", async () => {
+    expect(await inputsOf("", inArrow)).toStrictEqual([])
   })
 })
 

@@ -1,18 +1,14 @@
 import { UNNAMED_DECORATOR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { byId, importsOf, symbolsOf } from "./fixtures/ctx"
+import { byId, parseErrorsOf, symbolsOf } from "./fixtures/ctx"
 
 const decoratorsOf = async (source: string) =>
   byId(await symbolsOf([source, "export class C {}", ""].join("\n")), "#C").decorators
 
 const errorsOf = async (source: string) =>
-  (await importsOf([source, "export class C {}", ""].join("\n"))).errors.length
+  (await parseErrorsOf([source, "export class C {}", ""].join("\n"))).length
 
 describe("a decorator written in parentheses", () => {
-  it("imports the marker from a built @aburi/types", () => {
-    expect(UNNAMED_DECORATOR).toBe("<expression>")
-  })
-
   it("reads a name through them, and quotes them in raw", async () => {
     expect(await errorsOf("@(Controller)")).toBe(0)
     expect(await decoratorsOf("@(Controller)")).toStrictEqual([

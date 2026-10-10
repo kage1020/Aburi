@@ -6,6 +6,14 @@ import {
 } from "../src/string-escape"
 import { BACKSLASH, parseSource, requireTree } from "./fixtures/ctx"
 
+/** The string node an import of `written` parses its specifier into. */
+async function specifierNode(written: string) {
+  const source = `import x from ${written}`
+  const [node] = requireTree((await parseSource(source)).tree).rootNode.descendantsOfType("string")
+  if (node === undefined || node === null) throw new Error(`no string node in ${source}`)
+  return node
+}
+
 describe("the escapes that name a control character", () => {
   it.each([
     ["n", "\n"],
@@ -105,13 +113,7 @@ describe("anything else keeps what the author typed", () => {
 })
 
 describe("what a literal decodes to, and whether that is all of it", () => {
-  async function literalOf(written: string) {
-    const source = `import x from ${written}`
-    const result = await parseSource(source)
-    const value = requireTree(result.tree).rootNode.descendantsOfType("string")[0]
-    if (value === undefined || value === null) throw new Error(`no string node in ${source}`)
-    return decodeStringLiteral(value)
-  }
+  const literalOf = async (written: string) => decodeStringLiteral(await specifierNode(written))
 
   it.each([
     ["a plain literal", '"./m"', "./m", true],
@@ -134,13 +136,7 @@ describe("what a literal decodes to, and whether that is all of it", () => {
 })
 
 describe("what a literal reads as when the fallback is allowed to stand in", () => {
-  async function readOf(written: string): Promise<string> {
-    const source = `import x from ${written}`
-    const result = await parseSource(source)
-    const value = requireTree(result.tree).rootNode.descendantsOfType("string")[0]
-    if (value === undefined || value === null) throw new Error(`no string node in ${source}`)
-    return decodeStringLiteralOrRaw(value)
-  }
+  const readOf = async (written: string) => decodeStringLiteralOrRaw(await specifierNode(written))
 
   it.each([
     ["a plain literal as itself", '"./m"', "./m"],

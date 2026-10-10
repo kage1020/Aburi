@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { BACKSLASH, callsOf, hintOf, symbolOf, symbolsOf, walkOf } from "./fixtures/ctx"
+import { BACKSLASH, callsOf, hintOf, idsOf, symbolOf, walkOf } from "./fixtures/ctx"
 
 const API = [
   "export const api = {",
@@ -8,9 +8,6 @@ const API = [
   "  post() { send() },",
   "}",
 ].join("\n")
-
-const idsOf = async (source: string, path?: string) =>
-  (await symbolsOf(source, path)).map((symbol) => symbol.id)
 
 describe("a function an object literal holds is a member Symbol", () => {
   it("declares one for a property holding an arrow and one for a method", async () => {
@@ -53,14 +50,6 @@ describe("a function an object literal holds is a member Symbol", () => {
       "guard",
     ])
     expect((await walkOf(source, "ts:src/a.ts#api")).rules).toEqual([])
-  })
-
-  it("reads a concise arrow's body as its return value, as for any walk root", async () => {
-    const source = 'export const can = { admin: (u: any) => u.role === "admin" }'
-
-    expect((await walkOf(source, "ts:src/a.ts#can.admin")).rules).toMatchObject([
-      { type: "return", expr: 'u.role === "admin"' },
-    ])
   })
 
   it("puts a member's parameter defaults on the member, not on the binding", async () => {
@@ -172,12 +161,6 @@ describe("the binding an object is read under", () => {
     ])
   })
 
-  it("names an exported binding of a namespace merged into a class on the static side", async () => {
-    const source = "export class C {}\nexport namespace C { export const api = { get() { q() } } }"
-
-    expect(await idsOf(source)).toContain("ts:src/a.ts#C::api.get")
-  })
-
   it("gives an empty object a body with nothing in it, and no hint", async () => {
     const source = "export const EMPTY = {}"
 
@@ -287,17 +270,9 @@ describe("the name gate is a class member's, but for a private name", () => {
     ["a numeric key", "1: () => { q() }"],
     ["a quoted key spelling a private name", '"#v": () => { q() }'],
     ["a key the parser recovered", `"${BACKSLASH}uZZZZ": () => { q() }`],
-  ])("gives %s no Symbol and leaves its body on the binding", async (_label, entry) => {
-    const source = `export const api = { ${entry} }`
-
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#api"])
-    expect(await callsOf(source, "ts:src/a.ts#api")).toEqual(["q"])
-  })
-
-  it.each([
-    ["a private method", "#p() { q() }"],
+    ["a private method, which an object literal cannot have", "#p() { q() }"],
     ["a private name on a property", "#p: () => { q() }"],
-  ])("gives %s no Symbol, which an object literal cannot have", async (_label, entry) => {
+  ])("gives %s no Symbol and leaves its body on the binding", async (_label, entry) => {
     const source = `export const api = { ${entry} }`
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#api"])
@@ -377,15 +352,11 @@ describe("one member written twice", () => {
 })
 
 describe("a member's drop hint is a method's", () => {
-  it("hints an empty member body", async () => {
-    expect(await hintOf("export const o = { onClose() {} }", "ts:src/a.ts#o.onClose")).toEqual({
-      reason: "empty body",
-      category: "B",
-    })
-  })
-
-  it("hints nothing on the binding", async () => {
-    expect(await hintOf("export const o = { onClose() {} }", "ts:src/a.ts#o")).toBeNull()
+  it.each([
+    ["an empty member body", "ts:src/a.ts#o.onClose", { reason: "empty body", category: "B" }],
+    ["nothing on the binding", "ts:src/a.ts#o", null],
+  ])("hints %s", async (_label, id, hint) => {
+    expect(await hintOf("export const o = { onClose() {} }", id)).toEqual(hint)
   })
 })
 

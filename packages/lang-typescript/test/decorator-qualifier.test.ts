@@ -4,46 +4,54 @@ import { byId, symbolsOf } from "./fixtures/ctx"
 const decoratorsOf = async (source: string, id: string) =>
   byId(await symbolsOf(source), id).decorators
 
-describe("Decorator.qualifier", () => {
-  it("carries the receiver of a qualified decorator", async () => {
-    const decorators = await decoratorsOf(
-      ['@nest.Controller("/x")', "export class C {}", ""].join("\n"),
-      "#C",
-    )
-    expect(decorators).toEqual([
-      {
-        name: "Controller",
-        qualifier: "nest",
-        raw: 'nest.Controller("/x")',
-        arguments: ['"/x"'],
-        boundary: false,
-        line: 1,
-      },
+const onClass = (...decorators: string[]) => [...decorators, "export class C {}", ""].join("\n")
+
+const onMethod = (decorator: string) =>
+  ["export class C {", `  ${decorator}`, "  list() {}", "}", ""].join("\n")
+
+describe("what a decorator reads as", () => {
+  it.each([
+    [
+      "a qualified call",
+      '@nest.Controller("/x")',
+      { name: "Controller", qualifier: "nest", raw: 'nest.Controller("/x")', arguments: ['"/x"'] },
+    ],
+    [
+      "a bare call, with no qualifier key at all",
+      '@Controller("/x")',
+      { name: "Controller", raw: 'Controller("/x")', arguments: ['"/x"'] },
+    ],
+    [
+      "a qualified name written without arguments",
+      "@ns.Injectable",
+      { name: "Injectable", qualifier: "ns", raw: "ns.Injectable", arguments: [] },
+    ],
+    [
+      "a bare name written without arguments",
+      "@Post",
+      { name: "Post", raw: "Post", arguments: [] },
+    ],
+    [
+      "a nested receiver, carried whole for the consumer to take its first segment",
+      "@a.b.C()",
+      { name: "C", qualifier: "a.b", raw: "a.b.C()", arguments: [] },
+    ],
+    [
+      "an optional chain's receiver, which names no import but is written",
+      "@a?.Get()",
+      { name: "Get", qualifier: "a", raw: "a?.Get()", arguments: [] },
+    ],
+  ])("reads %s", async (_label, written, expected) => {
+    expect(await decoratorsOf(onClass(written), "#C")).toStrictEqual([
+      { ...expected, boundary: false, line: 1 },
     ])
   })
 
-  it("omits the key entirely on a bare decorator", async () => {
-    const decorators = await decoratorsOf(
-      ["@Controller()", "export class C {}", ""].join("\n"),
-      "#C",
-    )
-    expect(decorators[0]).not.toHaveProperty("qualifier")
-    expect(decorators[0]?.name).toBe("Controller")
-  })
-
-  it("reads the receiver of a decorator written without arguments", async () => {
-    const decorators = await decoratorsOf(
-      ["@ns.Injectable", "export class C {}", ""].join("\n"),
-      "#C",
-    )
-    expect(decorators[0]?.qualifier).toBe("ns")
-    expect(decorators[0]?.name).toBe("Injectable")
-  })
-
-  it("carries a nested receiver whole, leaving the consumer to take its first segment", async () => {
-    const decorators = await decoratorsOf(["@a.b.C()", "export class D {}", ""].join("\n"), "#D")
-    expect(decorators[0]?.qualifier).toBe("a.b")
-    expect(decorators[0]?.name).toBe("C")
+  it.each([
+    ["@this.Get()", "this"],
+    ["@nest.Get()", "nest"],
+  ])("reads the receiver of %s on a method as it does on a class", async (written, qualifier) => {
+    expect((await decoratorsOf(onMethod(written), "#C.list"))[0]?.qualifier).toBe(qualifier)
   })
 
   it.each([
@@ -52,53 +60,19 @@ describe("Decorator.qualifier", () => {
     ["a call", "@pick().Controller()"],
     ["a computed member", '@ns["Controller"]()'],
   ])("has nothing to carry where the decorator never reaches the run (%s)", async (_label, written) => {
-    const decorators = await decoratorsOf([written, "export class C {}", ""].join("\n"), "#C")
-    expect(decorators).toEqual([])
-  })
-
-  it("reads the receiver through the parentheses it was written in", async () => {
-    const decorators = await decoratorsOf(["@(a.b)", "export class C {}", ""].join("\n"), "#C")
-    expect(decorators[0]?.qualifier).toBe("a")
-    expect(decorators[0]?.name).toBe("b")
-  })
-
-  it("omits the key on a bare decorator written without arguments", async () => {
-    const decorators = await decoratorsOf(["@Post", "export class C {}", ""].join("\n"), "#C")
-    expect(decorators[0]).not.toHaveProperty("qualifier")
-    expect(decorators[0]?.name).toBe("Post")
-  })
-
-  it("quotes a receiver that is written but names no import, rather than dropping it", async () => {
-    const viaThis = await decoratorsOf(
-      ["export class C {", "  @this.Get()", "  list() {}", "}", ""].join("\n"),
-      "#C.list",
-    )
-    expect(viaThis[0]?.qualifier).toBe("this")
-
-    const optional = await decoratorsOf(["@a?.Get()", "export class D {}", ""].join("\n"), "#D")
-    expect(optional[0]?.qualifier).toBe("a")
-    expect(optional[0]?.raw).toBe("a?.Get()")
+    expect(await decoratorsOf(onClass(written), "#C")).toEqual([])
   })
 
   it("keeps the qualifier on every decorator of a run, in source order", async () => {
     const decorators = await decoratorsOf(
-      ["@nest.UseGuards(G)", "@Controller()", "@other.Injectable()", "export class C {}", ""].join(
-        "\n",
-      ),
+      onClass("@nest.UseGuards(G)", "@Controller()", "@other.Injectable()"),
       "#C",
     )
+
     expect(decorators.map((d) => [d.name, d.qualifier])).toEqual([
       ["UseGuards", "nest"],
       ["Controller", undefined],
       ["Injectable", "other"],
     ])
-  })
-
-  it("reads one on a decorated method as it does on a class", async () => {
-    const decorators = await decoratorsOf(
-      ["export class C {", "  @nest.Get()", "  list() {}", "}", ""].join("\n"),
-      "#C.list",
-    )
-    expect(decorators[0]?.qualifier).toBe("nest")
   })
 })

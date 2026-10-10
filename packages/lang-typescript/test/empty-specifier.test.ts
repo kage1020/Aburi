@@ -46,17 +46,6 @@ describe("an empty module specifier produces no edge and one recoverable error",
     expect(emptySpecifierErrors(errors)[0]?.line).toBe(2)
   })
 
-  it("reports each occurrence, including the two an edge dedupe would have merged", async () => {
-    const { imports, errors } = await importsOf('import a from ""; import a from ""')
-    expect(imports).toEqual([])
-    expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([15, 33])
-  })
-
-  it("reports an occurrence per line as well", async () => {
-    const { errors } = await importsOf(['import a from ""', 'import b from ""'].join("\n"))
-    expect(emptySpecifierErrors(errors).map((e) => e.line)).toEqual([1, 2])
-  })
-
   it("keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
     const { imports, errors } = await importsOf('import a from " "')
     expect(imports).toEqual([{ source: " ", symbols: ["default as a"], line: 1, dynamic: false }])
@@ -71,24 +60,53 @@ describe("an empty module specifier produces no edge and one recoverable error",
   })
 })
 
-describe("the diagnostics come out in source order", () => {
-  it("orders several dynamic specifiers on one line by column", async () => {
-    const { errors } = await importsOf(
+describe("each empty specifier is reported where it is written", () => {
+  it.each([
+    [
+      "two on one line, which an edge dedupe would merge",
+      'import a from ""; import a from ""',
+      [
+        [1, 15],
+        [1, 33],
+      ],
+    ],
+    [
+      "one per line",
+      'import a from ""\nimport b from ""',
+      [
+        [1, 15],
+        [2, 15],
+      ],
+    ],
+    [
+      "dynamic ones on one line, by column",
       'const a = import(""); const b = import(""); const c = import("")',
-    )
-    expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([18, 40, 62])
-  })
+      [
+        [1, 18],
+        [1, 40],
+        [1, 62],
+      ],
+    ],
+    [
+      "a static one before a dynamic one",
+      'import a from ""\nconst q = import("")',
+      [
+        [1, 15],
+        [2, 18],
+      ],
+    ],
+    [
+      "a dynamic one before a static one",
+      'const q = import("")\nimport a from ""',
+      [
+        [1, 18],
+        [2, 15],
+      ],
+    ],
+  ])("in source order, for %s", async (_label, source, positions) => {
+    const { imports, errors } = await importsOf(source)
 
-  it("interleaves the dynamic pass with the statement pass by line", async () => {
-    const { errors } = await importsOf(['import a from ""', 'const q = import("")'].join("\n"))
-    expect(emptySpecifierErrors(errors).map((e) => [e.line, e.column])).toEqual([
-      [1, 15],
-      [2, 18],
-    ])
-  })
-
-  it("orders a dynamic specifier written before a static one", async () => {
-    const { errors } = await importsOf(['const q = import("")', 'import a from ""'].join("\n"))
-    expect(emptySpecifierErrors(errors).map((e) => e.line)).toEqual([1, 2])
+    expect(imports).toEqual([])
+    expect(emptySpecifierErrors(errors).map((e) => [e.line, e.column])).toEqual(positions)
   })
 })

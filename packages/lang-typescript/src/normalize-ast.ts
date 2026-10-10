@@ -86,7 +86,6 @@ const FORMATTING_TOKENS: ReadonlySet<string> = new Set([
   "}",
 ])
 
-/** Node types that never contribute to the normalized AST. */
 const SKIPPED_NODE_TYPES: ReadonlySet<string> = new Set(["comment", "hash_bang_line"])
 
 const LEAF_TEXT_TYPES: ReadonlySet<string> = new Set([

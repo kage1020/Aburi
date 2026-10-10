@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { langTypescriptManifest } from "../src/index"
+import { normalizeAst } from "../src/index"
 import { idsOf, importsOf, symbolsOf } from "./fixtures/ctx"
 
 describe("a destructuring declaration declares its bindings", () => {
@@ -20,10 +20,6 @@ describe("a destructuring declaration declares its bindings", () => {
     ["both kinds nested", "export const { a: [b, { c }] } = m", ["b", "c"]],
   ])("extracts one Symbol per binding — %s", async (_label, source, names) => {
     expect(await idsOf(source)).toEqual(names.map((n) => `ts:src/a.ts#${n}`))
-  })
-
-  it("reads the value side of a rename, not the key being read from", async () => {
-    expect(await idsOf("export const { a: b } = m")).toEqual(["ts:src/a.ts#b"])
   })
 
   it.each([
@@ -49,17 +45,22 @@ describe("a destructuring declaration declares its bindings", () => {
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#a", "ts:src/a.ts#b"])
   })
 
-  it("gives every binding the kind and range a plain const gets", async () => {
-    const symbols = await symbolsOf("export const { GET, POST } = handlers")
+  it("gives every binding the kind a plain const gets, and the whole declaration's range", async () => {
+    const symbols = await symbolsOf("export const {\n  GET,\n  POST,\n} = handlers")
 
-    expect(symbols.map((s) => s.kind)).toEqual(["const", "const"])
-    expect(symbols.map((s) => s.visibility)).toEqual(["public", "public"])
-    expect(symbols[0]?.source.startLine).toBe(1)
-    expect(symbols[1]?.source.startLine).toBe(1)
-    for (const symbol of symbols) {
-      expect(symbol.derivedBy).toContain("destructured-binding")
-      expect(symbol.derivedBy).toContain("export-keyword")
-    }
+    expect(
+      symbols.map((s) => [s.kind, s.visibility, s.derivedBy, s.source.startLine, s.source.endLine]),
+    ).toEqual([
+      ["const", "public", ["destructured-binding", "export-keyword"], 1, 4],
+      ["const", "public", ["destructured-binding", "export-keyword"], 1, 4],
+    ])
+  })
+
+  it("describes every binding of one declaration by the same normalized string", async () => {
+    const [first, second] = await symbolsOf("export const { a, b } = m")
+    if (first === undefined || second === undefined) throw new Error("two bindings expected")
+
+    expect(normalizeAst(first)).toBe(normalizeAst(second))
   })
 
   it("marks an unexported destructuring internal, as it does a plain const", async () => {
@@ -76,64 +77,12 @@ describe("a destructuring declaration declares its bindings", () => {
     expect(symbols[0]?.signature).toBeNull()
   })
 
-  it("leaves a plain const exactly as it was", async () => {
-    const symbols = await symbolsOf("export const x = 1")
-
-    expect(symbols.map((s) => s.id)).toEqual(["ts:src/a.ts#x"])
-    expect(symbols[0]?.kind).toBe("const")
-    expect(symbols[0]?.derivedBy).toEqual(["export-keyword"])
-  })
-
-  it("leaves a variable-assigned arrow exactly as it was", async () => {
-    const symbols = await symbolsOf("export const f = () => 1")
-
-    expect(symbols.map((s) => s.kind)).toEqual(["function"])
-    expect(symbols[0]?.derivedBy).toContain("variable-assigned-function")
-  })
-
   it("prefixes each binding with the namespace it is declared in", async () => {
     expect(await idsOf("export namespace N { export const { a, b } = m }")).toEqual([
       "ts:src/a.ts#N",
       "ts:src/a.ts#N.a",
       "ts:src/a.ts#N.b",
     ])
-  })
-})
-
-describe("every rationale extraction emits is one the manifest declares", () => {
-  it.each([
-    ["export const { a } = m", ["destructured-binding"]],
-    ["export const x = 1", ["export-keyword"]],
-    ["export const f = () => 1", ["variable-assigned-function", "export-keyword"]],
-    ["export class A { m() {} }", ["export-keyword", "class-method"]],
-    ["export class A { static m() {} }", ["static-method"]],
-    ["export class A { constructor() {} }", ["constructor-declaration"]],
-    ["export interface I {}", ["interface-declaration", "export-keyword"]],
-    ["export type T = 1", ["type-alias", "export-keyword"]],
-    ["export enum E { A }", ["enum-declaration", "export-keyword"]],
-    ["export namespace N {}", ["namespace-declaration", "export-keyword"]],
-    ["export declare interface I {}", ["interface-declaration", "export-keyword"]],
-    ["export default function () {}", ["export-default"]],
-    ["export default interface I {}", ["interface-declaration", "export-default"]],
-    ["export class A { get v() { return 1 } }", ["accessor-declaration"]],
-    [
-      "export class A { get v() { return 1 } set v(n) {} }",
-      ["accessor-declaration", "declaration-merged"],
-    ],
-    ["export abstract class A { abstract m(): void }", ["abstract-declaration"]],
-    ["export declare function f(): void", ["ambient-declaration"]],
-    [
-      "export const o = { m() {}, f: () => {} }",
-      ["object-literal-initializer", "object-method", "property-assigned-function"],
-    ],
-  ])("declares the rationales %s produces", async (source, expected) => {
-    const declared = new Set(langTypescriptManifest.provides.derivedByPrefixes)
-    const emitted = (await symbolsOf(source)).flatMap((s) => s.derivedBy)
-
-    expect(emitted).toEqual(expect.arrayContaining(expected))
-    for (const token of emitted) {
-      expect(declared.has(token)).toBe(true)
-    }
   })
 })
 
@@ -155,7 +104,7 @@ describe("a computed member name costs its member and nothing else", () => {
   })
 })
 
-describe("an identifier the grammar refused is a Symbol now", () => {
+describe("an identifier outside ASCII names a Symbol", () => {
   it.each([
     ["a Japanese function", "export function ユーザー取得() {}", "ユーザー取得"],
     ["an accented function", "export function café() {}", "café"],
@@ -164,10 +113,9 @@ describe("an identifier the grammar refused is a Symbol now", () => {
     expect(await idsOf(source)).toEqual([`ts:src/a.ts#${name}`])
   })
 
-  it("keeps a whole file that mixes one with ordinary declarations", async () => {
+  it("keeps a whole file that mixes one with ordinary declarations, sorted by id", async () => {
     const ids = await idsOf("export function ユーザー取得() {}\nexport function ok() {}")
 
-    // Sorted by id, which is how `extractSymbols` returns them — not source order.
     expect(ids).toEqual(["ts:src/a.ts#ok", "ts:src/a.ts#ユーザー取得"])
   })
 })

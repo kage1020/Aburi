@@ -77,7 +77,6 @@ function readParameter(param: Node): Signature["inputs"][number] {
   return input
 }
 
-/** The node's source text, or null where the source wrote no binding there. */
 function writtenText(node: Node | null): string | null {
   if (node === null || node.isMissing || node.type === "ERROR") return null
   return node.text
@@ -145,7 +144,6 @@ const JSDOC_THROWS_PATTERN =
 
 const INLINE_LINK_PATTERN = /^@link(?:code|plain)?\s+([^\s|]+)/
 
-/** A link target that names a declaration: an identifier or dotted path, which a URL is not. */
 const DECLARATION_PATH_PATTERN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
 
 const BARE_TYPE_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
@@ -165,13 +163,11 @@ function extractJsDocThrows(jsDoc: string): string[] {
   return out
 }
 
-/** The target of a TSDoc link, or null for a link with none, a URL, or another inline tag. */
 function linkTarget(inline: string): string | null {
   const target = INLINE_LINK_PATTERN.exec(inline)?.[1]
   return target !== undefined && DECLARATION_PATH_PATTERN.test(target) ? target : null
 }
 
-/** A tag's text without the comment's gutter — one leading `*` per line — whitespace-collapsed. */
 function tagText(raw: string): string {
   return raw
     .split("\n")

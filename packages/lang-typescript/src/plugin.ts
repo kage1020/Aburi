@@ -67,5 +67,4 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
 
 export const langTypescriptPlugin = new LangTypescriptPlugin() satisfies LanguagePlugin<Tree, Node>
 
-/** Class export for consumers that want to wrap or extend the plugin. */
 export { LangTypescriptPlugin }
