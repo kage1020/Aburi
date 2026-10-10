@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { type ScratchWorkspace, useScratchWorkspace } from "@aburi/test-support"
 
@@ -30,9 +30,13 @@ export function useWorkspaceTree(prefix: string): WorkspaceTree {
         `packages:\n${patterns.map((pattern) => `  - ${JSON.stringify(pattern)}\n`).join("")}`,
       ),
     async writeLanguageFiles(dir, extension, count = 12) {
-      for (let index = 0; index < count; index += 1) {
-        await scratch.writeSource(join(dir, `f${index}${extension}`), "x")
-      }
+      const abs = join(scratch.root, dir)
+      await mkdir(abs, { recursive: true })
+      await Promise.all(
+        Array.from({ length: count }, (_, index) =>
+          writeFile(join(abs, `f${index}${extension}`), "x", "utf8"),
+        ),
+      )
     },
   }
 }

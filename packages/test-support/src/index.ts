@@ -1,4 +1,5 @@
 export * from "./classify"
+export * from "./clock"
 export * from "./diff"
 export * from "./errors"
 export * from "./extraction"

@@ -20,11 +20,10 @@ export function spawnStdioServer(
   args: readonly string[],
   cwd: string,
 ): SpawnedServer {
-  const useShell = shouldUseShell(command)
   const child = spawn(command, [...args], {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
-    shell: useShell,
+    shell: shouldUseShell(command, platform),
     windowsHide: true,
   })
 
@@ -85,8 +84,12 @@ async function raceExit(exited: Promise<number | null>, ms: number): Promise<voi
   })
 }
 
-function shouldUseShell(command: string): boolean {
-  if (platform !== "win32") return false
+/**
+ * Node spawns a `.cmd` / `.bat`, npm's shim for a language server on Windows, only through a
+ * shell; anything else is spawned directly, so no shell reparses its arguments.
+ */
+export function shouldUseShell(command: string, os: NodeJS.Platform): boolean {
+  if (os !== "win32") return false
   const lowered = command.toLowerCase()
   return lowered.endsWith(".cmd") || lowered.endsWith(".bat")
 }

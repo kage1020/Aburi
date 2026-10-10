@@ -5,6 +5,7 @@ import {
   errorFrom,
   makeCall,
   recordingLogger,
+  spend,
   useScratchWorkspace,
 } from "@aburi/test-support"
 import type { LanguagePlugin } from "@aburi/types"
@@ -17,7 +18,6 @@ import {
   serializeCanonical,
   writeCanonicalIR,
 } from "../../src"
-import { spend } from "../fixtures/clock"
 import {
   langManifest,
   oneSymbolPerFile,

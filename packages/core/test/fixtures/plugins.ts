@@ -4,6 +4,7 @@ import {
   noopRegistry,
   type ScratchWorkspace,
   silentLogger,
+  spend,
   useScratchWorkspace,
 } from "@aburi/test-support"
 import type {
@@ -37,7 +38,6 @@ import {
   VocabCheck,
 } from "../../src"
 import { makeLanguageId } from "../../src/id"
-import { spend } from "./clock"
 
 const PLUGIN_SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
 

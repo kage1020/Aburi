@@ -1,8 +1,7 @@
-import { makeCall } from "@aburi/test-support"
+import { makeCall, spend } from "@aburi/test-support"
 import type { Config } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_CLASSIFY_TIMEOUT_MS } from "../../src"
-import { spend } from "../fixtures/clock"
 import {
   expectExtracted,
   runPipeline,

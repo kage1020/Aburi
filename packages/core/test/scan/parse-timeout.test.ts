@@ -1,7 +1,8 @@
+import { useScratchWorkspace } from "@aburi/test-support"
 import type { ParseError } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_PARSE_TIMEOUT_MS, PARSE_TIMEOUT_MIN_MS, startParseDeadline } from "../../src"
-import { runPipeline, type Script, ScriptedLanguagePlugin } from "../fixtures/plugins"
+import { runPipeline, type Script, ScriptedLanguagePlugin, scanStubs } from "../fixtures/plugins"
 
 async function run(script: Script, parseTimeoutMs: number) {
   const plugin = new ScriptedLanguagePlugin(script)
@@ -81,5 +82,31 @@ describe("runFilePipeline — parse deadline", () => {
       "walkBody:one",
       "walkBody:two",
     ])
+  })
+})
+
+describe("scan — parse deadline", () => {
+  const workspace = useScratchWorkspace("parse-timeout")
+
+  async function scanOneFile(parseMs: number, parseTimeoutMs: number) {
+    await workspace.writeSource("test.stub", "")
+    return scanStubs(workspace.root, {
+      config: { parseTimeoutMs },
+      languages: [new ScriptedLanguagePlugin({ parseMs })],
+    })
+  }
+
+  it("reports a file that overran on parseTimeouts, with its budget and how long it ran", async () => {
+    const { parseTimeouts } = await scanOneFile(250, 100)
+    expect(parseTimeouts).toEqual([
+      { file: "test.stub", budgetMs: 100, elapsedMs: expect.any(Number) },
+    ])
+    expect(parseTimeouts[0]?.elapsedMs).toBeGreaterThanOrEqual(250)
+  })
+
+  it("reports nothing on parseTimeouts for a file that finished inside its budget", async () => {
+    const { parseTimeouts, ir } = await scanOneFile(0, 600_000)
+    expect(parseTimeouts).toEqual([])
+    expect(ir.symbols).toHaveLength(1)
   })
 })

@@ -1,10 +1,8 @@
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { chmod, stat } from "node:fs/promises"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { useScratchWorkspace } from "@aburi/test-support"
+import { beforeEach, describe, expect, it } from "vitest"
 import { describeJsonType, describeThrown, errorCode, isVanishedFile } from "../../src/scan/faults"
-
-let workRoot: string
 
 async function statFailure(path: string): Promise<unknown> {
   const outcome = await stat(path).then(
@@ -15,37 +13,32 @@ async function statFailure(path: string): Promise<unknown> {
   return outcome.error
 }
 
-beforeAll(async () => {
-  workRoot = await mkdtemp(join(tmpdir(), "aburi-scan-faults-"))
-  await writeFile(join(workRoot, "a-file"), "a", "utf8")
-  await mkdir(join(workRoot, "sealed"))
-  await writeFile(join(workRoot, "sealed", "inside"), "inside", "utf8")
-})
-
-afterAll(async () => {
-  await chmod(join(workRoot, "sealed"), 0o755).catch(() => {})
-  await rm(workRoot, { recursive: true, force: true })
-})
-
 const onUnprivilegedPosix = it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
 
 describe("isVanishedFile", () => {
+  const workspace = useScratchWorkspace("scan-faults")
+
+  beforeEach(async () => {
+    await workspace.writeSource("a-file", "a")
+    await workspace.writeSource("sealed/inside", "inside")
+  })
+
   it("absorbs a path that is not there", async () => {
-    const error = await statFailure(join(workRoot, "never-written"))
+    const error = await statFailure(join(workspace.root, "never-written"))
     expect(errorCode(error)).toBe("ENOENT")
     expect(isVanishedFile(error)).toBe(true)
   })
 
   it("absorbs a path whose directory is no longer one", async () => {
-    const error = await statFailure(join(workRoot, "a-file", "inner.ts"))
+    const error = await statFailure(join(workspace.root, "a-file", "inner.ts"))
     expect(errorCode(error)).toBe(process.platform === "win32" ? "ENOENT" : "ENOTDIR")
     expect(isVanishedFile(error)).toBe(true)
   })
 
   onUnprivilegedPosix("refuses a permission failure, which is the machine's", async () => {
-    await chmod(join(workRoot, "sealed"), 0o444)
-    const error = await statFailure(join(workRoot, "sealed", "inside"))
-    await chmod(join(workRoot, "sealed"), 0o755)
+    const sealed = join(workspace.root, "sealed")
+    await chmod(sealed, 0o444)
+    const error = await statFailure(join(sealed, "inside")).finally(() => chmod(sealed, 0o755))
     expect(errorCode(error)).toBe("EACCES")
     expect(isVanishedFile(error)).toBe(false)
   })

@@ -1,4 +1,4 @@
-import { makeCall, makeCtx } from "@aburi/test-support"
+import { makeCall, makeCtx, spend } from "@aburi/test-support"
 import type { EffectClassification, EffectPlugin } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -8,7 +8,6 @@ import {
   CoreError,
   classifyWithTimeout,
 } from "../../src"
-import { spend } from "../fixtures/clock"
 import { stubEffectsPlugin } from "../fixtures/plugins"
 
 const READ: EffectClassification = { effectId: "db.read", confidence: "high", derivedBy: "stub:x" }

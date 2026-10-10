@@ -12,6 +12,12 @@ function run(plugin: ScriptedLanguagePlugin) {
   return { result: runPipeline({ language: plugin, treeReleaseFailures }), treeReleaseFailures }
 }
 
+/** A tree is an opaque handle: only the very object `parseFile` handed out frees anything. */
+function expectReleasedTheHandedTree(plugin: ScriptedLanguagePlugin): void {
+  expect(plugin.released).toHaveLength(1)
+  expect(plugin.released[0]).toBe(plugin.handedOut)
+}
+
 describe("the scripted plugin", () => {
   it("has a releaseTree that needs its receiver, so recording it proves the receiver survived", () => {
     const detached = new ScriptedLanguagePlugin().releaseTree
@@ -33,7 +39,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
       "normalizeAst:two",
       "releaseTree",
     ])
-    expect(plugin.released).toEqual([plugin.handedOut])
+    expectReleasedTheHandedTree(plugin)
   })
 
   it("releases the tree a plugin built beside the error that refused it", async () => {
@@ -43,7 +49,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     const { result } = run(plugin)
 
     expect((await result).kind).toBe("parse-failed")
-    expect(plugin.released).toEqual([plugin.handedOut])
+    expectReleasedTheHandedTree(plugin)
   })
 
   it.each<[string, Script, RegExp | typeof TypeError]>([
@@ -54,7 +60,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
   ])("releases the tree when %s, and lets the throw through unchanged", async (_label, script, thrown) => {
     const plugin = new ScriptedLanguagePlugin(script)
     await expect(run(plugin).result).rejects.toThrow(thrown)
-    expect(plugin.released).toEqual([plugin.handedOut])
+    expectReleasedTheHandedTree(plugin)
   })
 
   it("calls no releaseTree when the plugin built no tree", async () => {

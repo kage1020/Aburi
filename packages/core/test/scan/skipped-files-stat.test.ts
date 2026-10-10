@@ -1,8 +1,7 @@
-import { useScratchWorkspace } from "@aburi/test-support"
+import { spend, useScratchWorkspace } from "@aburi/test-support"
 import type { Config, ParseError } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { checkIRIntegrity } from "../../src"
-import { spend } from "../fixtures/clock"
 import { oneSymbolPerFile, scanStubs } from "../fixtures/plugins"
 
 const workspace = useScratchWorkspace("skipped-files")

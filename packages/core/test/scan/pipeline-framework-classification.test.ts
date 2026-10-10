@@ -53,7 +53,9 @@ describe("runFilePipeline — framework classification", () => {
 
     const result = await extractOneSymbol({ frameworks: [watching], imports })
 
-    expect(seen).toEqual([result.imports])
+    // The very array, not a copy: a plugin may memoize per file on its identity.
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toBe(result.imports)
   })
 
   it("marks the decorator the winning classification names as a boundary", async () => {

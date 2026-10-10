@@ -13,7 +13,8 @@ export interface ScratchWorkspace {
 /**
  * A fresh directory under the OS temp dir for every test, removed afterwards. Never inside the
  * repository: config discovery walks up to the repository's own `aburi.json`. `root` is the real path,
- * so it compares equal to what the code under test resolves (macOS links its temp dir).
+ * so it compares equal to what the code under test resolves (macOS links its temp dir). Removal
+ * retries because Windows releases a just-closed file's handle late and `rm` meets it as ENOTEMPTY.
  */
 export function useScratchWorkspace(prefix: string): ScratchWorkspace {
   let root = ""
@@ -23,7 +24,7 @@ export function useScratchWorkspace(prefix: string): ScratchWorkspace {
   })
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   })
 
   return {
