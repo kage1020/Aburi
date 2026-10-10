@@ -6,22 +6,20 @@ export interface SerializeOptions {
   format?: "pretty" | "compact"
 }
 
-export function serializeCanonical(value: unknown, options: SerializeOptions = {}): string {
-  const format = options.format ?? "pretty"
-  const indent = format === "pretty" ? "  " : ""
-  const newline = format === "pretty" ? "\n" : ""
-  const colon = format === "pretty" ? ": " : ":"
-  return write(value, "$", 0, indent, newline, colon)
+interface Layout {
+  indent: string
+  newline: string
+  colon: string
 }
 
-function write(
-  value: unknown,
-  path: string,
-  depth: number,
-  indent: string,
-  newline: string,
-  colon: string,
-): string {
+const PRETTY: Layout = { indent: "  ", newline: "\n", colon: ": " }
+const COMPACT: Layout = { indent: "", newline: "", colon: ":" }
+
+export function serializeCanonical(value: unknown, options: SerializeOptions = {}): string {
+  return write(value, "$", 0, options.format === "compact" ? COMPACT : PRETTY)
+}
+
+function write(value: unknown, path: string, depth: number, layout: Layout): string {
   if (value === null) return "null"
   switch (typeof value) {
     case "boolean":
@@ -38,26 +36,33 @@ function write(
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]"
-    const childIndent = indent.repeat(depth + 1)
-    const closeIndent = indent.repeat(depth)
-    const items = value.map((v, i) => write(v, `${path}[${i}]`, depth + 1, indent, newline, colon))
-    return `[${newline}${items.map((s) => `${childIndent}${s}`).join(`,${newline}`)}${newline}${closeIndent}]`
+    const items = value.map((v, i) => write(v, `${path}[${i}]`, depth + 1, layout))
+    return enclose("[", items, "]", depth, layout)
   }
   if (typeof value === "object") {
     assertPlainObject(value, path)
     const entries = normalizedEntries(value as Record<string, unknown>, path)
     if (entries.length === 0) return "{}"
     entries.sort(([a], [b]) => compareCodeUnit(a, b))
-    const childIndent = indent.repeat(depth + 1)
-    const closeIndent = indent.repeat(depth)
-    const rendered = entries.map(([k, v]) => {
-      const keyJson = JSON.stringify(k)
-      const valueJson = write(v, `${path}.${k}`, depth + 1, indent, newline, colon)
-      return `${childIndent}${keyJson}${colon}${valueJson}`
-    })
-    return `{${newline}${rendered.join(`,${newline}`)}${newline}${closeIndent}}`
+    const members = entries.map(
+      ([k, v]) =>
+        `${JSON.stringify(k)}${layout.colon}${write(v, `${path}.${k}`, depth + 1, layout)}`,
+    )
+    return enclose("{", members, "}", depth, layout)
   }
   throw rejectNonJson(typeof value, path)
+}
+
+function enclose(
+  open: string,
+  items: readonly string[],
+  close: string,
+  depth: number,
+  { indent, newline }: Layout,
+): string {
+  const childIndent = indent.repeat(depth + 1)
+  const body = items.map((item) => `${childIndent}${item}`).join(`,${newline}`)
+  return `${open}${newline}${body}${newline}${indent.repeat(depth)}${close}`
 }
 
 function writeNumber(value: number, path: string): string {

@@ -208,32 +208,6 @@ const DOCUMENT: RecordSpec = {
   stats: record(STATS),
 }
 
-export const DOCUMENT_SHAPE: Readonly<Record<string, RecordSpec>> = {
-  $: DOCUMENT,
-  Generator: GENERATOR,
-  PluginRef: PLUGIN_REF,
-  Workspace: WORKSPACE,
-  WorkspaceManager: WORKSPACE_MANAGER,
-  Component: COMPONENT,
-  Decorator: DECORATOR,
-  Rule: RULE,
-  Effect: EFFECT,
-  Call: CALL,
-  SourceRange: SOURCE_RANGE,
-  Fingerprint: FINGERPRINT,
-  Signature: SIGNATURE,
-  Symbol: SYMBOL,
-  Dependency: DEPENDENCY,
-  Stats: STATS,
-  EffectPropagationStats: EFFECT_PROPAGATION_STATS,
-  EffectClassifyTimeout: EFFECT_CLASSIFY_TIMEOUT,
-  LspEnrichmentStats: LSP_ENRICHMENT_STATS,
-  LspHintRejections: LSP_HINT_REJECTIONS,
-  CallResolutionStats: CALL_RESOLUTION_STATS,
-  UnresolvedCallBuckets: UNRESOLVED_CALL_BUCKETS,
-  SkippedFile: SKIPPED_FILE,
-}
-
 export function checkDocumentShape(document: unknown): IntegrityViolation[] {
   const out: IntegrityViolation[] = []
   if (!isRecord(document)) {

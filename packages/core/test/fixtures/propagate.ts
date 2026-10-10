@@ -1,22 +1,21 @@
-import type { Effect } from "@aburi/types"
+import { effect, symbolId } from "@aburi/test-support"
+import type { Confidence, Effect } from "@aburi/types"
 import type { CallEdge } from "../../src/callgraph"
 
-/** A locally-detected Effect: `line` present, `propagated` absent (ir-schema.md). */
-export function effect(id: string, target: string, overrides: Partial<Effect> = {}): Effect {
-  return {
-    id,
-    target,
-    line: overrides.line ?? 1,
-    plugin: overrides.plugin ?? "effects-test",
-    confidence: overrides.confidence ?? "high",
-    derivedBy: overrides.derivedBy ?? `effects-plugin:test:${id}`,
-  }
+export function localEffect(
+  overrides: Omit<Partial<Effect>, "propagated" | "derivedFrom"> & { id: string; target: string },
+): Effect {
+  return effect({ plugin: "effects-test", ...overrides })
 }
 
-export function edge(from: string, to: string, overrides: Partial<CallEdge> = {}): CallEdge {
+export function edge(
+  from: string,
+  to: string,
+  overrides: { confidence?: Confidence; line?: number } = {},
+): CallEdge {
   return {
-    from: from as CallEdge["from"],
-    to: to as CallEdge["to"],
+    from: symbolId(from),
+    to: symbolId(to),
     via: "call",
     confidence: overrides.confidence ?? "high",
     line: overrides.line ?? 1,

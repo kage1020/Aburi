@@ -2,11 +2,10 @@ import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { describeThrown, errorCode, isVanishedFile } from "../../src/scan/faults"
+import { describeJsonType, describeThrown, errorCode, isVanishedFile } from "../../src/scan/faults"
 
 let workRoot: string
 
-/** The failure a syscall raised, or a throw naming the call that was supposed to fail. */
 async function statFailure(path: string): Promise<unknown> {
   const outcome = await stat(path).then(
     () => null,
@@ -51,70 +50,65 @@ describe("isVanishedFile", () => {
     expect(isVanishedFile(error)).toBe(false)
   })
 
-  it("refuses a thrown value that carries no code at all", () => {
-    expect(isVanishedFile(new Error("ENOENT: no such file or directory"))).toBe(false)
-    expect(isVanishedFile("ENOENT")).toBe(false)
-    expect(isVanishedFile(null)).toBe(false)
+  it.each([
+    new Error("ENOENT: no such file or directory"),
+    "ENOENT",
+    null,
+  ])("refuses %s, which carries no code", (thrown) => {
+    expect(isVanishedFile(thrown)).toBe(false)
   })
 })
 
 describe("errorCode", () => {
-  it("reads a string code and nothing else", () => {
-    expect(errorCode({ code: "EACCES" })).toBe("EACCES")
-    expect(errorCode({ code: 13 })).toBeNull()
-    expect(errorCode(null)).toBeNull()
-    expect(errorCode("EACCES")).toBeNull()
+  it.each<[unknown, string | null]>([
+    [{ code: "EACCES" }, "EACCES"],
+    [{ code: 13 }, null],
+    [null, null],
+    ["EACCES", null],
+  ])("reads %o as %s", (thrown, code) => {
+    expect(errorCode(thrown)).toBe(code)
   })
 })
 
 describe("describeThrown", () => {
-  it("takes an Error's message", () => {
-    expect(describeThrown(new Error("boom"))).toBe("boom")
-  })
+  const circularWithoutPrototype: Record<string, unknown> = Object.create(null)
+  circularWithoutPrototype.self = circularWithoutPrototype
 
-  it("names the class of an Error nobody gave a message", () => {
-    expect(describeThrown(new Error(""))).toBe("Error")
-  })
-
-  it("says a string was thrown when the string is empty", () => {
-    const described = describeThrown("")
-    expect(described).not.toBe("")
-    expect(described).toContain("string")
-  })
-
-  it("says an object was thrown when the object describes itself as nothing", () => {
-    const described = describeThrown({ toJSON: () => undefined, toString: () => "" })
-    expect(described).not.toBe("")
-    expect(described).toContain("object")
-  })
-
-  it("serializes a plain object", () => {
-    expect(describeThrown({ reason: "refused" })).toBe('{"reason":"refused"}')
-  })
-
-  it("returns something for every value a plugin can throw", () => {
-    const circular: Record<string, unknown> = {}
-    circular.self = circular
-    const thrown: unknown[] = [
-      "",
-      "plain",
-      undefined,
-      null,
-      0,
-      Number.NaN,
-      false,
-      1n,
-      Symbol("s"),
-      new Error(""),
-      new Error("boom"),
-      circular,
-      Object.create(null),
+  it.each<[string, unknown, string]>([
+    ["an Error by its message", new Error("boom"), "boom"],
+    ["an Error nobody gave a message by its class", new Error(""), "Error"],
+    ["a subclass nobody gave a message", new (class Abort extends Error {})(), "Error"],
+    ["a string as itself", "plain", "plain"],
+    ["an empty string by its type", "", "a thrown string described itself as empty"],
+    ["a plain object as JSON", { reason: "refused", at: 7 }, '{"reason":"refused","at":7}'],
+    ["an array as JSON", [], "[]"],
+    [
+      "an object that describes itself as nothing by its type",
       { toJSON: () => undefined, toString: () => "" },
-      { toJSON: () => 1n },
-      [],
-    ]
-    for (const value of thrown) {
-      expect(describeThrown(value), `describing a ${typeof value}`).not.toBe("")
-    }
+      "a thrown object described itself as empty",
+    ],
+    ["an object JSON cannot hold", { toJSON: () => 1n }, "[object Object]"],
+    ["a circular object with no prototype", circularWithoutPrototype, "[object Object]"],
+    ["undefined", undefined, "undefined"],
+    ["null", null, "null"],
+    ["a number", Number.NaN, "NaN"],
+    ["a boolean", false, "false"],
+    ["a bigint", 1n, "1"],
+    ["a symbol", Symbol("s"), "Symbol(s)"],
+  ])("describes %s", (_label, thrown, described) => {
+    expect(describeThrown(thrown)).toBe(described)
+  })
+})
+
+describe("describeJsonType", () => {
+  it.each<[unknown, string]>([
+    [[], "a list"],
+    [null, "null"],
+    [{}, "an object"],
+    ["x", "a string"],
+    [1, "a number"],
+    [true, "a boolean"],
+  ])("names %o %s", (value, described) => {
+    expect(describeJsonType(value)).toBe(described)
   })
 })

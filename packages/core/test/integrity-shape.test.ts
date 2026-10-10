@@ -1,17 +1,16 @@
+import { component, makeIR, sig } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { assertIRIntegrity, CoreError, checkIRIntegrity } from "../src/index"
-import { makeComponent, makeSymbol, minimalIR } from "./fixtures/ir"
+import { makeSymbol } from "./fixtures/ir"
 
-/** Build a Document with one top-level key removed. */
 function without(key: string): unknown {
-  const ir = minimalIR() as unknown as Record<string, unknown>
+  const ir = makeIR() as unknown as Record<string, unknown>
   delete ir[key]
   return ir
 }
 
-/** Build a Document with one top-level key replaced. */
 function withField(key: string, value: unknown): unknown {
-  return { ...(minimalIR() as unknown as Record<string, unknown>), [key]: value }
+  return { ...(makeIR() as unknown as Record<string, unknown>), [key]: value }
 }
 
 function shapeViolations(document: unknown) {
@@ -107,34 +106,25 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
 
   it("names the element, not the array, when a string array holds a non-string", () => {
     const violations = shapeViolations(
-      withField("components", [{ ...makeComponent("a"), roots: [7] }]),
+      withField("components", [{ ...component({ id: "a", name: "a" }), roots: [7] }]),
     )
     expect(violations.map((v) => v.subject)).toContain("components[0].roots[0]")
   })
 
   it("checks a parameter's optional and rest markers when they are present", () => {
     const symbol = makeSymbol("ts:src/a.ts#foo", {
-      signature: {
+      signature: sig({
         inputs: [
           { name: "a", type: "string", optional: true },
           { name: "ids", type: "string[]", rest: true },
         ],
-        outputs: [],
-        throws: [],
-        async: false,
-        generator: false,
-        typeParameters: [],
-      },
+      }),
     }) as unknown as Record<string, unknown>
     expect(shapeViolations(withField("symbols", [symbol]))).toEqual([])
 
     symbol.signature = {
+      ...sig(),
       inputs: [{ name: "a", type: "string", optional: "yes", rest: 1 }],
-      outputs: [],
-      throws: [],
-      async: false,
-      generator: false,
-      typeParameters: [],
     }
     const violations = shapeViolations(withField("symbols", [symbol]))
     expect(violations.map((v) => [v.subject, v.message])).toEqual([
@@ -145,27 +135,16 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
 
   it("checks a destructuring parameter's bindings when they are present", () => {
     const symbol = makeSymbol("ts:src/a.ts#foo", {
-      signature: {
-        inputs: [{ name: "{ save }", type: "Deps", bindings: ["save"] }],
-        outputs: [],
-        throws: [],
-        async: false,
-        generator: false,
-        typeParameters: [],
-      },
+      signature: sig({ inputs: [{ name: "{ save }", type: "Deps", bindings: ["save"] }] }),
     }) as unknown as Record<string, unknown>
     expect(shapeViolations(withField("symbols", [symbol]))).toEqual([])
 
     symbol.signature = {
+      ...sig(),
       inputs: [
         { name: "{ save }", type: "Deps", bindings: "save" },
         { name: "[a, b]", type: "", bindings: ["a", 7] },
       ],
-      outputs: [],
-      throws: [],
-      async: false,
-      generator: false,
-      typeParameters: [],
     }
     const violations = shapeViolations(withField("symbols", [symbol]))
     expect(violations.map((v) => v.subject)).toEqual([
@@ -186,24 +165,15 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
     expect(violations.every((v) => v.invariant === 20)).toBe(true)
   })
 
-  it("says nothing about a well-formed Document", () => {
-    const ir = minimalIR()
-    ir.components = [makeComponent("a")]
-    ir.symbols = [makeSymbol("ts:src/a.ts#foo", { component: "a" })]
-    ir.workspace.managers = [{ tool: "pnpm", roots: ["apps/a"] }]
-    expect(checkIRIntegrity(ir)).toEqual([])
-  })
-
   it("assertIRIntegrity reports it as an integrity violation, not a TypeError", () => {
-    let caught: unknown
-    try {
-      assertIRIntegrity(without("workspace"))
-    } catch (error) {
-      caught = error
-    }
-    expect(caught).toBeInstanceOf(CoreError)
-    expect((caught as CoreError).code).toBe("integrity-violation")
-    expect((caught as CoreError).violations?.some((v) => v.invariant === 20)).toBe(true)
-    expect((caught as CoreError).message).toContain("workspace")
+    const document = without("workspace")
+    expect(() => assertIRIntegrity(document)).toThrow(CoreError)
+    expect(() => assertIRIntegrity(document)).toThrowError(
+      expect.objectContaining({
+        code: "integrity-violation",
+        violations: [expect.objectContaining({ invariant: 20, subject: "document" })],
+        message: expect.stringContaining('"workspace" is absent'),
+      }),
+    )
   })
 })

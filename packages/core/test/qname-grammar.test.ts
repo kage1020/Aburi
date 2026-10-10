@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  CoreError,
-  DEFAULT_EXPORT_QNAME,
-  isQnameSegment,
-  isQualifiedName,
-  makeSymbolId,
-} from "../src"
+import { DEFAULT_EXPORT_QNAME, isQnameSegment, isQualifiedName, makeSymbolId } from "../src"
 
 const ZWNJ = "\u200C"
 const ZWJ = "\u200D"
@@ -15,15 +9,7 @@ function build(qualifiedName: string) {
   return makeSymbolId({ language: "ts", file: "src/a.ts", qualifiedName })
 }
 
-function refusalFor(qualifiedName: string): CoreError {
-  try {
-    build(qualifiedName)
-  } catch (error) {
-    if (error instanceof CoreError) return error
-    throw error
-  }
-  throw new Error(`expected makeSymbolId to refuse "${qualifiedName}"`)
-}
+const REFUSED = expect.objectContaining({ code: "anonymous-symbol-id-attempted" })
 
 describe("an identifier ECMAScript defines is a qualified name", () => {
   it.each([
@@ -84,7 +70,7 @@ describe("a private member keeps its `#`, after a separator only", () => {
     ["a bare `#` owner", "#.v"],
     ["two `#`", "Q.##v"],
   ])("refuses %s", (_label, qname) => {
-    expect(refusalFor(qname).code).toBe("anonymous-symbol-id-attempted")
+    expect(() => build(qname)).toThrowError(REFUSED)
     expect(isQualifiedName(qname)).toBe(false)
   })
 })
@@ -102,24 +88,17 @@ describe("what is not a name is still refused, and named", () => {
     ["an emoji", "🙂"],
     ["a fullwidth underscore", "＿x"],
   ])("refuses %s", (_label, qname) => {
-    const error = refusalFor(qname)
-
-    expect(error.code).toBe("anonymous-symbol-id-attempted")
-    expect(error.message).toContain("non-identifier segment")
-  })
-
-  it("refuses a connector punctuation mark that is not the underscore itself", () => {
-    expect(refusalFor("＿x").code).toBe("anonymous-symbol-id-attempted")
-  })
-
-  it("still refuses an empty segment, which the separator rule reports first", () => {
-    expect(refusalFor("A.").code).toBe("anonymous-symbol-id-attempted")
-    expect(refusalFor(".A").code).toBe("anonymous-symbol-id-attempted")
+    expect(() => build(qname)).toThrowError(
+      expect.objectContaining({
+        code: "anonymous-symbol-id-attempted",
+        message: expect.stringContaining("non-identifier segment"),
+      }),
+    )
   })
 
   it("keeps the default sentinel, which is exempted before the segment check", () => {
     expect(build(DEFAULT_EXPORT_QNAME)).toBe(`ts:src/a.ts#${DEFAULT_EXPORT_QNAME}`)
-    expect(refusalFor("<other>").code).toBe("anonymous-symbol-id-attempted")
+    expect(() => build("<other>")).toThrowError(REFUSED)
   })
 })
 

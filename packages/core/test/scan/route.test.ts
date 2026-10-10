@@ -1,46 +1,51 @@
-import type { LanguagePlugin } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildLanguageRouter } from "../../src"
+import { buildLanguageRouter, CoreError } from "../../src"
 import { langManifest, stubLanguagePlugin } from "../fixtures/plugins"
 
-function stubPlugin(name: string, extensions: string[]): LanguagePlugin {
-  return stubLanguagePlugin({ manifest: langManifest(name), fileExtensions: extensions })
+function plugin(name: string, fileExtensions: string[]) {
+  return stubLanguagePlugin({ manifest: langManifest(name), fileExtensions })
 }
 
 describe("buildLanguageRouter", () => {
-  it("routes files to the plugin that declared their extension", () => {
-    const ts = stubPlugin("lang-typescript", [".ts", ".tsx"])
-    const py = stubPlugin("lang-python", [".py"])
+  it("routes a file to the plugin that declared its extension, whatever the case", () => {
+    const ts = plugin("lang-typescript", [".ts", ".tsx"])
+    const py = plugin("lang-python", [".py"])
     const router = buildLanguageRouter([ts, py])
     expect(router.route("src/index.ts")).toBe(ts)
     expect(router.route("src/App.tsx")).toBe(ts)
+    expect(router.route("SRC/APP.TS")).toBe(ts)
     expect(router.route("scripts/build.py")).toBe(py)
   })
 
-  it("returns null for unknown extensions", () => {
-    const router = buildLanguageRouter([stubPlugin("lang-typescript", [".ts"])])
-    expect(router.route("README.md")).toBeNull()
-    expect(router.route("data.json")).toBeNull()
+  it.each([
+    "README.md",
+    "Makefile",
+  ])("answers null for %s, whose extension nobody claims", (path) => {
+    const router = buildLanguageRouter([plugin("lang-typescript", [".ts"])])
+    expect(router.route(path)).toBeNull()
   })
 
-  it("case-insensitive on extensions", () => {
-    const router = buildLanguageRouter([stubPlugin("lang-typescript", [".ts"])])
-    expect(router.route("SRC/APP.TS")).not.toBeNull()
+  it.each([
+    ["a decomposed declaration and a composed file name", ".ts\u0301", "src/a.t\u015b"],
+    ["a composed declaration and a decomposed file name", ".t\u015b", "src/a.ts\u0301"],
+  ])("routes %s to the same plugin", (_label, declared, path) => {
+    const owner = plugin("lang-accented", [declared])
+    expect(buildLanguageRouter([owner]).route(path)).toBe(owner)
   })
 
-  it("throws on extension collision between two different plugins", () => {
-    const a = stubPlugin("lang-a", [".ts"])
-    const b = stubPlugin("lang-b", [".ts"])
-    expect(() => buildLanguageRouter([a, b])).toThrow(/Two language plugins claim/)
+  it("refuses two plugins claiming one extension, naming both", () => {
+    const build = () => buildLanguageRouter([plugin("lang-a", [".ts"]), plugin("lang-b", [".TS"])])
+    expect(build).toThrow(CoreError)
+    expect(build).toThrow(/"lang-a" and "lang-b"/)
   })
 
-  it("permits the same plugin to be listed twice without collision", () => {
-    const ts = stubPlugin("lang-typescript", [".ts"])
-    expect(() => buildLanguageRouter([ts, ts])).not.toThrow()
+  it("lets one plugin be listed twice", () => {
+    const ts = plugin("lang-typescript", [".ts"])
+    expect(buildLanguageRouter([ts, ts]).route("a.ts")).toBe(ts)
   })
 
-  it("knownExtensions lists every registered extension lowercased", () => {
-    const router = buildLanguageRouter([stubPlugin("lang-typescript", [".TS", ".Tsx"])])
+  it("lists every claimed extension lowercased", () => {
+    const router = buildLanguageRouter([plugin("lang-typescript", [".TS", ".Tsx"])])
     expect([...router.knownExtensions].sort()).toEqual([".ts", ".tsx"])
   })
 })

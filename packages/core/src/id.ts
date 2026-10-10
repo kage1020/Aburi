@@ -2,10 +2,8 @@ import type { ComponentId, LanguageId, SymbolId } from "@aburi/types"
 import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError, type CoreErrorCode } from "./errors"
 
-/** Sentinel qualified name reserved for the lone default export of a module. */
 export const DEFAULT_EXPORT_QNAME = "<default>"
 
-/** Lowercase-ASCII kebab-ish language id (e.g. "ts", "tsx", "py", "go", "rs"). */
 const LANGUAGE_ID_PATTERN = /^[a-z][a-z0-9]*$/
 
 export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
@@ -24,7 +22,6 @@ export interface SymbolIdParts {
   qualifiedName: string
 }
 
-/** The subset of `CoreErrorCode` a grammar check can produce. */
 type GrammarViolationCode = Extract<
   CoreErrorCode,
   "anonymous-symbol-id-attempted" | "invalid-language-id" | "invalid-symbol-id" | "non-posix-path"
@@ -53,10 +50,10 @@ export function trySymbolId(parts: SymbolIdParts): SymbolId | null {
 
 export function makeComponentId(raw: string): ComponentId {
   if (!COMPONENT_ID_PATTERN.test(raw)) {
-    throw new CoreError(
-      `Component id "${raw}" violates the ASCII kebab-case pattern required by ir-schema.md`,
-      { code: "invalid-component-id", value: raw },
-    )
+    throw new CoreError(`Component id "${raw}" violates the ASCII kebab-case pattern`, {
+      code: "invalid-component-id",
+      value: raw,
+    })
   }
   return raw as ComponentId
 }
@@ -88,7 +85,6 @@ export function symbolIdFile(value: string): string | null {
   return parts.file
 }
 
-/** Narrow an arbitrary string to a `ComponentId`. Counterpart of `isSymbolId`. */
 export function isComponentId(value: string): value is ComponentId {
   return COMPONENT_ID_PATTERN.test(value)
 }
@@ -126,7 +122,6 @@ export function makeNestedQname(segments: readonly string[]): string {
   return segments.join(".")
 }
 
-/** Detect whether a qualified name is the reserved `<default>` sentinel. */
 export function isDefaultExportQname(qname: string): boolean {
   return qname === DEFAULT_EXPORT_QNAME
 }
@@ -142,9 +137,7 @@ export function toDocumentPath(rawPath: string): string {
 
 const SYMBOL_ID_SEPARATORS = [":", "#"] as const
 
-/** Where a path holds a backslash, which a Document path has no spelling for. */
 export interface BackslashSite {
-  /** The first `/`-delimited segment whose own name holds one. */
   segment: string
   prefix: string
 }
@@ -159,11 +152,8 @@ export function backslashSite(path: string): BackslashSite | null {
   return null
 }
 
-/** Where a path holds an id separator, and which ones. */
 export interface SymbolIdSeparatorSite {
-  /** The `/`-delimited segment that holds them — a directory name as readily as a filename. */
   segment: string
-  /** The separators that segment holds, in id order. */
   separators: readonly string[]
 }
 
@@ -208,7 +198,6 @@ function splitSymbolId(value: string): SymbolIdParts | null {
   }
 }
 
-/** Full validation of a candidate Symbol id, in the order the assertions used to run. */
 function symbolIdViolation(parts: SymbolIdParts): GrammarViolation | null {
   return (
     languageIdViolation(parts.language) ??
@@ -254,7 +243,6 @@ function languageIdViolation(language: string): GrammarViolation | null {
   return null
 }
 
-/** How a path site is named in its rejection message. */
 const PATH_SUBJECT = "path"
 const SYMBOL_ID_PATH_SUBJECT = "Symbol id file path"
 
@@ -310,7 +298,7 @@ function symbolIdPathViolation(path: string): GrammarViolation | null {
   if (symbolIdSeparatorSite(path) !== null) {
     return {
       code: "non-posix-path",
-      message: `${SYMBOL_ID_PATH_SUBJECT} "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md)`,
+      message: `${SYMBOL_ID_PATH_SUBJECT} "${path}" contains ":" or "#", the two Symbol id separators`,
       value: path,
     }
   }

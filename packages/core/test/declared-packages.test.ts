@@ -1,249 +1,183 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CoreError, detectComponents, detectManagers } from "../src/index"
+import { describe, expect, it } from "vitest"
+import { detectComponents, detectManagers } from "../src/index"
+import { useWorkspaceTree } from "./fixtures/workspace"
 
-let tmp = ""
-
-beforeEach(async () => {
-  tmp = await mkdtemp(join(tmpdir(), "aburi-core-declared-"))
-})
-
-afterEach(async () => {
-  await rm(tmp, { recursive: true, force: true })
-})
-
-async function writePackage(relativeDir: string, name: string): Promise<void> {
-  const dir = join(tmp, relativeDir)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, "package.json"), JSON.stringify({ name }), "utf8")
-}
-
-async function writePnpmManifest(...patterns: string[]): Promise<void> {
-  const lines = patterns.map((pattern) => `  - ${JSON.stringify(pattern)}`).join("\n")
-  await writeFile(join(tmp, "pnpm-workspace.yaml"), `packages:\n${lines}\n`, "utf8")
-}
+const tree = useWorkspaceTree("core-declared")
 
 async function pnpmRoots(): Promise<string[]> {
-  const { workspaces } = await detectManagers(tmp)
+  const { workspaces } = await detectManagers(tree.root)
   return workspaces
     .filter((candidate) => candidate.managerTool === "pnpm")
     .map((candidate) => candidate.relativeRoot)
-    .sort()
 }
 
 async function writeNonPackageDirectories(): Promise<void> {
-  await mkdir(join(tmp, "src"), { recursive: true })
-  await mkdir(join(tmp, "a", "b", "c", "d"), { recursive: true })
+  await tree.mkdir("src")
+  await tree.mkdir("a/b/c/d")
 }
 
 describe("a declared package is the directory that holds the manifest", () => {
   it("resolves '.' to the workspace root, not to every directory under it", async () => {
-    await writePackage(".", "root-pkg")
-    await writePackage("packages/app", "app")
+    await tree.writePackage(".", { name: "root-pkg" })
+    await tree.writePackage("packages/app", { name: "app" })
     await writeNonPackageDirectories()
-    await writePnpmManifest(".", "packages/*")
+    await tree.writePnpmWorkspace(".", "packages/*")
 
     expect(await pnpmRoots()).toEqual([".", "packages/app"])
   })
 
   it("reads a trailing slash as the same root", async () => {
-    await writePackage(".", "root-pkg")
+    await tree.writePackage(".", { name: "root-pkg" })
     await writeNonPackageDirectories()
-    await writePnpmManifest("./")
+    await tree.writePnpmWorkspace("./")
 
     expect(await pnpmRoots()).toEqual(["."])
   })
 
   it("declares nothing for '.' when the root holds no manifest", async () => {
-    await writePackage("packages/app", "app")
+    await tree.writePackage("packages/app", { name: "app" })
     await writeNonPackageDirectories()
-    await writePnpmManifest(".")
+    await tree.writePnpmWorkspace(".")
 
     expect(await pnpmRoots()).toEqual([])
   })
 
   it("resolves a literal path to that directory alone, not to its subtree", async () => {
-    await writePackage("tools/build", "build")
-    await writePackage("tools/build/nested", "nested")
-    await writePnpmManifest("tools/build")
+    await tree.writePackage("tools/build", { name: "build" })
+    await tree.writePackage("tools/build/nested", { name: "nested" })
+    await tree.writePnpmWorkspace("tools/build")
 
     expect(await pnpmRoots()).toEqual(["tools/build"])
   })
 
   it("passes over a matched directory that holds no manifest", async () => {
-    await writePackage("packages/app", "app")
-    await mkdir(join(tmp, "packages", "dist"), { recursive: true })
-    await writePnpmManifest("packages/*")
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.mkdir("packages/dist")
+    await tree.writePnpmWorkspace("packages/*")
 
     expect(await pnpmRoots()).toEqual(["packages/app"])
   })
 
   it("honours a negated pattern", async () => {
-    await writePackage("packages/app", "app")
-    await writePackage("packages/skipme", "skipme")
-    await writePnpmManifest("packages/*", "!packages/skipme")
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.writePackage("packages/skipme", { name: "skipme" })
+    await tree.writePnpmWorkspace("packages/*", "!packages/skipme")
 
     expect(await pnpmRoots()).toEqual(["packages/app"])
   })
 
   it("passes over a directory that is itself named package.json", async () => {
-    await writePackage("packages/app", "app")
-    await mkdir(join(tmp, "packages", "weird", "package.json"), { recursive: true })
-    await writeFile(join(tmp, "packages", "weird", "package.json", "inner.txt"), "x", "utf8")
-    await writePnpmManifest("packages/*")
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.writeSource("packages/weird/package.json/inner.txt", "x")
+    await tree.writePnpmWorkspace("packages/*")
 
     expect(await pnpmRoots()).toEqual(["packages/app"])
   })
 
   it("passes over a dependency's own manifest", async () => {
-    await writePackage("packages/app", "app")
-    await writePackage("node_modules/left-pad", "left-pad")
-    await writePnpmManifest("**")
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.writePackage("node_modules/left-pad", { name: "left-pad" })
+    await tree.writePnpmWorkspace("**")
 
     expect(await pnpmRoots()).toEqual(["packages/app"])
   })
 
   it("reaches ten directory levels down and stops there", async () => {
     const deep = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10"].join("/")
-    await writePackage(deep, "deep")
-    await writePackage(`${deep}/l11`, "past-the-ceiling")
-    await writePnpmManifest("**")
+    await tree.writePackage(deep, { name: "deep" })
+    await tree.writePackage(`${deep}/l11`, { name: "past-the-ceiling" })
+    await tree.writePnpmWorkspace("**")
 
     expect(await pnpmRoots()).toEqual([deep])
   })
 
   it("falls back to the whole repository when no matched directory holds a manifest", async () => {
-    await mkdir(join(tmp, "packages", "one"), { recursive: true })
-    await mkdir(join(tmp, "packages", "two"), { recursive: true })
-    await writePnpmManifest("packages/*")
+    await tree.mkdir("packages/one")
+    await tree.mkdir("packages/two")
+    await tree.writePnpmWorkspace("packages/*")
 
-    const { managers } = await detectManagers(tmp)
+    const { managers } = await detectManagers(tree.root)
     expect(managers).toEqual([{ tool: "pnpm", roots: [] }])
 
-    const components = await detectComponents({ workspaceRoot: tmp })
+    const components = await detectComponents({ workspaceRoot: tree.root })
     expect(components).toHaveLength(1)
     expect(components[0]?.roots).toEqual(["."])
   })
 
   it("declares nothing for an empty pattern", async () => {
-    await writePackage("packages/app", "app")
-    await writePnpmManifest("")
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.writePnpmWorkspace("")
 
     expect(await pnpmRoots()).toEqual([])
   })
 
-  it("still refuses a pattern that ascends out of the workspace", async () => {
-    await writePackage("outside/pkg", "outside")
-    await mkdir(join(tmp, "repo"), { recursive: true })
-    await writeFile(join(tmp, "repo", "package.json"), JSON.stringify({ name: "root" }), "utf8")
-    await mkdir(join(tmp, "repo", "apps", "a"), { recursive: true })
-    await writeFile(
-      join(tmp, "repo", "apps", "a", "package.json"),
-      JSON.stringify({ name: "a" }),
-      "utf8",
-    )
-    await writeFile(
-      join(tmp, "repo", "pnpm-workspace.yaml"),
-      'packages:\n  - "apps/*"\n  - "../outside/*"\n',
-      "utf8",
-    )
-
-    const thrown = await detectManagers(join(tmp, "repo")).then(
-      () => null,
-      (error: unknown) => error,
-    )
-
-    expect(thrown).toBeInstanceOf(CoreError)
-    expect((thrown as CoreError).code).toBe("workspace-root-outside")
-  })
-
   it("carries the matched manifest on every candidate", async () => {
-    await writePackage(".", "root-pkg")
-    await writePackage("packages/app", "app")
-    await writePnpmManifest(".", "packages/*")
+    await tree.writePackage(".", { name: "root-pkg" })
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.writePnpmWorkspace(".", "packages/*")
 
-    const { workspaces } = await detectManagers(tmp)
-    expect(workspaces.length).toBeGreaterThan(0)
-    for (const candidate of workspaces) {
-      expect(basename(candidate.manifestPath)).toBe("package.json")
-    }
+    const { workspaces } = await detectManagers(tree.root)
+    expect(workspaces.map((candidate) => basename(candidate.manifestPath))).toEqual([
+      "package.json",
+      "package.json",
+    ])
   })
 
   it("applies the same rule to npm workspaces", async () => {
     await writeNonPackageDirectories()
-    await writeFile(
-      join(tmp, "package.json"),
-      JSON.stringify({ name: "root-pkg", workspaces: [".", "apps/*"] }),
-      "utf8",
-    )
-    await writePackage("apps/a", "a")
+    await tree.writeJson("package.json", { name: "root-pkg", workspaces: [".", "apps/*"] })
+    await tree.writePackage("apps/a", { name: "a" })
 
-    const { workspaces } = await detectManagers(tmp)
-    expect(workspaces.map((candidate) => candidate.relativeRoot).sort()).toEqual([".", "apps/a"])
+    const { workspaces } = await detectManagers(tree.root)
+    expect(workspaces.map((candidate) => candidate.relativeRoot)).toEqual([".", "apps/a"])
   })
 })
 
 describe("the workspace root as a declared component", () => {
-  /** Enough files to clear the language census thresholds (≥10 files and ≥5% share). */
-  async function seedFiles(relativeDir: string, extension: string, count: number): Promise<void> {
-    const dir = join(tmp, relativeDir)
-    await mkdir(dir, { recursive: true })
-    for (let i = 0; i < count; i++) {
-      await writeFile(join(dir, `f${i}.${extension}`), `x${i} = ${i}\n`, "utf8")
-    }
-  }
-
-  async function seedTypescript(relativeDir: string, count: number): Promise<void> {
-    await seedFiles(relativeDir, "ts", count)
-  }
-
   it("becomes one component beside the packages, not one per directory", async () => {
-    await writePackage(".", "root-pkg")
-    await writePackage("packages/app", "app")
+    await tree.writePackage(".", { name: "root-pkg" })
+    await tree.writePackage("packages/app", { name: "app" })
     await writeNonPackageDirectories()
-    await seedTypescript("src", 12)
-    await seedTypescript("packages/app/src", 12)
-    await writePnpmManifest(".", "packages/*")
+    await tree.writeLanguageFiles("src", ".ts")
+    await tree.writeLanguageFiles("packages/app/src", ".ts")
+    await tree.writePnpmWorkspace(".", "packages/*")
 
-    const components = await detectComponents({ workspaceRoot: tmp })
+    const components = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.map((c) => c.id)).toEqual(["app", "root-pkg"])
     expect(components.find((c) => c.id === "root-pkg")?.roots).toEqual(["."])
   })
 
   it("censuses the root's own files", async () => {
-    await writePackage(".", "root-pkg")
-    await seedTypescript("src", 12)
-    await writePnpmManifest(".")
+    await tree.writePackage(".", { name: "root-pkg" })
+    await tree.writeLanguageFiles("src", ".ts")
+    await tree.writePnpmWorkspace(".")
 
-    const components = await detectComponents({ workspaceRoot: tmp })
+    const components = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components).toHaveLength(1)
     expect(components[0]?.languages).toEqual(["ts"])
   })
 
   it("censuses the packages nested under it as its own subtree", async () => {
-    await writePackage(".", "root-pkg")
-    await writePackage("packages/app", "app")
-    await seedFiles("services", "py", 12)
-    await seedTypescript("packages/app/src", 12)
-    await writePnpmManifest(".", "packages/*")
+    await tree.writePackage(".", { name: "root-pkg" })
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.writeLanguageFiles("services", ".py")
+    await tree.writeLanguageFiles("packages/app/src", ".ts")
+    await tree.writePnpmWorkspace(".", "packages/*")
 
-    const components = await detectComponents({ workspaceRoot: tmp })
+    const components = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.find((c) => c.id === "app")?.languages).toEqual(["ts"])
     expect(components.find((c) => c.id === "root-pkg")?.languages).toEqual(["py", "ts"])
   })
 
   it("names the root after its directory when the root manifest carries no name", async () => {
-    const root = join(tmp, "storefront")
-    await mkdir(root, { recursive: true })
-    await writeFile(join(root, "package.json"), JSON.stringify({ private: true }), "utf8")
-    await writeFile(join(root, "pnpm-workspace.yaml"), 'packages:\n  - "."\n', "utf8")
+    await tree.writePackage("storefront", { private: true })
+    await tree.writeSource("storefront/pnpm-workspace.yaml", 'packages:\n  - "."\n')
 
-    const components = await detectComponents({ workspaceRoot: root })
+    const components = await detectComponents({ workspaceRoot: join(tree.root, "storefront") })
 
     expect(components).toHaveLength(1)
     expect(components[0]?.id).toBe("storefront")

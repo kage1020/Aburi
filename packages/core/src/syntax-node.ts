@@ -16,7 +16,6 @@ export function asSyntaxNode(value: unknown): SyntaxNode | null {
   return candidate as SyntaxNode
 }
 
-/** The first direct named child of the given `type`, or `null`. */
 export function findNamedChildOfType(node: SyntaxNode, typeName: string): SyntaxNode | null {
   for (const child of node.namedChildren) {
     if (child !== null && child.type === typeName) return child
@@ -40,13 +39,11 @@ export function calleeText(callNode: SyntaxNode): string | null {
   return callee.text.length > 0 ? callee.text : null
 }
 
-/** The last dotted segment of a callee string (`app.route('/x').get` → `get`). */
 export function calleeLeaf(callee: string): string {
   const dot = callee.lastIndexOf(".")
   return dot < 0 ? callee : callee.slice(dot + 1)
 }
 
-/** True when any `call_expression` under `node` (itself included) has a callee leaf `predicate` accepts. */
 export function anyCallCalleeMatches(
   node: SyntaxNode,
   predicate: (leaf: string) => boolean,

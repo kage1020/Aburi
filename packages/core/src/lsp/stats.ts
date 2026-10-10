@@ -6,30 +6,24 @@ export interface LspStatsBuilder
   languagesDisabled: Set<LanguageId>
 }
 
-/** Every way a hint can be lost, as one name per stats-extension bucket. */
 export type LspHintRejectionReason = keyof LspHintRejections
 
-/** The reasons the enrichment pass can record — the producer half of the stats extension. */
 export type LspProducerRejection = Extract<
   LspHintRejectionReason,
   "unparseableHover" | "ownerClassNotFound" | "memberNotFound"
 >
 
-/** The reasons the resolver can record — the consumer half of the stats extension. */
 export type LspConsumerRejection = Extract<LspHintRejectionReason, "kindMismatch" | "targetDropped">
 
-/** The rejection buckets a producer increments in place (`counts[reason] += 1`). */
 export type LspHintRejectionCounts = LspHintRejections
 
 export type LspProducerStats = LspEnrichmentStats &
   Required<Pick<LspEnrichmentStats, "hintsProduced" | "hintsConsumed" | "hintsRejected">>
 
+/** Counts call sites, not hints: two identical calls on one line share a hint and consume it twice. */
 export interface LspHintUsage {
-  /** Call sites the LSP tier turned into an edge. */
   consumed: number
-  /** Call sites offered a hint written for the other receiver kind. */
   kindMismatch: number
-  /** Call sites whose hint named a Symbol a Category B/C rule dropped. */
   targetDropped: number
 }
 

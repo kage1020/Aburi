@@ -2,7 +2,7 @@ export type PathExpectation = { ok: true } | { ok: false; reason: string }
 
 export interface WorkspacePathCase {
   path: string
-  /** As a component root or a workspace-manager root. */
+  /** As a component or workspace-manager root, or any other path a Document records. */
   root: PathExpectation
   /** As a `symbols[].source.file`, and as the file segment of the id built from it. */
   symbolPath: PathExpectation
@@ -39,6 +39,12 @@ export const WORKSPACE_PATH_CASES: readonly WorkspacePathCase[] = [
     root: ok,
     symbolPath: no("Symbol id separators"),
     why: "likewise for the hash",
+  },
+  {
+    path: "src/v#1/util.ts",
+    root: ok,
+    symbolPath: no("Symbol id separators"),
+    why: "a directory's name holds a separator as readily as a file's",
   },
   {
     path: "",

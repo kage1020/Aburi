@@ -4,19 +4,18 @@ import ignore, { type Ignore } from "ignore"
 import { CoreError } from "../errors"
 import { describeThrown, isVanishedFile } from "./faults"
 
-/** The one filename git reads per directory. */
 const GITIGNORE_FILENAME = ".gitignore"
 
+// Regex engines refuse long patterns at lengths that differ by platform; one fixed cap keeps
+// the verdict on a rule the same on every machine.
 const MAX_RULE_LENGTH = 4096
 
-/** How much of a rule the failure message quotes. A pattern can be longer than a screen. */
 const QUOTED_RULE_LENGTH = 60
 
-/** How much of the engine's own diagnostic survives, from each end. */
 const QUOTED_REASON_HEAD = 40
 const QUOTED_REASON_TAIL = 60
 
-/** What one directory's rules say about one candidate. Silence is an answer the walk needs. */
+/** `"none"` is a directory with no opinion, which a deeper or shallower one may still supply. */
 type Verdict = "none" | "ignored" | "kept"
 
 export interface GitignoreTree {
@@ -133,7 +132,6 @@ class GitignoreDescent implements GitignoreTree {
     }
   }
 
-  /** Read at most once per directory, and only when the descent actually reached it. */
   async #matcherFor(directory: string): Promise<Ignore | null> {
     const cached = this.#matchers.get(directory)
     if (cached !== undefined) return cached

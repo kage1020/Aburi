@@ -54,9 +54,17 @@ export function isLspFailure(value: unknown): value is LspFailure {
   )
 }
 
-/** The message an `LspError` or a log line carries for a thrown value. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function serverError(error: unknown): LspError {
+  return { kind: "error", reason: "server-error", message: errorMessage(error) }
+}
+
+export function failureReason(failure: LspFailure): string {
+  if (failure.kind === "timeout") return "timeout"
+  return `${failure.reason}: ${failure.message}`
 }
 
 const SERVER_DISCONNECTED: LspError = Object.freeze({
@@ -96,11 +104,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
           input.timeoutMs,
         )
       } catch (error) {
-        return {
-          kind: "error",
-          reason: "server-error",
-          message: errorMessage(error),
-        }
+        return serverError(error)
       }
       if (isLspFailure(result)) return result
       const ack = await sendNotificationBounded(
@@ -136,27 +140,20 @@ export function createLspClient(server: SpawnedServer): LspClient {
     async request<T>(method: string, params: unknown, timeoutMs: number): Promise<T | LspFailure> {
       if (disposed) return SERVER_DISCONNECTED
       try {
-        const raw = await raceTimeout(connection.sendRequest<T>(method, params), timeoutMs)
-        return raw
+        return await raceTimeout(connection.sendRequest<T>(method, params), timeoutMs)
       } catch (error) {
-        return {
-          kind: "error",
-          reason: "server-error",
-          message: errorMessage(error),
-        }
+        return serverError(error)
       }
     },
 
     async shutdown() {
       if (disposed) return
-      try {
-        await raceTimeout(
-          connection.sendRequest(ShutdownRequest.type, undefined),
-          SHUTDOWN_GRACE_MS,
-        )
-      } catch {
-        // ignore — we still fire exit + kill below
-      }
+      // Each step's failure is dropped: the kill is what ends the process, and a throw from here
+      // would replace whatever error the caller is already unwinding with.
+      await raceTimeout(
+        connection.sendRequest(ShutdownRequest.type, undefined),
+        SHUTDOWN_GRACE_MS,
+      ).catch(() => undefined)
       await sendNotificationBounded(
         () => connection.sendNotification(ExitNotification.type),
         SHUTDOWN_GRACE_MS,
@@ -164,9 +161,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
       await server.killAfter(SHUTDOWN_GRACE_MS)
       try {
         connection.dispose()
-      } catch {
-        // ignore
-      }
+      } catch {}
       disposed = true
     },
   }
@@ -180,11 +175,7 @@ async function sendNotificationBounded(
     const outcome = await raceTimeout(send(), timeoutMs)
     return isLspFailure(outcome) ? outcome : null
   } catch (error) {
-    return {
-      kind: "error",
-      reason: "server-error",
-      message: errorMessage(error),
-    }
+    return serverError(error)
   }
 }
 

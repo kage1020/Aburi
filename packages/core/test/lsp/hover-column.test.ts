@@ -1,37 +1,26 @@
 import { describe, expect, it } from "vitest"
+import type { Position } from "vscode-languageserver-protocol"
 import { resolveCallGraph } from "../../src/callgraph"
-import { enrichWithLsp } from "../../src/lsp"
-import { makeClassSymbol, makeEnrichmentInput, makeMethodSymbol } from "./fixtures/enrichment-ctx"
-import { mockServerFactory } from "./fixtures/mock-server"
-
-const HOVER_METHOD = "textDocument/hover"
-const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
-
-type HoverPosition = { line: number; character: number }
+import { enrich, makeClassSymbol, makeMethodSymbol } from "./fixtures/enrichment-ctx"
+import { hoverPosition, hoverServer } from "./fixtures/mock-server"
 
 /** 0-based line of `callLine` in the fixture `hoveredPositions` builds. */
 const CALL_LINE = 2
 
-async function hoveredPositions(callLine: string, ...targets: string[]): Promise<HoverPosition[]> {
-  const cls = makeClassSymbol("src/a.ts", "C", 1)
+async function hoveredPositions(callLine: string, ...targets: string[]): Promise<Position[]> {
   const calls = targets.map((target) => ({ target, line: CALL_LINE + 1 }))
-  const caller = makeMethodSymbol("src/a.ts", "C", "run", 2, calls)
-  const seen: HoverPosition[] = []
-  const factory = mockServerFactory((_lang, client) => {
-    client.installHandler(DOC_SYMBOL_METHOD, () => [])
-    client.installHandler(HOVER_METHOD, (params) => {
-      const { line, character } = (params as { position: HoverPosition }).position
-      seen.push({ line, character })
+  const seen: Position[] = []
+  await enrich({
+    symbols: [
+      makeClassSymbol("src/a.ts", "C", 1),
+      makeMethodSymbol("src/a.ts", "C", "run", 2, calls),
+    ],
+    fileContents: { "src/a.ts": `class C {\n  run() {\n${callLine}\n  }\n}` },
+    serverFactory: hoverServer((params) => {
+      seen.push(hoverPosition(params))
       return null
-    })
-  })
-  await enrichWithLsp(
-    makeEnrichmentInput({
-      symbols: [cls, caller],
-      fileContents: { "src/a.ts": `class C {\n  run() {\n${callLine}\n  }\n}` },
-      serverFactory: factory,
     }),
-  )
+  })
   return seen
 }
 
@@ -237,21 +226,15 @@ describe("the hint names the call's own method", () => {
       [at("    this.saveAll", "this.saveAll"), "BaseStore.saveAll"],
       [at("return this.save", "this.save"), "UserStore.save"],
     ])
-    const factory = mockServerFactory((_lang, client) => {
-      client.installHandler(DOC_SYMBOL_METHOD, () => [])
-      client.installHandler(HOVER_METHOD, (params) => {
-        const { line, character } = (params as { position: HoverPosition }).position
+    const enrichment = await enrich({
+      symbols,
+      fileContents: { "src/a.ts": lines.join("\n") },
+      serverFactory: hoverServer((params) => {
+        const { line, character } = hoverPosition(params)
         const member = answers.get(`${line}:${character}`)
         return member === undefined ? null : { contents: `(method) ${member}(): void` }
-      })
-    })
-    const enrichment = await enrichWithLsp(
-      makeEnrichmentInput({
-        symbols,
-        fileContents: { "src/a.ts": lines.join("\n") },
-        serverFactory: factory,
       }),
-    )
+    })
     const result = resolveCallGraph({
       symbols: enrichment.symbols,
       importsByFile: new Map(),

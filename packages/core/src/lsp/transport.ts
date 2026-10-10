@@ -75,7 +75,6 @@ export function spawnStdioServer(
   }
 }
 
-/** Wait for the child to exit, giving up after `ms` so no caller can be pinned. */
 async function raceExit(exited: Promise<number | null>, ms: number): Promise<void> {
   await new Promise<void>((resolvePromise) => {
     const timer = setTimeout(resolvePromise, ms)

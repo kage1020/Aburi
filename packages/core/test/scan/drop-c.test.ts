@@ -1,73 +1,115 @@
-import type { CallCandidate } from "@aburi/types"
+import { makeCall } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { buildDropCFilter } from "../../src"
+import { buildDropCFilter, type DropCFilterInput } from "../../src"
 
-function makeCall(target: string): CallCandidate {
-  return { target, line: 1, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
+const decomposed = "café".normalize("NFD")
+const composed = decomposed.normalize("NFC")
+
+function drops(input: DropCFilterInput, target: string): boolean {
+  return buildDropCFilter(input).shouldDropCall(makeCall({ target }))
 }
 
-describe("DropCFilter — Category C call drop", () => {
-  it("drops every core console.* call", () => {
-    const filter = buildDropCFilter()
-    for (const t of [
-      "console.log",
-      "console.info",
-      "console.warn",
+describe("buildDropCFilter", () => {
+  it.each([
+    "console.log",
+    "console.info",
+    "console.warn",
+    "console.error",
+    "console.debug",
+    "console.trace",
+    "console.table",
+    "console.dir",
+    "console.group",
+    "console.groupEnd",
+    "process.stdout.write",
+    "process.stderr.write",
+  ])("drops the core callee %s with nothing configured", (target) => {
+    expect(drops({}, target)).toBe(true)
+  })
+
+  it.each([
+    "prisma.user.create",
+    "this.service.method",
+    "consoleWrap.method",
+  ])("keeps %s with nothing configured", (target) => {
+    expect(drops({}, target)).toBe(false)
+  })
+
+  it.each<[string, DropCFilterInput, string, boolean]>([
+    [
+      "a suppress prefix drops a member call",
+      { suppress: ["myLogger", "metrics"] },
+      "metrics.counter",
+      true,
+    ],
+    ["a suppress prefix drops the bare name", { suppress: ["myLogger"] }, "myLogger", true],
+    [
+      "a suppress prefix leaves another name",
+      { suppress: ["myLogger"] },
+      "otherLogger.debug",
+      false,
+    ],
+    [
+      "a suppress prefix stops at a member break",
+      { suppress: ["console"] },
+      "consoleWrap.method",
+      false,
+    ],
+    [
+      "a plugin's dropCallees drop like suppress",
+      { pluginDropCallees: ["pino"] },
+      "pino.info",
+      true,
+    ],
+    [
+      "keep rescues from suppress",
+      { suppress: ["console"], keep: ["console.error"] },
       "console.error",
-      "console.debug",
-      "console.trace",
-      "console.table",
-      "console.dir",
-      "console.group",
-      "console.groupEnd",
-    ]) {
-      expect(filter.shouldDropCall(makeCall(t))).toBe(true)
-    }
-  })
-
-  it("drops process.stdout.write and process.stderr.write", () => {
-    const filter = buildDropCFilter()
-    expect(filter.shouldDropCall(makeCall("process.stdout.write"))).toBe(true)
-    expect(filter.shouldDropCall(makeCall("process.stderr.write"))).toBe(true)
-  })
-
-  it("keeps calls that are not core drop targets", () => {
-    const filter = buildDropCFilter()
-    expect(filter.shouldDropCall(makeCall("prisma.user.create"))).toBe(false)
-    expect(filter.shouldDropCall(makeCall("this.service.method"))).toBe(false)
-  })
-
-  it("respects config.suppress[] prefixes", () => {
-    const filter = buildDropCFilter({ suppress: ["myLogger", "metrics"] })
-    expect(filter.shouldDropCall(makeCall("myLogger.debug"))).toBe(true)
-    expect(filter.shouldDropCall(makeCall("metrics.counter"))).toBe(true)
-    expect(filter.shouldDropCall(makeCall("otherLogger.debug"))).toBe(false)
-  })
-
-  it("respects plugin dropCallees[]", () => {
-    const filter = buildDropCFilter({ pluginDropCallees: ["pino", "child"] })
-    expect(filter.shouldDropCall(makeCall("pino.info"))).toBe(true)
-    expect(filter.shouldDropCall(makeCall("child.info"))).toBe(true)
-  })
-
-  it("config.keep[] wins over both suppress and core drop", () => {
-    const filter = buildDropCFilter({
-      suppress: ["console"],
-      keep: ["console.error"],
-    })
-    expect(filter.shouldDropCall(makeCall("console.error"))).toBe(false)
-    // Non-kept prefixes still fall under the suppress / core drop.
-    expect(filter.shouldDropCall(makeCall("console.log"))).toBe(true)
-  })
-
-  it("supports the `@Decorator` keep syntax by stripping the `@`", () => {
-    const filter = buildDropCFilter({ suppress: ["Transaction"], keep: ["@Transaction"] })
-    expect(filter.shouldDropCall(makeCall("Transaction.begin"))).toBe(false)
-  })
-
-  it("respects identifier boundaries — `console` prefix does NOT match `consoleWrap.method`", () => {
-    const filter = buildDropCFilter({ suppress: ["console"] })
-    expect(filter.shouldDropCall(makeCall("consoleWrap.method"))).toBe(false)
-    expect(filter.shouldDropCall(makeCall("console.log"))).toBe(true)
+      false,
+    ],
+    [
+      "keep leaves the rest of suppress in force",
+      { suppress: ["console"], keep: ["console.error"] },
+      "console.log",
+      true,
+    ],
+    [
+      "keep rescues from the core list",
+      { keep: ["process.stdout.write"] },
+      "process.stdout.write",
+      false,
+    ],
+    [
+      "keep rescues from a plugin's dropCallees",
+      { pluginDropCallees: ["pino"], keep: ["pino.audit"] },
+      "pino.audit",
+      false,
+    ],
+    [
+      "keep reads `@Name` as Name",
+      { suppress: ["Transaction"], keep: ["@Transaction"] },
+      "Transaction.begin",
+      false,
+    ],
+    [
+      "a decomposed suppress entry drops the composed call",
+      { suppress: [decomposed] },
+      `${composed}.log`,
+      true,
+    ],
+    [
+      "a decomposed dropCallee drops the composed call",
+      { pluginDropCallees: [decomposed] },
+      `${composed}.log`,
+      true,
+    ],
+    [
+      "a decomposed keep entry rescues the composed call",
+      { suppress: [composed], keep: [`${decomposed}.audit`] },
+      `${composed}.audit`,
+      false,
+    ],
+  ])("%s", (_label, input, target, dropped) => {
+    expect(drops(input, target)).toBe(dropped)
   })
 })

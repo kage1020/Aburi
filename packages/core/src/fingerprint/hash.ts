@@ -14,7 +14,7 @@ export function hashRawString(text: string): string {
   return sha256Hex(text).slice(0, FP_HEX_LENGTH)
 }
 
-/** Full lowercase-hex SHA-256 of `text`'s UTF-8 bytes; callers pick their own truncation. */
+/** Untruncated, so each caller picks its own width. */
 export function sha256Hex(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex")
 }

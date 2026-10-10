@@ -1,480 +1,205 @@
+import { decorator, effect, rule, sig } from "@aburi/test-support"
 import type { Effect, Symbol as IRSymbol, Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { hashCanonicalObject, logicFingerprint, logicNamesNothing } from "../../src/index"
-import { makeSymbol, symbolId } from "../fixtures/ir"
+import { logicFingerprint, logicNamesNothing } from "../../src/index"
+import { makeSymbol, type SymbolOverrides } from "../fixtures/ir"
 
-/** A locally-detected effect: the plugin classified a call in this body, at `line`. */
 function localEffect(id: string, target: string, line: number): Effect {
-  return {
-    id,
-    target,
-    line,
-    plugin: "effects-test",
-    confidence: "high",
-    derivedBy: "convention:test",
-  }
+  return effect({ id, target, plugin: "effects-test", line })
 }
 
-/** A propagated effect as the propagation pass writes one: no `line`, a direct callee. */
 function propagatedEffect(id: string, target: string): Effect {
-  return {
+  return effect({
     id,
     target,
     plugin: "effects-test",
-    confidence: "high",
-    derivedBy: "convention:test",
     propagated: true,
-    derivedFrom: [symbolId("ts:src/invoice.ts#saveInvoice")],
-  }
+    derivedFrom: ["ts:src/invoice.ts#saveInvoice"],
+  })
+}
+
+const GUARD = rule({ type: "guard", line: 3, condition: "amount <= 0" })
+const THROW = rule({ type: "throw", line: 5, what: "AmountInvalid" })
+const WRITE = localEffect("db.write", "prisma.invoice.create", 8)
+const PUBLISH = localEffect("event.publish", "eventBus.emit", 10)
+
+function body(overrides: SymbolOverrides = {}): IRSymbol {
+  return makeSymbol("ts:src/a.ts#foo", {
+    rules: [GUARD, THROW],
+    effects: [WRITE, PUBLISH],
+    ...overrides,
+  })
 }
 
 /** A caller with no rules, so its logic input is its effects alone. */
-function caller(effects: Effect[]): IRSymbol {
-  return makeSymbol("ts:src/invoice.ts#handleCheckout", { rules: [], effects })
+function caller(...effects: Effect[]): IRSymbol {
+  return makeSymbol("ts:src/invoice.ts#handleCheckout", { effects })
 }
 
-function base(): IRSymbol {
-  return makeSymbol("ts:src/a.ts#foo", {
-    rules: [
-      { type: "guard", line: 3, condition: "amount <= 0", what: null, expr: null, loopKind: null },
-      {
-        type: "throw",
-        line: 5,
-        condition: null,
-        what: "AmountInvalid",
-        expr: null,
-        loopKind: null,
-      },
-    ],
-    effects: [
-      {
-        id: "db.write",
-        target: "prisma.invoice.create",
-        line: 8,
-        plugin: "effects-prisma",
-        confidence: "high",
-        derivedBy: "convention:test",
-      },
-      {
-        id: "event.publish",
-        target: "eventBus.emit",
-        line: 10,
-        plugin: "effects-nest",
-        confidence: "high",
-        derivedBy: "convention:test",
-      },
-    ],
-  })
-}
-
-describe("logicFingerprint — invariance", () => {
-  const baseFp = logicFingerprint(base())
-
-  it("renaming a local variable that does not appear in any rule/effect string is invariant", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      source: {
-        file: "src/a.ts",
-        startLine: 42,
-        endLine: 99,
-        startColumn: null,
-        endColumn: null,
-      },
-      confidence: "medium",
-      derivedBy: ["convention:service-suffix"],
-    })
-    expect(logicFingerprint(sym)).toBe(baseFp)
-  })
-
-  it("adding a call is invariant (calls are not on the logic axis)", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      calls: [{ target: "console.log", line: 12, resolved: null }],
-    })
-    expect(logicFingerprint(sym)).toBe(baseFp)
-  })
-
-  it("changing decorators is invariant", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      decorators: [
-        {
-          name: "UseGuards",
-          raw: "UseGuards(RolesGuard)",
-          arguments: ["RolesGuard"],
-          boundary: false,
-          line: 1,
+describe("logicFingerprint ignores", () => {
+  it.each<[string, IRSymbol, IRSymbol]>([
+    [
+      "the Symbol's position, confidence and provenance",
+      body({
+        source: {
+          file: "src/a.ts",
+          startLine: 42,
+          endLine: 99,
+          startColumn: null,
+          endColumn: null,
         },
-      ],
-    })
-    expect(logicFingerprint(sym)).toBe(baseFp)
-  })
-
-  it("changing effects[].id but keeping the target is invariant (plugin-classification churn resistance)", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      effects: [
-        // Same target as base, reclassified from db.write to x-prisma:create.
-        {
-          id: "x-prisma:create",
-          target: "prisma.invoice.create",
-          line: 8,
-          plugin: "effects-prisma",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-        {
-          id: "x-nest:emit",
-          target: "eventBus.emit",
-          line: 10,
-          plugin: "effects-nest",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).toBe(baseFp)
-  })
-
-  it("reordering the effects plugin lineup that produces the same targets is invariant", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      effects: [
-        {
-          id: "db.write",
-          target: "prisma.invoice.create",
-          line: 8,
-          plugin: "effects-alternate",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-        {
-          id: "event.publish",
-          target: "eventBus.emit",
-          line: 10,
-          plugin: "effects-alternate",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).toBe(baseFp)
-  })
-
-  it("an id change that reorders two propagated effects leaves the caller's logic alone", () => {
-    const before = caller([
-      propagatedEffect("db.write", "prisma.invoice.create"),
-      propagatedEffect("event.publish", "bus.emit"),
-    ])
-    const after = caller([
-      propagatedEffect("event.publish", "bus.emit"),
-      propagatedEffect("x-acme:create", "prisma.invoice.create"),
-    ])
-
-    expect(logicFingerprint(after)).toBe(logicFingerprint(before))
-  })
-
-  it("the same reorder leaves the caller's logic alone beside a local effect of its own", () => {
-    const readsClock = localEffect("time.now", "Date.now", 4)
-    const before = caller([
-      readsClock,
-      propagatedEffect("db.write", "prisma.invoice.create"),
-      propagatedEffect("event.publish", "bus.emit"),
-    ])
-    const after = caller([
-      readsClock,
-      propagatedEffect("event.publish", "bus.emit"),
-      propagatedEffect("x-acme:create", "prisma.invoice.create"),
-    ])
-
-    expect(logicFingerprint(after)).toBe(logicFingerprint(before))
-  })
-
-  it("one target reaching a caller under two ids hashes as it does once the ids agree", () => {
-    const split = caller([
-      propagatedEffect("db.write", "prisma.invoice.create"),
-      propagatedEffect("x-acme:create", "prisma.invoice.create"),
-    ])
-    const unified = caller([propagatedEffect("db.write", "prisma.invoice.create")])
-
-    expect(logicFingerprint(split)).toBe(logicFingerprint(unified))
-  })
-
-  it("a propagated target the caller already calls locally adds nothing, whatever its id", () => {
-    const own = localEffect("db.write", "prisma.invoice.create", 6)
-    const split = caller([own, propagatedEffect("x-acme:create", "prisma.invoice.create")])
-    const unified = caller([own])
-
-    expect(logicFingerprint(split)).toBe(logicFingerprint(unified))
-  })
-
-  it("keeps local effects in call order ahead of the propagated ones", () => {
-    const sym = caller([
-      localEffect("db.write", "z.local", 3),
-      { ...localEffect("db.write", "m.local", 5), propagated: false },
-      propagatedEffect("db.write", "a.propagated"),
-    ])
-
-    expect(logicFingerprint(sym)).toBe(
-      hashCanonicalObject({
-        effects: [{ target: "z.local" }, { target: "m.local" }, { target: "a.propagated" }],
-        rules: [],
+        confidence: "medium",
+        derivedBy: ["convention:service-suffix"],
       }),
-    )
-  })
-
-  it("whitespace-only differences in rule condition strings are invariant", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        // Insert a newline and extra spaces — normalizeFingerprintString collapses them.
-        {
-          type: "guard",
-          line: 3,
-          condition: "amount  \n  <=  0",
-          what: null,
-          expr: null,
-          loopKind: null,
-        },
-        {
-          type: "throw",
-          line: 5,
-          condition: null,
-          what: "AmountInvalid",
-          expr: null,
-          loopKind: null,
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).toBe(baseFp)
+      body(),
+    ],
+    ["calls", body({ calls: [{ target: "console.log", line: 12, resolved: null }] }), body()],
+    ["decorators", body({ decorators: [decorator({ name: "UseGuards" })] }), body()],
+    ["the signature", body({ signature: sig({ inputs: [{ name: "a", type: "A" }] }) }), body()],
+    [
+      "whitespace inside a rule string",
+      body({ rules: [{ ...GUARD, condition: "amount  \n  <=  0" }, THROW] }),
+      body(),
+    ],
+    [
+      "a rule's line",
+      body({
+        rules: [
+          { ...GUARD, line: 30 },
+          { ...THROW, line: 50 },
+        ],
+      }),
+      body(),
+    ],
+    [
+      "which effect id classified a target",
+      body({
+        effects: [
+          { ...WRITE, id: "x-prisma:create" },
+          { ...PUBLISH, id: "x-nest:emit" },
+        ],
+      }),
+      body(),
+    ],
+    [
+      "which plugin classified a target",
+      body({ effects: [{ ...WRITE, plugin: "effects-alternate" }, PUBLISH] }),
+      body(),
+    ],
+    [
+      "`propagated: false` written out on a local effect",
+      caller({ ...WRITE, propagated: false }),
+      caller(WRITE),
+    ],
+    [
+      "where a propagated effect sits among the local ones",
+      caller(propagatedEffect("db.write", "a.propagated"), WRITE, PUBLISH),
+      caller(WRITE, PUBLISH, propagatedEffect("db.write", "a.propagated")),
+    ],
+    [
+      "an id change that reorders two propagated effects",
+      caller(
+        propagatedEffect("event.publish", "bus.emit"),
+        propagatedEffect("x-acme:create", "prisma.invoice.create"),
+      ),
+      caller(
+        propagatedEffect("db.write", "prisma.invoice.create"),
+        propagatedEffect("event.publish", "bus.emit"),
+      ),
+    ],
+    [
+      "the same reorder beside a local effect of the caller's own",
+      caller(
+        localEffect("time.now", "Date.now", 4),
+        propagatedEffect("event.publish", "bus.emit"),
+        propagatedEffect("x-acme:create", "prisma.invoice.create"),
+      ),
+      caller(
+        localEffect("time.now", "Date.now", 4),
+        propagatedEffect("db.write", "prisma.invoice.create"),
+        propagatedEffect("event.publish", "bus.emit"),
+      ),
+    ],
+    [
+      "one propagated target reaching the caller under two ids",
+      caller(
+        propagatedEffect("db.write", "prisma.invoice.create"),
+        propagatedEffect("x-acme:create", "prisma.invoice.create"),
+      ),
+      caller(propagatedEffect("db.write", "prisma.invoice.create")),
+    ],
+    [
+      "a propagated target the caller already reaches locally, whatever its id",
+      caller(WRITE, propagatedEffect("x-acme:create", "prisma.invoice.create")),
+      caller(WRITE),
+    ],
+  ])("%s", (_what, a, b) => {
+    expect(logicFingerprint(a)).toBe(logicFingerprint(b))
   })
 })
 
-describe("logicFingerprint — change conditions", () => {
-  const baseFp = logicFingerprint(base())
-
-  it("swapping rule order perturbs the hash (control flow order matters)", () => {
-    const sym = makeSymbol(base().id, { ...base(), rules: [...base().rules].reverse() })
-    expect(logicFingerprint(sym)).not.toBe(baseFp)
-  })
-
-  it("swapping effect order perturbs the hash (side effect order matters)", () => {
-    const sym = makeSymbol(base().id, { ...base(), effects: [...base().effects].reverse() })
-    expect(logicFingerprint(sym)).not.toBe(baseFp)
-  })
-
-  it("changing a rule condition perturbs the hash", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        { type: "guard", line: 3, condition: "amount < 0", what: null, expr: null, loopKind: null },
-        {
-          type: "throw",
-          line: 5,
-          condition: null,
-          what: "AmountInvalid",
-          expr: null,
-          loopKind: null,
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).not.toBe(baseFp)
-  })
-
-  it("changing effect.target perturbs the hash", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      effects: [
-        {
-          id: "db.write",
-          target: "prisma.customer.create",
-          line: 8,
-          plugin: "effects-prisma",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-        {
-          id: "event.publish",
-          target: "eventBus.emit",
-          line: 10,
-          plugin: "effects-nest",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).not.toBe(baseFp)
-  })
-
-  it("adding an effect perturbs the hash", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      effects: [
-        ...base().effects,
-        {
-          id: "fs.write",
-          target: "fs.writeFileSync",
-          line: 12,
-          plugin: "effects-fs",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).not.toBe(baseFp)
-  })
-
-  it("a propagated effect enters the hash, so a caller whose only effect is one moves", () => {
-    const reachesWrite = caller([propagatedEffect("db.write", "prisma.invoice.create")])
-    expect(logicFingerprint(reachesWrite)).not.toBe(logicFingerprint(caller([])))
-  })
-
-  it("changing Rule.what perturbs the hash", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        {
-          type: "guard",
-          line: 3,
-          condition: "amount <= 0",
-          what: null,
-          expr: null,
-          loopKind: null,
-        },
-        // Only the `what` string changed vs the base's throw rule.
-        {
-          type: "throw",
-          line: 5,
-          condition: null,
-          what: "NotFound",
-          expr: null,
-          loopKind: null,
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).not.toBe(baseFp)
-  })
-
-  it("changing Rule.type perturbs the hash", () => {
-    const sym = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        // Same shape as the base guard but re-typed as `return`.
-        {
-          type: "return",
-          line: 3,
-          condition: "amount <= 0",
-          what: null,
-          expr: null,
-          loopKind: null,
-        },
-        {
-          type: "throw",
-          line: 5,
-          condition: null,
-          what: "AmountInvalid",
-          expr: null,
-          loopKind: null,
-        },
-      ],
-    })
-    expect(logicFingerprint(sym)).not.toBe(baseFp)
-  })
-
-  it("changing Rule.loopKind perturbs the hash", () => {
-    const withFor = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        {
-          type: "loop",
-          line: 3,
-          condition: null,
-          what: null,
-          expr: null,
-          loopKind: "for",
-        },
-      ],
-    })
-    const withWhile = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        {
-          type: "loop",
-          line: 3,
-          condition: null,
-          what: null,
-          expr: null,
-          loopKind: "while",
-        },
-      ],
-    })
-    expect(logicFingerprint(withFor)).not.toBe(logicFingerprint(withWhile))
-  })
-
-  it("changing Rule.expr perturbs the hash", () => {
-    const a = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        { type: "return", line: 3, condition: null, what: null, expr: "invoice", loopKind: null },
-      ],
-    })
-    const b = makeSymbol(base().id, {
-      ...base(),
-      rules: [
-        { type: "return", line: 3, condition: null, what: null, expr: "receipt", loopKind: null },
-      ],
-    })
+describe("logicFingerprint moves with", () => {
+  it.each<[string, IRSymbol, IRSymbol]>([
+    ["the order of rules", body({ rules: [THROW, GUARD] }), body()],
+    ["the order of local effects", body({ effects: [PUBLISH, WRITE] }), body()],
+    ["a rule's condition", body({ rules: [{ ...GUARD, condition: "amount < 0" }, THROW] }), body()],
+    ["a rule's thrown value", body({ rules: [GUARD, { ...THROW, what: "NotFound" }] }), body()],
+    ["a rule's type", body({ rules: [{ ...GUARD, type: "return" }, THROW] }), body()],
+    [
+      "a rule's loop kind",
+      body({ rules: [rule({ type: "loop", loopKind: "for" })] }),
+      body({ rules: [rule({ type: "loop", loopKind: "while" })] }),
+    ],
+    [
+      "a rule's expression",
+      body({ rules: [rule({ type: "return", expr: "invoice" })] }),
+      body({ rules: [rule({ type: "return", expr: "receipt" })] }),
+    ],
+    [
+      "an effect's target",
+      body({ effects: [{ ...WRITE, target: "prisma.customer.create" }, PUBLISH] }),
+      body(),
+    ],
+    [
+      "an added effect",
+      body({ effects: [WRITE, PUBLISH, localEffect("fs.write", "fs.writeFileSync", 12)] }),
+      body(),
+    ],
+    [
+      "a propagated effect, even when it is the caller's only one",
+      caller(propagatedEffect("db.write", "prisma.invoice.create")),
+      caller(),
+    ],
+  ])("%s", (_what, a, b) => {
     expect(logicFingerprint(a)).not.toBe(logicFingerprint(b))
   })
 })
 
 describe("logicNamesNothing", () => {
-  const shaped = (over: Partial<Rule> & Pick<Rule, "type">): Rule => ({
-    line: 3,
-    condition: null,
-    what: null,
-    expr: null,
-    loopKind: null,
-    ...over,
-  })
-  const withRules = (...rules: Rule[]) => makeSymbol("ts:src/a.ts#foo", { rules, effects: [] })
+  const withRules = (...rules: Rule[]) => makeSymbol("ts:src/a.ts#foo", { rules })
 
-  it("holds for a body with no rules and no effects", () => {
-    expect(logicNamesNothing(withRules())).toBe(true)
-  })
-
-  it("holds for bodies that are only shape: a loop, a try, a guard or throw it could not read", () => {
-    expect(logicNamesNothing(withRules(shaped({ type: "loop", loopKind: "for" })))).toBe(true)
-    expect(logicNamesNothing(withRules(shaped({ type: "try" })))).toBe(true)
-    expect(logicNamesNothing(withRules(shaped({ type: "guard" }), shaped({ type: "throw" })))).toBe(
-      true,
-    )
+  it.each<[string, IRSymbol]>([
+    ["a body with no rules and no effects", withRules()],
+    ["a loop", withRules(rule({ type: "loop", loopKind: "for" }))],
+    ["a try", withRules(rule({ type: "try" }))],
+    [
+      "a guard and a throw it could not read",
+      withRules(rule({ type: "guard" }), rule({ type: "throw" })),
+    ],
+    ["a try at any line", withRules(rule({ type: "try", line: 40 }))],
+  ])("holds for %s", (_what, symbol) => {
+    expect(logicNamesNothing(symbol)).toBe(true)
   })
 
-  it("fails as soon as one rule carries a condition, a thrown value or an expression", () => {
-    const loop = shaped({ type: "loop", loopKind: "for" })
-    expect(logicNamesNothing(withRules(loop, shaped({ type: "guard", condition: "!id" })))).toBe(
-      false,
-    )
-    expect(logicNamesNothing(withRules(loop, shaped({ type: "throw", what: "Error" })))).toBe(false)
-    expect(logicNamesNothing(withRules(loop, shaped({ type: "return", expr: "a + b" })))).toBe(
-      false,
-    )
-  })
+  const loop = rule({ type: "loop", loopKind: "for" })
 
-  it("fails on any effect, the rules notwithstanding", () => {
-    const { effects } = base()
-    expect(logicNamesNothing(makeSymbol(base().id, { rules: [], effects }))).toBe(false)
-  })
-
-  it("fails on a propagated effect alone", () => {
-    const reachesWrite = caller([propagatedEffect("db.write", "prisma.invoice.create")])
-    expect(logicNamesNothing(reachesWrite)).toBe(false)
-  })
-
-  it("does not read what the hash does not: a rule's line", () => {
-    const at = (line: number) => withRules(shaped({ type: "try", line }))
-    expect(logicFingerprint(at(3))).toBe(logicFingerprint(at(40)))
-    expect(logicNamesNothing(at(40))).toBe(true)
+  it.each<[string, IRSymbol]>([
+    ["a rule carrying a condition", withRules(loop, rule({ type: "guard", condition: "!id" }))],
+    ["a rule carrying a thrown value", withRules(loop, rule({ type: "throw", what: "Error" }))],
+    ["a rule carrying an expression", withRules(loop, rule({ type: "return", expr: "a + b" }))],
+    ["a local effect", caller(WRITE)],
+    ["a propagated effect alone", caller(propagatedEffect("db.write", "prisma.invoice.create"))],
+  ])("fails on %s", (_what, symbol) => {
+    expect(logicNamesNothing(symbol)).toBe(false)
   })
 })

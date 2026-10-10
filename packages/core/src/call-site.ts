@@ -1,11 +1,9 @@
-/** The separator every key in this module joins its components with. */
 export const CALL_SITE_KEY_SEPARATOR = "\t"
 
 export function dependencyKey(from: string, to: string, via: string): string {
   return [from, to, via].join(CALL_SITE_KEY_SEPARATOR)
 }
 
-/** Identity of a call-graph edge, where `via` is fixed to `"call"`. */
 export function callEdgeKey(from: string, to: string): string {
   return [from, to].join(CALL_SITE_KEY_SEPARATOR)
 }

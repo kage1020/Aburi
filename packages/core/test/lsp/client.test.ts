@@ -1,9 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createLspClient, isLspFailure, LSP_TIMEOUT, SHUTDOWN_GRACE_MS } from "../../src/lsp"
+import { createLspClient, LSP_TIMEOUT, type LspClient, SHUTDOWN_GRACE_MS } from "../../src/lsp"
 import { createFakeServer, type FakeConnectionOptions } from "./fixtures/fake-connection"
 
-const WORKSPACE_ROOT = "/workspace"
 const FILE_URI = "file:///workspace/src/a.ts"
+const INITIALIZE_INPUT = {
+  workspaceRoot: "/workspace",
+  initializationOptions: {},
+  capabilities: {},
+}
+
+type Operation = [string, (client: LspClient, timeoutMs: number) => Promise<unknown>]
+
+const WRITES: Operation[] = [
+  ["didOpen", (client, timeoutMs) => client.didOpen(FILE_URI, "typescript", "x", timeoutMs)],
+  ["didClose", (client, timeoutMs) => client.didClose(FILE_URI, timeoutMs)],
+  ["request", (client, timeoutMs) => client.request("textDocument/hover", {}, timeoutMs)],
+]
 
 describe("LSP client write bounds", () => {
   beforeEach(() => {
@@ -14,49 +26,29 @@ describe("LSP client write bounds", () => {
     vi.useRealTimers()
   })
 
-  it("resolves didOpen with the timeout sentinel exactly at its bound", async () => {
-    const { client, connection } = makeClient({ notification: "pending" })
-    const call = track(client.didOpen(FILE_URI, "typescript", "const x = 1", 50))
+  it.each(WRITES)("resolves %s with the timeout sentinel exactly at its bound", async (_, send) => {
+    const { client } = makeClient({ notification: "pending", request: "pending" })
+    const call = track(send(client, 50))
     await vi.advanceTimersByTimeAsync(49)
     expect(call.settled).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     expect(await call.result).toBe(LSP_TIMEOUT)
-    expect(connection.notifications.map((n) => n.method)).toEqual(["textDocument/didOpen"])
   })
 
-  it("resolves didClose with the timeout sentinel exactly at its bound", async () => {
-    const { client, connection } = makeClient({ notification: "pending" })
-    const call = track(client.didClose(FILE_URI, 120))
-    await vi.advanceTimersByTimeAsync(119)
-    expect(call.settled).toBe(false)
-    await vi.advanceTimersByTimeAsync(1)
-    expect(await call.result).toBe(LSP_TIMEOUT)
-    expect(connection.notifications.map((n) => n.method)).toEqual(["textDocument/didClose"])
-  })
-
-  it("reports a rejected write as a server error rather than throwing", async () => {
-    const { client } = makeClient({ notification: "reject", rejectMessage: "EPIPE" })
-    await expect(client.didOpen(FILE_URI, "typescript", "const x = 1", 1000)).resolves.toEqual({
-      kind: "error",
-      reason: "server-error",
-      message: "EPIPE",
-    })
-    await expect(client.didClose(FILE_URI, 1000)).resolves.toEqual({
-      kind: "error",
-      reason: "server-error",
-      message: "EPIPE",
-    })
-  })
-
-  it("reports a synchronously thrown write as a server error", async () => {
+  it.each(
+    WRITES.flatMap(([name, send]) =>
+      (["reject", "throw-sync"] as const).map((behavior) => [name, behavior, send] as const),
+    ),
+  )("reports a %s whose write fails (%s) as a server error rather than throwing", async (_, behavior, send) => {
     const { client } = makeClient({
-      notification: "throw-sync",
-      rejectMessage: "connection closed",
+      notification: behavior,
+      request: behavior,
+      rejectMessage: "EPIPE",
     })
-    await expect(client.didOpen(FILE_URI, "typescript", "const x = 1", 1000)).resolves.toEqual({
+    await expect(send(client, 1000)).resolves.toEqual({
       kind: "error",
       reason: "server-error",
-      message: "connection closed",
+      message: "EPIPE",
     })
   })
 
@@ -78,18 +70,16 @@ describe("LSP client write bounds", () => {
     ])
   })
 
-  it("reports every write as server-disconnected once the server has exited", async () => {
+  it("reports every write as server-disconnected, and sends nothing, once the server has exited", async () => {
     const { client, connection, exit } = makeClient()
     await exit(0)
-    const disconnected = { kind: "error", reason: "server-disconnected", message: "server exited" }
-    await expect(client.didOpen(FILE_URI, "typescript", "const x = 1", 1000)).resolves.toEqual(
-      disconnected,
-    )
-    await expect(client.didClose(FILE_URI, 1000)).resolves.toEqual(disconnected)
-    await expect(client.request("textDocument/documentSymbol", {}, 1000)).resolves.toEqual(
-      disconnected,
-    )
-    // Nothing was put on a wire whose far end is gone.
+    for (const [, send] of WRITES) {
+      await expect(send(client, 1000)).resolves.toEqual({
+        kind: "error",
+        reason: "server-disconnected",
+        message: "server exited",
+      })
+    }
     expect(connection.notifications).toEqual([])
     expect(connection.requests).toEqual([])
   })
@@ -97,26 +87,18 @@ describe("LSP client write bounds", () => {
   it("starts listening once, on the first initialize", async () => {
     const { client, connection } = makeClient({ requestResult: { capabilities: {} } })
     expect(connection.listenCount).toBe(0)
-    const input = {
-      workspaceRoot: WORKSPACE_ROOT,
-      initializationOptions: {},
-      capabilities: {},
-      timeoutMs: 1000,
-    }
-    await client.initialize(input)
-    await client.initialize(input)
+    await client.initialize({ ...INITIALIZE_INPUT, timeoutMs: 1000 })
+    await client.initialize({ ...INITIALIZE_INPUT, timeoutMs: 1000 })
     expect(connection.listenCount).toBe(1)
   })
 
   it("fails initialize when the initialize request rejects", async () => {
     const { client } = makeClient({ request: "reject", rejectMessage: "spawn died" })
-    const result = await client.initialize({
-      workspaceRoot: WORKSPACE_ROOT,
-      initializationOptions: {},
-      capabilities: {},
-      timeoutMs: 1000,
+    await expect(client.initialize({ ...INITIALIZE_INPUT, timeoutMs: 1000 })).resolves.toEqual({
+      kind: "error",
+      reason: "server-error",
+      message: "spawn died",
     })
-    expect(result).toEqual({ kind: "error", reason: "server-error", message: "spawn died" })
   })
 
   it("fails initialize when the initialized notification never settles", async () => {
@@ -124,18 +106,11 @@ describe("LSP client write bounds", () => {
       notification: "pending",
       requestResult: { capabilities: {} },
     })
-    const call = track(
-      client.initialize({
-        workspaceRoot: WORKSPACE_ROOT,
-        initializationOptions: {},
-        capabilities: {},
-        timeoutMs: 50,
-      }),
-    )
+    const call = track(client.initialize({ ...INITIALIZE_INPUT, timeoutMs: 50 }))
     await vi.advanceTimersByTimeAsync(49)
     expect(call.settled).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
-    expect(isLspFailure(await call.result)).toBe(true)
+    expect(await call.result).toBe(LSP_TIMEOUT)
     expect(connection.requests.map((r) => r.method)).toEqual(["initialize"])
     expect(connection.notifications.map((n) => n.method)).toEqual(["initialized"])
   })
@@ -154,6 +129,13 @@ describe("LSP client write bounds", () => {
     expect(connection.notifications.map((n) => n.method)).toEqual(["exit"])
     expect(killAfterCalls).toEqual([SHUTDOWN_GRACE_MS])
     expect(connection.disposeCalled).toBe(true)
+  })
+
+  it("still sends exit and kills the server when the shutdown request fails", async () => {
+    const { client, connection, killAfterCalls } = makeClient({ request: "reject" })
+    await client.shutdown()
+    expect(connection.notifications.map((n) => n.method)).toEqual(["exit"])
+    expect(killAfterCalls).toEqual([SHUTDOWN_GRACE_MS])
   })
 })
 

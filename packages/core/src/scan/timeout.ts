@@ -6,10 +6,8 @@ import type {
 } from "@aburi/types"
 import { CoreError } from "../errors"
 
-/** Default per-call classify timeout in milliseconds. */
 export const DEFAULT_CLASSIFY_TIMEOUT_MS = 50
 
-/** Bounds enforced by the config schema — kept here so callers can validate before invoking. */
 export const CLASSIFY_TIMEOUT_MIN_MS = 10
 export const CLASSIFY_TIMEOUT_MAX_MS = 5000
 
@@ -29,9 +27,7 @@ export interface ClassifyWithTimeoutOptions {
 }
 
 export interface ClassifyWithTimeoutContext {
-  /** Owning Symbol id — required so the timeout event can be joined against the IR. */
   symbolId: string
-  /** POSIX-relative file path where the call sits. */
   file: string
 }
 
@@ -48,12 +44,13 @@ export function classifyWithTimeout(
   const elapsed = performance.now() - start
 
   if (typeof result === "object" && result !== null && "then" in result) {
+    // Settled here so a rejection of the abandoned Promise is not reported as unhandled.
     void (result as unknown as PromiseLike<unknown>).then(
       () => undefined,
       () => undefined,
     )
     throw new CoreError(
-      `Effect plugin "${plugin.manifest.name}" returned a Promise from classify(); the sync contract in effect-plugin.md requires a plain EffectClassification | null.`,
+      `Effect plugin "${plugin.manifest.name}" returned a Promise from classify(), which breaks its sync contract: classify() must return an EffectClassification or null.`,
       { code: "scan-plugin-misconfigured", value: plugin.manifest.name },
     )
   }
@@ -80,7 +77,6 @@ function clampTimeout(ms: number): number {
   return ms
 }
 
-/** Default per-file extraction budget in milliseconds. */
 export const DEFAULT_PARSE_TIMEOUT_MS = 5000
 
 export const PARSE_TIMEOUT_MIN_MS = 100
@@ -92,11 +88,8 @@ export interface ParseTimeoutEvent {
 }
 
 export interface ParseDeadline {
-  /** The clamped budget in effect for this file. */
   readonly budgetMs: number
-  /** Wall clock spent since the deadline started. */
   elapsedMs(): number
-  /** True once the budget is spent. */
   expired(): boolean
 }
 

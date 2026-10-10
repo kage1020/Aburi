@@ -1,6 +1,5 @@
 import type { Rule } from "@aburi/types"
 
-/** How many characters of a rule string reach the IR before it is cut. */
 export const RULE_TEXT_LIMIT = 120
 
 /** What marks a rule string that was cut: the schema's `maxLength: 123` is the limit plus this. */

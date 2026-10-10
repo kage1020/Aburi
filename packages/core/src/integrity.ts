@@ -1,5 +1,4 @@
-import type { DependencyEndpoint, IR, Symbol as IRSymbol } from "@aburi/types"
-import { CALL_SITE_KEY_SEPARATOR, callEdgeKey, dependencyKey } from "./call-site"
+import type { IR } from "@aburi/types"
 import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError, type IntegrityViolation } from "./errors"
 import {
@@ -10,8 +9,15 @@ import {
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
 } from "./id"
+import { checkCallResolutionStatsCensus, checkSkippedFilesCensus } from "./integrity-census"
+import {
+  checkCallEdgeEndpoints,
+  checkCallGraphProjectionAgrees,
+  checkDependencyEndpoints,
+  checkDependencyTupleUniqueness,
+} from "./integrity-dependencies"
+import { checkArraySortOrder } from "./integrity-order"
 import { checkDocumentShape } from "./integrity-shape"
-import { compareCodeUnit } from "./order"
 
 const CORE_EFFECT_VOCAB: ReadonlySet<string> = new Set([
   "db.read",
@@ -43,7 +49,6 @@ export function isCoreEffectId(id: string): boolean {
   return CORE_EFFECT_VOCAB.has(id)
 }
 
-/** Symbol.kind core enumeration. */
 const CORE_KIND_ENUM: ReadonlySet<string> = new Set([
   "function",
   "method",
@@ -59,17 +64,11 @@ const CORE_KIND_ENUM: ReadonlySet<string> = new Set([
   "call",
 ])
 
-/** Symbol.confidence enumeration. */
 const CORE_CONFIDENCE_ENUM: ReadonlySet<string> = new Set(["high", "medium", "low"])
 
-/** Plugin-extension effect prefix: `x-<plugin>:<action>`. */
 const PLUGIN_EFFECT_PATTERN = /^x-[a-z][a-z0-9-]*:[a-z][a-z0-9.-]+$/
 
-/** `<namespace>(:<segment>)+`, at least two segments, lowercase ASCII. */
 const EXT_KIND_PATTERN = /^[a-z][a-z0-9-]*(:[a-z][a-z0-9.-]*)+$/
-
-/** Symbol id shape: `<language>:<file-path>#<qualified-name>`. */
-const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
 
 export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   const shape = checkDocumentShape(document)
@@ -102,7 +101,6 @@ export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   return violations
 }
 
-/** Throwing variant: same checks, aggregates every violation into one CoreError. */
 export function assertIRIntegrity(document: unknown): void {
   const violations = checkIRIntegrity(document)
   if (violations.length === 0) return
@@ -132,7 +130,7 @@ function reportReservedNamespace(id: string, subject: string, out: IntegrityViol
   out.push({
     invariant: 16,
     subject,
-    message: `id uses the reserved language token "${language}"; ids in that namespace collide with another id kind (ir-schema.md)`,
+    message: `id uses the reserved language token "${language}"; ids in that namespace collide with another id kind`,
   })
 }
 
@@ -142,14 +140,14 @@ function checkIdGrammar(ir: IR, out: IntegrityViolation[]): void {
       out.push({
         invariant: 17,
         subject: symbol.id,
-        message: `Symbol id does not satisfy the <language>:<posix-path>#<qualified-name> grammar (ir-schema.md)`,
+        message: `Symbol id does not satisfy the <language>:<posix-path>#<qualified-name> grammar`,
       })
     }
     if (!isQualifiedName(symbol.name)) {
       out.push({
         invariant: 17,
         subject: symbol.id,
-        message: `Symbol.name "${symbol.name}" does not satisfy the qualified-name grammar (ir-schema.md)`,
+        message: `Symbol.name "${symbol.name}" does not satisfy the qualified-name grammar`,
       })
     }
   }
@@ -158,7 +156,7 @@ function checkIdGrammar(ir: IR, out: IntegrityViolation[]): void {
     out.push({
       invariant: 17,
       subject: component.id,
-      message: `Component id does not satisfy the ASCII kebab-case grammar (ir-schema.md)`,
+      message: `Component id does not satisfy the ASCII kebab-case grammar`,
     })
   }
 }
@@ -179,7 +177,7 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
     out.push({
       invariant: 18,
       subject: "workspace.languages",
-      message: `"${language}" does not satisfy the LanguageId grammar (ir-schema.md); a plugin manifest name is not a LanguageId`,
+      message: `"${language}" does not satisfy the LanguageId grammar; a plugin manifest name is not a LanguageId`,
     })
   }
   const known = new Set<string>(declared)
@@ -283,22 +281,6 @@ function checkSymbolComponentRef(ir: IR, out: IntegrityViolation[]): void {
   }
 }
 
-function checkDependencyEndpoints(ir: IR, out: IntegrityViolation[]): void {
-  const symbolIds = new Set<string>(ir.symbols.map((s) => s.id))
-  for (const dep of ir.dependencies) {
-    for (const role of ["from", "to"] as const) {
-      const endpoint = dep[role]
-      if (looksLikeSymbolId(endpoint) && !symbolIds.has(endpoint)) {
-        out.push({
-          invariant: 4,
-          subject: `dependencies[${role}=${endpoint}]`,
-          message: `dependency ${role} looks like a Symbol id but does not match any declared Symbol`,
-        })
-      }
-    }
-  }
-}
-
 function checkDroppedSymbolHasReason(ir: IR, out: IntegrityViolation[]): void {
   for (const symbol of ir.symbols) {
     if (symbol.dropped !== true) continue
@@ -388,320 +370,5 @@ function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
     const violation = posixWorkspaceRelativeViolation(site.path)
     if (violation === null) continue
     out.push({ invariant: 10, subject: site.subject, message: violation.message })
-  }
-}
-
-function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
-  assertSorted(
-    ir.components.map((c) => c.id),
-    "components[]",
-    compareCodeUnit,
-    out,
-  )
-  assertSorted(
-    ir.symbols.map((s) => s.id),
-    "symbols[]",
-    compareCodeUnit,
-    out,
-  )
-  assertSorted(
-    (ir.stats.skippedFiles ?? []).map((f) => f.path),
-    "stats.skippedFiles[]",
-    compareCodeUnit,
-    out,
-  )
-  assertSorted(
-    ir.dependencies.map((d) => dependencyKey(d.from, d.to, d.via)),
-    "dependencies[]",
-    compareCodeUnit,
-    out,
-  )
-  for (const symbol of ir.symbols) {
-    assertNumericSorted(
-      symbol.decorators.map((d) => d.line),
-      `symbols[id=${symbol.id}].decorators[].line`,
-      out,
-    )
-    assertNumericSorted(
-      symbol.rules.map((r) => r.line),
-      `symbols[id=${symbol.id}].rules[].line`,
-      out,
-    )
-    assertEffectSegmentation(symbol, out)
-    assertNumericSorted(
-      symbol.calls.map((c) => c.line),
-      `symbols[id=${symbol.id}].calls[].line`,
-      out,
-    )
-  }
-}
-
-function assertSorted<T>(
-  values: readonly T[],
-  collection: string,
-  compare: (a: T, b: T) => number,
-  out: IntegrityViolation[],
-  describePair: (prev: T, curr: T) => string = (prev, curr) =>
-    `"${String(prev)}" precedes "${String(curr)}"`,
-): void {
-  for (let i = 1; i < values.length; i++) {
-    const prev = values[i - 1]
-    const curr = values[i]
-    if (prev === undefined || curr === undefined) continue
-    if (compare(prev, curr) > 0) {
-      out.push({
-        invariant: 11,
-        subject: collection,
-        message: `${collection} not sorted: ${describePair(prev, curr)}`,
-      })
-      return
-    }
-  }
-}
-
-function assertNumericSorted(
-  values: readonly number[],
-  collection: string,
-  out: IntegrityViolation[],
-): void {
-  assertSorted(
-    values,
-    collection,
-    (a, b) => a - b,
-    out,
-    (prev, curr) => `line ${prev} precedes ${curr}`,
-  )
-}
-
-function looksLikeSymbolId(endpoint: DependencyEndpoint): boolean {
-  return SYMBOL_ID_PATTERN.test(endpoint)
-}
-
-function assertEffectSegmentation(symbol: IR["symbols"][number], out: IntegrityViolation[]): void {
-  const subject = `symbols[id=${symbol.id}].effects[]`
-  const firstPropagated = symbol.effects.findIndex((e) => e.propagated === true)
-  if (firstPropagated >= 0) {
-    for (let i = firstPropagated + 1; i < symbol.effects.length; i++) {
-      const entry = symbol.effects[i]
-      if (entry === undefined) continue
-      if (entry.propagated !== true) {
-        out.push({
-          invariant: 11,
-          subject,
-          message: `${subject}: locally-detected entry appears after a propagated entry (${entry.id}/${entry.target})`,
-        })
-        break
-      }
-    }
-  }
-  const locals: Array<{ line?: number; id: string; target: string }> = []
-  const propagated: Array<{ id: string; target: string }> = []
-  for (const effect of symbol.effects) {
-    if (effect.propagated === true) {
-      if (effect.line !== undefined) {
-        out.push({
-          invariant: 11,
-          subject,
-          message: `${subject}: propagated entry (${effect.id}/${effect.target}) carries line=${effect.line}; propagated entries must omit line`,
-        })
-      }
-      if (effect.derivedFrom === undefined || effect.derivedFrom.length === 0) {
-        out.push({
-          invariant: 11,
-          subject,
-          message: `${subject}: propagated entry (${effect.id}/${effect.target}) missing non-empty derivedFrom`,
-        })
-      }
-      propagated.push({ id: effect.id, target: effect.target })
-    } else {
-      if (effect.line === undefined) {
-        out.push({
-          invariant: 11,
-          subject,
-          message: `${subject}: locally-detected entry (${effect.id}/${effect.target}) missing line`,
-        })
-      }
-      const entry: { line?: number; id: string; target: string } = {
-        id: effect.id,
-        target: effect.target,
-      }
-      if (effect.line !== undefined) entry.line = effect.line
-      locals.push(entry)
-    }
-  }
-  assertNumericSorted(
-    locals.filter((e) => e.line !== undefined).map((e) => e.line as number),
-    `${subject}/local.line`,
-    out,
-  )
-  assertSorted(
-    propagated.map((e) => `${e.id}\t${e.target}`),
-    `${subject}/propagated(id,target)`,
-    compareCodeUnit,
-    out,
-  )
-}
-
-function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
-  const symbolsById = new Map<string, IRSymbol>(ir.symbols.map((s) => [s.id, s]))
-  for (const dep of ir.dependencies) {
-    if (dep.via !== "call") continue
-    for (const role of ["from", "to"] as const) {
-      const endpoint = dep[role]
-      if (!looksLikeSymbolId(endpoint)) {
-        out.push({
-          invariant: 12,
-          subject: `dependencies[${role}=${endpoint}]`,
-          message: `via:"call" dependency ${role} must be a Symbol id, got "${endpoint}"`,
-        })
-        continue
-      }
-      const target = symbolsById.get(endpoint)
-      if (target === undefined) {
-        out.push({
-          invariant: 12,
-          subject: `dependencies[${role}=${endpoint}]`,
-          message: `via:"call" dependency ${role} "${endpoint}" is not a declared Symbol`,
-        })
-        continue
-      }
-      if (target.dropped === true) {
-        out.push({
-          invariant: 12,
-          subject: `dependencies[${role}=${endpoint}]`,
-          message: `via:"call" dependency ${role} "${endpoint}" points at a dropped Symbol`,
-        })
-      }
-    }
-  }
-}
-
-function checkDependencyTupleUniqueness(ir: IR, out: IntegrityViolation[]): void {
-  const seen = new Set<string>()
-  for (const dep of ir.dependencies) {
-    const key = dependencyKey(dep.from, dep.to, dep.via)
-    if (seen.has(key)) {
-      out.push({
-        invariant: 13,
-        subject: `dependencies[from=${dep.from},to=${dep.to},via=${dep.via}]`,
-        message: "duplicate (from, to, via) triple in dependencies[]",
-      })
-      continue
-    }
-    seen.add(key)
-  }
-}
-
-function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void {
-  const expectedFromCalls = new Set<string>()
-  for (const symbol of ir.symbols) {
-    for (const call of symbol.calls) {
-      if (call.resolved === null) continue
-      expectedFromCalls.add(callEdgeKey(symbol.id, call.resolved))
-    }
-  }
-
-  const foundInDeps = new Set<string>()
-  for (const dep of ir.dependencies) {
-    if (dep.via !== "call") continue
-    foundInDeps.add(callEdgeKey(dep.from, dep.to))
-  }
-
-  for (const key of expectedFromCalls) {
-    if (!foundInDeps.has(key)) {
-      const [from, to] = key.split(CALL_SITE_KEY_SEPARATOR)
-      out.push({
-        invariant: 14,
-        subject: `dependencies[from=${from},to=${to},via=call]`,
-        message: `Symbol.calls[].resolved -> ${to} has no matching via:"call" Dependency`,
-      })
-    }
-  }
-  for (const key of foundInDeps) {
-    if (!expectedFromCalls.has(key)) {
-      const [from, to] = key.split(CALL_SITE_KEY_SEPARATOR)
-      out.push({
-        invariant: 14,
-        subject: `symbols[id=${from}].calls[resolved=${to}]`,
-        message: `via:"call" Dependency ${from} -> ${to} has no matching Symbol.calls[].resolved entry`,
-      })
-    }
-  }
-}
-
-function checkSkippedFilesCensus(ir: IR, out: IntegrityViolation[]): void {
-  const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
-  if (unparsed < 0) {
-    out.push({
-      invariant: 21,
-      subject: "stats.parsedFiles",
-      message: `stats.parsedFiles is ${ir.stats.parsedFiles} of ${ir.stats.totalFiles} total file(s); a scan cannot parse more files than it found`,
-    })
-  }
-
-  const skippedFiles = ir.stats.skippedFiles
-  if (skippedFiles === undefined) return
-
-  if (skippedFiles.length !== unparsed) {
-    out.push({
-      invariant: 21,
-      subject: "stats.skippedFiles",
-      message: `stats.skippedFiles names ${skippedFiles.length} file(s) but totalFiles - parsedFiles is ${unparsed}`,
-    })
-  }
-
-  const seen = new Set<string>()
-  for (const file of skippedFiles) {
-    if (seen.has(file.path)) {
-      out.push({
-        invariant: 21,
-        subject: "stats.skippedFiles",
-        message: `stats.skippedFiles names "${file.path}" more than once; one file is skipped for one reason`,
-      })
-      continue
-    }
-    seen.add(file.path)
-  }
-}
-
-function checkCallResolutionStatsCensus(ir: IR, out: IntegrityViolation[]): void {
-  const stats = ir.stats.callResolution
-  if (stats === undefined) return
-
-  let totalCalls = 0
-  let resolvedCalls = 0
-  for (const symbol of ir.symbols) {
-    totalCalls += symbol.calls.length
-    for (const call of symbol.calls) if (call.resolved !== null) resolvedCalls++
-  }
-
-  if (stats.totalCalls !== totalCalls) {
-    out.push({
-      invariant: 15,
-      subject: "stats.callResolution.totalCalls",
-      message: `stats.callResolution.totalCalls is ${stats.totalCalls} but symbols[] carry ${totalCalls} call sites`,
-    })
-  }
-  if (stats.resolvedCalls !== resolvedCalls) {
-    out.push({
-      invariant: 15,
-      subject: "stats.callResolution.resolvedCalls",
-      message: `stats.callResolution.resolvedCalls is ${stats.resolvedCalls} but symbols[] carry ${resolvedCalls} resolved calls`,
-    })
-  }
-
-  const { unresolved } = stats
-  const bucketed =
-    unresolved.localScope +
-    unresolved.external +
-    unresolved.dynamic +
-    unresolved.ambiguous +
-    unresolved.noMatch
-  if (bucketed !== stats.totalCalls - stats.resolvedCalls) {
-    out.push({
-      invariant: 15,
-      subject: "stats.callResolution.unresolved",
-      message: `bucket counts sum to ${bucketed} but totalCalls - resolvedCalls is ${stats.totalCalls - stats.resolvedCalls}`,
-    })
   }
 }

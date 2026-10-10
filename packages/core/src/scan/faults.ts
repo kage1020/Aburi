@@ -1,4 +1,3 @@
-/** The `code` a coded error carries, or `null` for a thrown value that has none. */
 export function errorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null
   const code = (error as { code?: unknown }).code

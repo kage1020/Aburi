@@ -40,7 +40,6 @@ export const CORE_IGNORE_PATTERNS: readonly string[] = [
   "**/go.sum",
 ]
 
-/** Default file size cap when `config.maxFileSizeBytes` is not set (2 MiB per config.v1 schema). */
 export const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024
 
 export interface DiscoverOptions {
@@ -55,7 +54,6 @@ export interface DiscoverOptions {
 export interface DiscoveredFile {
   path: string
   fsPath: string
-  /** File size in bytes. */
   size: number
 }
 
@@ -76,7 +74,6 @@ export interface UnnameableFile extends UnrepresentableBase {
 
 export interface CollidingFile extends UnrepresentableBase {
   reason: "colliding-spelling"
-  /** The one Document path every claimant normalizes to. */
   documentPath: string
 }
 
@@ -147,7 +144,7 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
       continue
     }
 
-    // `rawPath`, not `documentPath` — see `DiscoveredFile.fsPath`.
+    // A filesystem that stores names as given does not answer to the normalized spelling.
     const absolute = resolve(workspaceRoot, rawPath)
     let size: number
     try {
@@ -199,8 +196,7 @@ function withdrawCollisions(
   }
 }
 
-/** Both sides in NFC: this reads the filesystem's spelling, which may arrive decomposed. */
 function hasKnownExtension(path: string, extensions: ReadonlySet<string>): boolean {
   const extension = fileExtension(path)
-  return extension !== null && extensions.has(toNfc(extension))
+  return extension !== null && extensions.has(extension)
 }

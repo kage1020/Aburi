@@ -44,7 +44,7 @@ function buildLogicInput(symbol: IRSymbol): LogicInput {
 }
 
 function canonicalizeRules(rules: readonly Rule[]): LogicInput["rules"] {
-  // Source order as delivered (the IR places rules by line); never re-sorted, see above.
+  // Never re-sorted: a guard before a throw is not a throw before a guard.
   return rules.map((r) => ({
     condition: r.condition !== null ? normalizeFingerprintString(r.condition) : null,
     expr: r.expr !== null ? normalizeFingerprintString(r.expr) : null,

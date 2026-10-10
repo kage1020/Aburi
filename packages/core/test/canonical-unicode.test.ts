@@ -1,94 +1,42 @@
+import { makeIR } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { CoreError, checkIRIntegrity, makeSymbolId, serializeCanonical } from "../src/index"
-import { makeSymbol, minimalIR } from "./fixtures/ir"
+import { makeSymbol } from "./fixtures/ir"
 
-const NFD_E_ACUTE = "é"
-const NFC_E_ACUTE = "é"
+const NFD_E_ACUTE = "e\u0301"
+const NFC_E_ACUTE = "\u00e9"
 
-describe("serializeCanonical — Unicode key handling", () => {
-  it("uses two genuinely different spellings", () => {
-    // Guards every case below: if these ever become the same string, they all pass vacuously.
-    expect(NFD_E_ACUTE).not.toBe(NFC_E_ACUTE)
-    expect(NFD_E_ACUTE.normalize("NFC")).toBe(NFC_E_ACUTE)
+function compact(value: unknown): string {
+  return serializeCanonical(value, { format: "compact" })
+}
+
+describe("serializeCanonical — Unicode", () => {
+  it("normalizes keys before it orders them", () => {
+    expect(compact({ [NFD_E_ACUTE]: 1, f: 2 })).toBe(`{"f":2,"${NFC_E_ACUTE}":1}`)
   })
 
-  it("emits identical bytes whichever spelling the caller used", () => {
-    const decomposed = serializeCanonical({ [`caf${NFD_E_ACUTE}`]: 1, f: 2 }, { format: "compact" })
-    const composed = serializeCanonical({ [`caf${NFC_E_ACUTE}`]: 1, f: 2 }, { format: "compact" })
-
-    expect(decomposed).toBe(composed)
+  it("normalizes string values, so equal text hashes equally", () => {
+    expect(compact({ k: `caf${NFD_E_ACUTE}` })).toBe(compact({ k: `caf${NFC_E_ACUTE}` }))
   })
 
-  it("orders keys by their normalized form, not their input form", () => {
-    const out = serializeCanonical({ [NFD_E_ACUTE]: 1, f: 2 }, { format: "compact" })
-
-    expect(out).toBe(`{"f":2,"${NFC_E_ACUTE}":1}`)
-  })
-
-  it("normalizes string values too, so equal text hashes equally", () => {
-    const decomposed = serializeCanonical({ k: `caf${NFD_E_ACUTE}` }, { format: "compact" })
-    const composed = serializeCanonical({ k: `caf${NFC_E_ACUTE}` }, { format: "compact" })
-
-    expect(decomposed).toBe(composed)
-  })
-
-  it("refuses two keys that collide once normalized instead of emitting both", () => {
-    expect(() =>
-      serializeCanonical({ [NFD_E_ACUTE]: 1, [NFC_E_ACUTE]: 2 }, { format: "compact" }),
-    ).toThrow(CoreError)
-  })
-
-  it("keeps round-tripping through JSON.parse lossless", () => {
-    const source = { [`caf${NFD_E_ACUTE}`]: 1, [`caf${NFD_E_ACUTE}z`]: 2, plain: 3 }
-
-    const parsed = JSON.parse(serializeCanonical(source, { format: "compact" }))
-
-    expect(parsed).toEqual({ [`caf${NFC_E_ACUTE}`]: 1, [`caf${NFC_E_ACUTE}z`]: 2, plain: 3 })
-  })
-
-  it("does not treat a collision with an undefined value as a collision", () => {
-    expect(
-      serializeCanonical({ [NFD_E_ACUTE]: 1, [NFC_E_ACUTE]: undefined }, { format: "compact" }),
-    ).toBe(`{"${NFC_E_ACUTE}":1}`)
-  })
-
-  it("carries the collision through the pretty format and from inside an array", () => {
-    expect(() => serializeCanonical({ items: [{ [NFD_E_ACUTE]: 1, [NFC_E_ACUTE]: 2 }] })).toThrow(
-      CoreError,
+  it("refuses two keys that collide once normalized, naming both by code point", () => {
+    const colliding = { items: [{ [NFD_E_ACUTE]: 1, [NFC_E_ACUTE]: 2 }] }
+    expect(() => serializeCanonical(colliding)).toThrow(CoreError)
+    expect(() => serializeCanonical(colliding)).toThrowError(
+      expect.objectContaining({
+        code: "canonical-key-collision",
+        value: "$.items[0]",
+        message: expect.stringMatching(/U\+0065 U\+0301.*U\+00E9/),
+      }),
     )
-
-    try {
-      serializeCanonical({ items: [{ [NFD_E_ACUTE]: 1, [NFC_E_ACUTE]: 2 }] })
-    } catch (error) {
-      const core = error as CoreError & { code?: string; value?: string }
-      expect(core.code).toBe("canonical-key-collision")
-      expect(core.value).toBe("$.items[0]")
-      // The two keys render identically, so the message has to name the code points.
-      expect(core.message).toContain("U+0065 U+0301")
-      expect(core.message).toContain("U+00E9")
-    }
-  })
-})
-
-describe("Symbol ids are normalized at construction", () => {
-  it("gives an NFD and an NFC path the same id", () => {
-    const fromDecomposed = makeSymbolId({
-      language: "ts",
-      file: `src/caf${NFD_E_ACUTE}.ts`,
-      qualifiedName: "f",
-    })
-    const fromComposed = makeSymbolId({
-      language: "ts",
-      file: `src/caf${NFC_E_ACUTE}.ts`,
-      qualifiedName: "f",
-    })
-
-    expect(fromDecomposed).toBe(fromComposed)
-    expect(fromDecomposed).toBe(fromDecomposed.normalize("NFC"))
   })
 
-  it("keeps the sort the integrity check verifies and the sort on disk the same", () => {
-    const ir = minimalIR()
+  it("does not count a key whose value is undefined as a collision", () => {
+    expect(compact({ [NFD_E_ACUTE]: 1, [NFC_E_ACUTE]: undefined })).toBe(`{"${NFC_E_ACUTE}":1}`)
+  })
+
+  it("keeps the order the integrity check verifies and the order on disk the same", () => {
+    const ir = makeIR()
     ir.symbols = [
       makeSymbol(
         makeSymbolId({ language: "ts", file: `src/caf${NFD_E_ACUTE}.ts`, qualifiedName: "f" }),
@@ -109,9 +57,7 @@ describe("NFC, not NFKC", () => {
   const FULLWIDTH_A = "\uFF21"
 
   it("preserves compatibility characters in values and keys", () => {
-    expect(serializeCanonical({ [FULLWIDTH_A]: LIGATURE_FI }, { format: "compact" })).toBe(
-      `{"${FULLWIDTH_A}":"${LIGATURE_FI}"}`,
-    )
+    expect(compact({ [FULLWIDTH_A]: LIGATURE_FI })).toBe(`{"${FULLWIDTH_A}":"${LIGATURE_FI}"}`)
   })
 
   it("keeps two ids that differ only by a compatibility character distinct", () => {

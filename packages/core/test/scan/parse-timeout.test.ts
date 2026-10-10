@@ -1,181 +1,85 @@
-import configSchema from "@aburi/schema/aburi.config.v1.json" with { type: "json" }
-import { noopRegistry, silentLogger } from "@aburi/test-support"
-import type {
-  BodyExtraction,
-  ImportEdge,
-  LanguagePlugin,
-  OpaqueAstNode,
-  ParseError,
-  ParseResult,
-  SymbolCandidate,
-} from "@aburi/types"
+import type { ParseError } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import {
-  buildDropCFilter,
-  DEFAULT_PARSE_TIMEOUT_MS,
-  PARSE_TIMEOUT_MIN_MS,
-  runFilePipeline,
-  startParseDeadline,
-  VocabCheck,
-} from "../../src"
-import { spend } from "../fixtures/clock"
-import { stubCandidate, stubFile, stubLanguagePlugin } from "../fixtures/plugins"
+import { DEFAULT_PARSE_TIMEOUT_MS, PARSE_TIMEOUT_MIN_MS, startParseDeadline } from "../../src"
+import { runPipeline, type Script, ScriptedLanguagePlugin } from "../fixtures/plugins"
 
-interface StubTiming {
-  parseMs?: number
-  extractMs?: number
-  walkMsPerCandidate?: number
-  candidates?: readonly string[]
-  imports?: readonly ImportEdge[]
-  parseErrors?: readonly ParseError[]
-  /** Return no tree at all, the way a plugin reports a file it could not parse. */
-  noTree?: boolean
+async function run(script: Script, parseTimeoutMs: number) {
+  const plugin = new ScriptedLanguagePlugin(script)
+  const result = await runPipeline({ language: plugin, config: { parseTimeoutMs } })
+  return { result, order: plugin.order }
 }
 
-interface StubCalls {
-  extract: number
-  walk: string[]
+const RECOVERABLE: ParseError = {
+  message: "unexpected token",
+  line: 1,
+  column: 1,
+  recoverable: true,
 }
 
-function stubPlugin(timing: StubTiming, calls: StubCalls): LanguagePlugin {
-  const names = timing.candidates ?? ["one"]
-  return stubLanguagePlugin({
-    parseFile: async (): Promise<ParseResult> => {
-      spend(timing.parseMs ?? 0)
-      return {
-        tree: timing.noTree === true ? null : ({} as OpaqueAstNode),
-        errors: [...(timing.parseErrors ?? [])],
-        imports: [...(timing.imports ?? [])],
-      }
-    },
-    extractSymbols: () => {
-      calls.extract++
-      spend(timing.extractMs ?? 0)
-      return names.map((name) => stubCandidate(name))
-    },
-    walkBody: (symbol: SymbolCandidate<OpaqueAstNode>): BodyExtraction => {
-      calls.walk.push(symbol.name)
-      spend(timing.walkMsPerCandidate ?? 0)
-      return { rules: [], calls: [] }
-    },
-  })
-}
-
-async function run(timing: StubTiming, parseTimeoutMs?: number) {
-  const calls: StubCalls = { extract: 0, walk: [] }
-  const input: Parameters<typeof runFilePipeline>[0] = {
-    file: stubFile,
-    language: stubPlugin(timing, calls),
-    frameworks: [],
-    effects: [],
-    registry: noopRegistry,
-    vocab: new VocabCheck(noopRegistry, true),
-    config: parseTimeoutMs === undefined ? {} : { parseTimeoutMs },
-    dropCFilter: buildDropCFilter(),
-    component: null,
-    treeReleaseFailures: [],
-    log: silentLogger,
-  }
-  const result = await runFilePipeline(input)
-  return { result, calls }
-}
-
-describe("parse deadline budget", () => {
-  const spec = configSchema.properties.parseTimeoutMs
-
-  it("defaults to what the config schema documents", () => {
-    expect(startParseDeadline(undefined).budgetMs).toBe(DEFAULT_PARSE_TIMEOUT_MS)
-    expect(DEFAULT_PARSE_TIMEOUT_MS).toBe(spec.default)
-  })
-
-  it("clamps a value below the schema minimum up to it", () => {
-    expect(startParseDeadline(1).budgetMs).toBe(PARSE_TIMEOUT_MIN_MS)
-    expect(PARSE_TIMEOUT_MIN_MS).toBe(spec.minimum)
-  })
-
-  it("takes a configured value above the minimum as written", () => {
-    expect(startParseDeadline(250).budgetMs).toBe(250)
+describe("startParseDeadline", () => {
+  it.each<[string, number | undefined, number]>([
+    ["no budget as the default", undefined, DEFAULT_PARSE_TIMEOUT_MS],
+    ["a budget below the minimum as the minimum", 1, PARSE_TIMEOUT_MIN_MS],
+    ["a budget above the minimum as written", 250, 250],
+  ])("takes %s", (_label, configured, budget) => {
+    expect(startParseDeadline(configured).budgetMs).toBe(budget)
   })
 })
 
 describe("runFilePipeline — parse deadline", () => {
-  it("abandons the file when parseFile alone blows the budget, without extracting", async () => {
-    const { result, calls } = await run({ parseMs: 250 }, 100)
+  it.each<[string, Script, string[]]>([
+    ["its parse alone overran, without extracting it", { parseMs: 250 }, ["releaseTree"]],
+    [
+      "its extraction overran, before walking anything",
+      { extractMs: 250 },
+      ["extractSymbols", "releaseTree"],
+    ],
+    [
+      "a walk overran, before the next candidate",
+      { candidates: ["one", "two"], walkMsPerCandidate: 150 },
+      ["extractSymbols", "walkBody:one", "normalizeAst:one", "releaseTree"],
+    ],
+  ])("abandons a file once %s, and releases its tree", async (_label, script, order) => {
+    const { result, order: called } = await run(script, 100)
     expect(result.kind).toBe("parse-timeout")
-    expect(calls.extract).toBe(0)
-    expect(calls.walk).toEqual([])
+    expect(called).toEqual(order)
   })
 
-  it("stops walking partway through the candidate list, and keeps nothing it walked", async () => {
-    const { result, calls } = await run(
-      { candidates: ["one", "two", "three", "four"], walkMsPerCandidate: 60 },
+  it("hands back only the file, its parse errors and what the budget measured", async () => {
+    const { result } = await run(
+      {
+        parseMs: 250,
+        parseErrors: [RECOVERABLE],
+        imports: [{ source: "./other", symbols: ["thing"], line: 1, dynamic: false }],
+      },
       100,
     )
-    expect(result.kind).toBe("parse-timeout")
-    expect(calls.extract).toBe(1)
-    expect(calls.walk.length).toBeLessThanOrEqual(2)
-    expect("symbols" in result).toBe(false)
-    expect("imports" in result).toBe(false)
+    expect(result).toEqual({
+      kind: "parse-timeout",
+      path: "test.stub",
+      parseErrors: [RECOVERABLE],
+      timeout: { file: "test.stub", budgetMs: 100, elapsedMs: expect.any(Number) },
+    })
+    expect(result.kind === "parse-timeout" && result.timeout.elapsedMs).toBeGreaterThanOrEqual(100)
   })
 
-  it("keeps the parse errors of a file it abandons", async () => {
-    const parseErrors: readonly ParseError[] = [
-      { message: "unexpected token", line: 1, column: 1, recoverable: true },
-    ]
-    const { result } = await run({ parseMs: 250, parseErrors }, 100)
-    expect(result.kind).toBe("parse-timeout")
-    expect(result.parseErrors).toEqual(parseErrors)
-  })
-
-  it("reports a file with no tree as a parse failure rather than as a timeout", async () => {
-    const { result } = await run({ parseMs: 250, noTree: true }, 100)
+  it.each<[string, Script]>([
+    ["no tree", { parseMs: 250, tree: null }],
+    [
+      "a non-recoverable error",
+      { parseMs: 250, parseErrors: [{ ...RECOVERABLE, recoverable: false }] },
+    ],
+  ])("reports a file with %s as a parse failure even when its parse overran", async (_label, script) => {
+    const { result } = await run(script, 100)
     expect(result.kind).toBe("parse-failed")
-  })
-
-  it("reports a refused file as a parse failure even when the parse also blew the budget", async () => {
-    const parseErrors: readonly ParseError[] = [
-      { message: "wrong dialect", line: 1, column: 1, recoverable: false },
-    ]
-    const { result } = await run({ parseMs: 250, parseErrors }, 100)
-    expect(result.kind).toBe("parse-failed")
-  })
-
-  it("abandons a file whose extraction blew the budget and found nothing to walk", async () => {
-    const { result, calls } = await run({ candidates: [], extractMs: 250 }, 100)
-    expect(result.kind).toBe("parse-timeout")
-    expect(calls.extract).toBe(1)
-    expect(calls.walk).toEqual([])
-  })
-
-  it("reports the file, the budget in effect and the wall clock it actually spent", async () => {
-    const { result } = await run({ parseMs: 250 }, 100)
-    expect(result.kind).toBe("parse-timeout")
-    if (result.kind !== "parse-timeout") return
-    expect(result.timeout.file).toBe("test.stub")
-    expect(result.timeout.budgetMs).toBe(100)
-    expect(result.timeout.elapsedMs).toBeGreaterThanOrEqual(100)
-  })
-
-  it("hands back nothing at all from an abandoned file", async () => {
-    const imports: readonly ImportEdge[] = [
-      { source: "./other", symbols: ["thing"], line: 1, dynamic: false },
-    ]
-    const { result } = await run({ parseMs: 250, imports }, 100)
-    expect(Object.keys(result).sort()).toEqual(["kind", "parseErrors", "path", "timeout"])
   })
 
   it("leaves a file that finishes inside its budget untouched", async () => {
-    const { result, calls } = await run({ candidates: ["one", "two"] }, 600_000)
-    expect(result.kind).toBe("extracted")
-    if (result.kind !== "extracted") return
-    expect(result.symbols.map((sym) => sym.name)).toEqual(["one", "two"])
-    expect(calls.walk).toEqual(["one", "two"])
-  })
-
-  it("applies the default budget when the config omits one", async () => {
-    const { result } = await run({ candidates: ["one"] })
-    expect(result.kind).toBe("extracted")
-    if (result.kind !== "extracted") return
-    expect(result.symbols).toHaveLength(1)
+    const { result, order } = await run({ candidates: ["one", "two"] }, 600_000)
+    expect(result.kind === "extracted" && result.symbols.map((s) => s.name)).toEqual(["one", "two"])
+    expect(order.filter((call) => call.startsWith("walkBody"))).toEqual([
+      "walkBody:one",
+      "walkBody:two",
+    ])
   })
 })

@@ -1,469 +1,372 @@
-import type { Effect, Symbol as IRSymbol } from "@aburi/types"
+import { makeIR, symbolById } from "@aburi/test-support"
+import type { Confidence, Effect, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { CallEdge } from "../src/callgraph"
-import { serializeCanonical } from "../src/canonical"
 import { propagateEffects } from "../src/propagate"
 import { makeSymbol } from "./fixtures/ir"
-import { edge, effect } from "./fixtures/propagate"
+import { edge, localEffect } from "./fixtures/propagate"
 
-function local(overrides: Partial<Effect> & { id: string; target: string }): Effect {
-  return effect(overrides.id, overrides.target, overrides)
+function effectsOf(symbols: IRSymbol[], id: string): Effect[] {
+  return symbolById({ ir: makeIR({ symbols }) }, id).effects
 }
 
-function bySymbolId(symbols: IRSymbol[], id: string): IRSymbol {
-  const sym = symbols.find((s) => s.id === id)
-  if (sym === undefined) throw new Error(`missing symbol ${id}`)
-  return sym
+function propagatedOf(symbols: IRSymbol[], id: string): Effect[] {
+  return effectsOf(symbols, id).filter((e) => e.propagated === true)
 }
 
-describe("propagateEffects", () => {
-  it("direct A→B propagation — B's db.write reaches A", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A", { effects: [] }),
-      makeSymbol("ts:b.ts#B", {
-        effects: [local({ id: "db.write", target: "prisma.invoice.create", line: 8 })],
+const A = "ts:a.ts#A"
+const B = "ts:b.ts#B"
+const C = "ts:c.ts#C"
+const D = "ts:d.ts#D"
+
+describe("what reaches a caller", () => {
+  it("carries a callee's effect to its caller, without a line", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, { effects: [localEffect({ id: "db.write", target: "prisma.x", line: 8 })] }),
+    ]
+
+    const { symbols: out } = propagateEffects({ symbols, edges: [edge(A, B)] })
+
+    expect(propagatedOf(out, A)).toEqual([
+      {
+        id: "db.write",
+        target: "prisma.x",
+        plugin: "effects-test",
+        confidence: "high",
+        derivedBy: "convention:test",
+        propagated: true,
+        derivedFrom: [B],
+      },
+    ])
+  })
+
+  it("names the direct callee at every hop of a chain, never the far end", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B),
+      makeSymbol(C),
+      makeSymbol(D, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+    ]
+    const edges = [edge(A, B), edge(B, C), edge(C, D)]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect(propagatedOf(out, A).map((e) => e.derivedFrom)).toEqual([[B]])
+    expect(propagatedOf(out, B).map((e) => e.derivedFrom)).toEqual([[C]])
+    expect(propagatedOf(out, C).map((e) => e.derivedFrom)).toEqual([[D]])
+    expect(propagatedOf(out, D)).toEqual([])
+  })
+
+  it("merges a diamond into one entry deriving from both callees, sorted", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B),
+      makeSymbol(C),
+      makeSymbol(D, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+    ]
+    const edges = [edge(A, C), edge(A, B), edge(B, D), edge(C, D)]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect(propagatedOf(out, A).map((e) => e.derivedFrom)).toEqual([[B, C]])
+  })
+
+  it("gives every member of a cycle the effect one member detects", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B),
+      makeSymbol(C, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+    ]
+    const edges = [edge(A, B), edge(B, C), edge(C, A)]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect(propagatedOf(out, A).map((e) => e.derivedFrom)).toEqual([[B]])
+    expect(propagatedOf(out, B).map((e) => e.derivedFrom)).toEqual([[C]])
+    expect(effectsOf(out, C)).toEqual(symbols[2]?.effects)
+  })
+
+  it("adds nothing for a self-loop on a symbol that detects the effect itself", () => {
+    const symbols = [makeSymbol(A, { effects: [localEffect({ id: "db.write", target: "x" })] })]
+
+    const { symbols: out } = propagateEffects({ symbols, edges: [edge(A, A)] })
+
+    expect(effectsOf(out, A)).toEqual(symbols[0]?.effects)
+  })
+
+  it("lets a local effect shadow the same (id, target) arriving from a callee", () => {
+    const local = localEffect({ id: "db.write", target: "x", line: 42, confidence: "medium" })
+    const symbols = [
+      makeSymbol(A, { effects: [local] }),
+      makeSymbol(B, {
+        effects: [localEffect({ id: "db.write", target: "x", confidence: "high" })],
       }),
     ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const a = bySymbolId(out, "ts:a.ts#A")
-    const propagated = a.effects.filter((e) => e.propagated === true)
-    expect(propagated).toHaveLength(1)
-    expect(propagated[0]?.id).toBe("db.write")
-    expect(propagated[0]?.target).toBe("prisma.invoice.create")
-    expect(propagated[0]?.derivedFrom).toEqual(["ts:b.ts#B"])
-    expect(propagated[0]?.line).toBeUndefined()
+
+    const { symbols: out } = propagateEffects({ symbols, edges: [edge(A, B)] })
+
+    expect(effectsOf(out, A)).toEqual([local])
   })
 
-  it("two-hop A→B→C — A.derivedFrom is [B], B.derivedFrom is [C]", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C", { effects: [local({ id: "db.write", target: "prisma.x.create" })] }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B"), edge("ts:b.ts#B", "ts:c.ts#C")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    expect(
-      bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)?.derivedFrom,
-    ).toEqual(["ts:b.ts#B"])
-    expect(
-      bySymbolId(out, "ts:b.ts#B").effects.find((e) => e.propagated === true)?.derivedFrom,
-    ).toEqual(["ts:c.ts#C"])
-    // C has only its local effect, no propagated entry.
-    expect(bySymbolId(out, "ts:c.ts#C").effects.every((e) => e.propagated !== true)).toBe(true)
-  })
-
-  it("diamond A→B→D, A→C→D — A.derivedFrom is sorted union [B,C], single entry", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C"),
-      makeSymbol("ts:d.ts#D", { effects: [local({ id: "db.write", target: "x" })] }),
-    ]
-    const edges: CallEdge[] = [
-      edge("ts:a.ts#A", "ts:b.ts#B"),
-      edge("ts:a.ts#A", "ts:c.ts#C"),
-      edge("ts:b.ts#B", "ts:d.ts#D"),
-      edge("ts:c.ts#C", "ts:d.ts#D"),
-    ]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const a = bySymbolId(out, "ts:a.ts#A").effects.filter((e) => e.propagated === true)
-    expect(a).toHaveLength(1)
-    expect(a[0]?.derivedFrom).toEqual(["ts:b.ts#B", "ts:c.ts#C"])
-  })
-
-  it("min-along-path — edge high + effect medium collapses to medium", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", {
-        effects: [local({ id: "db.write", target: "x", confidence: "medium" })],
-      }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B", { confidence: "high" })]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.confidence).toBe("medium")
-  })
-
-  it("min-along-path — edge medium + effect high collapses to medium", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", {
-        effects: [local({ id: "db.write", target: "x", confidence: "high" })],
-      }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B", { confidence: "medium" })]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.confidence).toBe("medium")
-  })
-
-  it("max-across-paths — two paths medium + high merge to high", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C"),
-      makeSymbol("ts:d.ts#D", {
-        effects: [local({ id: "db.write", target: "x", confidence: "high" })],
-      }),
-    ]
-    const edges: CallEdge[] = [
-      edge("ts:a.ts#A", "ts:b.ts#B", { confidence: "medium" }),
-      edge("ts:a.ts#A", "ts:c.ts#C", { confidence: "high" }),
-      edge("ts:b.ts#B", "ts:d.ts#D", { confidence: "high" }),
-      edge("ts:c.ts#C", "ts:d.ts#D", { confidence: "high" }),
-    ]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.confidence).toBe("high")
-  })
-
-  it("SCC {A,B,C} all internal, only C has local — every member ends with same aggregated set", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C", { effects: [local({ id: "db.write", target: "x" })] }),
-    ]
-    const edges: CallEdge[] = [
-      edge("ts:a.ts#A", "ts:b.ts#B"),
-      edge("ts:b.ts#B", "ts:c.ts#C"),
-      edge("ts:c.ts#C", "ts:a.ts#A"),
-    ]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    for (const id of ["ts:a.ts#A", "ts:b.ts#B", "ts:c.ts#C"]) {
-      const entries = bySymbolId(out, id).effects.filter(
-        (e) => e.id === "db.write" && e.target === "x",
-      )
-      expect(entries.length).toBeGreaterThanOrEqual(1)
-    }
-    const c = bySymbolId(out, "ts:c.ts#C").effects
-    expect(c.some((e) => e.propagated !== true && e.id === "db.write")).toBe(true)
-  })
-
-  it("self-loop A→A on locally-effecting A — no duplicate propagated entry", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A", { effects: [local({ id: "db.write", target: "x" })] }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:a.ts#A")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const a = bySymbolId(out, "ts:a.ts#A")
-    expect(a.effects).toHaveLength(1)
-    expect(a.effects[0]?.propagated).not.toBe(true)
-  })
-
-  it("local shadows propagated on same (id,target)", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A", {
-        effects: [local({ id: "db.write", target: "x", line: 42, confidence: "medium" })],
-      }),
-      makeSymbol("ts:b.ts#B", {
-        effects: [local({ id: "db.write", target: "x", confidence: "high" })],
-      }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const a = bySymbolId(out, "ts:a.ts#A")
-    expect(a.effects).toHaveLength(1)
-    expect(a.effects[0]?.propagated).not.toBe(true)
-    expect(a.effects[0]?.line).toBe(42)
-    expect(a.effects[0]?.confidence).toBe("medium")
-  })
-
-  it("boundary decorator is NOT a propagation stop", () => {
-    const symbols: IRSymbol[] = [
+  it("propagates through a boundary decorator", () => {
+    const symbols = [
       makeSymbol("ts:ctl.ts#Ctl", {
         decorators: [{ name: "Post", raw: "Post()", arguments: [], boundary: true, line: 1 }],
       }),
       makeSymbol("ts:svc.ts#Svc"),
-      makeSymbol("ts:repo.ts#Repo", {
-        effects: [local({ id: "db.write", target: "prisma.invoice.create" })],
+      makeSymbol("ts:repo.ts#Repo", { effects: [localEffect({ id: "db.write", target: "x" })] }),
+    ]
+    const edges = [edge("ts:ctl.ts#Ctl", "ts:svc.ts#Svc"), edge("ts:svc.ts#Svc", "ts:repo.ts#Repo")]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect(propagatedOf(out, "ts:ctl.ts#Ctl").map((e) => e.id)).toEqual(["db.write"])
+  })
+
+  it("propagates nothing without an edge, and hands every symbol back once", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+    ]
+
+    const { symbols: out } = propagateEffects({ symbols, edges: [] })
+
+    expect(out).toEqual(symbols)
+  })
+})
+
+describe("the confidence a propagated effect carries", () => {
+  it.each<[Confidence, Confidence, Confidence]>([
+    ["high", "medium", "medium"],
+    ["medium", "high", "medium"],
+    ["low", "high", "low"],
+  ])("is the weaker of edge %s and effect %s: %s", (edgeConfidence, effectConfidence, expected) => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, {
+        effects: [localEffect({ id: "db.write", target: "x", confidence: effectConfidence })],
       }),
     ]
-    const edges: CallEdge[] = [
-      edge("ts:ctl.ts#Ctl", "ts:svc.ts#Svc"),
-      edge("ts:svc.ts#Svc", "ts:repo.ts#Repo"),
+
+    const { symbols: out } = propagateEffects({
+      symbols,
+      edges: [edge(A, B, { confidence: edgeConfidence })],
+    })
+
+    expect(propagatedOf(out, A).map((e) => e.confidence)).toEqual([expected])
+  })
+
+  it("is the stronger of two paths", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B),
+      makeSymbol(C),
+      makeSymbol(D, { effects: [localEffect({ id: "db.write", target: "x" })] }),
     ]
+    const edges = [
+      edge(A, B, { confidence: "medium" }),
+      edge(A, C, { confidence: "high" }),
+      edge(B, D),
+      edge(C, D),
+    ]
+
     const { symbols: out } = propagateEffects({ symbols, edges })
-    const ctl = bySymbolId(out, "ts:ctl.ts#Ctl")
-    expect(ctl.effects.some((e) => e.propagated === true && e.id === "db.write")).toBe(true)
+
+    expect(propagatedOf(out, A).map((e) => e.confidence)).toEqual(["high"])
   })
 
-  it("unresolved edges do not propagate — a symbol with no outgoing edges receives no propagated effects", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x" })] }),
+  it("takes the strongest of several call sites between one pair", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, { effects: [localEffect({ id: "db.write", target: "x" })] }),
     ]
-    const { symbols: out } = propagateEffects({ symbols, edges: [] })
-    expect(bySymbolId(out, "ts:a.ts#A").effects).toHaveLength(0)
-  })
+    const edges = [
+      edge(A, B, { confidence: "low", line: 5 }),
+      edge(A, B, { confidence: "high", line: 12 }),
+    ]
 
-  it("cross-language guard — edges only connect within one language universe", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x" })] }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
     const { symbols: out } = propagateEffects({ symbols, edges })
-    expect(bySymbolId(out, "ts:a.ts#A").effects.some((e) => e.propagated === true)).toBe(true)
+
+    expect(propagatedOf(out, A).map((e) => e.confidence)).toEqual(["high"])
   })
 
-  it("idempotence — running propagation twice reproduces the same effects[] byte-for-byte", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x" })] }),
+  it("takes the strongest of the edges leaving a cycle for one callee", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B),
+      makeSymbol(C, { effects: [localEffect({ id: "db.write", target: "x" })] }),
     ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
+    const edges = [
+      edge(A, B),
+      edge(B, A),
+      edge(A, C, { confidence: "low" }),
+      edge(B, C, { confidence: "high" }),
+    ]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect(propagatedOf(out, A)).toMatchObject([{ confidence: "high", derivedFrom: [B, C] }])
+  })
+})
+
+describe("the classification a propagated effect carries", () => {
+  it("is the callee's with the smaller derivedBy, plugin and derivedBy together", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, {
+        effects: [
+          localEffect({ id: "db.write", target: "x", derivedBy: "effects-plugin:z", plugin: "z" }),
+        ],
+      }),
+      makeSymbol(C, {
+        effects: [
+          localEffect({ id: "db.write", target: "x", derivedBy: "effects-plugin:a", plugin: "a" }),
+        ],
+      }),
+    ]
+
+    const { symbols: out } = propagateEffects({ symbols, edges: [edge(A, B), edge(A, C)] })
+
+    expect(propagatedOf(out, A)).toMatchObject([{ derivedBy: "effects-plugin:a", plugin: "a" }])
+  })
+
+  it("stays the one a member of the caller's cycle detected, over a smaller one from below", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, {
+        effects: [
+          localEffect({ id: "db.write", target: "x", derivedBy: "effects-plugin:z", plugin: "z" }),
+        ],
+      }),
+      makeSymbol(C, {
+        effects: [
+          localEffect({ id: "db.write", target: "x", derivedBy: "effects-plugin:a", plugin: "a" }),
+        ],
+      }),
+    ]
+    const edges = [edge(A, B), edge(B, A), edge(A, C)]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect(propagatedOf(out, A)).toMatchObject([
+      { derivedBy: "effects-plugin:z", plugin: "z", derivedFrom: [B, C] },
+    ])
+  })
+})
+
+describe("the effects[] a symbol ends with", () => {
+  it("lists locals first in call order, then propagated entries by (id, target)", () => {
+    const symbols = [
+      makeSymbol(A, {
+        effects: [
+          localEffect({ id: "x.write", target: "aaa", line: 30 }),
+          localEffect({ id: "a.read", target: "aaa", line: 45 }),
+        ],
+      }),
+      makeSymbol(B, {
+        effects: [
+          localEffect({ id: "queue.publish", target: "q" }),
+          localEffect({ id: "db.write", target: "prisma.x.create" }),
+        ],
+      }),
+    ]
+
+    const { symbols: out } = propagateEffects({ symbols, edges: [edge(A, B)] })
+
+    expect(effectsOf(out, A).map((e) => [e.id, e.propagated === true])).toEqual([
+      ["x.write", false],
+      ["a.read", false],
+      ["db.write", true],
+      ["queue.publish", true],
+    ])
+  })
+
+  it("orders propagated targets by UTF-16 code unit, as the serializer reads them", () => {
+    const composed = "caf\u00e9"
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, {
+        effects: [
+          localEffect({ id: "db.write", target: composed }),
+          localEffect({ id: "db.write", target: "cafz" }),
+        ],
+      }),
+    ]
+
+    const { symbols: out } = propagateEffects({ symbols, edges: [edge(A, B)] })
+
+    expect(propagatedOf(out, A).map((e) => e.target)).toEqual(["cafz", composed])
+  })
+
+  it("is the same whatever order the symbols and edges arrive in", () => {
+    const symbols = [
+      makeSymbol("ts:src/top.ts#top"),
+      makeSymbol("ts:src/left.ts#left", { effects: [localEffect({ id: "db.read", target: "r" })] }),
+      makeSymbol("ts:src/right.ts#right", {
+        effects: [localEffect({ id: "db.write", target: "w" })],
+      }),
+      makeSymbol("ts:src/bottom.ts#bottom", {
+        effects: [localEffect({ id: "network.http", target: "fetch" })],
+      }),
+    ]
+    const edges = [
+      edge("ts:src/top.ts#top", "ts:src/left.ts#left"),
+      edge("ts:src/top.ts#top", "ts:src/right.ts#right"),
+      edge("ts:src/left.ts#left", "ts:src/bottom.ts#bottom"),
+      edge("ts:src/right.ts#right", "ts:src/bottom.ts#bottom"),
+    ]
+
+    const forward = propagateEffects({ symbols, edges })
+    const reversed = propagateEffects({
+      symbols: [...symbols].reverse(),
+      edges: [...edges].reverse(),
+    })
+
+    expect([...reversed.symbols].reverse()).toEqual(forward.symbols)
+  })
+
+  it("is unchanged by a second pass over the first pass's output", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+    ]
+    const edges = [edge(A, B)]
+
     const pass1 = propagateEffects({ symbols, edges })
     const pass2 = propagateEffects({ symbols: pass1.symbols, edges })
+
     expect(pass2.symbols).toEqual(pass1.symbols)
   })
-
-  it("input CallEdge[] shuffle produces byte-identical output", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C"),
-      makeSymbol("ts:d.ts#D", { effects: [local({ id: "db.write", target: "x" })] }),
-    ]
-    const canonical: CallEdge[] = [
-      edge("ts:a.ts#A", "ts:b.ts#B"),
-      edge("ts:a.ts#A", "ts:c.ts#C"),
-      edge("ts:b.ts#B", "ts:d.ts#D"),
-      edge("ts:c.ts#C", "ts:d.ts#D"),
-    ]
-    const shuffled: CallEdge[] = [
-      canonical[3],
-      canonical[1],
-      canonical[2],
-      canonical[0],
-    ] as CallEdge[]
-    const a = propagateEffects({ symbols, edges: canonical })
-    const b = propagateEffects({ symbols, edges: shuffled })
-    expect(b.symbols).toEqual(a.symbols)
-  })
-
-  it("propagated entries omit line", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x", line: 99 })] }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.line).toBeUndefined()
-  })
 })
 
-describe("propagateEffects — additional invariants", () => {
-  it("derivedBy lex tie-break — two paths, smaller derivedBy wins", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", {
-        effects: [
-          local({
-            id: "db.write",
-            target: "x",
-            derivedBy: "effects-plugin:z:write",
-            plugin: "effects-z",
-          }),
-        ],
+describe("propagateEffects", () => {
+  it("reports the shape of the graph it swept", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B),
+      makeSymbol(C, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+    ]
+
+    const { stats } = propagateEffects({ symbols, edges: [edge(A, B), edge(B, C)] })
+
+    expect(stats).toEqual({
+      sccCount: 3,
+      maxSccSize: 1,
+      propagatedEffectCount: 2,
+      symbolsWithPropagatedEffects: 2,
+    })
+  })
+
+  it.each<[string, CallEdge]>([
+    ["from", edge("ts:ghost.ts#Ghost", A)],
+    ["to", edge(A, "ts:ghost.ts#Ghost")],
+  ])("refuses an edge whose %s is not among the symbols", (end, dangling) => {
+    expect(() => propagateEffects({ symbols: [makeSymbol(A)], edges: [dangling] })).toThrowError(
+      expect.objectContaining({
+        code: "propagation-invariant-violated",
+        message: expect.stringContaining(`CallEdge.${end}`),
       }),
-      makeSymbol("ts:c.ts#C", {
-        effects: [
-          local({
-            id: "db.write",
-            target: "x",
-            derivedBy: "effects-plugin:a:write",
-            plugin: "effects-a",
-          }),
-        ],
-      }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B"), edge("ts:a.ts#A", "ts:c.ts#C")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.derivedBy).toBe("effects-plugin:a:write")
-    expect(prop?.plugin).toBe("effects-a")
-  })
-
-  it("derivedFrom is the direct callee, not the full chain", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C", { effects: [local({ id: "db.write", target: "x" })] }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B"), edge("ts:b.ts#B", "ts:c.ts#C")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    expect(
-      bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)?.derivedFrom,
-    ).toEqual(["ts:b.ts#B"])
-  })
-
-  it("emission order: locals in call order first, propagated after sorted by (id, target)", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A", {
-        effects: [
-          // Local effects are seeded at lines 30 then 45 — call order should be preserved.
-          local({ id: "x.write", target: "aaa", line: 30 }),
-          local({ id: "a.read", target: "aaa", line: 45 }),
-        ],
-      }),
-      makeSymbol("ts:b.ts#B", {
-        effects: [
-          local({ id: "queue.publish", target: "q" }),
-          local({ id: "db.write", target: "prisma.x.create" }),
-        ],
-      }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const a = bySymbolId(out, "ts:a.ts#A").effects
-    // Local segment first (call order).
-    expect(a[0]?.propagated).not.toBe(true)
-    expect(a[1]?.propagated).not.toBe(true)
-    expect(a[0]?.id).toBe("x.write")
-    expect(a[1]?.id).toBe("a.read")
-    // Propagated segment sorted by (id, target).
-    expect(a[2]?.propagated).toBe(true)
-    expect(a[3]?.propagated).toBe(true)
-    expect(a[2]?.id).toBe("db.write")
-    expect(a[3]?.id).toBe("queue.publish")
-  })
-
-  it("local segment retains call order verbatim (target sort does not touch it)", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A", {
-        effects: [
-          local({ id: "db.write", target: "zzz", line: 10 }),
-          local({ id: "db.read", target: "aaa", line: 20 }),
-        ],
-      }),
-    ]
-    const { symbols: out } = propagateEffects({ symbols, edges: [] })
-    const a = bySymbolId(out, "ts:a.ts#A").effects
-    expect(a.map((e) => e.target)).toEqual(["zzz", "aaa"])
-  })
-
-  it("PropagationStats reflects graph shape", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C", { effects: [local({ id: "db.write", target: "x" })] }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B"), edge("ts:b.ts#B", "ts:c.ts#C")]
-    const { stats } = propagateEffects({ symbols, edges })
-    expect(stats.sccCount).toBe(3)
-    expect(stats.maxSccSize).toBe(1)
-    expect(stats.propagatedEffectCount).toBe(2)
-    expect(stats.symbolsWithPropagatedEffects).toBe(2)
-  })
-})
-
-describe("propagateEffects — coverage for merge / condense internals", () => {
-  it("multiple call sites on the same (from,to) collapse to the max edge confidence", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", {
-        effects: [local({ id: "db.write", target: "x", confidence: "high" })],
-      }),
-    ]
-    const edges: CallEdge[] = [
-      edge("ts:a.ts#A", "ts:b.ts#B", { confidence: "low", line: 5 }),
-      edge("ts:a.ts#A", "ts:b.ts#B", { confidence: "high", line: 12 }),
-    ]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.confidence).toBe("high")
-  })
-
-  it("condense collapses parallel SCC→SCC edges by max confidence", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B"),
-      makeSymbol("ts:c.ts#C", {
-        effects: [local({ id: "db.write", target: "x", confidence: "high" })],
-      }),
-    ]
-    const edges: CallEdge[] = [
-      edge("ts:a.ts#A", "ts:b.ts#B"),
-      edge("ts:b.ts#B", "ts:a.ts#A"),
-      edge("ts:a.ts#A", "ts:c.ts#C", { confidence: "low" }),
-      edge("ts:b.ts#B", "ts:c.ts#C", { confidence: "high" }),
-    ]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.confidence).toBe("high")
-    expect(prop?.derivedFrom).toEqual(["ts:b.ts#B", "ts:c.ts#C"])
-  })
-
-  it("plugin and derivedBy stay locked together on the winning tie-break", () => {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A"),
-      makeSymbol("ts:b.ts#B", {
-        effects: [
-          local({
-            id: "db.write",
-            target: "x",
-            derivedBy: "effects-plugin:z:write",
-            plugin: "effects-z",
-          }),
-        ],
-      }),
-      makeSymbol("ts:c.ts#C", {
-        effects: [
-          local({
-            id: "db.write",
-            target: "x",
-            derivedBy: "effects-plugin:a:write",
-            plugin: "effects-a",
-          }),
-        ],
-      }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B"), edge("ts:a.ts#A", "ts:c.ts#C")]
-    const { symbols: out } = propagateEffects({ symbols, edges })
-    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
-    expect(prop?.derivedBy).toBe("effects-plugin:a:write")
-    expect(prop?.plugin).toBe("effects-a")
-  })
-
-  it("throws when a CallEdge endpoint is not in the input symbols", () => {
-    const symbols: IRSymbol[] = [makeSymbol("ts:a.ts#A")]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:ghost.ts#Ghost")]
-    expect(() => propagateEffects({ symbols, edges })).toThrow(/CallEdge\.to/)
-  })
-})
-
-describe("propagateEffects — the sweep order and the written bytes agree", () => {
-  const NFC_CAFE = `caf${"\u00e9"}`
-  const NFD_CAFE = NFC_CAFE.normalize("NFD")
-
-  function propagatedTargets(target: string): string[] {
-    const symbols: IRSymbol[] = [
-      makeSymbol("ts:a.ts#A", { effects: [] }),
-      makeSymbol("ts:b.ts#B", {
-        effects: [local({ id: "db.write", target }), local({ id: "db.write", target: "cafz" })],
-      }),
-    ]
-    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
-    const result = propagateEffects({ symbols, edges })
-    return bySymbolId(result.symbols, "ts:a.ts#A").effects.map((e) => e.target)
-  }
-
-  it("orders a normalized target where the serializer will write it", () => {
-    expect(propagatedTargets(NFC_CAFE)).toEqual(["cafz", NFC_CAFE])
-  })
-
-  it("orders an un-normalized one somewhere else — which is why it never reaches here", () => {
-    expect(propagatedTargets(NFD_CAFE)).toEqual([NFD_CAFE, "cafz"])
-  })
-
-  it("serializes a normalized run in the order the array declares", () => {
-    const targets = propagatedTargets(NFC_CAFE)
-    const json = serializeCanonical(
-      targets.map((t) => ({ target: t })),
-      { format: "compact" },
     )
-    expect(json).toBe(`[{"target":"cafz"},{"target":"${NFC_CAFE}"}]`)
   })
 })

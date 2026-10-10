@@ -1,54 +1,23 @@
 import { describe, expect, it } from "vitest"
-import { CoreError, lastQnameSegment } from "../../src/index"
+import { lastQnameSegment } from "../../src/index"
 
 describe("lastQnameSegment", () => {
-  it("returns the identifier verbatim when no separator is present", () => {
-    expect(lastQnameSegment("createInvoice")).toBe("createInvoice")
-  })
-
-  it("returns the tail after '.' for instance members", () => {
-    expect(lastQnameSegment("InvoiceService.createInvoice")).toBe("createInvoice")
-  })
-
-  it("returns the tail after '::' for static members", () => {
-    expect(lastQnameSegment("Class::staticMethod")).toBe("staticMethod")
-  })
-
-  it("prefers '::' over '.' when both are present", () => {
-    expect(lastQnameSegment("A.B::method")).toBe("method")
-  })
-
-  it("keeps a private member's `#`, which tells it apart from a public one", () => {
-    expect(lastQnameSegment("C.#v")).toBe("#v")
-    expect(lastQnameSegment("C::#v")).toBe("#v")
-  })
-
-  it("keeps the <default> sentinel intact", () => {
-    expect(lastQnameSegment("<default>")).toBe("<default>")
-  })
-
-  it("returns the last segment of deeply nested paths", () => {
-    expect(lastQnameSegment("A.B.C.method")).toBe("method")
-  })
-
-  it("throws on an empty qualified name (upstream Symbol id builder bug)", () => {
-    expect(() => lastQnameSegment("")).toThrowError(CoreError)
-  })
-
   it.each([
-    ["trailing '::'", "foo::"],
-    ["trailing '.'", "A."],
-    ["only '::'", "::"],
-    ["only '.'", "."],
-  ])("throws on a qname with an empty last segment (%s)", (_, qname) => {
-    let caught: unknown
-    try {
-      lastQnameSegment(qname)
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(CoreError)
-    expect((caught as CoreError).code).toBe("anonymous-symbol-id-attempted")
-    expect((caught as CoreError).value).toBe(qname)
+    ["createInvoice", "createInvoice"],
+    ["InvoiceService.createInvoice", "createInvoice"],
+    ["A.B.C.method", "method"],
+    ["Class::staticMethod", "staticMethod"],
+    ["A.B::method", "method"],
+    ["C.#v", "#v"],
+    ["C::#v", "#v"],
+    ["<default>", "<default>"],
+  ])("answers %j with %j", (qname, leaf) => {
+    expect(lastQnameSegment(qname)).toBe(leaf)
+  })
+
+  it.each(["", "foo::", "A.", "::", "."])("refuses %j, whose last segment is empty", (qname) => {
+    expect(() => lastQnameSegment(qname)).toThrowError(
+      expect.objectContaining({ code: "anonymous-symbol-id-attempted", value: qname }),
+    )
   })
 })

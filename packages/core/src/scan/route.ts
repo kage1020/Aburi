@@ -1,9 +1,14 @@
 import type { LanguagePlugin } from "@aburi/types"
+import { toNfc } from "../codepoints"
 import { CoreError } from "../errors"
 
 export function fileExtension(path: string): string | null {
   const dot = path.lastIndexOf(".")
-  return dot < 0 ? null : path.slice(dot).toLowerCase()
+  return dot < 0 ? null : extensionKey(path.slice(dot))
+}
+
+function extensionKey(extension: string): string {
+  return toNfc(extension.toLowerCase())
 }
 
 export function buildLanguageRouter(
@@ -12,7 +17,7 @@ export function buildLanguageRouter(
   const table = new Map<string, LanguagePlugin<unknown, unknown>>()
   for (const plugin of plugins) {
     for (const ext of plugin.fileExtensions) {
-      const key = ext.toLowerCase()
+      const key = extensionKey(ext)
       const prior = table.get(key)
       if (prior && prior !== plugin) {
         throw new CoreError(
@@ -34,7 +39,6 @@ export class LanguageRouter {
     this.#table = table
   }
 
-  /** Every extension a plugin has claimed, lowercased and prefixed with `.`. */
   get knownExtensions(): readonly string[] {
     return [...this.#table.keys()]
   }

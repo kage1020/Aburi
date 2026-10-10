@@ -1,5 +1,5 @@
-import { open, readdir, readFile, stat } from "node:fs/promises"
-import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path"
+import { readFile } from "node:fs/promises"
+import { dirname, join, posix, relative, sep } from "node:path"
 import type { WorkspaceManager } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
@@ -7,162 +7,8 @@ import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
 import { posixWorkspaceRelativeViolation } from "./id"
 import { compareBy, compareCodeUnit } from "./order"
-import { describeJsonType, isVanishedFile } from "./scan/faults"
-
-const REPOSITORY_MARKER = ".git"
-
-const GITDIR_POINTER = "gitdir: "
-
-const ROOT_MARKERS = [
-  "pnpm-workspace.yaml",
-  "turbo.json",
-  "nx.json",
-  "lerna.json",
-  "go.work",
-  ".aburi-workspace",
-] as const
-
-const CONDITIONAL_ROOT_MARKERS = ["package.json", "Cargo.toml", "pyproject.toml"] as const
-
-type RootMarker =
-  | typeof REPOSITORY_MARKER
-  | (typeof ROOT_MARKERS)[number]
-  | (typeof CONDITIONAL_ROOT_MARKERS)[number]
-
-export interface DetectWorkspaceRootOptions {
-  cwd?: string
-}
-
-export async function detectWorkspaceRoot(
-  options: DetectWorkspaceRootOptions = {},
-): Promise<string> {
-  const startRaw = options.cwd ?? process.cwd()
-  const start = isAbsolute(startRaw) ? startRaw : resolve(process.cwd(), startRaw)
-
-  let dir = start
-  let outermost: string | null = null
-  let failure: MarkerFailure | null = null
-  while (true) {
-    const probe = await probeDirectoryMarkers(dir)
-    if (probe.marker !== null) outermost = dir
-    if (failure === null && probe.failure !== null) failure = { dir, cause: probe.failure }
-    if (probe.marker === REPOSITORY_MARKER) break
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  if (outermost === null) {
-    throw new CoreError(
-      `No workspace marker (.git, pnpm-workspace.yaml, turbo.json, nx.json, lerna.json, go.work, .aburi-workspace, or workspace-aware package.json/Cargo.toml/pyproject.toml) found at ${start} or any ancestor`,
-      { code: "workspace-root-not-found", value: start },
-    )
-  }
-  if (failure !== null && isAtOrBelow(failure.dir, outermost)) throw failure.cause
-  return outermost
-}
-
-/** The first marker probe that could not answer, and the directory it was probing. */
-interface MarkerFailure {
-  dir: string
-  cause: unknown
-}
-
-interface MarkerProbe {
-  /** The marker this directory carries, or `null` when it carries none. */
-  marker: RootMarker | null
-  /** The first error a probe of this directory raised, or `null` when every probe answered. */
-  failure: unknown
-}
-
-async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
-  let failure: unknown = null
-  const remember = (cause: unknown): void => {
-    if (failure === null) failure = cause
-  }
-  try {
-    if (await isRepository(join(dir, REPOSITORY_MARKER))) {
-      return { marker: REPOSITORY_MARKER, failure }
-    }
-  } catch (cause) {
-    remember(cause)
-  }
-  for (const name of ROOT_MARKERS) {
-    try {
-      if (await pathExists(join(dir, name))) return { marker: name, failure }
-    } catch (cause) {
-      remember(cause)
-    }
-  }
-  for (const name of CONDITIONAL_ROOT_MARKERS) {
-    const path = join(dir, name)
-    try {
-      if (!(await pathExists(path))) continue
-      if (await fileSatisfiesWorkspacePredicate(name, path)) return { marker: name, failure }
-    } catch (cause) {
-      remember(cause)
-    }
-  }
-  return { marker: null, failure }
-}
-
-async function isRepository(path: string): Promise<boolean> {
-  let entry: Awaited<ReturnType<typeof stat>>
-  try {
-    entry = await stat(path)
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return false
-    throw err
-  }
-  if (entry.isDirectory()) return true
-  if (!entry.isFile()) return false
-  const opening = Buffer.alloc(GITDIR_POINTER.length)
-  const handle = await open(path, "r")
-  try {
-    const { bytesRead } = await handle.read(opening, 0, opening.length, 0)
-    return opening.subarray(0, bytesRead).toString("utf8") === GITDIR_POINTER
-  } finally {
-    await handle.close()
-  }
-}
-
-function isAtOrBelow(dir: string, root: string): boolean {
-  if (dir === root) return true
-  return dir.startsWith(root.endsWith(sep) ? root : root + sep)
-}
-
-async function fileSatisfiesWorkspacePredicate(
-  marker: (typeof CONDITIONAL_ROOT_MARKERS)[number],
-  path: string,
-): Promise<boolean> {
-  switch (marker) {
-    case "package.json":
-      return packageJsonDeclaresWorkspaces(path)
-    case "Cargo.toml":
-      return tomlContainsWorkspaceSection(path)
-    case "pyproject.toml":
-      return pyprojectDeclaresWorkspace(path)
-  }
-}
-
-async function packageJsonDeclaresWorkspaces(path: string): Promise<boolean> {
-  const parsed = await readJson(path)
-  if (parsed === null || typeof parsed !== "object") return false
-  return "workspaces" in (parsed as Record<string, unknown>)
-}
-
-async function tomlContainsWorkspaceSection(path: string): Promise<boolean> {
-  const text = await readText(path)
-  return /^\s*\[workspace\]/m.test(text) || /^\s*\[workspace\.members\]/m.test(text)
-}
-
-async function pyprojectDeclaresWorkspace(path: string): Promise<boolean> {
-  const text = await readText(path)
-  return (
-    /^\s*\[tool\.uv\.workspace\]/m.test(text) ||
-    /^\s*\[tool\.hatch\.workspaces\]/m.test(text) ||
-    /^\s*\[tool\.poetry\]/m.test(text)
-  )
-}
+import { describeJsonType } from "./scan/faults"
+import { pathExists, readJson } from "./workspace-fs"
 
 export interface DetectManagersResult {
   managers: WorkspaceManager[]
@@ -182,7 +28,6 @@ export interface UnresolvedDeclaration {
 export interface WorkspaceCandidate {
   /** Workspace-root-relative POSIX path of the candidate directory. */
   relativeRoot: string
-  /** Absolute path of the candidate directory. */
   absoluteRoot: string
   /** Tool that produced this candidate (the same path may appear once per tool). */
   managerTool: string
@@ -230,7 +75,6 @@ export async function detectManagers(workspaceRoot: string): Promise<DetectManag
 interface ManagerScan {
   tool: string
   candidates: WorkspaceCandidate[]
-  /** Absolute path of the manifest this scan read. */
   manifestPath: string
   declaredPatterns: readonly string[]
 }
@@ -269,7 +113,7 @@ function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): voi
 async function detectPnpm(root: string): Promise<ManagerScan | null> {
   const manifestPath = join(root, "pnpm-workspace.yaml")
   if (!(await pathExists(manifestPath))) return null
-  const text = await readText(manifestPath)
+  const text = await readFile(manifestPath, "utf8")
   let parsed: unknown
   try {
     parsed = parseYaml(text)
@@ -342,7 +186,6 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
   return { tool: "nx", candidates, manifestPath, declaredPatterns: [] }
 }
 
-/** The manifest a pnpm/npm/yarn/bun `packages:` entry promises the directory holds. */
 const JS_PACKAGE_MANIFEST = "package.json"
 
 async function resolveDeclaredPackages(
@@ -400,60 +243,9 @@ function malformedPatternList(manifestPath: string, key: string, fault: string):
   )
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return false
-    throw err
-  }
-}
-
-async function readText(path: string): Promise<string> {
-  return readFile(path, "utf8")
-}
-
-async function readJson(path: string): Promise<unknown> {
-  const text = await readText(path)
-  try {
-    return JSON.parse(text)
-  } catch (cause) {
-    throw new CoreError(
-      `Failed to parse JSON at ${path}`,
-      { code: "workspace-manifest-malformed", value: path },
-      { cause },
-    )
-  }
-}
-
 function toRelativePosix(root: string, target: string): string {
   const rel = relative(root, target)
   if (rel.length === 0) return "."
   const posixRel = sep === "/" ? rel : rel.split(sep).join(posix.sep)
   return toNfc(posixRel)
-}
-
-/** Re-export so callers (component.ts) can list the directories without redoing detection. */
-export type { WorkspaceManager }
-
-/** Cheap helper for callers that only want to know whether a directory exists. */
-export async function isDirectory(path: string): Promise<boolean> {
-  try {
-    const stats = await stat(path)
-    return stats.isDirectory()
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return false
-    throw err
-  }
-}
-
-/** Read a directory; returns [] on ENOENT so callers do not have to wrap. */
-export async function safeReaddir(path: string): Promise<string[]> {
-  try {
-    return await readdir(path)
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return []
-    throw err
-  }
 }

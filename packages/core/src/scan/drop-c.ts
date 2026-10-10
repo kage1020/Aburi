@@ -17,11 +17,8 @@ const CORE_DROP_PREFIXES: readonly string[] = [
 ]
 
 export interface DropCFilterInput {
-  /** `config.suppress[]` — user-added identifier prefixes to drop. */
   suppress?: readonly string[]
-  /** `EffectPlugin.dropCallees[]` — logger plugins can add themselves here. */
   pluginDropCallees?: readonly string[]
-  /** `config.keep[]` — identifier prefixes that escape drop. Wins over everything. */
   keep?: readonly string[]
 }
 
@@ -49,7 +46,6 @@ export class DropCFilter {
     this.#keepPrefixes = keep.map((k) => toNfc(k.startsWith("@") ? k.slice(1) : k))
   }
 
-  /** True when the call's `target` should be dropped from effects / calls. */
   shouldDropCall(call: CallCandidate): boolean {
     if (this.matchesAnyPrefix(call.target, this.#keepPrefixes)) return false
     return this.matchesAnyPrefix(call.target, this.#dropPrefixes)

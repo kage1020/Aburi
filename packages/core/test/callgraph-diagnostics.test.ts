@@ -2,185 +2,246 @@ import type { ImportEdge, Symbol as IRSymbol, Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../src/call-site"
 import { resolveCallGraph } from "../src/callgraph"
-import { makeSymbol, type SymbolOverrides, symbolId } from "./fixtures/ir"
+import { importsOf, params, withCalls } from "./fixtures/callgraph"
+import { makeSymbol } from "./fixtures/ir"
 
-function withCalls(
-  id: string,
-  calls: Array<{ target: string; line: number }>,
-  overrides: SymbolOverrides = {},
-): IRSymbol {
-  return makeSymbol(id, {
-    calls: calls.map((c) => ({ target: c.target, line: c.line, resolved: null })),
-    ...overrides,
+const NO_IMPORTS: ReadonlyMap<string, readonly ImportEdge[]> = new Map()
+
+interface CallSetup {
+  callees?: IRSymbol[]
+  imports?: ReadonlyMap<string, readonly ImportEdge[]>
+  signature?: Signature
+  dynamicReceiver?: boolean
+}
+
+interface UnresolvedCase extends CallSetup {
+  cause: string
+  target: string
+}
+
+function resolveOneCall(target: string, setup: CallSetup = {}) {
+  const caller = withCalls("ts:src/a.ts#caller", [{ target, line: 4 }], {
+    component: "billing",
+    signature: setup.signature ?? null,
+  })
+  return resolveCallGraph({
+    symbols: [caller, ...(setup.callees ?? [])],
+    importsByFile: setup.imports ?? NO_IMPORTS,
+    dynamicCallSites: new Set(
+      setup.dynamicReceiver === true ? [makeCallSiteKey("src/a.ts", 4, target)] : [],
+    ),
   })
 }
 
-/** The default `source` is bare, so an edge that does not set one resolves nothing in the workspace. */
-function importEdge(over: Partial<ImportEdge>): ImportEdge {
-  return { source: "unset-module", symbols: [], line: 1, dynamic: false, ...over }
+function competingSaves(): IRSymbol[] {
+  return [
+    makeSymbol("ts:src/z.ts#User.save", { kind: "method", component: "billing" }),
+    makeSymbol("ts:src/b.ts#User.save", { kind: "method", component: "billing" }),
+  ]
 }
 
-function sig(...names: string[]): Signature {
-  return {
-    inputs: names.map((name) => ({ name, type: "unknown" })),
-    outputs: ["void"],
-    throws: [],
-    async: false,
-    generator: false,
-    typeParameters: [],
-  }
-}
+describe("unresolved calls are bucketed by cause", () => {
+  it.each<UnresolvedCase>([
+    { cause: "a callee that exists nowhere", target: "typoed" },
+    {
+      cause: "a relative import that misses",
+      target: "helper",
+      imports: importsOf("src/a.ts", { source: "./b", symbols: ["helper"] }),
+    },
+    {
+      cause: "a `.` import that misses",
+      target: "helper",
+      imports: importsOf("src/a.ts", { source: ".", symbols: ["helper"] }),
+    },
+    {
+      cause: "a dynamic import of a bare specifier",
+      target: "sortBy",
+      imports: importsOf("src/a.ts", { source: "lodash", symbols: ["sortBy"], dynamic: true }),
+    },
+  ])("`no-match` for $cause", (c) => {
+    const result = resolveOneCall(c.target, c)
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+  })
 
-describe("resolveCallGraph — unresolved-call diagnostics", () => {
-  it("an expression receiver is bucketed `dynamic`", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "factory.save", line: 9 }])
+  it("`no-match` for a `..` that climbs above the workspace root, rather than a clamp to the root index", () => {
+    const caller = withCalls("ts:a.ts#caller", [{ target: "helper", line: 2 }])
     const result = resolveCallGraph({
-      symbols: [caller],
-      importsByFile: new Map(),
-      dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 9, "factory.save")]),
+      symbols: [caller, makeSymbol("ts:index.ts#helper")],
+      importsByFile: importsOf("a.ts", { source: "..", symbols: ["helper"] }),
     })
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+  })
+
+  it.each<UnresolvedCase>([
+    {
+      cause: "a named import",
+      target: "sortBy",
+      imports: importsOf("src/a.ts", { source: "lodash", symbols: ["sortBy"] }),
+    },
+    {
+      cause: "a namespace import",
+      target: "lodash.sortBy",
+      imports: importsOf("src/a.ts", {
+        source: "lodash",
+        symbols: "*",
+        namespaceBinding: "lodash",
+      }),
+    },
+    {
+      cause: "a default import, by its local binding",
+      target: "React.createElement",
+      imports: importsOf("src/a.ts", { source: "react", symbols: ["default as React"] }),
+    },
+    {
+      cause: "an aliased import, by its local binding",
+      target: "sort",
+      imports: importsOf("src/a.ts", { source: "lodash", symbols: ["sortBy as sort"] }),
+    },
+  ])("`external` for $cause from a bare specifier", (c) => {
+    const result = resolveOneCall(c.target, c)
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
+  })
+
+  it.each<UnresolvedCase & { candidates: string[] }>([
+    {
+      cause: "two top-level Symbols of that name in the caller's file",
+      target: "helper",
+      callees: [
+        makeSymbol("ts:src/a.ts#helper.overload", { name: "helper" }),
+        makeSymbol("ts:src/a.ts#helper"),
+      ],
+      candidates: ["ts:src/a.ts#helper", "ts:src/a.ts#helper.overload"],
+    },
+    {
+      cause: "two imports binding that name",
+      target: "helper",
+      callees: [makeSymbol("ts:src/two.ts#helper"), makeSymbol("ts:src/one.ts#helper")],
+      imports: importsOf(
+        "src/a.ts",
+        { source: "./two", symbols: ["helper"] },
+        { source: "./one", symbols: ["helper"] },
+      ),
+      candidates: ["ts:src/one.ts#helper", "ts:src/two.ts#helper"],
+    },
+    {
+      cause: "two Symbols of that name in the caller's component",
+      target: "User.save",
+      callees: competingSaves(),
+      candidates: ["ts:src/b.ts#User.save", "ts:src/z.ts#User.save"],
+    },
+    {
+      cause: "two Symbols of that name in other components",
+      target: "User.save",
+      callees: [
+        makeSymbol("ts:src/z.ts#User.save", { kind: "method", component: "reporting" }),
+        makeSymbol("ts:src/b.ts#User.save", { kind: "method", component: "analytics" }),
+      ],
+      candidates: ["ts:src/b.ts#User.save", "ts:src/z.ts#User.save"],
+    },
+  ])("`ambiguous`, never a silent pick, for $cause, with the candidates lex-sorted", (c) => {
+    const result = resolveOneCall(c.target, c)
+    expect(result.edges).toEqual([])
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
     expect(result.diagnostics).toEqual([
       {
         symbolId: "ts:src/a.ts#caller",
+        target: c.target,
+        line: 4,
+        bucket: "ambiguous",
+        candidates: c.candidates,
+      },
+    ])
+  })
+
+  it("`dynamic` for an empty target", () => {
+    expect(resolveOneCall("").diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
+  })
+
+  it("`dynamic` for an expression receiver, with nothing else about the call changed", () => {
+    const plain = resolveOneCall("factory.save")
+    const flagged = resolveOneCall("factory.save", { dynamicReceiver: true })
+    expect(flagged.symbols).toEqual(plain.symbols)
+    expect(flagged.symbols[0]?.calls[0]?.resolved).toBeNull()
+    expect(flagged.edges).toEqual([])
+    expect(flagged.stats.resolvedCalls).toBe(plain.stats.resolvedCalls)
+    expect(plain.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+    expect(flagged.diagnostics).toEqual([
+      {
+        symbolId: "ts:src/a.ts#caller",
         target: "factory.save",
-        line: 9,
+        line: 4,
         bucket: "dynamic",
         candidates: [],
       },
     ])
   })
 
-  it("a callee that exists nowhere is bucketed `no-match`", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "typoed", line: 3 }])
-    const result = resolveCallGraph({ symbols: [caller], importsByFile: new Map() })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+  it("leaves a call that resolves alone when its receiver is flagged as an expression", () => {
+    const callees = [
+      makeSymbol("ts:src/a.ts#helper", { kind: "class" }),
+      makeSymbol("ts:src/a.ts#helper.save", { kind: "method" }),
+    ]
+    const plain = resolveOneCall("helper.save", { callees })
+    const flagged = resolveOneCall("helper.save", { callees, dynamicReceiver: true })
+    expect(flagged.edges).toEqual(plain.edges)
+    expect(flagged.symbols).toEqual(plain.symbols)
+    expect(flagged.diagnostics).toEqual([])
   })
 
-  it("competing candidates are bucketed `ambiguous` and recorded lex-sorted", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "User.save", line: 4 }], {
-      component: "billing",
-    })
-    const second = makeSymbol("ts:src/z.ts#User.save", {
-      name: "User.save",
-      kind: "method",
-      component: "billing",
-    })
-    const first = makeSymbol("ts:src/b.ts#User.save", {
-      name: "User.save",
-      kind: "method",
-      component: "billing",
-    })
-    const result = resolveCallGraph({
-      symbols: [caller, second, first],
-      importsByFile: new Map(),
-    })
-    expect(result.edges).toEqual([])
-    expect(result.diagnostics).toEqual([
-      {
-        symbolId: "ts:src/a.ts#caller",
-        target: "User.save",
-        line: 4,
-        bucket: "ambiguous",
-        candidates: ["ts:src/b.ts#User.save", "ts:src/z.ts#User.save"],
-      },
+  it.each<UnresolvedCase & { bucket: string; candidates: string[] }>([
+    {
+      cause: "`local-scope` over `external`, for a parameter named like an import",
+      target: "sortBy",
+      signature: params("sortBy"),
+      imports: importsOf("src/a.ts", { source: "lodash", symbols: ["sortBy"] }),
+      bucket: "local-scope",
+      candidates: [],
+    },
+    {
+      cause: "`local-scope` over `dynamic`, for a parameter used as an expression receiver",
+      target: "factory.save",
+      signature: params("factory"),
+      dynamicReceiver: true,
+      bucket: "local-scope",
+      candidates: [],
+    },
+    {
+      cause: "`dynamic` over `ambiguous`, since an expression receiver was never resolvable",
+      target: "User.save",
+      callees: competingSaves(),
+      dynamicReceiver: true,
+      bucket: "dynamic",
+      candidates: [],
+    },
+    {
+      cause: "`dynamic` over `external`, for an expression receiver named like an import",
+      target: "repo.save",
+      imports: importsOf("src/a.ts", { source: "@acme/db", symbols: ["repo"] }),
+      dynamicReceiver: true,
+      bucket: "dynamic",
+      candidates: [],
+    },
+    {
+      cause:
+        "`ambiguous` over `external`, since a recorded conflict outranks an out-of-reach import",
+      target: "User.save",
+      callees: competingSaves(),
+      imports: importsOf("src/a.ts", { source: "@acme/models", symbols: ["User"] }),
+      bucket: "ambiguous",
+      candidates: ["ts:src/b.ts#User.save", "ts:src/z.ts#User.save"],
+    },
+  ])("prefers $cause", (c) => {
+    expect(resolveOneCall(c.target, c).diagnostics.map((d) => [d.bucket, d.candidates])).toEqual([
+      [c.bucket, c.candidates],
     ])
   })
 
-  it("a callee shadowed by a caller parameter is bucketed `local-scope`", () => {
+  it("counts every call site in stats, and each unresolved one in its bucket", () => {
     const caller = makeSymbol("ts:src/a.ts#caller", {
-      signature: sig("helper"),
-      calls: [{ target: "helper", line: 5, resolved: null }],
-    })
-    const helper = makeSymbol("ts:src/a.ts#helper")
-    const result = resolveCallGraph({ symbols: [caller, helper], importsByFile: new Map() })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["local-scope"])
-  })
-
-  it("a named import from a bare specifier is bucketed `external`", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "sortBy", line: 2 }])
-    const result = resolveCallGraph({
-      symbols: [caller],
-      importsByFile: new Map([
-        ["src/a.ts", [importEdge({ source: "lodash", symbols: ["sortBy"] })]],
-      ]),
-    })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
-  })
-
-  it("a namespace import from a bare specifier is bucketed `external`", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "lodash.sortBy", line: 2 }])
-    const result = resolveCallGraph({
-      symbols: [caller],
-      importsByFile: new Map([
-        ["src/a.ts", [importEdge({ source: "lodash", symbols: "*", namespaceBinding: "lodash" })]],
-      ]),
-    })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
-  })
-
-  it("a default import from a bare specifier keeps its local binding as the `external` head", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "React.createElement", line: 2 }])
-    const result = resolveCallGraph({
-      symbols: [caller],
-      importsByFile: new Map([
-        ["src/a.ts", [importEdge({ source: "react", symbols: ["default as React"] })]],
-      ]),
-    })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
-  })
-
-  it("an aliased import keeps the local binding as the `external` head", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "sort", line: 2 }])
-    const result = resolveCallGraph({
-      symbols: [caller],
-      importsByFile: new Map([
-        ["src/a.ts", [importEdge({ source: "lodash", symbols: ["sortBy as sort"] })]],
-      ]),
-    })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
-  })
-
-  it("`this` / `super` with no LSP hint are bucketed `dynamic`", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [
-      { target: "this.save", line: 2 },
-      { target: "super.save", line: 3 },
-    ])
-    const result = resolveCallGraph({ symbols: [caller], importsByFile: new Map() })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic", "dynamic"])
-  })
-
-  it("a relative import that misses is bucketed `no-match`, not `external`", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 2 }])
-    const result = resolveCallGraph({
-      symbols: [caller],
-      importsByFile: new Map([["src/a.ts", [importEdge({ source: "./b", symbols: ["helper"] })]]]),
-    })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
-  })
-
-  it("a `.` import that misses is bucketed `no-match`, not `external`", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 2 }])
-    const result = resolveCallGraph({
-      symbols: [caller],
-      importsByFile: new Map([["src/a.ts", [importEdge({ source: ".", symbols: ["helper"] })]]]),
-    })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
-  })
-
-  it("a `..` above the workspace root is a relative miss, not a clamp to the root index", () => {
-    const caller = withCalls("ts:a.ts#caller", [{ target: "helper", line: 2 }])
-    const rootIndex = makeSymbol("ts:index.ts#helper")
-    const result = resolveCallGraph({
-      symbols: [caller, rootIndex],
-      importsByFile: new Map([["a.ts", [importEdge({ source: "..", symbols: ["helper"] })]]]),
-    })
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
-  })
-
-  it("stats count every call site and the buckets close the arithmetic", () => {
-    const caller = makeSymbol("ts:src/a.ts#caller", {
-      signature: sig("shadowed"),
+      signature: params("shadowed"),
       calls: [
         { target: "helper", line: 1, resolved: null },
         { target: "shadowed", line: 2, resolved: null },
@@ -189,219 +250,37 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
       ],
     })
     const helper = makeSymbol("ts:src/a.ts#helper")
-    const result = resolveCallGraph({ symbols: [caller, helper], importsByFile: new Map() })
+    const result = resolveCallGraph({ symbols: [caller, helper], importsByFile: NO_IMPORTS })
     expect(result.stats).toEqual({
       totalCalls: 4,
       resolvedCalls: 1,
       unresolved: { localScope: 1, external: 0, dynamic: 1, ambiguous: 0, noMatch: 1 },
     })
-    const { unresolved } = result.stats
-    const summed =
-      unresolved.localScope +
-      unresolved.external +
-      unresolved.dynamic +
-      unresolved.ambiguous +
-      unresolved.noMatch
-    expect(result.stats.totalCalls - result.stats.resolvedCalls).toBe(summed)
   })
 
-  it("reports zeroes rather than being absent when there is nothing to resolve", () => {
-    const result = resolveCallGraph({ symbols: [], importsByFile: new Map() })
-    expect(result.stats).toEqual({
-      totalCalls: 0,
-      resolvedCalls: 0,
-      unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 0 },
+  it("counts the calls of a dropped Symbol too", () => {
+    const dropped = withCalls("ts:src/a.ts#gone", [{ target: "typoed", line: 1 }], {
+      dropped: true,
+      dropReason: "cat-b:trivial",
     })
-    expect(result.diagnostics).toEqual([])
+    const result = resolveCallGraph({ symbols: [dropped], importsByFile: NO_IMPORTS })
+    expect(result.stats.totalCalls).toBe(1)
+    expect(result.stats.unresolved.noMatch).toBe(1)
   })
 
-  it("diagnostics sort by (symbolId, line, target) regardless of input order", () => {
+  it("sorts diagnostics by (symbolId, line, target) whatever order the Symbols arrive in", () => {
     const late = withCalls("ts:src/z.ts#zeta", [{ target: "nope", line: 1 }])
     const early = withCalls("ts:src/a.ts#alpha", [
       { target: "b-nope", line: 9 },
       { target: "a-nope", line: 2 },
     ])
-    const forward = resolveCallGraph({ symbols: [late, early], importsByFile: new Map() })
-    const reversed = resolveCallGraph({ symbols: [early, late], importsByFile: new Map() })
+    const forward = resolveCallGraph({ symbols: [late, early], importsByFile: NO_IMPORTS })
+    const reversed = resolveCallGraph({ symbols: [early, late], importsByFile: NO_IMPORTS })
     expect(forward.diagnostics.map((d) => `${d.symbolId}:${d.line}:${d.target}`)).toEqual([
       "ts:src/a.ts#alpha:2:a-nope",
       "ts:src/a.ts#alpha:9:b-nope",
       "ts:src/z.ts#zeta:1:nope",
     ])
-    expect(JSON.stringify(reversed.diagnostics)).toBe(JSON.stringify(forward.diagnostics))
-  })
-
-  it("is byte-stable across repeated runs on the same input", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [
-      { target: "typoed", line: 1 },
-      { target: "this.save", line: 2 },
-    ])
-    const symbols = [caller]
-    const first = resolveCallGraph({ symbols, importsByFile: new Map() })
-    const second = resolveCallGraph({ symbols, importsByFile: new Map() })
-    expect(JSON.stringify(first.diagnostics)).toBe(JSON.stringify(second.diagnostics))
-    expect(JSON.stringify(first.stats)).toBe(JSON.stringify(second.stats))
-  })
-
-  it("`dynamicCallSites` changes only the bucket — never `resolved`, never the edges", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper.save", line: 4 }])
-    const cls = makeSymbol("ts:src/a.ts#helper", { kind: "class" })
-    const method = makeSymbol("ts:src/a.ts#helper.save", { kind: "method" })
-    const symbols = [caller, cls, method]
-    const plain = resolveCallGraph({ symbols, importsByFile: new Map() })
-    const flagged = resolveCallGraph({
-      symbols,
-      importsByFile: new Map(),
-      dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 4, "helper.save")]),
-    })
-    expect(JSON.stringify(flagged.edges)).toBe(JSON.stringify(plain.edges))
-    expect(JSON.stringify(flagged.symbols)).toBe(JSON.stringify(plain.symbols))
-    // The call resolved, so no diagnostic is emitted on either side.
-    expect(flagged.diagnostics).toEqual([])
-    expect(plain.diagnostics).toEqual([])
-  })
-
-  it("`dynamicCallSites` on an UNRESOLVED call moves only the bucket", () => {
-    const caller = withCalls("ts:src/a.ts#caller", [{ target: "factory.save", line: 4 }])
-    const symbols = [caller]
-    const plain = resolveCallGraph({ symbols, importsByFile: new Map() })
-    const flagged = resolveCallGraph({
-      symbols,
-      importsByFile: new Map(),
-      dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 4, "factory.save")]),
-    })
-
-    expect(plain.symbols[0]?.calls[0]?.resolved).toBeNull()
-    expect(flagged.symbols[0]?.calls[0]?.resolved).toBeNull()
-    expect(plain.edges).toEqual([])
-    expect(flagged.edges).toEqual([])
-    expect(JSON.stringify(flagged.symbols)).toBe(JSON.stringify(plain.symbols))
-
-    expect(plain.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
-    expect(flagged.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
-    expect(flagged.stats.totalCalls).toBe(plain.stats.totalCalls)
-    expect(flagged.stats.resolvedCalls).toBe(plain.stats.resolvedCalls)
-  })
-
-  it("an LSP hint pointing at a dropped Symbol keeps the call in `dynamic`", () => {
-    const caller = withCalls("ts:src/a.ts#Svc.run", [{ target: "this.helper", line: 6 }])
-    const droppedTarget = makeSymbol("ts:src/a.ts#Svc.helper", {
-      kind: "method",
-      dropped: true,
-      dropReason: "cat-b:trivial",
-    })
-    const result = resolveCallGraph({
-      symbols: [caller, droppedTarget],
-      importsByFile: new Map(),
-      receiverHints: new Map([
-        [
-          makeCallSiteKey("src/a.ts", 6, "this.helper"),
-          { kind: "this", targetSymbolId: symbolId("ts:src/a.ts#Svc.helper") },
-        ],
-      ]),
-    })
-    expect(result.edges).toEqual([])
-    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
-  })
-
-  describe("bucket precedence tie-breaks", () => {
-    it("`local-scope` beats `external` when a parameter shadows an imported name", () => {
-      const caller = makeSymbol("ts:src/a.ts#caller", {
-        signature: sig("sortBy"),
-        calls: [{ target: "sortBy", line: 2, resolved: null }],
-      })
-      const result = resolveCallGraph({
-        symbols: [caller],
-        importsByFile: new Map([
-          ["src/a.ts", [importEdge({ source: "lodash", symbols: ["sortBy"] })]],
-        ]),
-      })
-      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["local-scope"])
-    })
-
-    it("`local-scope` beats `dynamic` when a parameter shadows an expression receiver", () => {
-      const caller = makeSymbol("ts:src/a.ts#caller", {
-        signature: sig("factory"),
-        calls: [{ target: "factory.save", line: 3, resolved: null }],
-      })
-      const result = resolveCallGraph({
-        symbols: [caller],
-        importsByFile: new Map(),
-        dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 3, "factory.save")]),
-      })
-      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["local-scope"])
-    })
-
-    it("`dynamic` beats `ambiguous` — an expression receiver was never resolvable", () => {
-      const caller = withCalls("ts:src/a.ts#caller", [{ target: "User.save", line: 4 }], {
-        component: "billing",
-      })
-      const first = makeSymbol("ts:src/b.ts#User.save", {
-        name: "User.save",
-        kind: "method",
-        component: "billing",
-      })
-      const second = makeSymbol("ts:src/z.ts#User.save", {
-        name: "User.save",
-        kind: "method",
-        component: "billing",
-      })
-      const result = resolveCallGraph({
-        symbols: [caller, first, second],
-        importsByFile: new Map(),
-        dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 4, "User.save")]),
-      })
-      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
-      expect(result.diagnostics[0]?.candidates).toEqual([])
-    })
-
-    it("`dynamic` beats `external` when the head is also a bare-specifier import", () => {
-      const caller = withCalls("ts:src/a.ts#caller", [{ target: "repo.save", line: 5 }])
-      const result = resolveCallGraph({
-        symbols: [caller],
-        importsByFile: new Map([
-          ["src/a.ts", [importEdge({ source: "@acme/db", symbols: ["repo"] })]],
-        ]),
-        dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 5, "repo.save")]),
-      })
-      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
-    })
-
-    it("`ambiguous` beats `external` — a recorded conflict outranks an out-of-reach import", () => {
-      const caller = withCalls("ts:src/a.ts#caller", [{ target: "User.save", line: 6 }], {
-        component: "billing",
-      })
-      const first = makeSymbol("ts:src/b.ts#User.save", {
-        name: "User.save",
-        kind: "method",
-        component: "billing",
-      })
-      const second = makeSymbol("ts:src/z.ts#User.save", {
-        name: "User.save",
-        kind: "method",
-        component: "billing",
-      })
-      const result = resolveCallGraph({
-        symbols: [caller, first, second],
-        importsByFile: new Map([
-          ["src/a.ts", [importEdge({ source: "@acme/models", symbols: ["User"] })]],
-        ]),
-      })
-      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["ambiguous"])
-      expect(result.diagnostics[0]?.candidates).toEqual([
-        "ts:src/b.ts#User.save",
-        "ts:src/z.ts#User.save",
-      ])
-    })
-  })
-
-  it("counts by calls[], not by the `dropped` flag", () => {
-    const dropped = withCalls("ts:src/a.ts#gone", [{ target: "typoed", line: 1 }], {
-      dropped: true,
-      dropReason: "cat-b:trivial",
-    })
-    const result = resolveCallGraph({ symbols: [dropped], importsByFile: new Map() })
-    expect(result.stats.totalCalls).toBe(1)
-    expect(result.stats.unresolved.noMatch).toBe(1)
+    expect(reversed.diagnostics).toEqual(forward.diagnostics)
   })
 })

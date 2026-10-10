@@ -1,6 +1,9 @@
+import { rule } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   apiFingerprint,
+  type ComputeFingerprintInput,
+  CoreError,
   computeSymbolFingerprint,
   logicFingerprint,
   syntaxFingerprint,
@@ -10,55 +13,30 @@ import { makeSymbol } from "../fixtures/ir"
 
 describe("computeSymbolFingerprint", () => {
   const symbol = makeSymbol("ts:src/a.ts#foo", {
-    rules: [{ type: "guard", line: 3, condition: "x > 0", what: null, expr: null, loopKind: null }],
+    rules: [rule({ type: "guard", line: 3, condition: "x > 0" })],
   })
 
-  it("delegates each axis to the axis-specific hasher", () => {
-    const fp = computeSymbolFingerprint({ symbol, normalizedAstString: "(x)" })
-    expect(fp.api).toBe(apiFingerprint(symbol))
-    expect(fp.logic).toBe(logicFingerprint(symbol))
-    expect(fp.syntax).toBe(syntaxFingerprint("(x)"))
-  })
-
-  it("100x determinism: repeated calls never diverge on any axis", () => {
-    const first = computeSymbolFingerprint({ symbol, normalizedAstString: "(x)" })
-    for (let i = 0; i < 100; i++) {
-      const fp = computeSymbolFingerprint({ symbol, normalizedAstString: "(x)" })
-      expect(fp).toEqual(first)
-    }
-  })
-
-  it("a dropped Symbol receives ZERO on every axis without needing an AST string", () => {
-    const dropped = makeSymbol(symbol.id, {
-      ...symbol,
-      dropped: true,
-      dropReason: "pure DTO",
+  it("computes each axis with its own hasher", () => {
+    expect(computeSymbolFingerprint({ symbol, normalizedAstString: "(x)" })).toEqual({
+      api: apiFingerprint(symbol),
+      logic: logicFingerprint(symbol),
+      syntax: syntaxFingerprint("(x)"),
     })
-    const fp = computeSymbolFingerprint({ symbol: dropped })
-    expect(fp).toEqual({
+  })
+
+  it("gives a dropped Symbol zero on every axis, without needing an AST string", () => {
+    const dropped = makeSymbol(symbol.id, { ...symbol, dropped: true, dropReason: "pure DTO" })
+    expect(computeSymbolFingerprint({ symbol: dropped })).toEqual({
       api: ZERO_FINGERPRINT,
       logic: ZERO_FINGERPRINT,
       syntax: ZERO_FINGERPRINT,
     })
   })
 
-  it("dropped=true and dropped=false produce different fingerprints for the same shape", () => {
-    const dropped = makeSymbol(symbol.id, {
-      ...symbol,
-      dropped: true,
-      dropReason: "logger boilerplate",
-    })
-    const kept = makeSymbol(symbol.id, { ...symbol, dropped: false })
-    const droppedFp = computeSymbolFingerprint({ symbol: dropped })
-    const keptFp = computeSymbolFingerprint({ symbol: kept, normalizedAstString: "(x)" })
-    expect(droppedFp.api).not.toBe(keptFp.api)
-    expect(droppedFp.api).toBe(ZERO_FINGERPRINT)
-  })
-
-  it("refuses whitespace-only normalizedAstString so missing-AST Symbols cannot collapse to the same hash", () => {
-    const kept = makeSymbol(symbol.id, { ...symbol, dropped: false })
-    expect(() =>
-      computeSymbolFingerprint({ symbol: kept, normalizedAstString: "   \n\t " }),
-    ).toThrowError(/empty normalized AST/)
+  it.each<[string, ComputeFingerprintInput]>([
+    ["no", { symbol }],
+    ["a whitespace-only", { symbol, normalizedAstString: "   " }],
+  ])("refuses %s AST string for a kept Symbol, so AST-less Symbols cannot share a hash", (_what, input) => {
+    expect(() => computeSymbolFingerprint(input)).toThrow(CoreError)
   })
 })

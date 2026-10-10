@@ -61,7 +61,6 @@ export function requestImplementation(
   return requestLocations(ImplementationRequest.method, client, uri, position, timeoutMs)
 }
 
-/** The two location-valued requests share one wire shape, and so one wrapper. */
 async function requestLocations(
   method: string,
   client: LspClient,

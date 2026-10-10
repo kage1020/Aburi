@@ -6,7 +6,6 @@ import { describeThrown, errorCode } from "./faults"
 export interface UndeclaredVocabOccurrence {
   kind: "effect" | "extKind"
   value: string
-  /** Manifest name of the plugin that emitted it. */
   plugin: string
   file: string
   /** The call's line for an effect; an extKind belongs to the Symbol, which has none here. */
@@ -14,7 +13,6 @@ export interface UndeclaredVocabOccurrence {
   symbol: string
 }
 
-/** Whether a run with this config refuses undeclared vocabulary: `strict` defaults to true. */
 export function isStrict(config: Pick<Config, "strict">): boolean {
   return config.strict !== false
 }
@@ -29,7 +27,6 @@ export class VocabCheck {
     this.#strict = strict
   }
 
-  /** What a run that is not strict found, in emission order. Always empty in a strict one. */
   get occurrences(): readonly UndeclaredVocabOccurrence[] {
     return this.#occurrences
   }
