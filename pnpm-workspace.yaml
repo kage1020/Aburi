@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "schema"
+  - "examples"
   - "docs"
   - "benchmarks/*"
 

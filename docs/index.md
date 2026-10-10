@@ -14,6 +14,9 @@ hero:
       text: Get started
       link: /guide/getting-started
     - theme: alt
+      text: See it on real changes
+      link: /showcase/
+    - theme: alt
       text: What is Aburi?
       link: /guide/what-is-aburi
     - theme: alt

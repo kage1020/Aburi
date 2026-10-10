@@ -18,6 +18,8 @@
       "!pnpm-lock.yaml",
       "!schema",
       "!packages/cli/test/e2e/projects",
+      "!examples/*/before",
+      "!examples/*/after",
       "!benchmarks/*/results"
     ]
   },
