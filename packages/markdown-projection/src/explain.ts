@@ -141,7 +141,6 @@ function renderCallResolution(
   return lines
 }
 
-/** Every Symbol id with a `via: "call"` edge into `symbol`, deduplicated and lex-sorted. */
 function collectCallers(symbol: IRSymbol, dependencies: readonly Dependency[]): string[] {
   const callers = new Set<string>()
   for (const d of dependencies) {

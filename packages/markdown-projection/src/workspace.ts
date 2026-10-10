@@ -13,11 +13,10 @@ import {
 /** Nodes above this render as text-only fallback so GitHub mermaid does not choke. */
 export const MERMAID_NODE_LIMIT = 100
 
-/** Top-N effect surface table. Kept at 10 to fit a PR-comment-safe height. */
+/** Ten rows keep the effect surface table short enough for a PR comment. */
 export const EFFECT_SURFACE_TOP_N = 10
 
 export interface ProjectWorkspaceOptions {
-  /** Omit `generatedAt` even if the IR carries it (mirrors CLI `--no-timestamp`). */
   suppressTimestamp?: boolean
 }
 

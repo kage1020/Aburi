@@ -29,7 +29,6 @@ export function codeFragment(
   return `\n${fencedBlock(source, indent)}\n`
 }
 
-/** The inline threshold: single-line and no longer than `INLINE_CODE_MAX_LENGTH`. */
 export function fitsInline(value: string): boolean {
   return !value.includes("\n") && value.length <= INLINE_CODE_MAX_LENGTH
 }
@@ -100,7 +99,6 @@ export function requireDropReason(symbol: {
   return symbol.dropReason
 }
 
-/** Dropped fold-out over pre-sorted entry lines; empty input renders nothing. */
 export function droppedFoldout(entries: readonly string[]): string {
   if (entries.length === 0) return ""
   const body = entries.map((line) => `- ${line}`).join("\n")
@@ -125,7 +123,6 @@ export function decoratorRows(decorators: readonly Decorator[]): string[] {
   return rows
 }
 
-/** The two decorator buckets as pre-rendered inline strings, `null` where a bucket is empty. */
 export interface DecoratorLists {
   boundary: string | null
   regular: string | null
@@ -213,7 +210,6 @@ export function effectRow(eff: Effect): string {
   return `- ${eff.id}: ${inlineCode(eff.target)} (L${eff.line}) [${eff.plugin}]${confidenceBadge(eff.confidence)}`
 }
 
-/** Shared rendering for the direct sources required on every propagated effect. */
 export function propagatedFromSuffix(derivedFrom: readonly string[]): string {
   if (derivedFrom.length === 0) {
     throw new ProjectionInvariantError("derivedFrom", "propagated Effect")
@@ -229,7 +225,6 @@ export function orderEffects(effects: readonly Effect[]): Effect[] {
   return [...locals, ...propagated]
 }
 
-/** `(id, target)` order — the whole of an effect's identity. */
 export function compareEffectIdentity(a: Effect, b: Effect): number {
   return compareStrings(a.id, b.id) || compareStrings(a.target, b.target)
 }
@@ -251,7 +246,6 @@ function isZeroFingerprint(fp: Fingerprint): boolean {
 
 const ZERO_FINGERPRINT = "000000000000"
 
-/** Symbol heading: name + kind is enough for a reader scanning the file. */
 export function symbolHeading(symbol: IRSymbol): string {
   return `#### ${symbolTitle(symbol)}`
 }
@@ -260,14 +254,12 @@ export function symbolTitle(symbol: IRSymbol): string {
   return `${inlineCode(symbol.name)} *(${symbol.kind})*${confidenceBadge(symbol.confidence)}`
 }
 
-/** Canonical Symbol order within a file: `startLine`, then `id`. */
 export function orderSymbolsWithinFile(symbols: readonly IRSymbol[]): IRSymbol[] {
   return [...symbols].sort(
     (a, b) => a.source.startLine - b.source.startLine || compareStrings(a.id, b.id),
   )
 }
 
-/** File grouping preserves the POSIX path ordering. */
 export function orderFilesAscending(files: readonly string[]): string[] {
   return [...files].sort(compareStrings)
 }
@@ -276,7 +268,6 @@ export function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** Dependencies in `(from, to, via)` order — their identity. */
 export function sortDependencies(deps: readonly Dependency[]): Dependency[] {
   return [...deps].sort(
     (a, b) =>
@@ -288,7 +279,6 @@ export interface RenderDocumentOptions {
   readonly collapseBlankRuns?: boolean
 }
 
-/** A document's final bytes: collapsed blank runs, one trailing newline, `\n` throughout. */
 export function renderDocument(
   lines: readonly string[],
   options: RenderDocumentOptions = {},
@@ -300,12 +290,10 @@ export function renderDocument(
 
 const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
 
-/** Whether an endpoint has the Symbol id silhouette rather than the Component id one. */
 export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
 }
 
-/** Whether either end of a Dependency is a Symbol, which routes it to the symbol-level sections. */
 export function isSymbolEdge(dependency: Dependency): boolean {
   return isSymbolIdEndpoint(dependency.from) || isSymbolIdEndpoint(dependency.to)
 }

@@ -23,7 +23,6 @@ export const FAIL_ON_STATUSES = [
   "unknown",
 ] as const satisfies readonly FailOnStatus[]
 
-/** Comparison operator when a numeric threshold is attached (e.g. `changed:>10`). */
 export type FailOnComparator = ">" | ">=" | "==" | "<="
 
 export type FailOnClause =

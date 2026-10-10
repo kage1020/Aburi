@@ -1,140 +1,127 @@
-import { makeSymbol } from "@aburi/test-support"
-import type {
-  Symbol as IRSymbol,
-  SymbolChanged,
-  SymbolDelta,
-  SymbolMovedChanged,
-} from "@aburi/types"
+import { component, effect, makeSymbol } from "@aburi/test-support"
+import type { Confidence, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { renderSymbolBlock } from "../src/component"
-import { projectDiff } from "../src/diff"
-import { projectSymbolExplain } from "../src/explain"
-import { emptySummary, makeDiff } from "./fixtures"
+import { effectRow, projectComponent, projectSymbolExplain } from "../src"
+import { changed, movedChanged, projectChanges, relocated } from "./fixtures"
+import { bytes } from "./markdown"
 
-const unsure = makeSymbol({
-  id: "ts:src/x.controller.ts#XController",
-  name: "XController",
-  kind: "class",
-  confidence: "medium",
+const controller = (confidence: Confidence, i = 0): IRSymbol =>
+  makeSymbol({
+    id: `ts:src/x.controller.ts#XController${i}`,
+    name: `XController${i}`,
+    kind: "class",
+    confidence,
+  })
+
+const views: [string, (symbol: IRSymbol) => string, (title: string) => string][] = [
+  [
+    "component page heading",
+    (symbol) =>
+      projectComponent({
+        component: component({ id: "core", name: "core" }),
+        symbols: [symbol],
+        dependencies: [],
+      }),
+    (title) => `#### ${title}`,
+  ],
+  [
+    "diff.md entry heading",
+    (symbol) => projectChanges([{ status: "added", symbol }]),
+    (title) => `### ${title}`,
+  ],
+  [
+    "diff.md names-only row",
+    (symbol) => {
+      const added = [symbol, ...Array.from({ length: 19 }, (_, i) => controller("high", i + 1))]
+      const changes = added.map((entry) => ({ status: "added" as const, symbol: entry }))
+      return projectChanges(changes, { maxBytes: bytes(projectChanges(changes)) - 1 })
+    },
+    (title) => `- ${title} — \`src/x.controller.ts:1\``,
+  ],
+  ["explain title", (symbol) => projectSymbolExplain(symbol), (title) => `# ${title}`],
+  [
+    "dropped explain title",
+    (symbol) => projectSymbolExplain({ ...symbol, dropped: true, dropReason: "pure DTO" }),
+    (title) => `# ${title} — dropped`,
+  ],
+]
+
+describe("a Symbol's confidence on every line that names it", () => {
+  it.each(views)("badges a medium Symbol on the %s", (_, render, line) => {
+    expect(render(controller("medium")).split("\n")).toContain(
+      line("`XController0` *(class)* ⚠ medium"),
+    )
+  })
+
+  it.each(views)("draws nothing for a high Symbol on the %s", (_, render, line) => {
+    expect(render(controller("high")).split("\n")).toContain(line("`XController0` *(class)*"))
+  })
+
+  it("spells a low Symbol's badge with its own word", () => {
+    expect(projectSymbolExplain(controller("low")).split("\n")[0]).toBe(
+      "# `XController0` *(class)* ⚠ low",
+    )
+  })
 })
 
-function changed(before: IRSymbol, after: IRSymbol, delta: Partial<SymbolDelta>): SymbolChanged {
-  return {
-    status: "changed",
-    before,
-    after,
-    delta: {
-      apiChanged: false,
-      logicChanged: false,
-      syntaxChanged: false,
-      componentChanged: false,
-      visibilityChanged: false,
-      confidenceChanged: true,
-      ...delta,
-    },
-  }
-}
-
-function render(item: SymbolChanged): string {
-  return projectDiff(makeDiff({ symbols: [item], summary: { ...emptySummary(), changed: 1 } }))
-}
-
-describe("a Symbol heading carries its confidence", () => {
-  it("badges a medium Symbol on the component page", () => {
-    expect(renderSymbolBlock(unsure)[0]).toBe("#### `XController` *(class)* ⚠ medium")
+describe("an Effect row's confidence", () => {
+  it("badges a medium Effect after its plugin", () => {
+    expect(
+      effectRow(
+        effect({
+          id: "event.publish",
+          target: "bus.emit",
+          plugin: "effects-nest",
+          confidence: "medium",
+        }),
+      ),
+    ).toBe("- event.publish: `bus.emit` (L1) [effects-nest] ⚠ medium")
   })
 
-  it("badges a low Symbol", () => {
-    const low = { ...unsure, confidence: "low" as const }
-    expect(renderSymbolBlock(low)[0]).toBe("#### `XController` *(class)* ⚠ low")
-  })
-
-  it("draws nothing for a high Symbol", () => {
-    const sure = { ...unsure, confidence: "high" as const }
-    expect(renderSymbolBlock(sure)[0]).toBe("#### `XController` *(class)*")
-  })
-
-  it("badges the explain title", () => {
-    expect(projectSymbolExplain(unsure).split("\n")[0]).toBe("# `XController` *(class)* ⚠ medium")
-  })
-
-  it("badges the explain title of a dropped Symbol", () => {
-    const dropped = { ...unsure, dropped: true, dropReason: "pure DTO" }
-    expect(projectSymbolExplain(dropped).split("\n")[0]).toBe(
-      "# `XController` *(class)* ⚠ medium — dropped",
-    )
-  })
-
-  it("badges a Symbol listed whole in diff.md", () => {
-    const md = projectDiff(
-      makeDiff({
-        symbols: [{ status: "added", symbol: unsure }],
-        summary: { ...emptySummary(), added: 1 },
-      }),
-    )
-    expect(md).toContain("### `XController` *(class)* ⚠ medium")
+  it("draws nothing for a high Effect", () => {
+    expect(
+      effectRow(
+        effect({ id: "db.read", target: "prisma.user.findMany", plugin: "effects-prisma" }),
+      ),
+    ).toBe("- db.read: `prisma.user.findMany` (L1) [effects-prisma]")
   })
 })
 
 describe("diff.md reports a confidence change", () => {
-  const sure = { ...unsure, confidence: "high" as const }
+  const sure = controller("high")
 
   it("gives a confidence-only change its own section, with before and after", () => {
-    const md = render(changed(sure, unsure, {}))
+    const md = projectChanges([
+      changed(sure, { confidenceChanged: true }, { confidence: "medium" }),
+    ])
 
-    expect(md).toContain("## 🎚 Confidence changes")
-    expect(md).toContain("### `XController` *(class)* ⚠ medium")
-    expect(md).toContain("- confidence: `high` → `medium`")
-    expect(md).not.toContain("## ⚠ API changes")
-    expect(md).not.toContain("fingerprint changed; no field-level detail")
-  })
-
-  it("keeps a change that also moved the API in the API section, with the confidence row", () => {
-    const md = render(changed(sure, unsure, { apiChanged: true }))
-
-    expect(md).toContain("## ⚠ API changes")
-    expect(md).toContain("- confidence: `high` → `medium`")
-    expect(md).not.toContain("## 🎚 Confidence changes")
-  })
-
-  it("lifts a syntax change out of the folded section, where the before and after would not show", () => {
-    const md = render(changed(sure, unsure, { syntaxChanged: true }))
-
-    expect(md).toContain("## 🎚 Confidence changes")
-    expect(md).not.toContain("## 🎨 Syntax-only changes")
-    // The confidence row explains no fingerprint, so the syntax change keeps its own line.
-    expect(md).toContain("- syntax fingerprint changed; no field-level detail was recorded")
+    expect(md).toContain(
+      "## 🎚 Confidence changes\n\n### `XController0` *(class)* ⚠ medium\n**File**: `src/x.controller.ts:1`\n\n- confidence: `high` → `medium`\n",
+    )
   })
 
   it("shows the row, and no badge, when the machine became sure", () => {
-    const md = render(changed(unsure, sure, {}))
+    const md = projectChanges([
+      changed(controller("medium"), { confidenceChanged: true }, { confidence: "high" }),
+    ])
 
-    expect(md).toContain("### `XController` *(class)*\n")
+    expect(md).toContain("### `XController0` *(class)*\n")
     expect(md).toContain("- confidence: `medium` → `high`")
   })
 
   it("lists a moved Symbol whose only change is confidence under both of its sections", () => {
-    const after = { ...unsure, source: { ...unsure.source, file: "src/moved/x.controller.ts" } }
-    const entry: SymbolMovedChanged = {
-      ...changed(sure, after, {}),
-      status: "moved+changed",
-      rationale: "id-match",
-    }
-    const md = projectDiff(
-      makeDiff({ symbols: [entry], summary: { ...emptySummary(), movedChanged: 1 } }),
-    )
+    const after = { ...relocated(sure, "src/moved/x.controller.ts"), confidence: "medium" as const }
+    const md = projectChanges([movedChanged(sure, after, { confidenceChanged: true }, "id-match")])
 
-    expect(md).toContain("## 🔀 Moved + Changed")
-    expect(md).toContain("### `XController` *(class)* ⚠ medium")
-    expect(md).toContain("- confidence: `high` → `medium`")
-    // Routed by its axis as well, as a moved+changed API or logic change is.
-    expect(md).toContain("## 🎚 Confidence changes")
-    expect(md).not.toContain("no field-level detail")
+    for (const heading of ["## 🔀 Moved + Changed", "## 🎚 Confidence changes"]) {
+      const section = md.slice(md.indexOf(heading))
+      expect(section).toContain("### `XController0` *(class)* ⚠ medium")
+      expect(section).toContain("- confidence: `high` → `medium`")
+    }
   })
 
   it("says nothing about confidence for a diff written before the field existed", () => {
-    const { confidenceChanged: _, ...older } = changed(sure, sure, { logicChanged: true }).delta
-    const md = render({ status: "changed", before: sure, after: sure, delta: older })
+    const md = projectChanges([changed(sure, { logicChanged: true })])
 
     expect(md.toLowerCase()).not.toContain("confidence")
     expect(md).toContain("## 🔧 Logic changes")

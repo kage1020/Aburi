@@ -12,10 +12,7 @@ import {
   ruleRow,
   tableCell,
 } from "../src"
-
-function longCondition(): string {
-  return "user.role === 'admin' && flags.enabled && !session.expired && ctx.tenant === wantedTenantName"
-}
+import { LONG_CONDITION } from "./fixtures"
 
 const THROWN_TEMPLATE = `new Error(\`unknown kind: \${k}\`)`
 const CACHE_KEY_TEMPLATE = `redis.get(\`k:\${id}\`)`
@@ -94,10 +91,10 @@ describe("tableCell", () => {
 
 describe("ruleRow — a value that has to fence stays inside its list item", () => {
   it("moves the line tag ahead of the fence and indents the block into the item", () => {
-    expect(ruleRow(rule({ type: "guard", line: 3, condition: longCondition() }))).toEqual([
+    expect(ruleRow(rule({ type: "guard", line: 3, condition: LONG_CONDITION }))).toEqual([
       "- guard (L3):",
       "  ```",
-      `  ${longCondition()}`,
+      `  ${LONG_CONDITION}`,
       "  ```",
     ])
   })
@@ -142,7 +139,7 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
           name: "f",
           component: "billing",
           rules: [
-            rule({ type: "guard", line: 3, condition: longCondition() }),
+            rule({ type: "guard", line: 3, condition: LONG_CONDITION }),
             rule({ type: "loop", line: 9, loopKind: "for" }),
           ],
         }),

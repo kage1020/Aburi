@@ -2,4 +2,4 @@
 "@aburi/diff": patch
 ---
 
-The error `buildDiff` raises for a document that lists one Dependency twice no longer cites design-doc sections; it says on its own why the repeat would make the report wrong.
+The errors `buildDiff` and `computeSlices` raise for a document that repeats a Symbol, Component or Dependency, or for a malformed Slice record, no longer cite design-doc sections; each says on its own why the input is refused.
