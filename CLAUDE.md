@@ -51,7 +51,7 @@ Private packages:
 - `@aburi/examples` (`examples/`) — the docs Showcase; its build runs `aburi diff` over each example.
 - `@aburi/docs` (`docs/`) — the VitePress site. Its `build` builds the packages it renders first.
 - `@aburi/benchmark-public-repos` (`benchmarks/public-repos/`) — measures `scan` and `diff` on pinned
-  public repositories; run by hand or by `benchmark.yml`, not by turbo's build.
+  public repositories; run by hand or by `benchmark.yml`. Its report helpers have unit tests.
 
 Generated, gitignored, rebuilt by turbo: `packages/types/src/generated/` (the `codegen` task, from the
 schemas) and `packages/lang-typescript/wasm/` (vendored grammars).

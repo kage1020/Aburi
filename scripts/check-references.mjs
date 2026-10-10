@@ -1,6 +1,7 @@
 // Lists text that cites something that rots — a design-doc section (`§3.4`, `ir-schema.md`), a spec id
 // (`CR5`, `LP8q`), an invariant number, an issue or pull request — in code comments, test titles, every
-// line of the YAML files, and the JSON Schemas' descriptions, which ship as JSDoc in @aburi/types.
+// line of the YAML files, and the `description` of the JSON Schemas (shipped as JSDoc in @aburi/types)
+// and of every package.json (shown on npm).
 //
 //   node scripts/check-references.mjs [pathspecs…]
 import { execFileSync } from "node:child_process"
@@ -28,7 +29,16 @@ const REFERENCE = new RegExp(
   ].join("|"),
 )
 
-const DEFAULT_PATHSPECS = ["*.ts", "*.tsx", "*.mts", "*.mjs", "*.yml", "*.yaml", "schema/*.json"]
+const DEFAULT_PATHSPECS = [
+  "*.ts",
+  "*.tsx",
+  "*.mts",
+  "*.mjs",
+  "*.yml",
+  "*.yaml",
+  "schema/*.json",
+  "*package.json",
+]
 const patterns = process.argv.slice(2)
 const files = execFileSync(
   "git",
