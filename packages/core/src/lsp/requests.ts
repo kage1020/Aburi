@@ -1,8 +1,3 @@
-/**
- * Typed wrappers around the 4 LSP requests the enrichment pass uses
- * (lsp-enrichment.md). Every wrapper takes an explicit `timeoutMs` so callers
- * can enforce per-request budgets uniformly.
- */
 import {
   type DocumentSymbol,
   DocumentSymbolRequest,
@@ -66,7 +61,6 @@ export function requestImplementation(
   return requestLocations(ImplementationRequest.method, client, uri, position, timeoutMs)
 }
 
-/** The two location-valued requests share one wire shape, and so one wrapper. */
 async function requestLocations(
   method: string,
   client: LspClient,

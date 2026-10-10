@@ -16,17 +16,6 @@ import { DiffError } from "./errors"
 
 const byId = compareBy((item: { id: string }) => item.id)
 
-/**
- * `docs/design/diff-algorithm.md` — Component diff. Assumes `components[].id` is unique
- * on each side (ir-schema.md #2) and does not check it: `buildDiff` establishes that, and
- * a caller reaching this export directly owns the obligation, because the lookup map here is
- * last-write-wins.
- *
- * Any field that differs makes a Component `changed` — the whole object is compared, not the
- * three axes the delta names, so a `changed[]` entry with all three booleans `false` is a
- * well-formed answer meaning "something else about this component moved". `modified` deltas
- * are intentionally absent: fields are reported as before/after pairs.
- */
 export function diffComponents(
   base: readonly Component[],
   head: readonly Component[],
@@ -70,57 +59,16 @@ export function diffComponents(
   return { added, removed, changed }
 }
 
-/**
- * What one document knows about itself, for deciding whether the *other* document's silence
- * about an edge is evidence.
- *
- * `symbolFiles` is keyed on the endpoint id exactly as `dependencies[]` spells it, and its
- * values come from `symbols[].source.file` — the form `stats.skippedFiles[].path` is written
- * in, and the space `buildDiff` classifies Symbols by. The same form is not always the same
- * name: when git renamed a file between the revisions, each document records it under its own
- * name, and `lostCounterparts` translates between the two. Reading the file out of the id's
- * path segment instead would be a second answer to "which file is this endpoint in" that
- * nothing forces to agree with the first. A Component endpoint is absent from the map, which
- * keeps it out of the reclassification without a special case: an aggregate over roots has no
- * file to lose.
- */
 export interface DependencySideView {
-  /**
-   * `source.file` of every Symbol this document holds, keyed by `DependencyEndpoint` rather
-   * than `SymbolId` because the lookup happens with an endpoint whose kind is not yet known,
-   * and "absent" is the answer for a Component id.
-   */
   symbolFiles: ReadonlyMap<DependencyEndpoint, RelativePath>
-  /** Files this document never analysed, by path, with the reason it gave. */
   lostFiles: ReadonlyMap<RelativePath, SkipReason>
 }
 
-/**
- * A git rename map read in both directions (`diff-algorithm.md` §3.5.1). A leftover Symbol, or
- * an edge endpoint, names its file the way its own document does, while the document that may
- * have lost it recorded the same file under the name it had there, so each direction is the
- * translation for one side's question.
- *
- * `headToBase` lists every base path renamed onto a head path, sorted. git renames no two base
- * files onto one path, so a list built from `git diff` never holds more than one; a map handed
- * to `buildDiff` directly can, and which of them answers should not be a property of the order
- * that map happens to list them in.
- *
- * Exported because `DependencySideView` is public and `diffDependencies` requires one. Build it
- * with `renameDirections`, which is what keeps the two directions each other's inverse.
- */
 export interface RenameDirections {
   readonly baseToHead: ReadonlyMap<RelativePath, RelativePath>
   readonly headToBase: ReadonlyMap<RelativePath, readonly RelativePath[]>
 }
 
-/**
- * Both directions of `renames`, the base-to-head map `git diff --find-renames` gives. `null` —
- * no rename information, as with `--base` / `--head` IR files — gives two empty directions,
- * which is how a caller with nothing to translate says so. Exported for the reason
- * `RenameDirections` is. Copies `renames`, so a later change to the caller's map cannot reach
- * a diff built from it.
- */
 export function renameDirections(
   renames: ReadonlyMap<RelativePath, RelativePath> | null,
 ): RenameDirections {
@@ -135,28 +83,14 @@ export function renameDirections(
   return { baseToHead, headToBase }
 }
 
-/** The document that lacks an entry, and so the one a loss is looked up in. */
 export type AbsentSide = "base" | "head"
 
-/** Everything a loss lookup reads: both side views, and the rename map that joins them. */
 export interface LossSides {
   base: DependencySideView
   head: DependencySideView
   renames: RenameDirections
 }
 
-/**
- * Every record the `absentFrom` document holds for the file the other document names `path`,
- * each with the path the absent document recorded it under: `path` itself first, then — when
- * git renamed the file between the revisions — each name the rename map gives it on the absent
- * side, in path order. Without the second lookup a renamed file the other side skipped would
- * leave its Symbols as confident additions or deletions, which is the silence `unknown` exists
- * to break.
- *
- * Takes the side by name and picks both the view and the rename direction from it, because each
- * is one of a pair of the same type — `RelativePath` is a plain string — so handing over the
- * wrong one would compile and quietly restore the lookup a rename defeats.
- */
 export function lostCounterparts(
   path: RelativePath,
   absentFrom: AbsentSide,
@@ -166,7 +100,7 @@ export function lostCounterparts(
   const found: DiffSkippedFile[] = []
   const reason = absent.lostFiles.get(path)
   if (reason !== undefined) found.push({ path, reason })
-  for (const other of namesOnSide(path, absentFrom, sides.renames)) {
+  for (const other of renamedOnAbsentSide(path, absentFrom, sides.renames)) {
     if (other === path) continue
     const otherReason = absent.lostFiles.get(other)
     if (otherReason !== undefined) found.push({ path: other, reason: otherReason })
@@ -174,10 +108,6 @@ export function lostCounterparts(
   return found
 }
 
-/**
- * The first of `lostCounterparts`, for an entry that needs one explanation rather than every
- * record: a Symbol carries one `reason`, and an edge endpoint is one file.
- */
 export function lostCounterpart(
   path: RelativePath,
   absentFrom: AbsentSide,
@@ -186,8 +116,7 @@ export function lostCounterpart(
   return lostCounterparts(path, absentFrom, sides)[0]
 }
 
-/** What git renamed the other document's `path` to, or from, on the `absentFrom` side. */
-function namesOnSide(
+function renamedOnAbsentSide(
   path: RelativePath,
   absentFrom: AbsentSide,
   renames: RenameDirections,
@@ -197,11 +126,6 @@ function namesOnSide(
   return headPath === undefined ? [] : [headPath]
 }
 
-/**
- * Build a side view from a document. Exported because `DependencySideView` is public and
- * `diffDependencies` requires one; `buildDiff` reads `lostFiles` for its own Symbol
- * classification from this same object.
- */
 export function dependencySideView(ir: IR): DependencySideView {
   const symbolFiles = new Map<DependencyEndpoint, RelativePath>()
   for (const symbol of ir.symbols) symbolFiles.set(symbol.id, symbol.source.file)
@@ -210,23 +134,6 @@ export function dependencySideView(ir: IR): DependencySideView {
   return { symbolFiles, lostFiles }
 }
 
-/**
- * `docs/design/diff-algorithm.md` — Dependency diff. Identity is the composite
- * `(from, to, via)` triple; direction and effect changes surface as an added + removed pair so
- * `modified` is not part of the schema. Uniqueness of the triple is the caller's
- * obligation on the same terms as `diffComponents`.
- *
- * `sides` separates a deletion from a loss and is required rather than optional:
- * omitting it would silently classify every edge into a lost file as a deletion while still
- * writing `unknown: []`, which the schema defines as "nothing was unknown". A caller with no
- * skip list passes a side view whose `lostFiles` is empty. `renames` is required on the same
- * terms: without it an edge into a file git renamed and one side skipped would be a confident
- * deletion or addition beside the same `unknown: []`. A caller with no rename information
- * passes `renameDirections(null)`.
- *
- * The return type declares `unknown` present, where the schema leaves it optional for
- * documents that predate the field.
- */
 export function diffDependencies(
   base: readonly Dependency[],
   head: readonly Dependency[],
@@ -242,15 +149,11 @@ export function diffDependencies(
   for (const [key, dep] of headKeys) {
     const baseDep = baseKeys.get(key)
     if (baseDep === undefined) {
-      // Held by head and not by base, so its endpoints resolve against head — the document
-      // that has the Symbols — and the question is whether base could have seen them.
       const lostFiles = endpointsLostBy(dep, "base", sides)
       if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "base", lostFiles })
       else added.push(dep)
       continue
     }
-    // A direction or effect flip. No loss check: both documents hold the edge, so neither is
-    // silent about it, and `unknown` exists only to explain a silence.
     if (baseDep.direction !== dep.direction || (baseDep.effect ?? null) !== (dep.effect ?? null)) {
       removed.push(baseDep)
       added.push(dep)
@@ -268,14 +171,6 @@ export function diffDependencies(
   return { added, removed, unknown }
 }
 
-/**
- * The endpoint files the `absentFrom` document never analysed, read through the other one —
- * the holder — because that is the document the edge, and the Symbol behind each endpoint,
- * comes from. Both endpoints are checked: an edge dies when *either* end's file goes. Each path
- * is the one the absent document recorded, which after a git rename is not the holder's.
- * Deduped on that path and sorted by it, so an intra-file edge collapses to the one file it
- * lost, renamed or not.
- */
 function endpointsLostBy(
   dep: Dependency,
   absentFrom: AbsentSide,
@@ -285,10 +180,6 @@ function endpointsLostBy(
   const byPath = new Map<RelativePath, SkipReason>()
   for (const endpoint of [dep.from, dep.to]) {
     const file = holder.symbolFiles.get(endpoint)
-    // Normally a Component endpoint, which has no file to lose. A symbol-shaped endpoint with
-    // no Symbol behind it (forbidden by ir-schema.md #4, but `buildDiff` runs no integrity
-    // check) lands here too and quietly reverts to the plain classification: there is no
-    // diagnostics channel, and refusing would take down the legitimate case sharing the branch.
     if (file === undefined) continue
     const lost = lostCounterpart(file, absentFrom, sides)
     if (lost === undefined) continue
@@ -299,13 +190,6 @@ function endpointsLostBy(
     .sort(compareBy((file) => file.path))
 }
 
-/**
- * `docs/design/diff-algorithm.md` — the fields Dependency identity is made of, in key
- * order, and the join that turns them into one. Both exported so the entry-point uniqueness
- * check keys on exactly what this file keys on. Core's invariant #13 joins the same triple
- * with a different separator; the two agree for every endpoint that satisfies the id grammars
- * of ir-schema.md.
- */
 export const DEPENDENCY_IDENTITY_FIELDS = ["from", "to", "via"] as const
 
 export function dependencyIdentity(parts: readonly string[]): string {
@@ -318,14 +202,6 @@ function dependencyKey(dependency: Dependency): string {
 
 const compareDependencies = compareBy(dependencyKey)
 
-/**
- * Whether two Components are the same record over every field the document carries, via
- * `@aburi/core`'s canonical serialization of the normalized form — so a field added to `v1`
- * later is compared without a list here going stale, and key order or Unicode spelling
- * cannot manufacture a change. The serializer's refusals (`non-plain-json`,
- * `canonical-key-collision`) become `DiffError`, because `errors.ts` is the whole of this
- * package's failure surface.
- */
 function componentsEqual(a: Component, b: Component): boolean {
   return canonicalComponent(a, "base") === canonicalComponent(b, "head")
 }
@@ -342,13 +218,6 @@ function canonicalComponent(component: Component, side: "base" | "head"): string
   }
 }
 
-/**
- * The spelling-independent form of a Component (ir-schema.md): `description` is Class A,
- * so absent and `null` are one spelling; `publicApi` and `frameworks` are Class B fields whose
- * own writer rule is "omitted when empty", so absent and `[]` are one spelling. Class B does
- * not say that in general — a field whose presence is itself information must not be added
- * to `PRESENCE_EQUALS_EMPTY_FIELDS`.
- */
 function normalizeComponent(component: Component): Record<string, unknown> {
   const normalized: Record<string, unknown> = { ...component }
   if (normalized.description === null || normalized.description === undefined) {

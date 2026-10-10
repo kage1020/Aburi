@@ -2,17 +2,16 @@ import { makeExtractionCtx } from "@aburi/test-support"
 import type {
   BodyExtraction,
   DropHint,
-  ExtractionContext,
   ImportEdge,
   ParseError,
   ParseResult,
   SymbolCandidate,
-  WalkContext,
 } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import {
   classifySymbolDropHint,
   extractSymbols,
+  normalizeAst,
   parseTypescriptFile,
   walkBody,
 } from "../../src/index"
@@ -22,21 +21,8 @@ export const BACKSLASH = String.fromCharCode(92)
 
 const DEFAULT_PATH = "src/a.ts"
 
-/**
- * Re-exported rather than written again. The local copy built the same `ExtractionContext`
- * over the same `noopRegistry` and differed only in demanding both arguments, so a suite
- * reading `makeExtractionCtx(path, source)` could not tell which of the two it had imported —
- * and one of them would drift. The name stays reachable from the fixture module, because that
- * is where a suite looks for its helpers; the definition is the shared one every other
- * package's suites already use.
- */
 export { makeExtractionCtx }
 
-/**
- * Narrow a nullable Tree for tests that only exercise the happy path. Fails loudly when
- * the parse returned null so the missing tree does not get silently masked as an empty
- * Symbol list.
- */
 export function requireTree(tree: Tree | null): Tree {
   if (tree === null) throw new Error("test fixture invariant: parse returned null")
   return tree
@@ -55,6 +41,12 @@ export async function importsOf(
   return { errors: result.errors, imports: result.imports }
 }
 
+/** Every diagnostic a parse produced, as `line:column message`. */
+export async function parseErrorsOf(source: string, path = DEFAULT_PATH): Promise<string[]> {
+  const { errors } = await parseSource(source, path)
+  return errors.map((e) => `${e.line}:${e.column} ${e.message}`)
+}
+
 export function emptySpecifierErrors(errors: readonly ParseError[]): ParseError[] {
   return errors.filter((e) => e.message.includes("empty module specifier"))
 }
@@ -67,13 +59,20 @@ export async function symbolsOf(
   return extractSymbols(requireTree(result.tree), makeExtractionCtx(path, source))
 }
 
-export async function idsOf(source: string): Promise<string[]> {
-  return (await symbolsOf(source)).map((s) => s.id)
+export async function idsOf(source: string, path = DEFAULT_PATH): Promise<string[]> {
+  return (await symbolsOf(source, path)).map((s) => s.id)
 }
 
 /** The Symbol with exactly this id, or a failure naming the ids the fixture did produce. */
-export async function symbolOf(source: string, id: string): Promise<SymbolCandidate<Node>> {
-  const symbols = await symbolsOf(source)
+export async function symbolOf(
+  source: string,
+  id: string,
+  path = DEFAULT_PATH,
+): Promise<SymbolCandidate<Node>> {
+  return requireSymbol(await symbolsOf(source, path), id)
+}
+
+function requireSymbol(symbols: SymbolCandidate<Node>[], id: string): SymbolCandidate<Node> {
   const found = symbols.find((s) => s.id === id)
   if (found === undefined) {
     throw new Error(`no Symbol ${id}; have ${symbols.map((s) => s.id).join(", ")}`)
@@ -92,9 +91,19 @@ export function byId(symbols: SymbolCandidate<Node>[], suffix: string): SymbolCa
   return match
 }
 
-function walkSymbol(symbol: SymbolCandidate<Node>, ctx: ExtractionContext): BodyExtraction {
-  const walkCtx: WalkContext<Node> = { ...ctx, symbol }
-  return walkBody(symbol, walkCtx)
+export function normalizedOf(source: string, id: string, path = DEFAULT_PATH): Promise<string> {
+  return symbolOf(source, id, path).then(normalizeAst)
+}
+
+/** What a walk of every Symbol the fixture declares found, keyed by the Symbol's id. */
+export async function walksOf(
+  source: string,
+  path = DEFAULT_PATH,
+): Promise<Map<string, BodyExtraction>> {
+  const result = await parseSource(source, path)
+  const ctx = makeExtractionCtx(path, source)
+  const symbols = extractSymbols(requireTree(result.tree), ctx)
+  return new Map(symbols.map((symbol) => [symbol.id, walkBody(symbol, { ...ctx, symbol })]))
 }
 
 export async function walkOf(
@@ -102,11 +111,9 @@ export async function walkOf(
   id: string,
   path = DEFAULT_PATH,
 ): Promise<BodyExtraction> {
-  const result = await parseSource(source, path)
-  const ctx = makeExtractionCtx(path, source)
-  const target = extractSymbols(requireTree(result.tree), ctx).find((s) => s.id === id)
-  if (target === undefined) throw new Error(`no Symbol ${id} in fixture`)
-  return walkSymbol(target, ctx)
+  const walk = (await walksOf(source, path)).get(id)
+  if (walk === undefined) throw new Error(`no Symbol ${id} in fixture`)
+  return walk
 }
 
 /** Walk the first Symbol extraction answers, for a fixture that declares exactly one. */
@@ -114,23 +121,18 @@ export async function walkFirstSymbol(
   source: string,
   path = DEFAULT_PATH,
 ): Promise<BodyExtraction> {
-  const result = await parseSource(source, path)
-  const ctx = makeExtractionCtx(path, source)
-  const [target] = extractSymbols(requireTree(result.tree), ctx)
-  if (target === undefined) throw new Error("no symbols in fixture")
-  return walkSymbol(target, ctx)
+  const [walk] = (await walksOf(source, path)).values()
+  if (walk === undefined) throw new Error("no symbols in fixture")
+  return walk
 }
 
-export async function callsOf(source: string, id: string): Promise<string[]> {
-  return (await walkOf(source, id)).calls.map((c) => c.target)
+export async function callsOf(source: string, id: string, path = DEFAULT_PATH): Promise<string[]> {
+  return (await walkOf(source, id, path)).calls.map((c) => c.target)
 }
 
 export async function hintOf(source: string, id: string): Promise<DropHint | null> {
-  const result = await parseSource(source)
-  const ctx = makeExtractionCtx(DEFAULT_PATH, source)
-  const target = extractSymbols(requireTree(result.tree), ctx).find((s) => s.id === id)
-  if (target === undefined) throw new Error(`no Symbol ${id} in fixture`)
-  return classifySymbolDropHint(target, ctx)
+  const symbol = await symbolOf(source, id)
+  return classifySymbolDropHint(symbol, makeExtractionCtx(DEFAULT_PATH, source))
 }
 
 /** An exported class `C` holding these members, one per line. */

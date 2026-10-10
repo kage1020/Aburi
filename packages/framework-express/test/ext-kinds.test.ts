@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest"
 import { EXPRESS_EXT_KINDS, isExpressExtKind } from "../src/index"
 
 describe("EXPRESS_EXT_KINDS", () => {
-  it("lists exactly the 5 Express extKinds", () => {
-    expect(EXPRESS_EXT_KINDS).toHaveLength(5)
+  it("lists exactly the Express extKinds", () => {
+    expect(EXPRESS_EXT_KINDS).toEqual([
+      "framework:express:router",
+      "framework:express:route",
+      "framework:express:middleware",
+      "framework:express:error-middleware",
+      "framework:express:mount",
+    ])
   })
 
   it("isExpressExtKind narrows for owned ids", () => {

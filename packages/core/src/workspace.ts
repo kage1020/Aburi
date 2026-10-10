@@ -1,5 +1,5 @@
-import { open, readdir, readFile, stat } from "node:fs/promises"
-import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path"
+import { readFile } from "node:fs/promises"
+import { dirname, join, posix, relative, sep } from "node:path"
 import type { WorkspaceManager } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
@@ -7,273 +7,12 @@ import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
 import { posixWorkspaceRelativeViolation } from "./id"
 import { compareBy, compareCodeUnit } from "./order"
-import { describeJsonType, isVanishedFile } from "./scan/faults"
-
-/**
- * The marker that also ends the walk: a repository, the tree `aburi diff` checks a revision out
- * of. It is probed on its own, ahead of the others, so that a directory carrying it beside
- * another marker answers as a repository whatever order the lists below are in.
- */
-const REPOSITORY_MARKER = ".git"
-
-/**
- * What a `.git` file opens with when it is a repository: the pointer git writes for a linked
- * worktree or a submodule. Any other file of that name is not one.
- */
-const GITDIR_POINTER = "gitdir: "
-
-/**
- * Filenames whose presence at any directory ancestor identifies a workspace root. The
- * outermost match wins (see detectWorkspaceRoot's contract): when both a sub-project and a
- * monorepo parent carry markers, the monorepo root is the one the IR must describe.
- */
-const ROOT_MARKERS = [
-  "pnpm-workspace.yaml",
-  "turbo.json",
-  "nx.json",
-  "lerna.json",
-  "go.work",
-  ".aburi-workspace",
-] as const
-
-/**
- * Files whose presence is a marker only when their content satisfies an extra predicate
- * (e.g. `package.json` is a marker only when it carries a `workspaces` field).
- */
-const CONDITIONAL_ROOT_MARKERS = ["package.json", "Cargo.toml", "pyproject.toml"] as const
-
-type RootMarker =
-  | typeof REPOSITORY_MARKER
-  | (typeof ROOT_MARKERS)[number]
-  | (typeof CONDITIONAL_ROOT_MARKERS)[number]
-
-export interface DetectWorkspaceRootOptions {
-  /**
-   * Starting directory. The detector walks parent directories upward, remembering the
-   * outermost marker hit, and stops at the first `.git`. Defaults to `process.cwd()`. Relative
-   * paths are resolved against the current working directory.
-   */
-  cwd?: string
-}
-
-/**
- * Walk upward from `cwd` and return the absolute path of the outermost directory that
- * carries a workspace marker. Outermost wins so a sub-project's `package.json` does not
- * shadow the monorepo's `.git` / `pnpm-workspace.yaml`.
- *
- * The walk ends at the first `.git` — a directory, or the `gitdir:` file a linked worktree or a
- * submodule has in its place — because a root above the repository is a tree `aburi diff`
- * cannot check a revision out of (`component-detect.md` §11.1 has the layouts that did this).
- *
- * Throws CoreError "workspace-root-not-found" only when no marker exists between cwd and
- * the filesystem root — callers fall back to "treat cwd as a single-project workspace" in
- * that branch rather than aborting.
- *
- * Outside a repository the walk runs all the way to the filesystem root, so it opens manifests
- * in directories that have nothing to do with this workspace: a `$HOME/package.json` left
- * behind on a shared machine, or a directory a CI container is not allowed to read. A manifest
- * that cannot be read *inside* the workspace still has to be raised — the packages it was meant
- * to declare would otherwise go missing with nothing saying so — but one above the workspace
- * root is somebody else's file and aborting on it leaves the user with a path they do not
- * recognize and no way around it.
- *
- * Which of the two a failure is cannot be decided while the walk is still climbing, so the
- * first failure is remembered together with the directory it happened in and answered once the
- * outermost marker is known:
- *
- * - No marker anywhere: "workspace-root-not-found" wins regardless. Callers read that code as
- *   "cwd is a single-project workspace", and a broken manifest above an absent root must not
- *   turn that fallback into a different, harder error.
- * - The failing directory is the workspace root or sits below it: the failure is inside the
- *   workspace, and it is rethrown exactly as it was raised.
- * - Otherwise the failing directory is above the workspace root, and it is ignored.
- */
-export async function detectWorkspaceRoot(
-  options: DetectWorkspaceRootOptions = {},
-): Promise<string> {
-  const startRaw = options.cwd ?? process.cwd()
-  const start = isAbsolute(startRaw) ? startRaw : resolve(process.cwd(), startRaw)
-
-  let dir = start
-  let outermost: string | null = null
-  let failure: MarkerFailure | null = null
-  while (true) {
-    const probe = await probeDirectoryMarkers(dir)
-    if (probe.marker !== null) outermost = dir
-    if (failure === null && probe.failure !== null) failure = { dir, cause: probe.failure }
-    if (probe.marker === REPOSITORY_MARKER) break
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  if (outermost === null) {
-    throw new CoreError(
-      `No workspace marker (.git, pnpm-workspace.yaml, turbo.json, nx.json, lerna.json, go.work, .aburi-workspace, or workspace-aware package.json/Cargo.toml/pyproject.toml) found at ${start} or any ancestor`,
-      { code: "workspace-root-not-found", value: start },
-    )
-  }
-  if (failure !== null && isAtOrBelow(failure.dir, outermost)) throw failure.cause
-  return outermost
-}
-
-/** The first marker probe that could not answer, and the directory it was probing. */
-interface MarkerFailure {
-  dir: string
-  cause: unknown
-}
-
-interface MarkerProbe {
-  /** The marker this directory carries, or `null` when it carries none. */
-  marker: RootMarker | null
-  /** The first error a probe of this directory raised, or `null` when every probe answered. */
-  failure: unknown
-}
-
-/**
- * Probe one directory for every marker, handing a read failure back to the walk instead of
- * throwing it.
- *
- * Probing still stops at the first marker found, exactly as it did when this threw: a `.git`
- * beside an unreadable `package.json` makes the directory a root without anything ever opening
- * that manifest, so no failure is invented for a directory that already answered. `.git` is
- * asked first, so that holds whatever order the marker lists are in. A failure
- * recorded before the hit is still reported, because a directory that both fails a probe and
- * carries a marker is the workspace root itself — a `Cargo.toml` workspace beside a malformed
- * `package.json` — and that failure is inside the workspace.
- */
-async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
-  let failure: unknown = null
-  const remember = (cause: unknown): void => {
-    if (failure === null) failure = cause
-  }
-  try {
-    if (await isRepository(join(dir, REPOSITORY_MARKER))) {
-      return { marker: REPOSITORY_MARKER, failure }
-    }
-  } catch (cause) {
-    remember(cause)
-  }
-  for (const name of ROOT_MARKERS) {
-    try {
-      if (await pathExists(join(dir, name))) return { marker: name, failure }
-    } catch (cause) {
-      remember(cause)
-    }
-  }
-  for (const name of CONDITIONAL_ROOT_MARKERS) {
-    const path = join(dir, name)
-    try {
-      if (!(await pathExists(path))) continue
-      if (await fileSatisfiesWorkspacePredicate(name, path)) return { marker: name, failure }
-    } catch (cause) {
-      remember(cause)
-    }
-  }
-  return { marker: null, failure }
-}
-
-/**
- * Is the `.git` at `path` a repository: a directory, or a file opening with the `gitdir:`
- * pointer?
- *
- * A file of that name is otherwise nothing git would open — an empty one left behind, a
- * submodule's pointer copied out of a tarball without the module — and taken at its name it
- * made the directory holding it the workspace root, with no warning and every id rooted there.
- * Only the pointer's opening bytes are read; a directory's contents never are. `stat` rather
- * than `lstat`, so a symlink answers for what it points at and a dangling one is absent.
- */
-async function isRepository(path: string): Promise<boolean> {
-  let entry: Awaited<ReturnType<typeof stat>>
-  try {
-    entry = await stat(path)
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return false
-    throw err
-  }
-  if (entry.isDirectory()) return true
-  if (!entry.isFile()) return false
-  const opening = Buffer.alloc(GITDIR_POINTER.length)
-  const handle = await open(path, "r")
-  try {
-    const { bytesRead } = await handle.read(opening, 0, opening.length, 0)
-    return opening.subarray(0, bytesRead).toString("utf8") === GITDIR_POINTER
-  } finally {
-    await handle.close()
-  }
-}
-
-/**
- * Is `dir` the workspace root or a directory inside it?
- *
- * Both paths come off the same upward walk, so one is always an ancestor of the other and a
- * prefix comparison decides it without a `relative` round-trip. The separator guard is for a
- * root that already ends in one (`/`, `C:\`), where appending a second would match nothing.
- */
-function isAtOrBelow(dir: string, root: string): boolean {
-  if (dir === root) return true
-  return dir.startsWith(root.endsWith(sep) ? root : root + sep)
-}
-
-async function fileSatisfiesWorkspacePredicate(
-  marker: (typeof CONDITIONAL_ROOT_MARKERS)[number],
-  path: string,
-): Promise<boolean> {
-  switch (marker) {
-    case "package.json":
-      return packageJsonDeclaresWorkspaces(path)
-    case "Cargo.toml":
-      return tomlContainsWorkspaceSection(path)
-    case "pyproject.toml":
-      return pyprojectDeclaresWorkspace(path)
-  }
-}
-
-async function packageJsonDeclaresWorkspaces(path: string): Promise<boolean> {
-  const parsed = await readJson(path)
-  if (parsed === null || typeof parsed !== "object") return false
-  return "workspaces" in (parsed as Record<string, unknown>)
-}
-
-/**
- * Lightweight TOML probe: we only need to know whether `[workspace]` or `[tool.uv.workspace]` /
- * `[tool.hatch.workspaces]` / `[tool.poetry]` headers exist. Avoiding a full TOML parser
- * dependency here keeps the surface narrow; the language plugins will bring proper
- * TOML parsing when they ship.
- */
-async function tomlContainsWorkspaceSection(path: string): Promise<boolean> {
-  const text = await readText(path)
-  return /^\s*\[workspace\]/m.test(text) || /^\s*\[workspace\.members\]/m.test(text)
-}
-
-async function pyprojectDeclaresWorkspace(path: string): Promise<boolean> {
-  const text = await readText(path)
-  return (
-    /^\s*\[tool\.uv\.workspace\]/m.test(text) ||
-    /^\s*\[tool\.hatch\.workspaces\]/m.test(text) ||
-    /^\s*\[tool\.poetry\]/m.test(text)
-  )
-}
+import { describeJsonType } from "./scan/faults"
+import { pathExists, readJson } from "./workspace-fs"
 
 export interface DetectManagersResult {
   managers: WorkspaceManager[]
-  /**
-   * Resolved per-manager workspace candidate directories (workspace-root-relative POSIX
-   * paths). Component autodetect consumes this to materialize components without re-globbing.
-   */
   workspaces: WorkspaceCandidate[]
-  /**
-   * Managers whose manifest declared package patterns and resolved none of them.
-   *
-   * Reported rather than warned about, because detection has no sink of its own and its two
-   * CLI callers each have one. `detectComponents` drops the field deliberately: `aburi init`
-   * reaches it through that function and reads `unresolved` from its own `detectManagers`
-   * call, so carrying it through a second return type would be a second copy of one answer.
-   *
-   * It is not the same as an empty `managers[].roots`: turbo emits that deliberately as a
-   * co-marker, and a manifest that declared no patterns at all is asking for the workspace
-   * root alone — only a declaration that resolved to nothing means the packages the user
-   * named are missing from the Document.
-   */
   unresolved: UnresolvedDeclaration[]
 }
 
@@ -281,14 +20,6 @@ export interface DetectManagersResult {
 export interface UnresolvedDeclaration {
   /** The tool whose manifest declared them, as spelled on `managers[].tool`. */
   tool: string
-  /**
-   * The manifest that declared them, workspace-root-relative and POSIX.
-   *
-   * `tool` does not identify it: `detectJsPackageManagerTool` answers "pnpm" for a
-   * `package.json#workspaces` whenever a `pnpm-lock.yaml` is present, so a repository that
-   * moved to pnpm and left `workspaces` behind has two dead manifests under one tool name.
-   * This is what a reader opens, and what orders the two.
-   */
   manifestPath: string
   /** Every string the manifest lists, including ones the resolver drops. */
   patterns: readonly string[]
@@ -297,25 +28,12 @@ export interface UnresolvedDeclaration {
 export interface WorkspaceCandidate {
   /** Workspace-root-relative POSIX path of the candidate directory. */
   relativeRoot: string
-  /** Absolute path of the candidate directory. */
   absoluteRoot: string
   /** Tool that produced this candidate (the same path may appear once per tool). */
   managerTool: string
-  /**
-   * Absolute path of the manifest that made this directory a package (`package.json`,
-   * `project.json`). Every detector finds candidates by finding manifests, so a candidate
-   * without one is not a shape this type has.
-   */
   manifestPath: string
 }
 
-/**
- * Resolve every JS/TS workspace manager the detectors currently recognize: pnpm,
- * npm/yarn/bun (via `package.json#workspaces`), turbo (as a hint), and nx (via project.json
- * presence). Each manager's roots are recorded once on `managers[]` (workspace-relative
- * POSIX paths), and every candidate directory is materialized on `workspaces[]` for
- * downstream Component synthesis.
- */
 export async function detectManagers(workspaceRoot: string): Promise<DetectManagersResult> {
   const managers: WorkspaceManager[] = []
   const workspaces: WorkspaceCandidate[] = []
@@ -357,14 +75,7 @@ export async function detectManagers(workspaceRoot: string): Promise<DetectManag
 interface ManagerScan {
   tool: string
   candidates: WorkspaceCandidate[]
-  /** Absolute path of the manifest this scan read. */
   manifestPath: string
-  /**
-   * Every string this manager's manifest lists as a package pattern. Empty when it lists none:
-   * turbo and nx declare no patterns at all, and a `packages:` or `workspaces` field that is
-   * absent yields none. A field that is present and is not a list of strings does not reach
-   * here — `readPatternList` refuses it.
-   */
   declaredPatterns: readonly string[]
 }
 
@@ -387,22 +98,6 @@ function mergeManager(
   managers.push({ tool: scan.tool, roots: [...roots] })
 }
 
-/**
- * Refuse a declared package that sits outside the workspace root.
- *
- * `tinyglobby` honours an ascending pattern and returns matches above `cwd`, so a manifest
- * declaring `packages: ['../shared/*']` produces candidates whose relative root starts
- * `..`. Two things are then true at once, and neither is something to record: the IR cannot
- * express such a root (`workspace.root` anchors every path in the Document, and integrity
- * invariant #10 refuses one that ascends past it), and the file walk never opens those
- * directories anyway, because it globs `**` under the workspace root.
- *
- * Failing is the honest outcome rather than dropping the candidate. Silently continuing
- * would produce a Document that omits packages the user declared, with nothing anywhere
- * saying so; `detectManagers` already refuses a manifest it cannot parse, and this is the
- * same class of problem in the same file. The message names the tool and the offending
- * root, and the CLI reports it against the workspace rather than as an internal failure.
- */
 function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): void {
   const violation = posixWorkspaceRelativeViolation(
     candidate.relativeRoot,
@@ -418,7 +113,7 @@ function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): voi
 async function detectPnpm(root: string): Promise<ManagerScan | null> {
   const manifestPath = join(root, "pnpm-workspace.yaml")
   if (!(await pathExists(manifestPath))) return null
-  const text = await readText(manifestPath)
+  const text = await readFile(manifestPath, "utf8")
   let parsed: unknown
   try {
     parsed = parseYaml(text)
@@ -445,10 +140,6 @@ async function detectPackageJsonWorkspaces(root: string): Promise<ManagerScan[]>
   return [{ tool, candidates, manifestPath, declaredPatterns: patterns }]
 }
 
-/**
- * npm and yarn accept `workspaces` as a list or as `{ packages: [...] }`, so the object form
- * is unwrapped before the shared rule in `readPatternList` reads it.
- */
 function extractWorkspacePatterns(parsed: unknown, manifestPath: string): string[] {
   if (parsed === null || typeof parsed !== "object") return []
   const ws = (parsed as { workspaces?: unknown }).workspaces
@@ -458,11 +149,6 @@ function extractWorkspacePatterns(parsed: unknown, manifestPath: string): string
   return readPatternList(parsed, "workspaces", manifestPath)
 }
 
-/**
- * Pick the most specific lockfile present (pnpm > yarn > bun > npm). The IR's manager id
- * mirrors the lockfile because `pnpm-lock.yaml` proves pnpm, even when `package.json#workspaces`
- * also matches npm's vocabulary.
- */
 async function detectJsPackageManagerTool(root: string): Promise<string> {
   if (await pathExists(join(root, "pnpm-lock.yaml"))) return "pnpm"
   if (await pathExists(join(root, "yarn.lock"))) return "yarn"
@@ -474,9 +160,6 @@ async function detectJsPackageManagerTool(root: string): Promise<string> {
 async function detectTurbo(root: string): Promise<ManagerScan | null> {
   const manifestPath = join(root, "turbo.json")
   if (!(await pathExists(manifestPath))) return null
-  // turbo.json does not declare workspaces itself; it is a co-marker that signals "the
-  // real workspace patterns live in pnpm-workspace.yaml or package.json#workspaces".
-  // Emit a manager entry with empty roots so the IR records the tool's presence.
   return { tool: "turbo", candidates: [], manifestPath, declaredPatterns: [] }
 }
 
@@ -503,21 +186,8 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
   return { tool: "nx", candidates, manifestPath, declaredPatterns: [] }
 }
 
-/** The manifest a pnpm/npm/yarn/bun `packages:` entry promises the directory holds. */
 const JS_PACKAGE_MANIFEST = "package.json"
 
-/**
- * Resolve a manager's declared package patterns into candidate directories.
- *
- * Matched against the manifest rather than against the directory, because a directory pattern
- * is not a directory to tinyglobby: `expandDirectories` widens one that names a directory into
- * that directory's whole subtree, so `.` reaches everything and `tools/build` swallows
- * `tools/build/nested`. Against the manifest, a pattern names what it says.
- *
- * `expandDirectories` is off here for the residue of the same behaviour: a directory literally
- * named `package.json` would be widened into the files beneath it, and each of those would
- * name that directory as a package.
- */
 async function resolveDeclaredPackages(
   workspaceRoot: string,
   patterns: readonly string[],
@@ -543,33 +213,10 @@ async function resolveDeclaredPackages(
   })
 }
 
-/**
- * Append the manifest to the directory the pattern names, replacing a trailing slash — so `.`
- * and `./` alike become `./package.json`, the root's own manifest.
- *
- * A negation keeps its `!` and needs no special case: a directory is a candidate only through
- * its manifest, so excluding the manifest excludes the directory. An empty pattern is dropped
- * before this — it would become `/package.json`, which names the filesystem root.
- */
 function toManifestPattern(pattern: string): string {
   return pattern.replace(/\/?$/, `/${JS_PACKAGE_MANIFEST}`)
 }
 
-/**
- * The package patterns a manifest declares under `key`, or `[]` when it declares none.
- *
- * A field that is present and is not a list of strings is refused rather than filtered away.
- * `packages:` followed by `- tools/*:` is the most ordinary YAML slip there is — the trailing
- * colon makes the entry a map — and every such manifest declares packages, resolves none, and
- * lands on the single-project fallback describing the whole repository. Dropping the element
- * quietly is the silence this file reports everywhere else, one level further in; pnpm refuses
- * all three shapes itself (`Invalid package type - object`, `packages field is not an array`,
- * `Invalid package type - number`), so this is its reading rather than a stricter one.
- *
- * The remediation differs from a pattern that matched nothing — write it as a list of strings,
- * rather than fix the pattern — which is why it is a refusal and not another entry on
- * `unresolved`.
- */
 function readPatternList(value: unknown, key: string, manifestPath: string): string[] {
   if (value === null || typeof value !== "object") return []
   const field = (value as Record<string, unknown>)[key]
@@ -596,79 +243,9 @@ function malformedPatternList(manifestPath: string, key: string, fault: string):
   )
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return false
-    throw err
-  }
-}
-
-async function readText(path: string): Promise<string> {
-  return readFile(path, "utf8")
-}
-
-async function readJson(path: string): Promise<unknown> {
-  const text = await readText(path)
-  try {
-    return JSON.parse(text)
-  } catch (cause) {
-    throw new CoreError(
-      `Failed to parse JSON at ${path}`,
-      { code: "workspace-manifest-malformed", value: path },
-      { cause },
-    )
-  }
-}
-
-/**
- * Express `target` as a workspace-relative POSIX path, in the same spelling
- * `toDocumentPath` gives the file paths that sit beside it in the IR.
- *
- * The one place a separator is converted, and the reason the conversion is guarded on `sep`
- * rather than applied to every backslash: `relative` hands back a native path, and only where
- * the platform separator *is* a backslash does a backslash in it mean a separator. On POSIX it
- * is an ordinary filename character, and rewriting it renames the directory rather than
- * describing it. Everything that takes a path already in POSIX form — the file walk, from
- * `glob` — hands it to `toDocumentPath` unconverted, which is what lets the shared rule refuse
- * the character instead of spending it.
- *
- * The NFC step is the Unicode-normalization entry point for roots (ir-schema.md): a root left
- * in whatever spelling the filesystem returned would disagree with a `symbols[].source.file`
- * naming the same directory, which is normalized at its own entry point.
- *
- * A `..` result is possible and is not normalized away: glob patterns may ascend, and a
- * directory above the workspace root genuinely is outside it. `mergeManager` drops those.
- */
 function toRelativePosix(root: string, target: string): string {
   const rel = relative(root, target)
   if (rel.length === 0) return "."
   const posixRel = sep === "/" ? rel : rel.split(sep).join(posix.sep)
   return toNfc(posixRel)
-}
-
-/** Re-export so callers (component.ts) can list the directories without redoing detection. */
-export type { WorkspaceManager }
-
-/** Cheap helper for callers that only want to know whether a directory exists. */
-export async function isDirectory(path: string): Promise<boolean> {
-  try {
-    const stats = await stat(path)
-    return stats.isDirectory()
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return false
-    throw err
-  }
-}
-
-/** Read a directory; returns [] on ENOENT so callers do not have to wrap. */
-export async function safeReaddir(path: string): Promise<string[]> {
-  try {
-    return await readdir(path)
-  } catch (err: unknown) {
-    if (isVanishedFile(err)) return []
-    throw err
-  }
 }

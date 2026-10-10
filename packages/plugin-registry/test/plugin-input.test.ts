@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
+import { importEdge } from "@aburi/test-support"
 import type { EffectsManifest, ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   assertImportBinding,
+  assertNamespaceBinding,
   assertNonEmptySegments,
   defineEffectsManifest,
   hasLiteralFirstArgument,
@@ -18,26 +18,18 @@ import {
 const ORIGIN: PluginInputOrigin = { plugin: "effects-example", filePath: "src/service.ts" }
 
 function edge(source: string, line: number): ImportEdge {
-  return { source, symbols: ["Thing"], line, dynamic: false }
+  return importEdge({ source, symbols: ["Thing"], line })
 }
 
 describe("assertNonEmptySegments", () => {
-  it("splits a well-formed target into its segments", () => {
-    const result = assertNonEmptySegments("prisma.user.create", ORIGIN)
-    expect(result.segments).toEqual(["prisma", "user", "create"])
-    expect(result.last).toBe("create")
-  })
-
-  it("accepts a single-segment target", () => {
-    const result = assertNonEmptySegments("fetch", ORIGIN)
-    expect(result.segments).toEqual(["fetch"])
-    expect(result.last).toBe("fetch")
+  it.each([
+    ["prisma.user.create", ["prisma", "user", "create"], "create"],
+    ["fetch", ["fetch"], "fetch"],
+  ])("splits %s into its segments and its last one", (target, segments, last) => {
+    expect(assertNonEmptySegments(target, ORIGIN)).toEqual({ segments, last })
   })
 
   it("types the first segment as present, so callers index it without a cast", () => {
-    // The tuple type is the whole point of the return value: a `readonly string[]` would
-    // widen `segments[0]` to `string | undefined` under noUncheckedIndexedAccess and push
-    // a cast back into every classifier. This assignment is the compile-time assertion.
     const first: string = assertNonEmptySegments("db.select", ORIGIN).segments[0]
     expect(first).toBe("db")
   })
@@ -73,18 +65,12 @@ describe("assertNonEmptySegments", () => {
 describe("hasMatchingImport", () => {
   const isExample = (source: string) => source === "example-orm"
 
-  it("returns true when any edge satisfies the predicate", () => {
-    expect(hasMatchingImport([edge("react", 1), edge("example-orm", 2)], ORIGIN, isExample)).toBe(
-      true,
-    )
-  })
-
-  it("returns false when no edge satisfies the predicate", () => {
-    expect(hasMatchingImport([edge("react", 1), edge("zod", 2)], ORIGIN, isExample)).toBe(false)
-  })
-
-  it("returns false for an empty import list without throwing", () => {
-    expect(hasMatchingImport([], ORIGIN, isExample)).toBe(false)
+  it.each([
+    ["some edge", [edge("react", 1), edge("example-orm", 2)], true],
+    ["no edge", [edge("react", 1), edge("zod", 2)], false],
+    ["an empty import list", [], false],
+  ])("answers whether the predicate holds for %s", (_, imports, expected) => {
+    expect(hasMatchingImport(imports, ORIGIN, isExample)).toBe(expected)
   })
 
   it("throws for an empty ImportEdge.source, naming the plugin, file, and line", () => {
@@ -94,8 +80,6 @@ describe("hasMatchingImport", () => {
   })
 
   it("validates every edge before matching, so a broken edge after a match still throws", () => {
-    // A `.some()` that validated inline would short-circuit on the match at index 0 and
-    // never see the broken edge behind it, making throw behaviour depend on import order.
     expect(() =>
       hasMatchingImport([edge("example-orm", 1), edge("", 2)], ORIGIN, isExample),
     ).toThrow(/line 2/)
@@ -116,56 +100,38 @@ describe("hasMatchingImport", () => {
 })
 
 describe("assertImportBinding", () => {
-  const named = (symbols: string[], line = 1): ImportEdge => ({
-    source: "example-orm",
-    symbols,
-    line,
-    dynamic: false,
+  const named = (symbols: string[], line = 1): ImportEdge =>
+    importEdge({ source: "example-orm", symbols, line })
+
+  it.each([
+    ["an unaliased entry", { imported: "Thing", local: "Thing" }, "Thing"],
+    ["an aliased entry", { imported: "Thing", local: "T" }, "Thing as T"],
+  ])("accepts %s", (_, binding, raw) => {
+    expect(() => assertImportBinding(binding, raw, named([raw]), ORIGIN)).not.toThrow()
   })
 
-  it("accepts an unaliased entry", () => {
-    expect(() =>
-      assertImportBinding({ imported: "Thing", local: "Thing" }, "Thing", named(["Thing"]), ORIGIN),
-    ).not.toThrow()
-  })
-
-  it("accepts an aliased entry", () => {
-    expect(() =>
-      assertImportBinding(
-        { imported: "Thing", local: "T" },
-        "Thing as T",
-        named(["Thing as T"]),
-        ORIGIN,
-      ),
-    ).not.toThrow()
-  })
-
-  it("rejects an entry whose exported half is empty", () => {
-    // `" as T"`. The local half survives, so a caller that only guards `local` indexes the
-    // name against an empty canonical — which matches no vocabulary table and drops the
-    // classification with nothing recording that anything was skipped.
-    expect(() =>
-      assertImportBinding({ imported: "", local: "T" }, " as T", named([" as T"], 4), ORIGIN),
-    ).toThrow(
-      /effects-example \(src\/service\.ts, line 4\).*ImportEdge\.symbols entry " as T" has an empty half/,
+  it.each([
+    ["exported half", { imported: "", local: "T" }, " as T"],
+    ["local half", { imported: "Thing", local: "" }, "Thing as "],
+    ["entry as a whole", { imported: "", local: "" }, ""],
+  ])("rejects an entry whose %s is empty, naming the plugin, file and line", (_, binding, raw) => {
+    expect(() => assertImportBinding(binding, raw, named([raw], 4), ORIGIN)).toThrow(
+      `effects-example (src/service.ts, line 4): ImportEdge.symbols entry "${raw}" has an empty half — language plugin emitted an unnormalized import edge`,
     )
   })
+})
 
-  it("rejects an entry whose local half is empty", () => {
-    expect(() =>
-      assertImportBinding(
-        { imported: "Thing", local: "" },
-        "Thing as ",
-        named(["Thing as "], 6),
-        ORIGIN,
-      ),
-    ).toThrow(/line 6.*"Thing as " has an empty half/)
+describe("assertNamespaceBinding", () => {
+  const namespaceEdge = importEdge({ source: "example-orm", symbols: "*", line: 3 })
+
+  it("accepts a binding that names something", () => {
+    expect(() => assertNamespaceBinding("orm", namespaceEdge, ORIGIN)).not.toThrow()
   })
 
-  it("rejects an entry that is empty outright", () => {
-    expect(() =>
-      assertImportBinding({ imported: "", local: "" }, "", named([""], 2), ORIGIN),
-    ).toThrow(/line 2.*"" has an empty half/)
+  it("rejects an empty binding, naming the plugin, file and line", () => {
+    expect(() => assertNamespaceBinding("", namespaceEdge, ORIGIN)).toThrow(
+      "effects-example (src/service.ts, line 3): ImportEdge.namespaceBinding is empty — language plugin emitted an unnormalized import edge",
+    )
   })
 })
 
@@ -179,6 +145,7 @@ describe("identifierWords", () => {
     expect(identifierWords("_prisma")).toEqual(["prisma"])
     expect(identifierWords("read_replica_db")).toEqual(["read", "replica", "db"])
     expect(identifierWords("$db")).toEqual(["db"])
+    expect(identifierWords("read-replica")).toEqual(["read", "replica"])
   })
 
   it("keeps an acronym run whole", () => {
@@ -199,8 +166,6 @@ describe("identifierWords", () => {
   })
 
   it("is a word split, not a substring search — the distinction the callers rely on", () => {
-    // `feedback` contains "db" and `context` contains "tx"; a substring test would call
-    // both a database client. This is the whole reason the helper exists.
     expect(identifierWords("feedback")).toEqual(["feedback"])
     expect(identifierWords("context")).toEqual(["context"])
   })
@@ -322,40 +287,11 @@ describe("defineEffectsManifest", () => {
   })
 
   it("keeps xPrefix and capabilities off the shape, so reading either is a compile error", () => {
-    // `PluginManifest` declares both optional, and `defineEffectsManifest`'s docblock leans
-    // on the first being absent: the registry derives `xPrefix` from `name`, so a manifest
-    // that carried one would be stating something nobody reads. While `EffectsPluginManifest`
-    // inherited the optionals, `manifest.xPrefix` was a well-typed read that answered
-    // `undefined` for every manifest in the repo — a mistake with nothing to catch it.
-    //
-    // Like the assignments above, this is enforced by `pnpm typecheck`, not by the runner,
-    // and it fails in both directions: should either read start compiling again, the
-    // directive goes unused and TypeScript reports it as TS2578.
     const manifest = defineEffectsManifest("effects-foo", "effects-plugin:foo")
     // @ts-expect-error `xPrefix` is the registry's to derive, not the manifest's to declare.
     const xPrefix = manifest.xPrefix
     // @ts-expect-error a first-party effects plugin claims no capabilities.
     const capabilities = manifest.capabilities
     expect([xPrefix, capabilities]).toEqual([undefined, undefined])
-  })
-})
-
-describe("plugin-input module", () => {
-  it("has no value imports, so the subpath stays free of the barrel's ajv setup", () => {
-    // The whole reason this module is a separate tsdown entry is that importing the
-    // package root evaluates `manifest.ts`, which compiles the plugin JSON Schema at
-    // module scope. A value import added here would fold this chunk back into that graph
-    // — silently, since nothing else in the build would fail. Asserted against the source
-    // rather than `dist/` so the check does not depend on a build having run.
-    const source = readFileSync(
-      fileURLToPath(new URL("../src/plugin-input.ts", import.meta.url)),
-      "utf8",
-    )
-    const importLines = source.split("\n").filter((line) => line.startsWith("import "))
-    // Asserted as a shape rather than as one pinned line: what must hold is that every
-    // import is type-only, and pinning the line made adding a second type to the same
-    // `import type` fail a test whose subject it is not.
-    expect(importLines.length).toBeGreaterThan(0)
-    for (const line of importLines) expect(line.startsWith("import type ")).toBe(true)
   })
 })

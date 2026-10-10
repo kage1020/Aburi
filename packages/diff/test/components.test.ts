@@ -1,48 +1,38 @@
 import { makeLanguageId } from "@aburi/core"
-import { component, componentId, dependency } from "@aburi/test-support"
-import type { Component, ComponentDiff } from "@aburi/types"
+import { component, componentId, dependency, errorFrom } from "@aburi/test-support"
+import type { Component, ComponentDiff, Dependency } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import {
-  type DependencySideView,
-  DiffError,
-  diffComponents,
-  diffDependencies,
-  type RenameDirections,
-  renameDirections,
-} from "../src"
+import { DiffError, diffComponents, diffDependencies, renameDirections } from "../src"
 
 type ComponentDelta = ComponentDiff["changed"][number]["delta"]
 
-/**
- * Side views for two documents that skipped nothing, with no rename map between them. Every
- * one of these tests is about identity comparison, not about loss, so the honest input is a
- * pair that has no skip list or rename to offer — which `diffDependencies` requires a caller to
- * spell rather than default into.
- */
-const NO_LOSSES: {
-  base: DependencySideView
-  head: DependencySideView
-  renames: RenameDirections
-} = {
-  base: { symbolFiles: new Map(), lostFiles: new Map() },
-  head: { symbolFiles: new Map(), lostFiles: new Map() },
-  renames: renameDirections(null),
+const UNCHANGED_AXES: ComponentDelta = {
+  rootsChanged: false,
+  publicApiChanged: false,
+  frameworksChanged: false,
 }
 
-describe("diffComponents (I5)", () => {
-  it("classifies unchanged components as no-op (not in added/removed/changed)", () => {
-    const c = component({ id: "billing", name: "billing" })
-    const result = diffComponents([c], [c])
-    expect(result.added).toEqual([])
-    expect(result.removed).toEqual([])
-    expect(result.changed).toEqual([])
+const billing = (overrides: Partial<Omit<Component, "id">> = {}) =>
+  component({ id: "billing", name: "billing", ...overrides })
+
+describe("diffComponents", () => {
+  it("reports nothing for a Component both sides hold unchanged", () => {
+    expect(diffComponents([billing()], [billing()])).toEqual({
+      added: [],
+      removed: [],
+      changed: [],
+    })
   })
 
-  it("lists a removed component", () => {
-    const c = component({ id: "billing", name: "billing" })
-    const result = diffComponents([c], [])
-    expect(result.removed).toHaveLength(1)
-    expect(result.removed[0]?.id).toBe("billing")
+  it("lists added and removed Components, each sorted by id", () => {
+    const named = (id: string) => component({ id, name: id })
+    const result = diffComponents(
+      [named("zeta"), named("kept"), named("alpha")],
+      [named("omega"), named("kept"), named("beta")],
+    )
+    expect(result.added.map((c) => c.id)).toEqual(["beta", "omega"])
+    expect(result.removed.map((c) => c.id)).toEqual(["alpha", "zeta"])
+    expect(result.changed).toEqual([])
   })
 
   it.each<[string, Partial<Component>, Partial<Component>, keyof ComponentDelta]>([
@@ -60,84 +50,32 @@ describe("diffComponents (I5)", () => {
     ],
     ["frameworks", { frameworks: [] }, { frameworks: ["nestjs"] }, "frameworksChanged"],
   ])("flags only %s when that field moves", (_, before, after, flag) => {
-    const result = diffComponents(
-      [component({ id: "billing", name: "billing", ...before })],
-      [component({ id: "billing", name: "billing", ...after })],
-    )
-    expect(result.changed).toHaveLength(1)
-    expect(result.changed[0]?.delta).toEqual({
-      rootsChanged: false,
-      publicApiChanged: false,
-      frameworksChanged: false,
-      [flag]: true,
-    })
+    const result = diffComponents([billing(before)], [billing(after)])
+    expect(result.changed.map((entry) => entry.delta)).toEqual([
+      { ...UNCHANGED_AXES, [flag]: true },
+    ])
   })
 
-  // Change detection compares the whole Component; the three booleans summarise three axes and
-  // are not the definition of "changed" (diff-algorithm.md). A field outside them produced
-  // no entry at all, so the projection had no before/after pair to render.
-  it("reports a display-name change with all three delta booleans false", () => {
-    const before = component({ id: "billing", name: "Billing" })
-    const after = component({ id: "billing", name: "Billing & Invoicing" })
-    const result = diffComponents([before], [after])
-    expect(result.changed).toHaveLength(1)
-    expect(result.changed[0]?.before.name).toBe("Billing")
-    expect(result.changed[0]?.after.name).toBe("Billing & Invoicing")
-    expect(result.changed[0]?.delta).toEqual({
-      rootsChanged: false,
-      publicApiChanged: false,
-      frameworksChanged: false,
-    })
+  it.each<[string, Partial<Component>, Partial<Component>]>([
+    ["a renamed Component", { name: "Billing" }, { name: "Billing & Invoicing" }],
+    [
+      "an added language",
+      { languages: [makeLanguageId("ts")] },
+      { languages: [makeLanguageId("ts"), makeLanguageId("py")] },
+    ],
+    ["a description written", { description: null }, { description: "Invoices" }],
+    ["a description edited", { description: "Invoices" }, { description: "Invoices and dunning" }],
+    ["a description removed", { description: "Invoices" }, { description: null }],
+    ["an empty description where there was none", { description: null }, { description: "" }],
+  ])("reports %s as changed, carrying both sides whole with all three axes false", (_, before, after) => {
+    const result = diffComponents([billing(before)], [billing(after)])
+    expect(result.changed).toEqual([
+      { before: billing(before), after: billing(after), delta: UNCHANGED_AXES },
+    ])
   })
 
-  it("reports an added language", () => {
-    const before = component({ id: "billing", name: "billing", languages: [makeLanguageId("ts")] })
-    const after = component({
-      id: "billing",
-      name: "billing",
-      languages: [makeLanguageId("ts"), makeLanguageId("py")],
-    })
-    const result = diffComponents([before], [after])
-    expect(result.changed).toHaveLength(1)
-    expect(result.changed[0]?.after.languages).toEqual([makeLanguageId("ts"), makeLanguageId("py")])
-  })
-
-  it("reports a description added, edited and removed", () => {
-    const none = component({ id: "billing", name: "billing", description: null })
-    const written = component({ id: "billing", name: "billing", description: "Invoices" })
-    const edited = component({
-      id: "billing",
-      name: "billing",
-      description: "Invoices and dunning",
-    })
-    expect(diffComponents([none], [written]).changed).toHaveLength(1)
-    expect(diffComponents([written], [edited]).changed).toHaveLength(1)
-    expect(diffComponents([written], [none]).changed).toHaveLength(1)
-  })
-
-  it("still reports a changed component when name and roots move together", () => {
-    const before = component({ id: "billing", name: "Billing", roots: ["apps/billing"] })
-    const after = component({
-      id: "billing",
-      name: "Billing & Invoicing",
-      roots: ["apps/billing", "packages/billing-domain"],
-    })
-    const result = diffComponents([before], [after])
-    expect(result.changed).toHaveLength(1)
-    expect(result.changed[0]?.delta.rootsChanged).toBe(true)
-  })
-
-  // ir-schema.md: an absent Class A key reads as `null` and an empty Class B list reads as
-  // absent, so neither respelling is a change. A whole-record comparison has to be told this —
-  // it is the one thing a byte comparison would get wrong.
   it("does not report a change when a document respells absence", () => {
-    const explicit = component({
-      id: "billing",
-      name: "billing",
-      publicApi: [],
-      frameworks: [],
-      description: null,
-    })
+    const explicit = billing({ publicApi: [], frameworks: [], description: null })
     const omitted: Component = {
       id: explicit.id,
       name: explicit.name,
@@ -149,19 +87,12 @@ describe("diffComponents (I5)", () => {
   })
 
   it("does not report a change when key insertion order differs", () => {
-    // Class B fields are spelled identically on both sides, so this pins key order alone and
-    // does not re-test the absence respellings above.
-    const a = component({
-      id: "billing",
-      name: "billing",
-      roots: ["apps/billing"],
-      description: "Invoices",
-    })
+    const a = billing({ roots: ["apps/billing"], description: "Invoices" })
     const b: Component = {
       description: "Invoices",
       languages: [makeLanguageId("ts")],
-      frameworks: a.frameworks ?? [],
-      publicApi: a.publicApi ?? [],
+      frameworks: [],
+      publicApi: [],
       roots: ["apps/billing"],
       name: "billing",
       id: componentId("billing"),
@@ -169,168 +100,82 @@ describe("diffComponents (I5)", () => {
     expect(diffComponents([a], [b]).changed).toEqual([])
   })
 
-  // The property that justifies reaching for `@aburi/core`'s canonical serializer rather than
-  // sorting keys by hand: ir-schema.md puts every IR string in NFC, and a document that
-  // arrives in NFD would otherwise report an untouched component as changed on every pull
-  // request. Swap the serializer for `JSON.stringify` over sorted keys and only this fails.
   it("does not report a change when a string arrives in a different Unicode form", () => {
     const composed = "café"
-    const decomposed = "cafe\u0301"
+    const decomposed = "café"
     expect(composed).not.toBe(decomposed)
-    expect(composed.normalize("NFC")).toBe(decomposed.normalize("NFC"))
-    const nfc = component({ id: "billing", name: composed, description: composed })
-    const nfd = component({ id: "billing", name: decomposed, description: decomposed })
-    expect(diffComponents([nfc], [nfd]).changed).toEqual([])
-  })
-
-  it("reports an empty description as a change, because it is not the same as none", () => {
-    const none = component({ id: "billing", name: "billing", description: null })
-    const empty = component({ id: "billing", name: "billing", description: "" })
-    expect(diffComponents([none], [empty]).changed).toHaveLength(1)
-  })
-
-  it("refuses a component it cannot compare, as a DiffError naming the component", () => {
-    const sound = component({ id: "billing", name: "billing" })
-    // A nested value JSON cannot carry. Only a hand-assembled document reaches this — which is
-    // the case the error exists for, and `errors.ts` is the whole of this package's failure
-    // surface, so it must not leave as a bare `CoreError` from `@aburi/core`.
-    const unsound = { ...sound, roots: [(() => "apps/billing") as unknown as string] }
-    let raised: unknown
-    try {
-      diffComponents([sound], [unsound])
-    } catch (error) {
-      raised = error
-    }
-    expect(raised).toBeInstanceOf(DiffError)
-    expect((raised as DiffError).code).toBe("ir-shape-invalid")
-    expect((raised as DiffError).value).toBe("components[id=billing]")
+    expect(
+      diffComponents(
+        [billing({ name: composed, description: composed })],
+        [billing({ name: decomposed, description: decomposed })],
+      ).changed,
+    ).toEqual([])
   })
 
   it("sorts changed[] by id", () => {
-    const rename = (id: string, name: string) => component({ id, name })
+    const renamed = (id: string, name: string) => component({ id, name })
     const result = diffComponents(
-      [rename("z", "Z"), rename("a", "A"), rename("m", "M")],
-      [rename("z", "Z2"), rename("a", "A2"), rename("m", "M2")],
+      [renamed("z", "Z"), renamed("a", "A"), renamed("m", "M")],
+      [renamed("z", "Z2"), renamed("a", "A2"), renamed("m", "M2")],
     )
     expect(result.changed.map((c) => c.after.id)).toEqual(["a", "m", "z"])
   })
+
+  it("refuses a Component it cannot compare, naming it and keeping the cause", async () => {
+    const unsound = billing({ roots: [(() => "apps/billing") as unknown as string] })
+    const error = await errorFrom(DiffError, () => diffComponents([billing()], [unsound]))
+    expect(error).toMatchObject({ code: "ir-shape-invalid", value: "components[id=billing]" })
+    expect(error.message).toMatch(/^head components\[id=billing\] cannot be compared: /)
+    expect(error.cause).toBeInstanceOf(Error)
+  })
 })
 
-describe("diffDependencies (I5)", () => {
-  it("emits added + removed as a pair when direction changes on the same triple", () => {
-    const before = dependency({
-      from: "billing",
-      to: "payments",
-      via: "import",
-      direction: "outbound",
+describe("diffDependencies", () => {
+  const NO_LOSSES = {
+    base: { symbolFiles: new Map(), lostFiles: new Map() },
+    head: { symbolFiles: new Map(), lostFiles: new Map() },
+    renames: renameDirections(null),
+  }
+  const billingToPayments = (overrides: Partial<Dependency> = {}) =>
+    dependency({ from: "billing", to: "payments", via: "call", ...overrides })
+
+  it.each<[string, Partial<Dependency>, Partial<Dependency>]>([
+    ["direction", { direction: "outbound" }, { direction: "inbound" }],
+    ["effect", { effect: null }, { effect: "db.write" }],
+  ])("reports an edge whose %s changed as an added + removed pair", (_, before, after) => {
+    expect(
+      diffDependencies([billingToPayments(before)], [billingToPayments(after)], NO_LOSSES),
+    ).toEqual({
+      added: [billingToPayments(after)],
+      removed: [billingToPayments(before)],
+      unknown: [],
     })
-    const after = dependency({
-      from: "billing",
-      to: "payments",
-      via: "import",
-      direction: "inbound",
+  })
+
+  it("reports an edge only base holds as removed, and one only head holds as added", () => {
+    const old = dependency({ from: "a", to: "b" })
+    const fresh = dependency({ from: "a", to: "c" })
+    expect(diffDependencies([old], [fresh], NO_LOSSES)).toEqual({
+      added: [fresh],
+      removed: [old],
+      unknown: [],
     })
-    const result = diffDependencies([before], [after], NO_LOSSES)
-    expect(result.added).toHaveLength(1)
-    expect(result.removed).toHaveLength(1)
-    expect(result.added[0]?.direction).toBe("inbound")
-    expect(result.removed[0]?.direction).toBe("outbound")
   })
 
-  it("emits added + removed when effect changes but (from, to, via) is stable", () => {
-    const before = dependency({
-      from: "billing",
-      to: "payments",
-      via: "call",
-      effect: null,
-    })
-    const after = dependency({
-      from: "billing",
-      to: "payments",
-      via: "call",
-      effect: "db.write",
-    })
-    const result = diffDependencies([before], [after], NO_LOSSES)
-    expect(result.added).toHaveLength(1)
-    expect(result.removed).toHaveLength(1)
-  })
-
-  it("emits pure removed when the triple vanishes from head", () => {
-    const before = dependency({ from: "a", to: "b" })
-    const result = diffDependencies([before], [], NO_LOSSES)
-    expect(result.removed).toHaveLength(1)
-    expect(result.added).toEqual([])
-  })
-
-  it("emits pure added when the triple is new in head", () => {
-    const after = dependency({ from: "a", to: "b" })
-    const result = diffDependencies([], [after], NO_LOSSES)
-    expect(result.added).toHaveLength(1)
-    expect(result.removed).toEqual([])
-  })
-
-  it("sorts added / removed deterministically by composite key", () => {
-    const result = diffDependencies(
-      [],
-      [
-        dependency({ from: "z", to: "a" }),
-        dependency({ from: "a", to: "z" }),
-        dependency({ from: "a", to: "b" }),
-      ],
-      NO_LOSSES,
-    )
-    const keys = result.added.map((d) => `${d.from}::${d.to}::${d.via}`)
-    expect(keys).toEqual([...keys].sort())
-  })
-
-  it("treats a symbol-id endpoint added in head as a plain add on the same (from, to, via) key", () => {
-    const after = dependency({
+  it("sorts Component and Symbol edges together by (from, to, via)", () => {
+    const symbolEdge = dependency({
       from: "ts:src/a.ts#caller",
       to: "ts:src/util.ts#helper",
       via: "call",
-      direction: "outbound",
-      effect: null,
     })
-    const result = diffDependencies([], [after], NO_LOSSES)
-    expect(result.added).toHaveLength(1)
-    expect(result.added[0]?.from).toBe("ts:src/a.ts#caller")
-    expect(result.added[0]?.via).toBe("call")
-  })
-
-  it("mixes component-level and symbol-level edges in one added[] and sorts them together", () => {
-    const compEdge = dependency({
-      from: "billing",
-      to: "payments",
-      via: "import",
-    })
-    const symEdge = dependency({
-      from: "ts:src/a.ts#caller",
-      to: "ts:src/util.ts#helper",
-      via: "call",
-      direction: "outbound",
-      effect: null,
-    })
-    const result = diffDependencies([], [symEdge, compEdge], NO_LOSSES)
-    expect(result.added).toHaveLength(2)
-    const keys = result.added.map((d) => `${d.from}::${d.to}::${d.via}`)
-    expect(keys).toEqual([...keys].sort())
-    // The composite-key sort places the component-level "billing::payments::import"
-    // before the symbol-id "ts:src/..." endpoints because lowercase kebab-case
-    // component ids sort ahead of the language-prefixed symbol ids.
-    expect(result.added[0]?.from).toBe("billing")
-    expect(result.added[1]?.from).toBe("ts:src/a.ts#caller")
-  })
-
-  it("emits pure removed when a symbol-level edge disappears from head", () => {
-    const before = dependency({
-      from: "ts:src/a.ts#caller",
-      to: "ts:src/util.ts#helper",
-      via: "call",
-      direction: "outbound",
-      effect: null,
-    })
-    const result = diffDependencies([before], [], NO_LOSSES)
-    expect(result.removed).toHaveLength(1)
-    expect(result.added).toEqual([])
+    const za = dependency({ from: "z", to: "a" })
+    const az = dependency({ from: "a", to: "z" })
+    const ab = dependency({ from: "a", to: "b" })
+    expect(diffDependencies([], [symbolEdge, za, az, ab], NO_LOSSES).added).toEqual([
+      ab,
+      az,
+      symbolEdge,
+      za,
+    ])
   })
 })

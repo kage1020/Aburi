@@ -17,7 +17,9 @@
       "!**/src/generated",
       "!pnpm-lock.yaml",
       "!schema",
-      "!packages/e2e-integration/fixtures",
+      "!packages/cli/test/e2e/projects",
+      "!examples/*/before",
+      "!examples/*/after",
       "!benchmarks/*/results"
     ]
   },

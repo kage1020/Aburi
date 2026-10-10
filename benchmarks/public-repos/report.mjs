@@ -1,30 +1,8 @@
-/**
- * Everything the harness decides without touching the disk: which arguments and which
- * repositories are acceptable, whether a measured run counts as a measurement, and how a
- * finished sweep renders.
- *
- * Split out of `run.mjs` so those decisions can be tested against the committed samples.
- * `run.mjs` keeps the clones, the child processes and the writes.
- */
 import { tmpdir } from "node:os"
 import { posix, resolve, win32 } from "node:path"
 
-/**
- * The exit codes a *completed* scan can return. 0 is clean and 3 is a tripped gate — the run
- * finished, wrote its IR, and reported that something in the workspace was not clean
- * (`cli-spec.md`). `zod` exits 3 on every run here because one file's extraction throws,
- * and its numbers are real; flattening that to "failed" would discard the measurement.
- * 1 (runtime) and 2 (input) mean the opposite: there is no answer to record.
- */
 const COMPLETED_EXIT_CODES = new Set([0, 3])
 
-/**
- * Why this run cannot be counted as a measurement, or `null` if it can.
- *
- * `irWritten` has to be observed *after* the harness removed the previous run's IR. Without
- * that removal a run that dies leaves its predecessor's file in place, and the hash taken
- * from it makes the sweep look deterministic having compared nothing.
- */
 export function scanRunFault(measurement, irWritten) {
   if (measurement.wallMs == null) return measurement.failure ?? "no measurement line"
   if (!COMPLETED_EXIT_CODES.has(measurement.exitCode)) return `exit ${measurement.exitCode}`
@@ -38,11 +16,6 @@ export function median(values) {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
 }
 
-/**
- * The measured runs reduced to the row the report prints — or the reason there is no row.
- * One faulted run condemns the repository rather than being averaged out of sight: a sweep
- * that quietly measured two runs where three were asked for is not the sweep in the header.
- */
 export function summariseScans(runs, options = {}) {
   for (const [index, entry] of runs.entries()) {
     const fault = scanRunFault(entry.measurement, entry.irWritten)
@@ -55,13 +28,7 @@ export function summariseScans(runs, options = {}) {
   const exitCodes = runs.map((entry) => entry.measurement.exitCode)
   return {
     runs: runs.length,
-    // Still written so every month's sample has the same shape for anything diffing them;
-    // `exitCodes` is what the report reads.
     exitCode: exitCodes[exitCodes.length - 1],
-    /**
-     * Every run's, because 0 and 3 are both a completed run and nothing above stops three runs
-     * disagreeing between them. `exitCode` alone would keep the last and lose the disagreement.
-     */
     exitCodes,
     wallMsSamples,
     wallMsMedian,
@@ -70,26 +37,12 @@ export function summariseScans(runs, options = {}) {
     peakRssKb: Math.max(...runs.map((entry) => entry.measurement.maxRssKb)),
     filesPerSecond: totalFiles == null ? null : totalFiles / (wallMsMedian / 1000),
     irHash: hashes[0],
-    // Every run's hash, so `deterministic` can be re-derived from the results file alone.
     irHashes: hashes,
-    /**
-     * `--no-timestamp` removes the only intentionally varying field, so two runs over an
-     * unchanged tree must serialise to the same bytes — the single-threaded half of
-     * performance.md Rule PF-11. One run compares nothing, and `[x].every(...)` is
-     * true for the same reason `[].every(...)` is, so it reports unmeasured rather than a tick.
-     */
     deterministic: hashes.length < 2 ? null : hashes.every((hash) => hash === hashes[0]),
     warnings,
   }
 }
 
-/**
- * The absolute paths a run's output carries: the harness work directory, and the throwaway
- * worktree `aburi diff` checks the base ref out into, whose suffix is random per run. Both
- * belong to the machine that measured rather than to the measurement, so a results file that
- * keeps them diffs on them every month and pins one machine's scratch path in the repository
- * for good.
- */
 export function scrubPaths(text, workDir) {
   const variants = new Set([workDir, workDir.replaceAll("\\", "/"), workDir.replaceAll("/", "\\")])
   let scrubbed = text
@@ -97,12 +50,6 @@ export function scrubPaths(text, workDir) {
   return scrubbed.replace(/\S*aburi-worktree-[A-Za-z0-9]+/g, "<base-worktree>")
 }
 
-/**
- * How many files the scan recovered a parse error in. These reach the IR rather than
- * `stats.skippedFiles`, so `Files lost` counts none of them and no timing column can see them
- * either — the count exists only in the warning the CLI prints. A diff prints one for the base
- * and one for the head, hence the maximum rather than the first.
- */
 export function countRecoverableParseErrors(warnings) {
   const counts = [...warnings.matchAll(/(\d+) file\(s\) had recoverable parse errors/g)].map(
     (match) => Number(match[1]),
@@ -110,13 +57,6 @@ export function countRecoverableParseErrors(warnings) {
   return counts.length === 0 ? 0 : Math.max(...counts)
 }
 
-/**
- * Whether `candidate` is `root` or sits inside it.
- *
- * A prefix comparison on the string is wrong twice: it calls the sibling `Aburi-bench` a child,
- * and on Windows it misses a path that differs only in case, which is the same directory.
- * `relative()` answers both, and it is the platform's own answer about its own paths.
- */
 export function containsPath(root, candidate, platform = process.platform) {
   const api = platform === "win32" ? win32 : posix
   const rel = api.relative(root, candidate)
@@ -138,11 +78,6 @@ function requireCount(argv, index, flag, minimum) {
   return value
 }
 
-/**
- * Every flag is validated here rather than where it is read, because the alternative costs the
- * whole sweep: `--runs abc` reaches the scan loop as `NaN`, runs zero iterations, and throws on
- * an empty array after the build and nine clones have already been paid for.
- */
 export function parseArgs(argv) {
   const options = {
     only: null,
@@ -163,11 +98,6 @@ export function parseArgs(argv) {
   return options
 }
 
-/**
- * An id the manifest does not carry is a typo, not a filter. Reporting a one-row sweep for
- * `--only "zod, nest"` — where the space makes the second id unknown — would record measuring
- * one repository as if that had been the intent.
- */
 export function resolveRepos(manifest, only) {
   if (only === null) return manifest.repos
   const known = manifest.repos.map((repo) => repo.id)
@@ -201,10 +131,6 @@ function dashes(count) {
   return Array.from({ length: count }, () => "—")
 }
 
-/**
- * The scan's exit code, or every run's when they disagree. Samples written before
- * `exitCodes` was recorded carry only the last run's.
- */
 function formatExitCodes(scan) {
   const codes = scan.exitCodes ?? [scan.exitCode]
   if (codes.every((code) => code === codes[0])) return formatCount(codes[0])

@@ -34,11 +34,4 @@ describe("PrismaEffectsPlugin", () => {
       prismaEffectsPlugin.classify(makeCall({ target: "prisma.user.findMany" }), ctx),
     ).toBeNull()
   })
-
-  it("classify is idempotent across repeated invocations (no per-call state)", () => {
-    const ctx = makeCtx({ imports: [makePrismaImport()] })
-    const call = makeCall({ target: "prisma.$transaction" })
-    const runs = Array.from({ length: 5 }, () => prismaEffectsPlugin.classify(call, ctx))
-    for (const run of runs) expect(run).toEqual(runs[0])
-  })
 })

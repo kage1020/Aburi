@@ -1,29 +1,3 @@
-/**
- * LSP enrichment pass (lsp-enrichment.md). Consumes the language plugin's
- * `IRSymbol[]` output, spawns one LSP server per configured language, opens each
- * file once, and refines a strictly bounded set of IR fields:
- *
- *   - SourceRange.startColumn / endColumn (from documentSymbol)
- *   - Signature.inferredThrows            (from hover @throws parsing)
- *   - receiverHints                       (this. / super. resolution, fed to callgraph)
- *
- * The pass is a no-op when `lsp.enabled !== true`, when no server is configured
- * for any language present in the symbol set, or when a server fails to start.
- * Determinism is guaranteed by processing files in ascending path
- * order, sorting each file's jobs by (Symbol id, call line, call target), and
- * — because concurrent workers finish in whatever order the server answers —
- * holding every job's response until all of them have stopped and only then
- * applying them in that sorted order. So the content of what is written, and
- * the order it is written in, do not depend on arrival. *Which* jobs get that
- * far still does: the per-file budget and the fallback-tier escalation both read
- * the clock, and a file that runs out mid-way keeps what it had. That axis is the
- * fallback tiers', not this one's. Interface-typed receiver resolution (call-resolution.md) is
- * deferred until `IRSymbol.implements` lands; the `implementerHints` output
- * channel exists but is populated as an empty map today so downstream
- * consumers can flip on interface resolution without an API change.
- */
-
-import { pathToFileURL } from "node:url"
 import type {
   Config,
   Symbol as IRSymbol,
@@ -32,33 +6,22 @@ import type {
   LspServerConfig,
   SymbolId,
 } from "@aburi/types"
-import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
-import { makeCallSiteKey, receiverHead } from "../call-site"
 import { groupBy } from "../collections"
-import { lastQnameSegment } from "../fingerprint/short-name"
-import { trySymbolId } from "../id"
 import { silentLogger } from "../logger"
-import { compareBy, compareCodeUnit } from "../order"
+import { compareBy } from "../order"
 import {
   createLspClient,
   errorMessage,
+  failureReason,
   isLspFailure,
   type LspClient,
-  type LspFailure,
   SHUTDOWN_GRACE_MS,
 } from "./client"
-import { createFallbackState, type FallbackState } from "./fallback"
-import { requestDocumentSymbols, requestHover } from "./requests"
-import {
-  countProducerRejection,
-  createStatsBuilder,
-  finalizeStats,
-  type LspProducerStats,
-  type LspStatsBuilder,
-} from "./stats"
+import { createFallbackState } from "./fallback"
+import { enrichLanguageFiles } from "./file-pass"
+import { createStatsBuilder, finalizeStats, type LspProducerStats } from "./stats"
 import { type SpawnedServer, spawnStdioServer } from "./transport"
 
-/** A file the caller read: what was in it, and the name it was read under. */
 export interface ReadFile {
   content: string
   /** Relative to `workspaceRoot`, as the filesystem spells it — not as the Document does. */
@@ -68,34 +31,10 @@ export interface ReadFile {
 export interface EnrichmentInput {
   symbols: readonly IRSymbol[]
   workspaceRoot: string
-  /**
-   * The files the caller read, keyed by Document path.
-   *
-   * Both halves of each entry are needed and they are one entry rather than two maps, because
-   * every file that has content also has a spelling on disk and the two cannot go out of step
-   * — a second map keyed the same way is an agreement nothing enforces, and a missing key
-   * there would be an invariant violation dressed as a fallback.
-   *
-   * `content` is what `didOpen` pushes. `fsPath` is the spelling the filesystem stores the file
-   * under, which is what the `file://` URI is built from: a URI is a filesystem address, and a
-   * server is free to read the project itself — tsserver does — so one told about a URI nothing
-   * resolves to answers about a document it invented rather than about the file. The two differ
-   * only for a name that was not already in NFC.
-   */
   fileContents: ReadonlyMap<string, ReadFile>
   lspConfig: Config["lsp"] | undefined
   logger?: Logger
-  /**
-   * Injected server factory. Real production always uses the default (spawn).
-   * Tests inject an in-memory server + client pair so no child process is needed.
-   */
   serverFactory?: ServerFactory
-  /**
-   * Injected clock for deterministic tests. Defaults to `performance.now`,
-   * which is monotonic — the per-file budget measures elapsed time, and a
-   * wall clock stepped backwards by NTP would make `now() - start` negative
-   * and the budget unable to fire, which is the hang it exists to prevent.
-   */
   now?: () => number
 }
 
@@ -103,34 +42,14 @@ export interface EnrichmentResult {
   symbols: IRSymbol[]
   receiverHints: ReadonlyMap<string, ReceiverHint>
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
-  /**
-   * The producer half of `stats.lspEnrichment` (lsp-enrichment.md), or `undefined` when
-   * the pass was a no-op. `hintsConsumed` and two of the five rejection buckets are the
-   * resolver's to fill and are `0` here; `withHintUsage` folds its report in. A caller
-   * assembling the passes itself has to do that fold, or those three stay at `0` in the IR.
-   */
   stats: LspProducerStats | undefined
 }
 
-/**
- * Per-call-site hint the resolver consults when the untyped tier gives up.
- * `targetSymbolId` names the callee Symbol the LSP tier resolved to — that is,
- * the id of the member function/method, not the containing class — so the
- * resolver can emit an edge without an additional lookup. Interface-typed
- * receiver hints are not produced today (see file header), so `kind` is
- * currently always `"this"` or `"super"`; the union keeps room for the
- * follow-up without another type break.
- */
 export interface ReceiverHint {
   kind: "this" | "super"
   targetSymbolId: SymbolId
 }
 
-/**
- * A `ServerFactory` produces a ready-to-use `LspClient` for a given language +
- * server config, given the workspace root and initialize timeout. Tests inject
- * mocks; production uses the default (spawn + `vscode-jsonrpc`).
- */
 export type ServerFactory = (
   language: LanguageId,
   serverConfig: LspServerConfig,
@@ -148,72 +67,63 @@ const CLIENT_CAPABILITIES = {
 } as const
 
 export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentResult> {
-  const emptyResult: EnrichmentResult = {
-    symbols: [...input.symbols],
-    receiverHints: new Map(),
-    implementerHints: new Map(),
-    stats: undefined,
+  const servers = input.lspConfig?.enabled === true ? input.lspConfig.servers : undefined
+  if (servers === undefined) {
+    return {
+      symbols: [...input.symbols],
+      receiverHints: new Map(),
+      implementerHints: new Map(),
+      stats: undefined,
+    }
   }
-  if (input.lspConfig?.enabled !== true) return emptyResult
-  const servers = input.lspConfig.servers
-  if (servers === undefined) return emptyResult
 
   const logger: Logger = input.logger ?? silentLogger
   const stats = createStatsBuilder(true)
   const fallback = createFallbackState()
+  const workingSymbols = input.symbols.map(cloneSymbol)
+  const workingById = new Map(workingSymbols.map((symbol) => [symbol.id, symbol]))
+  const receiverHints = new Map<string, ReceiverHint>()
+  const factory = input.serverFactory ?? defaultServerFactory
+  const disableLanguage = (language: LanguageId, warning: string): void => {
+    logger.warn?.(warning)
+    stats.languagesDisabled.add(language)
+  }
 
   const symbolsByLanguage = groupBy(input.symbols, (symbol) => symbol.language)
-  const workingSymbols: IRSymbol[] = input.symbols.map((s) => cloneSymbol(s))
-  const workingById = new Map<SymbolId, IRSymbol>()
-  for (const s of workingSymbols) workingById.set(s.id, s)
-
-  const receiverHints = new Map<string, ReceiverHint>()
-
-  const factory = input.serverFactory ?? defaultServerFactory
-
   for (const [language, langSymbols] of [...symbolsByLanguage].sort(compareBy(([id]) => id))) {
     const serverConfig = servers[language]
     if (serverConfig === undefined) continue
 
-    let client: LspClient | null = null
+    let client: LspClient | null
     try {
-      const raw = factory(language, serverConfig, input.workspaceRoot)
-      client = raw instanceof Promise ? await raw : raw
+      client = await factory(language, serverConfig, input.workspaceRoot)
     } catch (error) {
-      logger.warn?.(`[aburi:lsp] failed to spawn server for ${language}: ${errorMessage(error)}`)
-      fallback.onLanguageDisabled(language)
-      stats.languagesDisabled.add(language)
+      disableLanguage(
+        language,
+        `[aburi:lsp] failed to spawn server for ${language}: ${errorMessage(error)}`,
+      )
       continue
     }
     if (client === null) {
-      logger.warn?.(`[aburi:lsp] server not available for ${language}`)
-      fallback.onLanguageDisabled(language)
-      stats.languagesDisabled.add(language)
+      disableLanguage(language, `[aburi:lsp] server not available for ${language}`)
       continue
     }
 
-    // Opens where the server exists and nothing has been asked of it yet. The two branches
-    // above are outside it on purpose: neither has a server to shut down. From here every
-    // exit — a reported failure, a thrown one, a clean pass — leaves through the `finally`,
-    // because what is on the other side of it is a child process.
     try {
-      const initTimeout = serverConfig.initializeTimeoutMs ?? 10000
       const initResult = await client.initialize({
         workspaceRoot: input.workspaceRoot,
         initializationOptions: serverConfig.initializationOptions ?? {},
         capabilities: CLIENT_CAPABILITIES,
-        timeoutMs: initTimeout,
+        timeoutMs: serverConfig.initializeTimeoutMs ?? 10000,
       })
       if (isLspFailure(initResult)) {
-        logger.warn?.(
+        disableLanguage(
+          language,
           `[aburi:lsp] initialize failed for ${language} (${failureReason(initResult)}); falling back to untyped tier for this language`,
         )
-        fallback.onLanguageDisabled(language)
-        stats.languagesDisabled.add(language)
         continue
       }
-
-      await processLanguage({
+      await enrichLanguageFiles({
         language,
         serverConfig,
         client,
@@ -225,34 +135,18 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
         fallback,
         receiverHints,
         logger,
-        now: input.now ?? monotonicNow,
+        now: input.now ?? (() => performance.now()),
       })
     } catch (error) {
-      // An unexpected throw is the per-language fallback tier, not the end of the scan: this
-      // pass is optional by design, and the whole of what it can lose is the typed-tier
-      // values for one language. Letting it out would take the Document with it — every
-      // Symbol of every language, over an enrichment nobody asked to be load-bearing.
-      //
-      // Whatever this language enriched before the throw is kept, per the IR degradation rule
-      // for SourceRange:
-      // a fallback leaves what was already written alone and leaves the rest at the
-      // Tree-sitter tier's `null`. A half-enriched file is still a file whose columns are right.
-      //
-      // The warning is the one fallback rule 3 allows, and it says what the reader gets rather than
-      // whose fault it is: from here a broken server and a bug in this package are the same
-      // event, and by the time a throw has survived every guard `processLanguage` puts on the
-      // client, the second is the likelier of the two. The debug line beside it carries what
-      // tells them apart, on a channel that is not a CLI warning and so is not rule 3's to count.
-      logger.warn?.(
+      disableLanguage(
+        language,
         `[aburi:lsp] enrichment for ${language} threw (${errorMessage(error)}); falling back to untyped tier for this language`,
       )
       logger.debug?.(`[aburi:lsp] enrichment for ${language} threw`, {
         language,
-        error: describeErrorClass(error),
-        stack: errorStack(error),
+        error: error instanceof Error ? error.name : typeof error,
+        stack: error instanceof Error ? error.stack : undefined,
       })
-      fallback.onLanguageDisabled(language)
-      stats.languagesDisabled.add(language)
     } finally {
       await safeShutdown(client, language, logger)
     }
@@ -261,470 +155,13 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
   return {
     symbols: workingSymbols,
     receiverHints,
-    // Interface tier deferred (see file header) — always empty for now.
     implementerHints: new Map(),
     stats: finalizeStats(stats),
   }
 }
 
-interface ProcessLanguageInput {
-  language: LanguageId
-  serverConfig: LspServerConfig
-  client: LspClient
-  symbols: readonly IRSymbol[]
-  workingById: Map<SymbolId, IRSymbol>
-  fileContents: ReadonlyMap<string, ReadFile>
-  workspaceRoot: string
-  stats: LspStatsBuilder
-  fallback: FallbackState
-  receiverHints: Map<string, ReceiverHint>
-  logger: Logger
-  now: () => number
-}
-
-async function processLanguage(input: ProcessLanguageInput): Promise<void> {
-  const symbolsByFile = groupBy(input.symbols, (symbol) => symbol.source.file)
-  const filesSorted = [...symbolsByFile.keys()].sort(compareCodeUnit)
-
-  const requestTimeout = input.serverConfig.requestTimeoutMs ?? 500
-  const fileBudget = input.serverConfig.fileBudgetMs ?? 2000
-  const concurrency = input.serverConfig.concurrency ?? 8
-
-  for (const file of filesSorted) {
-    if (input.fallback.isLanguageDisabled(input.language)) break
-    const read = input.fileContents.get(file)
-    if (read === undefined) continue
-    const content = read.content
-
-    const uri = fileUriFor(input.workspaceRoot, read.fsPath)
-    const languageIdForOpen = languageIdForLspOpen(input.language)
-    const fileSymbols = symbolsByFile.get(file) ?? []
-
-    const fileStart = input.now()
-    let fileFellBack = false
-
-    // Notification bounds come from the timeouts table; `didOpen` draws on the file
-    // budget. A write that stalls, is rejected, or is addressed to a server
-    // that has already exited is a per-file fallback. The try/catch covers
-    // injected `ServerFactory` clients, which are free to throw where
-    // `createLspClient` reports.
-    try {
-      const opened = await input.client.didOpen(uri, languageIdForOpen, content, fileBudget)
-      if (isLspFailure(opened)) {
-        input.logger.warn?.(`[aburi:lsp] didOpen failed for ${file} (${failureReason(opened)})`)
-        fileFellBack = true
-      }
-    } catch (error) {
-      input.logger.warn?.(`[aburi:lsp] didOpen failed for ${file}: ${errorMessage(error)}`)
-      fileFellBack = true
-    }
-
-    // A `didOpen` that came back healthy may still have consumed the budget on
-    // the way. Without this check the pass would issue a `documentSymbol`
-    // request the file can no longer pay for — the budget is re-read after that
-    // request and before each job, but never before the first one.
-    if (!fileFellBack && overBudget(input.now, fileStart, fileBudget)) fileFellBack = true
-
-    if (!fileFellBack) {
-      input.stats.requestsIssued += 1
-      const docSymbols = await requestDocumentSymbols(input.client, uri, requestTimeout)
-      const requestOk = !isLspFailure(docSymbols)
-      if (isLspFailure(docSymbols)) accountForFailure(input.stats, docSymbols)
-      const requestOutcome = input.fallback.onRequest(file, requestOk)
-      if (requestOutcome.escalate) fileFellBack = true
-      if (requestOk) {
-        applyDocumentSymbols(
-          docSymbols as DocumentSymbol[] | SymbolInformation[],
-          fileSymbols,
-          input.workingById,
-        )
-      }
-    }
-
-    if (!fileFellBack && overBudget(input.now, fileStart, fileBudget)) fileFellBack = true
-
-    if (!fileFellBack) {
-      const jobs = buildRequestJobs(fileSymbols, content)
-      // Responses are held, not applied, while workers are running: determinism wants the cache
-      // consumed in job order, and a write issued from inside a worker would take its order
-      // from the server's pace instead (no live collision depends on this today; it keeps a
-      // future non-merging field in `applyJobResult` from reintroducing arrival order).
-      const responses: unknown[] = new Array(jobs.length)
-      const answered: boolean[] = new Array(jobs.length).fill(false)
-      try {
-        await runJobsWithConcurrency(jobs, concurrency, async (job, index) => {
-          if (fileFellBack) return
-          if (overBudget(input.now, fileStart, fileBudget)) {
-            fileFellBack = true
-            return
-          }
-          input.stats.requestsIssued += 1
-          const result = await executeJob(job, input.client, uri, requestTimeout)
-          const jobOk = !isLspFailure(result)
-          if (isLspFailure(result)) accountForFailure(input.stats, result)
-          const outcome = input.fallback.onRequest(file, jobOk)
-          if (outcome.escalate) fileFellBack = true
-          if (jobOk) {
-            responses[index] = result
-            answered[index] = true
-          }
-        })
-      } finally {
-        // Also on the way out of a throw (degradation keeps what a fallback already earned; every
-        // worker has stopped by now). Each apply catches for itself so a throw here can
-        // neither replace the exception unwinding through this `finally` nor cost more than
-        // its own result.
-        for (let index = 0; index < jobs.length; index += 1) {
-          const job = jobs[index]
-          if (job === undefined || !answered[index]) continue
-          try {
-            applyJobResult(
-              job,
-              responses[index],
-              input.receiverHints,
-              input.workingById,
-              input.stats,
-            )
-          } catch (error) {
-            input.logger.debug?.(
-              `[aburi:lsp] applying hover for ${file}:${job.callLine} threw: ${errorMessage(error)}`,
-            )
-          }
-        }
-      }
-    }
-
-    // `didClose` draws on the per-request budget. Its outcome cannot
-    // change what this file produced, so it is logged and nothing more — it
-    // moves no counter and escalates nothing. A transport broken for good
-    // fails the next file's `didOpen` instead, which is where fallback escalation
-    // starts.
-    try {
-      const closed = await input.client.didClose(uri, requestTimeout)
-      if (isLspFailure(closed)) {
-        input.logger.debug?.(`[aburi:lsp] didClose failed for ${file} (${failureReason(closed)})`)
-      }
-    } catch (error) {
-      input.logger.debug?.(`[aburi:lsp] didClose failed for ${file}: ${errorMessage(error)}`)
-    }
-
-    if (fileFellBack) {
-      input.stats.filesFellBack += 1
-    } else {
-      input.stats.filesEnriched += 1
-    }
-    const closeOutcome = input.fallback.onFileClose(file, input.language, fileFellBack)
-    if (closeOutcome.escalate) {
-      input.fallback.onLanguageDisabled(input.language)
-      input.stats.languagesDisabled.add(input.language)
-      input.logger.warn?.(
-        `[aburi:lsp] disabling LSP for ${input.language} after 5 consecutive file fallbacks`,
-      )
-      break
-    }
-  }
-}
-
-type RequestJob = {
-  kind: "this-super-hover"
-  symbolId: SymbolId
-  callLine: number
-  column: number
-  /**
-   * The originating `Call.target`, verbatim. It is the third component of the
-   * call-site key the hint is filed under, and without it a line carrying more
-   * than one call cannot say which of them a hint answers for.
-   */
-  target: string
-  calleeText: string
-  receiverKind: "this" | "super"
-}
-
-/**
- * Build the LSP request job list for a single file. Only `this.<method>` /
- * `super.<method>` shapes emit a hover job today — interface-typed receiver
- * resolution (call-resolution.md) needs an `IRSymbol.implements` seam
- * that is not yet in the IR, so we do not spend budget on `typeDefinition`
- * requests whose result we cannot act on. When that seam lands the interface
- * job type returns here.
- *
- * Exactly two segments, because `findMethodColumn` hovers a `<head>.<member>`
- * pair and a longer chain has no pair that names its callee. For
- * `this.emitter.emit` the pair built here is `this.emitter`, which hovers the
- * property; the pair holding the callee, `this.emit`, is on the line only
- * where another call put it (`this.emit(a); this.emitter.emit(b)`), and then
- * it hovers that call. Either way the hint that comes back is well-formed,
- * correctly keyed, `kind`-consistent — and names a callee the call site never
- * reaches. Neither lock in `resolveViaLspHint` can see that, because both are
- * about the target and the target is right; only declining the request stops
- * it. Such a call keeps the `resolved: null` and the `dynamic` diagnostic it
- * has without LSP, which is the honest answer until `findMethodColumn` can
- * address the whole chain.
- */
-function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): RequestJob[] {
-  const jobs: RequestJob[] = []
-  const lines = content.split(/\r?\n/)
-  const maskedLines = new Map<number, string>()
-  for (const symbol of fileSymbols) {
-    for (const call of symbol.calls) {
-      if (call.resolved !== null) continue
-      const line = lines[call.line - 1]
-      if (line === undefined) continue
-      const segments = call.target.split(".").filter((s) => s.length > 0)
-      if (segments.length !== 2) continue
-      const head = receiverHead(call.target)
-      const method = segments[1] as string
-      if (head !== "this" && head !== "super") continue
-      let masked = maskedLines.get(call.line)
-      if (masked === undefined) {
-        masked = maskStringsAndComments(line)
-        maskedLines.set(call.line, masked)
-      }
-      const column = findMethodColumn(line, masked, head, method)
-      if (column === null) continue
-      jobs.push({
-        kind: "this-super-hover",
-        symbolId: symbol.id,
-        callLine: call.line,
-        column,
-        target: call.target,
-        calleeText: method,
-        receiverKind: head,
-      })
-    }
-  }
-  jobs.sort(compareRequestJob)
-  return jobs
-}
-
-/**
- * The deterministic consumption order: Symbol id ascending, then call-site line
- * ascending, then call target — the three components of a job's identity. Two
- * jobs share all three only for two calls to one target on one line, and those
- * hover the same position, so their order cannot change what is applied.
- *
- * On the scan path this sort changes nothing: `scan.ts` sorts `symbols` by id
- * before calling `enrichWithLsp`, and `calls[]` reaches here in `(line, then
- * target)` order from `pipeline.ts`'s stable re-sort by line. It is here
- * because `enrichWithLsp` is public API and may be handed symbols in any order,
- * and a determinism guarantee that holds only for one caller's habits is not
- * one — not because the pipeline's order is wrong.
- */
-function compareRequestJob(a: RequestJob, b: RequestJob): number {
-  return (
-    compareCodeUnit(a.symbolId, b.symbolId) ||
-    a.callLine - b.callLine ||
-    compareCodeUnit(a.target, b.target)
-  )
-}
-
-async function executeJob(
-  job: RequestJob,
-  client: LspClient,
-  uri: string,
-  timeoutMs: number,
-): Promise<unknown | LspFailure> {
-  const position: Position = { line: job.callLine - 1, character: job.column }
-  return await requestHover(client, uri, position, timeoutMs)
-}
-
-/**
- * Turn one hover answer into a receiver hint, or say why it could not be one.
- *
- * Each early return is a way for the typed tier to do nothing while every request counter
- * reports a healthy run: a hover that answers on time with no readable body is
- * `requestsIssued += 1` and nothing else, and its file still lands in `filesEnriched`. The
- * bucket each one writes is the only record that the answer arrived and was unusable
- * (lsp-enrichment.md).
- */
-function applyJobResult(
-  job: RequestJob,
-  result: unknown,
-  receiverHints: Map<string, ReceiverHint>,
-  workingById: Map<SymbolId, IRSymbol>,
-  stats: LspStatsBuilder,
-): void {
-  const caller = workingById.get(job.symbolId)
-  // Not a rejection and not counted as one: jobs are built from the same Symbols this map
-  // holds, so a miss here is an internal inconsistency rather than something the server did.
-  if (caller === undefined) return
-  const text = extractHoverPayload(result)
-  if (text === null) {
-    countProducerRejection(stats, "unparseableHover")
-    return
-  }
-  const ownerClassName = extractOwnerClassName(text)
-  if (ownerClassName === null) {
-    countProducerRejection(stats, "ownerClassNotFound")
-    return
-  }
-  const ownerClassId = findClassSymbolId(caller, ownerClassName, workingById)
-  if (ownerClassId === null) {
-    countProducerRejection(stats, "ownerClassNotFound")
-    return
-  }
-  const memberId = findMemberSymbolId(
-    caller.language,
-    caller.source.file,
-    ownerClassName,
-    job.calleeText,
-    workingById,
-  )
-  if (memberId === null) {
-    countProducerRejection(stats, "memberNotFound")
-    return
-  }
-  // Counted before the write, not inside it: the hover was read all the way to a callee
-  // either way, and it is that reading — not which of two identical call sites reached the
-  // key first — that the producer sum in the stats extension accounts for.
-  stats.hintsProduced += 1
-  // First hint for a call site wins. Results are applied in job order, so
-  // "first" is the lowest-sorted job rather than the quickest response — and
-  // the only jobs that can collide now are two identical call sites, which
-  // hover at the same position and therefore answer the same thing anyway.
-  // The guard is what makes that last sentence something other than a promise.
-  const key = makeCallSiteKey(caller.source.file, job.callLine, job.target)
-  if (!receiverHints.has(key)) {
-    receiverHints.set(key, { kind: job.receiverKind, targetSymbolId: memberId })
-  }
-  const throws = extractInferredThrowsFromHover(text)
-  if (throws.length > 0) appendInferredThrows(caller, throws)
-}
-
-/**
- * Apply documentSymbol results: match by name+line to populate startColumn/endColumn.
- * DocumentSymbol range is 0-based; our SourceRange columns are 1-based.
- */
-function applyDocumentSymbols(
-  entries: DocumentSymbol[] | SymbolInformation[],
-  fileSymbols: readonly IRSymbol[],
-  workingById: Map<SymbolId, IRSymbol>,
-): void {
-  const flat: Array<{
-    name: string
-    startLine: number
-    startCol: number
-    endLine: number
-    endCol: number
-  }> = []
-  const push = (name: string, range: { start: Position; end: Position }): void => {
-    flat.push({
-      name,
-      startLine: range.start.line + 1,
-      startCol: range.start.character + 1,
-      endLine: range.end.line + 1,
-      endCol: range.end.character + 1,
-    })
-  }
-  // An explicit stack rather than recursion. The depth of this tree is the server's to
-  // choose, and a deep one used to arrive as a `RangeError` thrown out of the pass — which,
-  // before the language boundary existed, ended the scan. Bounding the depth instead would
-  // trade the crash for silently dropped entries.
-  //
-  // Children are pushed in reverse so they come off in source order: matching below takes the
-  // first entry at a given line and name, so the visit order decides which columns a Symbol
-  // gets. That order is pre-order, parent before children — the same one the recursion had.
-  const stack: (DocumentSymbol | SymbolInformation)[] = [...entries].reverse()
-  while (stack.length > 0) {
-    const entry = stack.pop()
-    // Unreachable under the loop condition; it is here because the index is unchecked. `continue`
-    // rather than `break` so an impossible entry costs one entry rather than every queued sibling.
-    if (entry === undefined) continue
-    if ("range" in entry) {
-      push(entry.name, entry.range)
-      // `Array.isArray`, not a presence check: `entries` is a cast over the server's JSON, so
-      // the shape is no more the type's to promise than the depth is. A server that serializes
-      // an empty child list as `null` is ordinary, and reading `.length` off it would cost the
-      // whole language its enrichment.
-      const children = (entry as DocumentSymbol).children
-      if (Array.isArray(children)) {
-        for (let i = children.length - 1; i >= 0; i--) {
-          const child = children[i]
-          if (child !== undefined) stack.push(child)
-        }
-      }
-      continue
-    }
-    const info = entry as SymbolInformation
-    if (info.location?.range !== undefined) push(info.name, info.location.range)
-  }
-
-  for (const symbol of fileSymbols) {
-    const match = flat.find(
-      (e) => e.startLine === symbol.source.startLine && lastSegment(symbol.name) === e.name,
-    )
-    if (match === undefined) continue
-    const working = workingById.get(symbol.id)
-    if (working === undefined) continue
-    working.source = {
-      ...working.source,
-      startColumn: match.startCol,
-      endColumn: match.endCol,
-    }
-  }
-}
-
-function appendInferredThrows(symbol: IRSymbol, throws: readonly string[]): void {
-  if (symbol.signature === null || symbol.signature === undefined) return
-  const existing = symbol.signature.inferredThrows ?? []
-  const merged = [...new Set([...existing, ...throws])].sort(compareCodeUnit)
-  if (merged.length === 0) return
-  symbol.signature = { ...symbol.signature, inferredThrows: merged }
-}
-
-/**
- * Run `jobs` through at most `concurrency` workers, and do not return while any of them is
- * still running.
- *
- * A worker that throws is recorded rather than allowed to reject, and the lowest-indexed
- * failure is rethrown once every worker has stopped. Letting a rejection out directly would
- * settle this function while the other workers were mid-request: they would go on writing
- * into the Symbols and the hint map their caller had already returned to *its* caller, and
- * sending requests to a server that had since been shut down. An IR that keeps changing after
- * the pass returns it is the determinism guarantee in lsp-enrichment.md, not untidiness.
- *
- * The remaining jobs are run rather than abandoned, so the set of writes a failing file
- * produces is the same on a rerun. Stopping at the first failure would make it depend on how
- * many workers happened to be in flight, and the cost of finishing is small: `run` re-reads
- * the file's budget and returns early once it is spent. Which failure is reported is decided
- * by job index for the same reason — the wall-clock order of concurrent rejections is not a
- * property of the input.
- */
-async function runJobsWithConcurrency<T>(
-  jobs: readonly T[],
-  concurrency: number,
-  run: (job: T, index: number) => Promise<void>,
-): Promise<void> {
-  if (jobs.length === 0) return
-  const workers = Math.max(1, Math.min(concurrency, jobs.length))
-  let cursor = 0
-  const failures = new Map<number, unknown>()
-  const takers = Array.from({ length: workers }, async () => {
-    while (cursor < jobs.length) {
-      const idx = cursor
-      cursor += 1
-      const job = jobs[idx]
-      if (job === undefined) return
-      try {
-        await run(job, idx)
-      } catch (error) {
-        failures.set(idx, error)
-      }
-    }
-  })
-  await Promise.all(takers)
-  if (failures.size === 0) return
-  const first = Math.min(...failures.keys())
-  throw failures.get(first)
-}
-
 function cloneSymbol(symbol: IRSymbol): IRSymbol {
-  // `signature` and `component` are Class A (ir-schema.md), so the clone writes both
-  // keys unconditionally and normalizes a missing one to `null`. The clone used to preserve
-  // an absent `signature` key verbatim, which made this the one place on a writer path that
-  // still distinguished absence from `null` — reachable only through an input Symbol this
-  // pipeline did not build, and invisible until the IR was serialized.
-  const cloned: IRSymbol = {
+  return {
     ...symbol,
     source: { ...symbol.source },
     component: symbol.component ?? null,
@@ -735,7 +172,6 @@ function cloneSymbol(symbol: IRSymbol): IRSymbol {
     effects: symbol.effects.map((e) => ({ ...e })),
     fingerprint: { ...symbol.fingerprint },
   }
-  return cloned
 }
 
 function cloneSignature(
@@ -757,85 +193,6 @@ function cloneSignature(
   return base
 }
 
-/** `relativePath` is a filesystem path, not a Document one — see `EnrichmentInput.fileContents`. */
-function fileUriFor(workspaceRoot: string, relativePath: string): string {
-  const absolute = normalizeAbsolute(workspaceRoot, relativePath)
-  return pathToFileURL(absolute).toString()
-}
-
-function normalizeAbsolute(workspaceRoot: string, relativePath: string): string {
-  const trimmedRoot =
-    workspaceRoot.endsWith("/") || workspaceRoot.endsWith("\\")
-      ? workspaceRoot.slice(0, -1)
-      : workspaceRoot
-  return `${trimmedRoot}/${relativePath}`
-}
-
-function languageIdForLspOpen(languageId: LanguageId): string {
-  switch (languageId) {
-    case "ts":
-      return "typescript"
-    case "tsx":
-      return "typescriptreact"
-    case "js":
-      return "javascript"
-    case "jsx":
-      return "javascriptreact"
-    default:
-      return languageId
-  }
-}
-
-function monotonicNow(): number {
-  return performance.now()
-}
-
-function overBudget(now: () => number, startMs: number, budgetMs: number): boolean {
-  return now() - startMs > budgetMs
-}
-
-function accountForFailure(stats: LspStatsBuilder, failure: LspFailure): void {
-  if (failure.kind === "timeout") stats.requestsTimedOut += 1
-  else stats.requestsFailed += 1
-}
-
-function failureReason(failure: LspFailure): string {
-  if (failure.kind === "timeout") return "timeout"
-  return `${failure.reason}: ${failure.message}`
-}
-
-/**
- * The two things a message does not carry, for the debug channel.
- *
- * A message alone cannot separate a server that misbehaved from a bug in this package, and
- * from the language boundary the second is the likelier: every call this file makes to a
- * client is already total, so what is left to throw is Aburi's own code. `name` says which
- * kind of failure it was, and the stack says whose file to open.
- */
-function describeErrorClass(error: unknown): string {
-  if (error instanceof Error) return error.name
-  return typeof error
-}
-
-function errorStack(error: unknown): string | undefined {
-  return error instanceof Error ? error.stack : undefined
-}
-
-/**
- * End the language's server, on every path out of the language, without ever becoming the
- * reason the caller failed.
- *
- * The swallow is load-bearing rather than cosmetic: this runs from a `finally` that is often
- * already unwinding, where a throw would replace the diagnostic the reader needs with one
- * about the shutdown. It is not silent, though — a shutdown that fails is a server that may
- * still be running, which is the whole thing this call exists to prevent, so it is said.
- *
- * Bounded for the same reason it is guarded. `LspClient` is a seam callers supply through
- * `EnrichmentInput.serverFactory`, and a `shutdown` that never settles would stop the scan
- * inside a `finally` with nothing to read — every other call this file makes to a client
- * carries a deadline. A hang and a failure leave the reader with the same server still up, so
- * they get the same line.
- */
 async function safeShutdown(
   client: LspClient,
   language: LanguageId,
@@ -857,262 +214,12 @@ async function safeShutdown(
   }
 }
 
-/**
- * How long `safeShutdown` waits for a client to finish shutting down.
- *
- * Three grace periods, which is the longest a client built the way `createLspClient` is can
- * legitimately take: it spends at most one on the shutdown request, one on the `exit`
- * notification, and one waiting before SIGKILL. Past that it is not going to answer.
- */
 const SHUTDOWN_CALL_BUDGET_MS = SHUTDOWN_GRACE_MS * 3
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    // Unreferenced because nothing is waiting on this timer once the shutdown answers, and a
-    // referenced one would hold the process open for the rest of its budget.
     setTimeout(resolve, ms).unref?.()
   })
-}
-
-/**
- * Column (0-based) of `method` in the call `<head>.<method>` on `line`; `masked` is `line`
- * through `maskStringsAndComments`. The needle must stand as its own tokens and lie outside
- * strings and comments: an unrelated occurrence earlier on the line draws the hover, and the
- * hint that comes back names a member the call never reaches with nothing downstream able to
- * tell. `?.` joins the two as `.` does, because a call's target spells `this?.save()` as
- * `this.save`.
- *
- * When `masked` holds no occurrence, the mask may have invented a string or a comment that hides
- * the call — a prose apostrophe read as a quote, in JSX text (`<p>Don't {this.title()}</p>`) or
- * in prose on a line continuing a block comment or template literal opened above — so the raw
- * line's occurrence is taken instead, if it is the line's only one: of several, nothing says
- * which is code. Failing both, `null`, and deliberately no search for a bare `method`, which
- * would land on unrelated occurrences (`console.log(myLog.log)` matching the wrong receiver).
- */
-function findMethodColumn(
-  line: string,
-  masked: string,
-  head: string,
-  method: string,
-): number | null {
-  const needle = new RegExp(
-    `${NO_NAME_BEFORE}${escapeRegExp(head)}\\??\\.${escapeRegExp(method)}${NO_NAME_AFTER}`,
-    "gu",
-  )
-  const match = masked.matchAll(needle).next().value ?? soleMatch(line, needle)
-  if (match === undefined) return null
-  return match.index + match[0].length - method.length
-}
-
-/**
- * What may not touch the needle: a character that continues an identifier (ECMA-262's
- * IdentifierPart) on either side, and before it a `.` that makes the head a property of
- * something else (`ctx.this`, `ctx?.this`), unless that `.` ends a spread's `...`.
- */
-const NO_NAME_BEFORE = String.raw`(?<![\p{ID_Continue}$\u{200C}\u{200D}])(?<!(?<!\.\.)\.)`
-const NO_NAME_AFTER = String.raw`(?![\p{ID_Continue}$\u{200C}\u{200D}])`
-
-function soleMatch(text: string, pattern: RegExp): RegExpExecArray | undefined {
-  const [only, ...rest] = text.matchAll(pattern)
-  return rest.length === 0 ? only : undefined
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-/**
- * `line` with every string literal, template literal and comment it opens blanked to spaces,
- * delimiters included, so indices still line up with the source. A template literal's `${…}` is
- * code, and a call inside it stays visible. Two things are read as code although they are not:
- * a regex literal, quotes and all (`/"/` opens a string), since telling one from a division takes
- * more than a line of text; and a line that continues a block comment or a template literal from
- * the line above, since the reading is one line at a time, which is what the caller has.
- */
-function maskStringsAndComments(line: string): string {
-  const out = line.split("")
-  maskCode(line, 0, out, false)
-  return out.join("")
-}
-
-/**
- * Mask from `start` as code. Inside a template literal's `${…}` (`inInterpolation`), stops at
- * the `}` that closes it and returns its index; otherwise runs to the end of the line.
- */
-function maskCode(line: string, start: number, out: string[], inInterpolation: boolean): number {
-  let depth = 0
-  let i = start
-  while (i < line.length) {
-    const char = line[i]
-    const next = line[i + 1]
-    if (char === "/" && next === "/") {
-      blank(out, i, line.length)
-      return line.length
-    }
-    if (char === "/" && next === "*") {
-      const close = line.indexOf("*/", i + 2)
-      const end = close === -1 ? line.length : close + 2
-      blank(out, i, end)
-      i = end
-      continue
-    }
-    if (char === '"' || char === "'") {
-      const end = quotedEnd(line, i, char)
-      blank(out, i, end)
-      i = end
-      continue
-    }
-    if (char === "`") {
-      i = maskTemplate(line, i, out)
-      continue
-    }
-    if (char === "{") depth += 1
-    if (char === "}") {
-      if (inInterpolation && depth === 0) return i
-      depth -= 1
-    }
-    i += 1
-  }
-  return line.length
-}
-
-/**
- * Mask the template literal opened at `start`, keeping its `${…}` as code. Returns the index
- * just past the literal.
- */
-function maskTemplate(line: string, start: number, out: string[]): number {
-  blank(out, start, start + 1)
-  let i = start + 1
-  while (i < line.length) {
-    const char = line[i]
-    if (char === "`") {
-      blank(out, i, i + 1)
-      return i + 1
-    }
-    if (char === "$" && line[i + 1] === "{") {
-      i = maskCode(line, i + 2, out, true) + 1
-      continue
-    }
-    const end = Math.min(char === "\\" ? i + 2 : i + 1, line.length)
-    blank(out, i, end)
-    i = end
-  }
-  return line.length
-}
-
-/**
- * The index just past the literal opened by `quote` at `start`, honouring backslash escapes; an
- * unclosed quote runs to the end of the line.
- */
-function quotedEnd(line: string, start: number, quote: string): number {
-  let i = start + 1
-  while (i < line.length) {
-    if (line[i] === "\\") {
-      i += 2
-      continue
-    }
-    if (line[i] === quote) return i + 1
-    i += 1
-  }
-  return line.length
-}
-
-function blank(out: string[], from: number, to: number): void {
-  for (let k = from; k < to; k += 1) out[k] = " "
-}
-
-function extractHoverPayload(result: unknown): string | null {
-  if (result === null || result === undefined) return null
-  if (typeof result === "object") {
-    const hover = result as { text?: string }
-    if (typeof hover.text === "string") return hover.text
-  }
-  return null
-}
-
-const OWNER_CLASS_PATTERN = /\((?:method|property|getter|setter)\)\s+([A-Za-z_$][A-Za-z0-9_$]*)\./
-const CLASS_METHOD_PATTERN = /class\s+([A-Za-z_$][A-Za-z0-9_$]*)/
-
-function extractOwnerClassName(hoverText: string): string | null {
-  const primary = OWNER_CLASS_PATTERN.exec(hoverText)
-  if (primary !== null && primary[1] !== undefined) return primary[1]
-  const secondary = CLASS_METHOD_PATTERN.exec(hoverText)
-  if (secondary !== null && secondary[1] !== undefined) return secondary[1]
-  return null
-}
-
-/**
- * A `@throws` / `@throw` / `@exception` tag in hover text, read by the rule `signature.throws`
- * follows (ir-schema.md §7) so that the two fields agree about what one tag declares: the text in
- * its braces, or the target of a `{@link X}` in them; with no braces, the tag's whole text when
- * that is a type name, and nothing for a description. The text runs to the next tag, on a later
- * line or the same one, or to the end of the hover. Only a tag written as in source is read:
- * typescript-language-server renders one as `*@throws* — …`, which this does not match.
- */
-const THROWS_JSDOC_PATTERN =
-  /@(?:throws?|exception)(?![\w$])[ \t]*(?:\{([^}\n]+)\})?((?:(?!\n[ \t]*@|[ \t]@[a-zA-Z])[\s\S])*)/g
-/** `@link X`, `@linkcode X` or `@linkplain X` in a `{…}`, and `X` when it names a declaration. */
-const THROWS_LINK_PATTERN =
-  /^@link(?:code|plain)?\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:[\s|]|$)/
-/** A brace-less tag's whole text, read as a type: an identifier or path, upper-case first. */
-const THROWS_PLAIN_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
-
-function extractInferredThrowsFromHover(hoverText: string): string[] {
-  const out = new Set<string>()
-  for (const match of hoverText.matchAll(THROWS_JSDOC_PATTERN)) {
-    const braced = match[1]?.trim()
-    if (braced !== undefined) {
-      const typed = braced.startsWith("@") ? THROWS_LINK_PATTERN.exec(braced)?.[1] : braced
-      if (typed !== undefined && typed.length > 0) out.add(typed)
-      continue
-    }
-    const text = (match[2] ?? "").replace(/\s+/g, " ").trim()
-    if (THROWS_PLAIN_PATTERN.test(text)) out.add(text)
-  }
-  return [...out]
-}
-
-function findClassSymbolId(
-  caller: IRSymbol,
-  className: string,
-  workingById: Map<SymbolId, IRSymbol>,
-): SymbolId | null {
-  const expectedId = trySymbolId({
-    language: caller.language,
-    file: caller.source.file,
-    qualifiedName: className,
-  })
-  if (expectedId !== null && workingById.has(expectedId)) return expectedId
-  for (const s of workingById.values()) {
-    if (s.language === caller.language && s.name === className && s.kind === "class") {
-      return s.id
-    }
-  }
-  return null
-}
-
-function findMemberSymbolId(
-  language: string,
-  callerFile: string,
-  className: string,
-  methodName: string,
-  workingById: Map<SymbolId, IRSymbol>,
-): SymbolId | null {
-  const idInSameFile = trySymbolId({
-    language,
-    file: callerFile,
-    qualifiedName: `${className}.${methodName}`,
-  })
-  if (idInSameFile !== null && workingById.has(idInSameFile)) return idInSameFile
-  for (const s of workingById.values()) {
-    if (s.language === language && s.name === `${className}.${methodName}`) return s.id
-  }
-  return null
-}
-
-/** What a document symbol names a Symbol by: the segment after its last `.` or `::`. */
-function lastSegment(qualifiedName: string): string {
-  return lastQnameSegment(qualifiedName)
 }
 
 async function defaultServerFactory(
@@ -1126,12 +233,6 @@ async function defaultServerFactory(
   } catch {
     return null
   }
-  // The Node child_process 'error' event (ENOENT / EACCES / …) fires
-  // asynchronously; the sync try above never sees it. Race the spawn against a
-  // short window so the enrichment pass can distinguish "spawn failed" from
-  // "child came up healthy". The window is short so we do not delay the
-  // per-language `initialize` handshake for well-configured servers — a real
-  // spawn resolves the exit-or-error race well under 100 ms.
   const spawnOutcome = await Promise.race([
     server.spawnError,
     new Promise<null>((resolvePromise) => setTimeout(() => resolvePromise(null), 100)),

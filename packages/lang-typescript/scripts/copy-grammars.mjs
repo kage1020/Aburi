@@ -1,74 +1,28 @@
-/**
- * Vendors the tree-sitter grammar wasms this plugin parses with into the package's own
- * `wasm/` directory, and writes the attribution that has to travel with them.
- *
- * This plugin reads two of the grammars `@vscode/tree-sitter-wasm` ships. npm cannot
- * install part of a tarball, so keeping it a runtime dependency would put all the others
- * on every consumer's disk unread — hence a devDependency plus this copy. The measured
- * sizes behind that decision are in the changeset, where they stay true to their date.
- *
- * The destination is the package root rather than `dist/` so that one relative path,
- * `../wasm/`, resolves for both `dist/index.mjs` (published) and `src/parser.ts` (tests,
- * which import the sources directly). Both live exactly one directory below the package
- * root; `parser.ts` states that dependency where it builds the paths.
- *
- * Runs from two places — the package's `build` script, and vitest's `globalSetup`, so
- * that `vitest --watch`, a single-file run and the editor extension all provision the
- * grammars rather than failing on a missing file. Those can run concurrently, so every
- * write lands through a temporary file and a rename.
- */
 import { createHash } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
-import { dirname, join } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const require = createRequire(import.meta.url)
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const destinationDir = join(packageRoot, "wasm")
+const packageWasmDir = join(dirname(dirname(fileURLToPath(import.meta.url))), "wasm")
 
-/**
- * Grammar wasms `EXTENSION_GRAMMAR` in `src/parser.ts` dispatches to.
- *
- * This list and the two `new URL()` literals over there are necessarily separate: those
- * have to stay literals for a bundler to treat them as assets, so they cannot read a
- * shared constant. `test/vendored-grammars.test.ts` in `@aburi/e2e-integration` asserts
- * that every path the parser resolves exists, which is what catches the two drifting.
- */
 const GRAMMARS = ["tree-sitter-typescript.wasm", "tree-sitter-tsx.wasm"]
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex")
 
-/**
- * Read a file, distinguishing "not written yet" from every other failure.
- *
- * Only ENOENT means the destination is absent. EACCES on a `wasm/` restored from a CI
- * cache under another owner, EBUSY from a vitest run holding the file on Windows, EIO on
- * a network drive — collapsing those into "absent" makes the next write fail with a
- * second-order message ("permission denied, copyfile") in place of the one fact the
- * script already had.
- */
 async function readIfPresent(path) {
   try {
     return await readFile(path)
   } catch (error) {
     if (error.code === "ENOENT") return null
     throw new Error(
-      `copy-grammars: cannot read ${path} (${error.code}). Remove ` +
-        `packages/lang-typescript/wasm/ and re-run the build.`,
+      `copy-grammars: cannot read ${path} (${error.code}). Remove ${dirname(path)} and re-run the build.`,
       { cause: error },
     )
   }
 }
 
-/**
- * Write `content` to `destination` unless the identical bytes are already there.
- *
- * Comparing content rather than size is what keeps `NOTICE` honest: a size-only check
- * would let a grammar that changed upstream without changing length stay on disk under a
- * `NOTICE` naming the new version — a false provenance record rather than a stale cache.
- * Since `wasm/` is gitignored, such a file would survive branch switches and `git clean`.
- */
 async function writeIfChanged(destination, content) {
   const existing = await readIfPresent(destination)
   if (existing !== null && digest(existing) === digest(content)) return false
@@ -78,15 +32,6 @@ async function writeIfChanged(destination, content) {
   return true
 }
 
-/**
- * The attribution that ships beside the binaries.
- *
- * Two separate credits are owed and they are not the same one: the licence text upstream
- * distributes is `@vscode/tree-sitter-wasm`'s own, whose copyright line is Microsoft's,
- * while the grammars are tree-sitter's work. Upstream registers only tree-sitter itself
- * in `cgmanifest.json` and ships no grammar-project licence, so this reproduces that
- * registration verbatim rather than implying a licence text it does not have.
- */
 async function buildNotice() {
   const { version } = require("@vscode/tree-sitter-wasm/package.json")
   const { registrations } = require("@vscode/tree-sitter-wasm/cgmanifest.json")
@@ -125,27 +70,34 @@ async function buildNotice() {
   ].join("\n")}\n`
 }
 
-/** Provision `wasm/`, reporting how many files this run actually had to write. */
-export default async function vendorGrammars() {
-  await mkdir(destinationDir, { recursive: true })
+/** Provision `destination`, reporting how many files this run actually had to write. */
+async function vendorGrammarsInto(destination) {
+  await mkdir(destination, { recursive: true })
 
   const written = await Promise.all(
     GRAMMARS.map(async (name) => {
       const source = await readFile(require.resolve(`@vscode/tree-sitter-wasm/wasm/${name}`))
-      return writeIfChanged(join(destinationDir, name), source)
+      return writeIfChanged(join(destination, name), source)
     }),
   )
-  const noticeWritten = await writeIfChanged(join(destinationDir, "NOTICE"), await buildNotice())
+  const noticeWritten = await writeIfChanged(join(destination, "NOTICE"), await buildNotice())
 
   const count = written.filter(Boolean).length
+  const shown = relative(process.cwd(), destination) || "."
   console.log(
     count === 0 && !noticeWritten
-      ? `wasm/ already holds the ${GRAMMARS.length} tree-sitter grammars`
-      : `vendored ${count} tree-sitter grammar(s)${noticeWritten ? " and NOTICE" : ""} into wasm/`,
+      ? `${shown} already holds the ${GRAMMARS.length} tree-sitter grammars`
+      : `vendored ${count} tree-sitter grammar(s)${noticeWritten ? " and NOTICE" : ""} into ${shown}`,
   )
+}
+
+// Vitest's globalSetup calls the default export with its own context, so it takes no destination.
+export default function vendorGrammars() {
+  return vendorGrammarsInto(packageWasmDir)
 }
 
 // Also runnable as a plain script, which is how the `build` script invokes it.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await vendorGrammars()
+  const [destination] = process.argv.slice(2)
+  await vendorGrammarsInto(destination === undefined ? packageWasmDir : resolve(destination))
 }

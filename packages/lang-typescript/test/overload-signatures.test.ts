@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { normalizeAst } from "../src/index"
-import { idsOf, symbolOf, walkOf } from "./fixtures/ctx"
-
-/**
- * An overload signature folds into its implementation's Symbol as a declaration with no body,
- * so the syntax axis sees the overload set; the implementation still leads (LP8f, LP8q).
- * Dropped outright, an overload reached no fingerprint of the Symbol it belongs to: an edit to a
- * method's overload moved only its class's `syntax`, and one to a module-level overload moved
- * nothing at all.
- */
+import { idsOf, normalizedOf, symbolOf, walkOf } from "./fixtures/ctx"
 
 const PARSE = [
   "export interface Config { name: string }",
@@ -29,11 +21,8 @@ const FIND = [
   "",
 ]
 
-async function stringOf(lines: readonly string[], id: string): Promise<string> {
-  return normalizeAst(await symbolOf(lines.join("\n"), id))
-}
+const stringOf = (lines: readonly string[], id: string) => normalizedOf(lines.join("\n"), id)
 
-/** Every id once: two Symbols under one id is what integrity invariant #1 refuses. */
 async function expectDistinctIds(source: string): Promise<void> {
   const ids = await idsOf(source)
   expect(new Set(ids).size).toBe(ids.length)
@@ -44,9 +33,8 @@ describe("an overload signature beside its implementation", () => {
     const parse = await symbolOf(PARSE.join("\n"), "ts:src/a.ts#parse")
 
     expect(parse.signature?.inputs).toEqual([{ name: "input", type: "any" }])
-    // Every scalar is the lead's, the range included, so the overload lines sit outside it.
     expect(parse.source.startLine).toBe(4)
-    expect(parse.derivedBy.filter((token) => token === "declaration-merged")).toHaveLength(1)
+    expect(parse.derivedBy).toEqual(["export-keyword", "declaration-merged"])
     expect(parse.mergedDeclarations?.map((d) => d.fullNode.text)).toEqual([
       "function parse(input: string): Config;",
       "function parse(input: Buffer): Config;",
@@ -76,7 +64,7 @@ describe("an overload signature beside its implementation", () => {
     const find = await symbolOf(FIND.join("\n"), "ts:src/a.ts#R.find")
     expect(find.signature?.inputs).toEqual([{ name: "id", type: "any" }])
     expect(find.source.startLine).toBe(4)
-    expect(find.derivedBy.filter((token) => token === "declaration-merged")).toHaveLength(1)
+    expect(find.derivedBy).toEqual(["class-method", "declaration-merged"])
     expect(find.mergedDeclarations?.map((d) => d.fullNode.text)).toEqual([
       "find(id: string): User",
       "find(id: number): User",
@@ -132,13 +120,12 @@ describe("an overload signature beside its implementation", () => {
     expect(normalizeAst(await symbolOf(retyped, id))).not.toBe(normalizeAst(symbol))
   })
 
-  it("gives overloads with no implementation no Symbol, as tsc's TS2391 has it", async () => {
+  it("gives overloads with no implementation no Symbol, as tsc refuses them", async () => {
     expect(await idsOf("export function lone(a: string): void;\n")).toEqual([])
     expect(await idsOf("export class S {\n  m(a: string): void;\n}\n")).toEqual(["ts:src/a.ts#S"])
   })
 
   it("folds an overload with no implementation into another declaration of its name", async () => {
-    // TS2391 still, and the namespace leads: it is the one declaration in the group that can.
     const source = "function f(a: string): void;\nnamespace f { export const x = 1 }\n"
     const f = await symbolOf(source, "ts:src/a.ts#f")
     expect(f.kind).toBe("namespace")
@@ -154,9 +141,6 @@ describe("an overload signature beside its implementation", () => {
   })
 
   it("does not fold a module-level generator's overloads, which the grammar cannot parse", async () => {
-    // The divergence LP8q records: tree-sitter reads `export function* g(…): T;` as an
-    // expression statement and an ERROR, not a `function_signature`, so there is nothing to
-    // fold, where a class body's `*m(…): T;` folds. Pinned so the answer is a decision.
     const source = [
       "export function* g(a: string): Iterable<string>;",
       "export function* g(a: any) { yield a }",
@@ -175,7 +159,6 @@ describe("a bodyless accessor signature, which tsc rejects outside a declare", (
     expect(x.fullNode.text).toBe("set x(v: number) { store(v) }")
     expect(x.signature?.inputs).toEqual([{ name: "v", type: "number" }])
     expect((await walkOf(source, "ts:src/a.ts#C.x")).calls.map((c) => c.target)).toEqual(["store"])
-    // The class skips the setter's body because the member carries it, so it has none.
     expect((await walkOf(source, "ts:src/a.ts#C")).calls).toEqual([])
   })
 
@@ -195,8 +178,6 @@ describe("a bodyless accessor signature, which tsc rejects outside a declare", (
 
 describe("what an overload's parameter list holds", () => {
   it("stays on the class, which reads the signature whole", async () => {
-    // The member's walk starts from bodies and an overload has none, so a parameter decorator's
-    // arguments go where an implementation's go, and a default (TS2371) goes with them.
     const source =
       "class C { m(@Inject() a: string): void; m(a = compute()): void; m(a: any) { log(a) } }"
 

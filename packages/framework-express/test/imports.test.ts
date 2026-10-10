@@ -1,17 +1,12 @@
-import { parseTypescriptFile } from "@aburi/lang-typescript"
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
+import { extractFile } from "@aburi/test-harness"
+import { makeExtractionCtx } from "@aburi/test-support"
 import type { FrameworkClassifyContext, ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { hasExpressImport, importListMentionsExpress, readExpressFromText } from "../src/imports"
-import { makeCtx } from "./fixtures/symbol"
 
-/**
- * The context the scan hands a framework plugin: the file and its parsed import edges. The
- * scan also puts each edge through NFC first, which leaves an ASCII specifier's edge as it
- * is; the e2e scan in `e2e-integration` goes through that step.
- */
-async function classifyCtx(source: string): Promise<FrameworkClassifyContext> {
-  const parsed = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return { ...makeCtx("src/a.ts", source), imports: parsed.imports }
+async function classifyCtx(source: string, path = "src/a.ts"): Promise<FrameworkClassifyContext> {
+  return (await extractFile(langTypescriptPlugin, path, source)).ctx
 }
 
 async function importsExpress(source: string): Promise<boolean> {
@@ -51,7 +46,6 @@ describe("hasExpressImport", () => {
     expect(await importsExpress(source)).toBe(true)
   })
 
-  // Each of these has no `express` edge, so only the text can answer.
   it.each([
     ["an import between merge-conflict markers", CONFLICTED],
     ["an import followed by two junk tokens", `import express from "express" foo bar\n`],
@@ -62,7 +56,7 @@ describe("hasExpressImport", () => {
     ],
     ["an import inside `declare module`", `declare module "x" { import express from "express" }\n`],
     ["an import inside a namespace", `namespace api { import express from "express" }\n`],
-  ])("reads %s as Express", async (_label, source) => {
+  ])("reads %s, which leaves no `express` edge, as Express", async (_label, source) => {
     const ctx = await classifyCtx(source)
     expect(importListMentionsExpress(ctx.imports)).toBe(false)
     expect(hasExpressImport(ctx)).toBe(true)
@@ -88,21 +82,18 @@ describe("hasExpressImport", () => {
   })
 
   it("reads an import from its edge where the text reading loses it", async () => {
-    // The quote in the JSX text hides the rest of the line from the tokenizer (see
-    // `tokenize`); the parser still reads the import, and the edge is what answers.
     const source = `const A = () => <p>Don't</p>; import express from "express"\n`
-    const parsed = await parseTypescriptFile({ path: "src/a.tsx", content: source })
-    const ctx = { ...makeCtx("src/a.tsx", source), imports: parsed.imports }
     expect(readExpressFromText(source).imports).toBe(false)
-    expect(hasExpressImport(ctx)).toBe(true)
+    expect(hasExpressImport(await classifyCtx(source, "src/a.tsx"))).toBe(true)
   })
 
   it("answers each file from its own text when two contexts share one import list", () => {
-    // The text reading is cached on the import list; a list shared across files must not
-    // hand one file's answer to the other.
     const imports: ImportEdge[] = []
-    const app = { ...makeCtx("src/app.js", `const express = require("express")\n`), imports }
-    const other = { ...makeCtx("src/other.js", `const x = 1\n`), imports }
+    const app = {
+      ...makeExtractionCtx("src/app.js", `const express = require("express")\n`),
+      imports,
+    }
+    const other = { ...makeExtractionCtx("src/other.js", `const x = 1\n`), imports }
     expect(hasExpressImport(app)).toBe(true)
     expect(hasExpressImport(other)).toBe(false)
   })
@@ -183,8 +174,6 @@ describe("readExpressFromText — the require call", () => {
     expect(readExpressFromText(source).requires).toBe(false)
   })
 
-  // JSX text cannot be told apart from code without a parser (see `tokenize`). These pin the
-  // two ways that reads wrong, so a change to either shows up here.
   it("reads a `require` commented out after JSX text with a quote as code", () => {
     const source = `const A = () => <p>Don't</p> /* old:\nconst e = require("express")\n*/\n`
     expect(readExpressFromText(source).requires).toBe(true)
@@ -223,27 +212,13 @@ describe("readExpressFromText — the import statement", () => {
 })
 
 describe("importListMentionsExpress", () => {
-  it("matches an ImportEdge whose source is exactly 'express'", () => {
-    expect(
-      importListMentionsExpress([
-        { source: "express", symbols: ["default"], line: 1, dynamic: false },
-      ]),
-    ).toBe(true)
-  })
-
-  it("matches an ImportEdge to an 'express/' subpath", () => {
-    expect(
-      importListMentionsExpress([
-        { source: "express/lib/router", symbols: ["Router"], line: 1, dynamic: false },
-      ]),
-    ).toBe(true)
-  })
-
-  it("does not match 'express-session'", () => {
-    expect(
-      importListMentionsExpress([
-        { source: "express-session", symbols: ["default"], line: 1, dynamic: false },
-      ]),
-    ).toBe(false)
+  it.each([
+    ["express", true],
+    ["express/lib/router", true],
+    ["express-session", false],
+  ])("reads an edge to %s as Express: %s", (source, expected) => {
+    expect(importListMentionsExpress([{ source, symbols: ["x"], line: 1, dynamic: false }])).toBe(
+      expected,
+    )
   })
 })

@@ -7,60 +7,52 @@ import {
 } from "../src"
 
 describe("sanitizeSymbolId", () => {
-  it("replaces separators with `-` and collapses runs", () => {
-    expect(
-      sanitizeSymbolId("ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice"),
-    ).toBe("ts-apps-billing-src-InvoiceService-ts-InvoiceService-createInvoice")
-  })
-
-  it("collapses consecutive dashes to one", () => {
-    expect(sanitizeSymbolId("a::b//c")).toBe("a-b-c")
-  })
-
-  it("trims leading/trailing dashes", () => {
-    expect(sanitizeSymbolId(":a:")).toBe("a")
+  it.each([
+    [
+      "replaces each separator with `-`",
+      "ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice",
+      "ts-apps-billing-src-InvoiceService-ts-InvoiceService-createInvoice",
+    ],
+    ["collapses a run of separators to one dash", "a::b//c", "a-b-c"],
+    ["trims leading and trailing dashes", ":a:", "a"],
+  ])("%s", (_, id, sanitized) => {
+    expect(sanitizeSymbolId(id)).toBe(sanitized)
   })
 })
 
 describe("collisionSuffix", () => {
-  it("is deterministic and 6 hex chars", () => {
+  it("is six hex characters, the same for the same id", () => {
     const suffix = collisionSuffix("ts:src/a.ts#Foo")
     expect(suffix).toMatch(/^[0-9a-f]{6}$/)
     expect(collisionSuffix("ts:src/a.ts#Foo")).toBe(suffix)
+    expect(collisionSuffix("ts:src/a.ts#Bar")).not.toBe(suffix)
   })
 })
 
-/**
- * The always-append composition, which `assignSymbolFilenames` reaches for only on a
- * collision. It is a public export for callers that want the suffix on every file rather
- * than on the pairs that happen to clash, so the shape of what it appends is pinned here
- * rather than left to the collision cases below.
- */
 describe("withCollisionSuffix", () => {
-  it("always appends the deterministic suffix", () => {
-    const value = withCollisionSuffix("ts:src/a.ts#Foo")
-    expect(value).toMatch(/^ts-src-a-ts-Foo-[0-9a-f]{6}$/)
+  it("always appends the suffix to the sanitized id", () => {
+    expect(withCollisionSuffix("ts:src/a.ts#Foo")).toBe(
+      `ts-src-a-ts-Foo-${collisionSuffix("ts:src/a.ts#Foo")}`,
+    )
   })
 })
 
-describe("assignSymbolFilenames — collision handling", () => {
-  it("keeps the base name when there is no collision", () => {
+describe("assignSymbolFilenames", () => {
+  it("keeps the sanitized id when no other id shares it", () => {
     const map = assignSymbolFilenames(["ts:src/a.ts#Foo", "ts:src/b.ts#Bar"])
     expect(map.get("ts:src/a.ts#Foo")).toBe("ts-src-a-ts-Foo")
     expect(map.get("ts:src/b.ts#Bar")).toBe("ts-src-b-ts-Bar")
   })
 
-  it("MP9: adds a hash suffix when two ids sanitise to the same base", () => {
-    // Both ids sanitise to "a-b" so both entries must switch to the -<hash> form.
-    const map = assignSymbolFilenames(["a:b", "a.b"])
-    const a = map.get("a:b")
-    const b = map.get("a.b")
-    expect(a).toMatch(/^a-b-[0-9a-f]{6}$/)
-    expect(b).toMatch(/^a-b-[0-9a-f]{6}$/)
-    expect(a).not.toBe(b)
+  it("suffixes every id that shares a sanitized form", () => {
+    const map = assignSymbolFilenames(["a:b", "a.b", "c"])
+    expect(map.get("a:b")).toBe(withCollisionSuffix("a:b"))
+    expect(map.get("a.b")).toBe(withCollisionSuffix("a.b"))
+    expect(map.get("a:b")).not.toBe(map.get("a.b"))
+    expect(map.get("c")).toBe("c")
   })
 
-  it("throws on a duplicate Symbol id (IR contract forbids duplicates)", () => {
+  it("refuses a Symbol id given twice", () => {
     expect(() => assignSymbolFilenames(["ts:src/a.ts#Foo", "ts:src/a.ts#Foo"])).toThrow(
       /duplicate Symbol id/,
     )

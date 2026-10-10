@@ -1,17 +1,4 @@
-// Public type surface for Aburi.
-//
-// Three sources are merged here:
-//   1. Schema-generated types (src/generated/*.ts, regenerate via `pnpm --filter @aburi/types codegen`)
-//   2. Hand-written plugin contracts (src/plugins.ts, derived from docs/design/*.md)
-//   3. Per-run diagnostics (src/diagnostics.ts) — deliberately outside every schema
-//
-// A few names appear in multiple schemas with intentionally different shapes
-// (e.g. IR's rich Generator vs Diff's lite Generator, manifest-declared EffectVocab vs
-// registry-resolved EffectVocab). They are explicitly aliased to keep the surface unambiguous.
-
-// ---------- Per-run diagnostics (not part of any schema) ----------
 export type { UnresolvedCallBucket, UnresolvedCallDiagnostic } from "./diagnostics"
-// ---------- Config (aburi.json / aburi.jsonc) ----------
 export type {
   ComponentOverride,
   Config,
@@ -20,7 +7,6 @@ export type {
   LspServerConfig,
   PluginRef as ConfigPluginRef,
 } from "./generated/config"
-// ---------- Diff output ----------
 export type {
   ArrayDelta,
   ComponentDiff,
@@ -47,8 +33,6 @@ export type {
   SymbolRemoved,
   SymbolUnknown,
 } from "./generated/diff"
-// ---------- IR (canonical runtime model) ----------
-// Disambiguating alias so callers can keep the global `Symbol` in scope.
 export type {
   Call,
   CallResolutionStats,
@@ -86,7 +70,6 @@ export type {
   Workspace,
   WorkspaceManager,
 } from "./generated/ir"
-// ---------- Plugin manifest (aburi.plugin.v1) ----------
 export type {
   Capabilities,
   EffectVocab as ManifestEffectVocab,
@@ -94,7 +77,6 @@ export type {
   PluginManifest,
   Provides,
 } from "./generated/plugin"
-// ---------- Hand-written plugin contracts ----------
 export type {
   BodyExtraction,
   CallCandidate,
@@ -111,6 +93,7 @@ export type {
   FrameworkManifest,
   FrameworkPlugin,
   FrameworkVocab,
+  ImportBinding,
   ImportEdge,
   LangManifest,
   LanguageCapabilities,
@@ -131,5 +114,4 @@ export type {
   WalkContext,
   WrittenSourceRange,
 } from "./plugins"
-// ---------- Reserved IR strings (values, not types) ----------
 export { COMPUTED_TARGET_SEGMENT, UNNAMED_DECORATOR } from "./vocabulary"

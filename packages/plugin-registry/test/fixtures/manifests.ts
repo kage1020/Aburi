@@ -1,18 +1,13 @@
-import type { PluginManifest } from "@aburi/types"
+import type { PluginManifest, Provides } from "@aburi/types"
 
-// Helpers to build minimally-valid PluginManifest objects for registry tests.
-// Each helper returns a fresh object so individual tests can mutate without
-// affecting siblings.
-
-interface BaseOverrides {
+interface ManifestOverrides {
   name?: string
-  version?: string
+  provides?: Partial<Provides>
 }
 
 const SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json" as const
-const ENGINES = { aburi: "^1.0.0" } as const
 
-function emptyProvides() {
+function provides(over: Partial<Provides> = {}): Provides {
   return {
     effects: [],
     effectPrefixes: [],
@@ -20,40 +15,42 @@ function emptyProvides() {
     extKindPrefixes: [],
     derivedByPrefixes: [],
     frameworks: [],
+    ...over,
   }
 }
 
-export function langManifest(over: BaseOverrides = {}): PluginManifest {
+export function langManifest(over: ManifestOverrides = {}): PluginManifest {
   return {
     $schema: SCHEMA,
     name: over.name ?? "lang-foo",
-    version: over.version ?? "1.0.0",
+    version: "1.0.0",
     type: "lang",
-    engines: { ...ENGINES },
-    provides: emptyProvides(),
+    engines: { aburi: "^1.0.0" },
+    provides: provides(over.provides),
   }
 }
 
-export function effectsManifest(over: BaseOverrides & { xPrefix?: string } = {}): PluginManifest {
-  const name = over.name ?? "effects-foo"
+export function effectsManifest(
+  over: ManifestOverrides & { xPrefix?: string } = {},
+): PluginManifest {
   return {
     $schema: SCHEMA,
-    name,
-    version: over.version ?? "1.0.0",
+    name: over.name ?? "effects-foo",
+    version: "1.0.0",
     type: "effects",
     ...(over.xPrefix !== undefined ? { xPrefix: over.xPrefix } : {}),
-    engines: { ...ENGINES },
-    provides: emptyProvides(),
+    engines: { aburi: "^1.0.0" },
+    provides: provides(over.provides),
   }
 }
 
-export function frameworkManifest(over: BaseOverrides = {}): PluginManifest {
+export function frameworkManifest(over: ManifestOverrides = {}): PluginManifest {
   return {
     $schema: SCHEMA,
     name: over.name ?? "framework-foo",
-    version: over.version ?? "1.0.0",
+    version: "1.0.0",
     type: "framework",
-    engines: { ...ENGINES },
-    provides: emptyProvides(),
+    engines: { aburi: "^1.0.0" },
+    provides: provides(over.provides),
   }
 }

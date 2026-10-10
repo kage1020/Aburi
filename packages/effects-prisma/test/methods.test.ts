@@ -9,57 +9,47 @@ import {
 } from "../src/index"
 
 describe("Prisma method vocabulary", () => {
-  it("exposes every documented delegate read method", () => {
-    for (const m of [
-      "findUnique",
-      "findUniqueOrThrow",
-      "findFirst",
-      "findFirstOrThrow",
-      "findMany",
-      "count",
-      "aggregate",
-      "groupBy",
-    ] as const) {
-      expect(PRISMA_READ_METHODS.has(m)).toBe(true)
-      expect(isPrismaReadMethod(m)).toBe(true)
-    }
+  it.each([
+    [
+      "read",
+      PRISMA_READ_METHODS,
+      isPrismaReadMethod,
+      [
+        "findUnique",
+        "findUniqueOrThrow",
+        "findFirst",
+        "findFirstOrThrow",
+        "findMany",
+        "count",
+        "aggregate",
+        "groupBy",
+      ],
+    ],
+    [
+      "write",
+      PRISMA_WRITE_METHODS,
+      isPrismaWriteMethod,
+      [
+        "create",
+        "createMany",
+        "createManyAndReturn",
+        "update",
+        "updateMany",
+        "updateManyAndReturn",
+        "upsert",
+        "delete",
+        "deleteMany",
+      ],
+    ],
+  ] as const)("lists exactly the delegate %s methods, and its guard accepts each", (_family, set, guard, members) => {
+    expect([...set]).toEqual(members)
+    for (const method of members) expect(guard(method)).toBe(true)
   })
 
-  it("exposes every documented delegate write method", () => {
-    for (const m of [
-      "create",
-      "createMany",
-      "createManyAndReturn",
-      "update",
-      "updateMany",
-      "updateManyAndReturn",
-      "upsert",
-      "delete",
-      "deleteMany",
-    ] as const) {
-      expect(PRISMA_WRITE_METHODS.has(m)).toBe(true)
-      expect(isPrismaWriteMethod(m)).toBe(true)
-    }
-  })
-
-  it("keeps the read and write sets disjoint", () => {
-    for (const m of PRISMA_READ_METHODS) {
-      expect(PRISMA_WRITE_METHODS.has(m as never)).toBe(false)
-    }
-  })
-
-  it("recognizes the transaction sentinel and rejects imposters", () => {
-    expect(isPrismaTransactionMethod(PRISMA_TRANSACTION_METHOD)).toBe(true)
+  it("recognizes $transaction alone as the transaction method", () => {
+    expect(PRISMA_TRANSACTION_METHOD).toBe("$transaction")
+    expect(isPrismaTransactionMethod("$transaction")).toBe(true)
     expect(isPrismaTransactionMethod("transaction")).toBe(false)
     expect(isPrismaTransactionMethod("$transactional")).toBe(false)
-  })
-
-  it("rejects unrelated method names for both sets", () => {
-    const untypedRead = PRISMA_READ_METHODS as ReadonlySet<string>
-    const untypedWrite = PRISMA_WRITE_METHODS as ReadonlySet<string>
-    for (const m of ["executeRaw", "queryRaw", "findMayn", "createOrUpdate"]) {
-      expect(untypedRead.has(m)).toBe(false)
-      expect(untypedWrite.has(m)).toBe(false)
-    }
   })
 })

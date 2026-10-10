@@ -14,21 +14,6 @@ import { extractWrapperCall, isContextCall, isForwardRefCall, isMemoCall } from 
 /** `extKind` narrowed to the plugin's own union so a typo fails to compile. */
 type ReactClassification = { extKind: ReactExtKind; derivedBy: string }
 
-/**
- * First-match-wins over React conventions:
- *
- *   1. hook         — `function` kind, leaf name matches /^use[A-Z]/
- *   2. hoc          — `function` kind, leaf name matches /^with[A-Z]/
- *   3. context      — `const` kind, initializer is `createContext(...)`
- *   4. forward-ref  — `const` kind, initializer is `forwardRef(...)`
- *   5. memo         — `const` kind, initializer is `memo(...)`
- *   6. provider     — `function` kind, PascalCase, returned JSX is `<X.Provider>`
- *   7. component    — `function` kind, PascalCase, body returns JSX
- *
- * Hook / hoc are name-only signals on lowercase-first identifiers, so they cannot overlap
- * the PascalCase-gated branches and are checked first: `useOverlay() { return <div/> }` is a
- * hook, not a component. Other symbol kinds return `null`.
- */
 export function classifyReactSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   _ctx: ExtractionContext,

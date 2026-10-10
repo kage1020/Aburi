@@ -1,44 +1,29 @@
 import { existsSync } from "node:fs"
-import { mkdtemp, readdir, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readdir } from "node:fs/promises"
 import { resolve, sep } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { EXIT, runCli } from "../src"
-import { MemStream, writeTypeScriptWorkspace } from "./fixtures"
+import { useScratchWorkspace } from "@aburi/test-support"
+import { beforeEach, describe, expect, it } from "vitest"
+import { EXIT } from "../src"
+import { runCliIn } from "./run-cli"
+import { writeTypeScriptWorkspace } from "./workspace"
 
-/** `scan`'s `--format`, `--no-md` and `--no-json`: one output taken away, never a guess. */
-
-let scratch = ""
+const workspace = useScratchWorkspace("format-flags")
 
 beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-format-flags-"))
-  await writeTypeScriptWorkspace(scratch, "format-flags")
-})
-
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
+  await writeTypeScriptWorkspace(workspace.root, "format-flags")
 })
 
 async function scan(
   ...flags: string[]
 ): Promise<{ code: number; stderr: string; wrote: string[] | null }> {
-  const stderr = new MemStream()
-  const out = resolve(scratch, "out")
-  const code = await runCli({
-    argv: ["scan", "--output-dir", out, ...flags],
-    stdout: new MemStream(),
-    stderr,
-    env: {},
-    cwd: scratch,
-  })
-  if (!existsSync(out)) return { code, stderr: stderr.text(), wrote: null }
-  // `readdir` joins nested entries with the platform separator.
+  const out = resolve(workspace.root, "out")
+  const { code, stderr } = await runCliIn(workspace.root, ["scan", "--output-dir", out, ...flags])
+  if (!existsSync(out)) return { code, stderr, wrote: null }
   const wrote = (await readdir(out, { recursive: true })).map((entry) => entry.replaceAll(sep, "/"))
-  return { code, stderr: stderr.text(), wrote: wrote.sort() }
+  return { code, stderr, wrote: wrote.sort() }
 }
 
 const IR = ["aburi.ir.json"]
-// `components/*.md` is written with `workspace.md` and governed by the same format.
 const MARKDOWN = ["components", "components/format-flags.md", "workspace.md"]
 const BOTH = [...IR, ...MARKDOWN].sort()
 
@@ -71,7 +56,6 @@ describe("scan format flags", () => {
       "--format both and --no-json contradict each other: drop one",
     ],
     [
-      // Only the flag that contradicts is named; `--no-md` agrees with `--format json`.
       ["--format", "json", "--no-md", "--no-json"],
       "--format json and --no-json contradict each other: drop one",
     ],

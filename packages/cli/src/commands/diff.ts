@@ -1,15 +1,11 @@
-import { spawn, spawnSync } from "node:child_process"
-import { existsSync, rmSync, writeSync } from "node:fs"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { basename, dirname, join, resolve } from "node:path"
+import { resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
 import {
   formatCallResolutionLine,
   projectDiff,
   projectDiffSummaryLine,
 } from "@aburi/markdown-projection"
-import type { IR, IRRef, NotComparedFile } from "@aburi/types"
+import type { IR, IRRef } from "@aburi/types"
 import {
   DIFF_FULL_MD_FILENAME,
   DIFF_JSON_FILENAME,
@@ -17,32 +13,23 @@ import {
   resolveOutputDir,
 } from "../artifact-paths"
 import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-load"
-import { CliError, errorCode, errorMessage, internalFault, unplacedErrorCode } from "../errors"
+import { CliError, errorMessage, internalFault, unplacedErrorCode } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
-import { pathExists } from "../fs-probe"
 import { readGeneratorInfo } from "../generator-info"
+import type { GitRunner } from "../git/runner"
 import { readIR } from "../ir-io"
-import { joinCapped } from "../listing"
 import { createOutputDir, removeOutputFile, writeOutputFile } from "../output-file"
-import { cleanUpOnFatalSignal } from "../signal-cleanup"
 import type { WarnFn } from "../warn"
-import { resolveWorkspaceRoot } from "../workspace-root"
-import { runScan, type ScanReport } from "./scan"
+import { chooseInputs, type DiffInputs } from "./diff-inputs"
+import {
+  type DiffSide,
+  type RevisionScanContext,
+  type ScanPair,
+  scanRevisions,
+} from "./diff-revisions"
+import { faultedSides, warnAboutComparison } from "./diff-warnings"
 
-export type { WarnFn }
-
-/**
- * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md).
- *
- * Most codes describe something the reader can fix — IR schemas that disagree, a malformed
- * IR, a repeated id — so they surface as `config-error` (exit 2). `invalid-line-fuzz` cannot
- * reach a reader of this command — it calls `buildDiff` without `delta`, and `aburi.json` has no
- * key to get wrong. It stays in the `config-error` arm for callers of the exported
- * `classifyDiffError`, who pass `lineFuzz` themselves. `slice-invariant-violated` cannot: it fires only when Aburi produced a Slice
- * breaking its own derivation rule (slice-view.md), and reporting that as a config error
- * would send a reader through `aburi.json` for a bug that is not there.
- */
 export function classifyDiffError(error: DiffError): CliError {
   switch (error.code) {
     case "schema-mismatch":
@@ -67,93 +54,26 @@ export interface DiffOptions {
   failOn?: string
   configPath?: string
   compact?: boolean
-  /**
-   * Size cap for `diff.md`, in UTF-8 bytes (`markdown-projection.md`). Absent writes the
-   * whole document, which is what a file on disk is for; a caller that posts the file as a
-   * GitHub comment has to pass one, because the API rejects a body over 65536 bytes outright.
-   */
   maxBytes?: number
-  /** Injected git runner for tests. Defaults to a real `git` child process. */
   git?: GitRunner
-  /** Non-fatal warning sink (defaults to `process.stderr.write`). */
   warn?: WarnFn
-}
-
-export interface GitRunner {
-  run(
-    args: readonly string[],
-    options?: { cwd?: string },
-  ): Promise<{ stdout: string; stderr: string }>
 }
 
 export interface DiffReport {
   diffJsonPath: string | null
   diffMdPath: string | null
-  /**
-   * The uncapped report, written only when `maxBytes` had to shorten `diff.md` — the file its
-   * note points at. `null` whenever `diff.md` is the whole report or was not written.
-   */
   diffFullMdPath: string | null
   summaryLine: string
-  /**
-   * Head-side call-resolution census (call-resolution.md), rendered for
-   * stdout. `null` when the head IR predates `stats.callResolution` — an older
-   * artifact cannot be back-filled, and printing zeroes would claim a clean
-   * graph the run never actually observed.
-   */
   callResolutionLine: string | null
   triggered: { clause: FailOnClause; observed: number } | null
-  /**
-   * Sides whose own scan reported a fault — `ScanReport.exitCode` other than success, which
-   * means a file was withdrawn during extraction, or the scan read too little of the workspace
-   * to be believed (`cli-spec.md`). The two can hold on different sides at once, which is
-   * why the warning built from this list says each side's cause rather than one about both.
-   *
-   * `null` in `--base` / `--head` mode, where this command ran no scan: that is not the same
-   * answer as two clean scans, and an empty array would say it was. A document written by a
-   * faulted scan still says so in `stats.skippedFiles`, and that is warned about rather than
-   * gated on — see `warnOnRecordedFaults`.
-   *
-   * A non-empty list forces `exitCode` to `EXIT.GATE` with `triggered` still `null`, so this
-   * is what a programmatic caller reads to tell the two causes apart instead of parsing
-   * warnings.
-   */
   faultedScans: readonly DiffSide[] | null
   exitCode: ExitCode
 }
 
-/**
- * Which revision a scan covered. The head is always the working tree, whatever the ref spec
- * calls it (`cli-spec.md`), so the two are not interchangeable with the ref names.
- */
-export type DiffSide = "base" | "head"
-
-/**
- * `aburi diff` — two dispatch paths, both defined by `docs/design/cli-spec.md`:
- *
- * - `<base>..<head>` ref spec. Both refs are validated with `git rev-parse
- *   --verify` before we touch the working tree; the base ref materialises via a
- *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
- *   tree itself is scanned as the head. The base's intermediate IR lives under
- *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
- *   The worktree's own directory is named after the head workspace's own directory,
- *   since Component detection reads that name — see `baseWorktreeLeaf`. The head is
- *   always the working tree: the `<head>` label in the ref spec only labels the report.
- * - `--base <ir.json> --head <ir.json>` — parses both files and jumps directly to
- *   `buildDiff`. No git required.
- *
- * `--fail-on` is parsed once and evaluated post-diff; the first triggered clause maps to
- * `EXIT.GATE` with a stable diagnostic phrasing. An empty `--fail-on` value
- * (from an unset shell variable, for example) or an empty clause is rejected by the parser
- * rather than silently disabling the CI gate.
- */
 export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
   const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
-  // Checked here rather than left to `projectDiff`, which raises a `RangeError`: a bad flag is
-  // an input error (exit 2) in this command's table, and it is checked before the scans so a
-  // typo costs a message instead of two full extractions.
   if (
     options.maxBytes !== undefined &&
     (!Number.isInteger(options.maxBytes) || options.maxBytes <= 0)
@@ -163,95 +83,119 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       "input-error",
     )
   }
-  // One pin for the whole command, taken only once something needs it: a `--base` / `--head`
-  // run that named its own `--output-dir` consults no config at all, and pinning walks the
-  // filesystem and can raise `config-read-failed` on an EACCES that run would never have met.
   let pinned: PinnedConfig | null = null
   const pinConfigOnce = async (): Promise<PinnedConfig> => {
     pinned ??= await pinConfig(cwd, options.configPath)
     return pinned
   }
-  // Before anything expensive. The destination is decided from `cwd` alone, and a run that
-  // cannot be filed is a run not worth computing: resolved after the diff, a broken config
-  // would cost two scans or two IR reads and then report `Failed to load Aburi config`, which
-  // reads as "the comparison failed" when the comparison had already succeeded.
-  //
-  // The config is read only when the flag left the question open — a run that named its
-  // destination must not be stopped by a file it never consults. The per-side scans of a ref
-  // diff read the config for their own reasons, and write to an explicit temp directory
-  // either way, which is a flag by another name.
   const inputs = chooseInputs(options)
   const outputDir = resolveOutputDir(
     cwd,
     options.outputDir,
     options.outputDir === undefined ? await configuredOutputDir(await pinConfigOnce()) : undefined,
   )
-  // And created now, for the same reason: a destination that cannot hold the report is
-  // refused before two scans are run for it.
   await createOutputDir("diff", outputDir)
-  // Removed before the scans, whatever the format, so the order is always "remove, then write if
-  // needed" and a path that cannot be cleared is refused before two scans are run for it. A run
-  // that stops first — a plugin that fails to load, a strict scan's undeclared value — then leaves
-  // nothing a caller checking for `diff.md` would post as this run's report. `diff.full.md` goes
-  // too: written only when this run's cap shortens `diff.md`, one left here would be the full
-  // report of some other diff even on a run that does write.
-  await removeOutputFile({
-    command: "diff",
-    artefact: "the diff JSON",
-    path: resolve(outputDir, DIFF_JSON_FILENAME),
-  })
-  await removeOutputFile({
-    command: "diff",
-    artefact: "the diff Markdown",
-    path: resolve(outputDir, DIFF_MD_FILENAME),
-  })
-  const fullMdPath = resolve(outputDir, DIFF_FULL_MD_FILENAME)
-  await removeOutputFile({
-    command: "diff",
-    artefact: "the uncapped diff Markdown",
-    path: fullMdPath,
-  })
-  const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(
-    inputs,
-    options,
+  await removeEarlierReport(outputDir)
+  const compared = await readSides(inputs, {
     cwd,
+    git: options.git,
+    compact: options.compact,
     pinConfigOnce,
     warn,
-  )
+  })
 
   const generator = await readGeneratorInfo()
-  // The narrowed return of `buildDiff` rather than a bare `DiffResult`: this command writes
-  // the document, so it holds the fields the writer always emits, and re-widening here would
-  // put an `?? []` back in front of the array whose whole point is that it is never absent.
-  let diff: ReturnType<typeof buildDiff>
+  let diff: BuiltDiff
   try {
     diff = buildDiff({
-      baseIR,
-      headIR,
-      base: irRef(baseRef, baseIR),
-      head: irRef(headRef, headIR),
+      baseIR: compared.baseIR,
+      headIR: compared.headIR,
+      base: irRef(compared.baseRef, compared.baseIR),
+      head: irRef(compared.headRef, compared.headIR),
       generator,
-      ...(gitRenames === null ? {} : { gitRenames }),
+      ...(compared.gitRenames === null ? {} : { gitRenames: compared.gitRenames }),
     })
   } catch (error) {
     if (error instanceof DiffError) throw classifyDiffError(error)
     throw error
   }
 
-  const format = options.format ?? "both"
+  const written = await writeReport(diff, outputDir, options, warn)
+  const { firstTriggered } = evaluateFailOn(failOn, diff)
+  const faultedScans = faultedSides(compared.scans)
+  const exitCode: ExitCode =
+    firstTriggered === null && (faultedScans === null || faultedScans.length === 0)
+      ? EXIT.SUCCESS
+      : EXIT.GATE
 
-  let diffJsonPath: string | null = null
-  let diffMdPath: string | null = null
+  warnAboutComparison({ ...compared, notCompared: diff.notCompared }, warn)
+  const callResolution = compared.headIR.stats.callResolution
+  return {
+    ...written,
+    summaryLine: projectDiffSummaryLine(diff),
+    callResolutionLine:
+      callResolution === undefined ? null : formatCallResolutionLine(callResolution),
+    triggered: firstTriggered,
+    faultedScans,
+    exitCode,
+  }
+}
+
+export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {
+  return formatTriggered(triggered.clause, triggered.observed)
+}
+
+async function removeEarlierReport(outputDir: string): Promise<void> {
+  for (const [artefact, filename] of [
+    ["the diff JSON", DIFF_JSON_FILENAME],
+    ["the diff Markdown", DIFF_MD_FILENAME],
+    ["the uncapped diff Markdown", DIFF_FULL_MD_FILENAME],
+  ] as const) {
+    await removeOutputFile({ command: "diff", artefact, path: resolve(outputDir, filename) })
+  }
+}
+
+type BuiltDiff = ReturnType<typeof buildDiff>
+
+interface ComparedSides {
+  baseIR: IR
+  headIR: IR
+  baseRef: string
+  headRef: string
+  gitRenames: GitRenameMap | null
+  scans: ScanPair | null
+}
+
+async function readSides(inputs: DiffInputs, context: RevisionScanContext): Promise<ComparedSides> {
+  if (inputs.kind === "refs") {
+    const scanned = await scanRevisions(inputs.spec, context)
+    return { ...scanned, baseRef: inputs.spec.base, headRef: inputs.spec.head }
+  }
+  return {
+    baseIR: await readIR(resolve(context.cwd, inputs.base)),
+    headIR: await readIR(resolve(context.cwd, inputs.head)),
+    baseRef: inputs.base,
+    headRef: inputs.head,
+    gitRenames: null,
+    scans: null,
+  }
+}
+
+type WrittenReport = Pick<DiffReport, "diffJsonPath" | "diffMdPath" | "diffFullMdPath">
+
+async function writeReport(
+  diff: BuiltDiff,
+  outputDir: string,
+  options: Pick<DiffOptions, "format" | "compact" | "maxBytes">,
+  warn: WarnFn,
+): Promise<WrittenReport> {
+  const format = options.format ?? "both"
+  const written: WrittenReport = { diffJsonPath: null, diffMdPath: null, diffFullMdPath: null }
   if (format !== "md") {
-    diffJsonPath = resolve(outputDir, DIFF_JSON_FILENAME)
-    // The same split `aburi scan` makes for the IR: the serializer can refuse the document
-    // (two keys differing only in Unicode composition), which is a property of what was
-    // compared — exit 2, the path attached — while a disk refusing the bytes is the machine's.
+    const diffJsonPath = resolve(outputDir, DIFF_JSON_FILENAME)
     let serialized: string
     try {
-      serialized = writeCanonicalDiff(diff, {
-        format: options.compact ? "compact" : "pretty",
-      })
+      serialized = writeCanonicalDiff(diff, { format: options.compact ? "compact" : "pretty" })
     } catch (error) {
       throw new CliError(
         `Failed to serialize the diff for ${diffJsonPath}: ${errorMessage(error)}`,
@@ -263,1087 +207,45 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       { command: "diff", artefact: "the diff JSON", path: diffJsonPath },
       serialized,
     )
+    written.diffJsonPath = diffJsonPath
   }
-  if (format === "json" && options.maxBytes !== undefined) {
-    // Not an input error: the action passes `--max-bytes` without consulting `--format`, so
-    // rejecting the pair would fail every `format: json` run of it. Said out loud all the same —
-    // a flag that is accepted, validated and then has nothing to act on is one a reader is
-    // entitled to hear about.
-    warn(
-      `⚠ --max-bytes has no effect under --format json: the cap applies to ${DIFF_MD_FILENAME}, which this run does not write.`,
-    )
-  }
-  let diffFullMdPath: string | null = null
-  if (format !== "json") {
-    diffMdPath = resolve(outputDir, DIFF_MD_FILENAME)
-    const uncapped = projectDiff(diff)
-    let markdown = uncapped
-    if (options.maxBytes !== undefined && Buffer.byteLength(uncapped, "utf8") > options.maxBytes) {
-      // The target before the pointer: a capped `diff.md` names this file, so a failure here
-      // must leave no `diff.md` naming a file that is not there.
-      await writeOutputFile(
-        { command: "diff", artefact: "the uncapped diff Markdown", path: fullMdPath },
-        uncapped,
+  if (format === "json") {
+    if (options.maxBytes !== undefined) {
+      warn(
+        `⚠ --max-bytes has no effect under --format json: the cap applies to ${DIFF_MD_FILENAME}, which this run does not write.`,
       )
-      diffFullMdPath = fullMdPath
-      markdown = projectDiff(diff, {
-        maxBytes: options.maxBytes,
-        fullReportLocation: `\`${DIFF_FULL_MD_FILENAME}\` beside \`${DIFF_MD_FILENAME}\``,
-      })
-      // The one case the projection cannot meet is a budget smaller than the title, the
-      // Summary line and the omission note together (`markdown-projection.md`). It says so in
-      // the document; this says so to the caller, who asked for a number and got a bigger one.
-      const written = Buffer.byteLength(markdown, "utf8")
-      if (written > options.maxBytes) {
-        warn(
-          `⚠ ${DIFF_MD_FILENAME} is ${written} bytes, over the ${options.maxBytes} requested: every section was dropped and the title and summary alone exceed it. Raise --max-bytes.`,
-        )
-      }
     }
+    return written
+  }
+  const diffMdPath = resolve(outputDir, DIFF_MD_FILENAME)
+  const uncapped = projectDiff(diff)
+  let markdown = uncapped
+  if (options.maxBytes !== undefined && Buffer.byteLength(uncapped, "utf8") > options.maxBytes) {
+    const fullMdPath = resolve(outputDir, DIFF_FULL_MD_FILENAME)
     await writeOutputFile(
-      { command: "diff", artefact: "the diff Markdown", path: diffMdPath },
-      markdown,
+      { command: "diff", artefact: "the uncapped diff Markdown", path: fullMdPath },
+      uncapped,
     )
-  }
-
-  // `cli-spec.md` stdout shape
-  const summaryLine = projectDiffSummaryLine(diff)
-  const { firstTriggered } = evaluateFailOn(failOn, diff)
-  const faultedScans =
-    scans === null ? null : SIDES.filter((side) => scans[side].exitCode !== EXIT.SUCCESS)
-  const exitCode: ExitCode =
-    firstTriggered === null && (faultedScans === null || faultedScans.length === 0)
-      ? EXIT.SUCCESS
-      : EXIT.GATE
-
-  // An IR written before `stats.callResolution` existed cannot be back-filled,
-  // and printing zeroes would claim a clean call graph the run never observed.
-  // Dropping the line silently is just as bad in the other direction: the
-  // reviewer would read the Slice View below without knowing the one signal
-  // that explains a suspicious singleton is missing. So: no stdout line, and
-  // one stderr note saying why and how to get it back.
-  const callResolution = headIR.stats.callResolution
-  if (callResolution === undefined) {
-    warn(
-      `⚠ head IR has no stats.callResolution, so the call-resolution census is unavailable for this diff. Re-run \`aburi scan\` on the head revision to record it (call-resolution.md).`,
-    )
-  }
-  warnOnUnenumerableLosses(baseIR, "base", warn)
-  warnOnUnenumerableLosses(headIR, "head", warn)
-  warnOnSymmetricLosses(diff.notCompared, warn)
-  warnOnRecoverableParseErrors(scans, warn)
-  if (scans === null) warnOnRecordedFaults({ base: baseIR, head: headIR }, warn)
-  else warnOnScanFault(scans, faultedScans ?? [], warn)
-  return {
-    diffJsonPath,
-    diffMdPath,
-    diffFullMdPath,
-    summaryLine,
-    callResolutionLine:
-      callResolution === undefined ? null : formatCallResolutionLine(callResolution),
-    triggered: firstTriggered,
-    faultedScans,
-    exitCode,
-  }
-}
-
-/** Iteration order for the two sides, and the order they are reported in. */
-const SIDES: readonly DiffSide[] = ["base", "head"]
-
-/**
- * A file whose parse reported recoverable errors is in the IR, so nothing marks it.
- *
- * `stats.skippedFiles` covers the files that never arrived, and `buildDiff` turns their
- * Symbols into `unknown` rather than into deletions. A file the plugin kept is in neither
- * list — but a parse that reported errors may have skipped the declaration those errors were
- * in, and the Symbol set is then short with no file having gone missing. That moves `added`
- * and `removed` exactly like a real change, and no gate can tell the difference.
- *
- * Only the ref form can say this. `parseErrorCount` is a property of the scan, not of the
- * document it wrote, so `--base` / `--head` mode has no way to ask.
- */
-function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): void {
-  if (scans === null) return
-  const affected = SIDES.filter((side) => scans[side].parseErrorCount > 0)
-  if (affected.length === 0) return
-  const where = affected.map((side) => `${side} ${scans[side].parseErrorCount}`).join(", ")
-  warn(
-    `⚠ Files with recoverable parse errors (${where}) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. ` +
-      `Their Symbol sets can be short, which moves added / removed without a file having been skipped.`,
-  )
-  // Counted here and not listed: this command runs both scans, and each one's own report named
-  // its files on this stderr above (`cli-spec.md`). What this line adds is the consequence for
-  // the diff, which neither scan is in a position to say.
-}
-
-/**
- * A scan that broke makes the diff evidence of nothing, whichever side broke: an incident that
- * `scan` refuses to exit `0` on (`cli-spec.md`) must not turn green by being asked for a diff
- * instead. That covers the base side too — a fault at the base ref reddens every diff taken
- * against it.
- *
- * One clause per faulted side, each in the words of what that scan reported: two sides can
- * fault for different reasons, and this is the line a reader greps out of a CI log to account
- * for the exit code.
- */
-function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], warn: WarnFn): void {
-  if (faultedScans.length === 0) return
-  const clauses = faultedScans.map((side) => `${side}: ${describeScanFault(scans[side])}`)
-  warn(
-    `⚠ ${clauses.join("; ")}. This run exits 3 even though the diff was written. ` +
-      `Fix it, or the comparison is against a workspace one side could not read.`,
-  )
-}
-
-/**
- * Why one scan did not exit clean, in the words of what it reported.
- *
- * Shorter than the lines `scan` prints for itself: those carry the consequence and where to
- * look, and both scans' reports are already on this stderr above this one (`cli-spec.md`).
- * This clause exists to account for the exit code, so it names the cause and stops.
- *
- * An extraction fault comes first when one scan has more than one. It is the reason that says
- * something in the run is broken, and a scan that withdrew every file it found has the coverage
- * fault as a consequence of it rather than as a second finding. That reading holds *within* a
- * scan and not across two, which is why it is decided here rather than by the caller.
- *
- * A cause that loses the contest still gets a trailing clause rather than silence. This is the
- * line a reader greps out of a CI log to account for the exit code, and an unnameable file
- * leaves no other trace anywhere — so the one reason that cannot be recovered later is the one
- * that must not be dropped for being second.
- *
- * The last arm is for a scan that gates for a reason this function has not been taught. It is
- * unreachable today — the three above are the whole of `runScan`'s gate, and the unnameable arm
- * fills the `fault === null` gap ahead of it — and saying nothing more than the exit code already
- * said is the honest answer to a cause we cannot name.
- */
-function describeScanFault(report: ScanReport): string {
-  const withdrawn = report.extractionFailures.length
-  if (withdrawn > 0) return `extraction withdrew ${withdrawn} file(s)`
-  const fault = report.coverageFault
-  // Before "discovered no file to read" and after the other two faults, because the direction
-  // of cause runs one way: an unnameable file leaves `totalFiles`, so a workspace whose whole
-  // candidate set is unnameable discovers nothing and that fault is this one's consequence.
-  // Leaving the denominator can only raise the parsed ratio, so it cannot produce either of
-  // the other two — where those hold they are their own cause, and they are named instead.
-  const unnameable = report.unrepresentableFiles.length
-  if (unnameable > 0 && (fault === null || fault.kind === "nothing-discovered")) {
-    return `${unnameable} file(s) have names no Document path can spell`
-  }
-  // Only on the two arms it can co-occur with. The guard above already returned for the other
-  // two, so appending it there would be a clause no input can produce.
-  const alsoUnnameable =
-    unnameable === 0 ? "" : ` (and ${unnameable} more have names no Document path can spell)`
-  if (fault === null) return "it did not exit clean"
-  switch (fault.kind) {
-    case "nothing-discovered":
-      return "it discovered no file to read"
-    case "nothing-parsed":
-      return `none of the ${fault.totalFiles} file(s) it found parsed${alsoUnnameable}`
-    case "below-floor":
-      return `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed, below the floor the workspace set${alsoUnnameable}`
-  }
-}
-
-/**
- * File mode ran no scan, but the documents remember one.
- *
- * `stats.skippedFiles[].reason` persists `extraction-failed`, so `--base` / `--head` can see
- * that a file was withdrawn when a document was written even though it never watched it
- * happen. Left
- * silent, a workspace that makes `aburi scan` exit 3 produced two IRs that diff clean — and
- * scan-in-one-job, diff-in-another is the shape `cli-spec.md` recommends when git is not
- * available.
- *
- * It warns and does not gate. The fault already had its exit code, in the run that hit it;
- * failing here a second time would red a job for someone else's incident, on documents the
- * caller pinned deliberately. What the caller cannot do is not be told.
- */
-function warnOnRecordedFaults(irs: Record<DiffSide, IR>, warn: WarnFn): void {
-  for (const side of SIDES) {
-    const withdrawn = (irs[side].stats.skippedFiles ?? []).filter(
-      (file) => file.reason === "extraction-failed",
-    )
-    if (withdrawn.length === 0) continue
-    warn(
-      `⚠ ${side} IR records ${withdrawn.length} file(s) withdrawn during extraction: ${joinCapped(withdrawn.map((file) => file.path))}. ` +
-        `The scan that wrote it exited 3; this diff does not, because the fault was reported where it happened.`,
-    )
-  }
-}
-
-/**
- * An IR that dropped files but predates `stats.skippedFiles` cannot say which ones.
- *
- * `buildDiff` needs the paths to tell a loss from a deletion, so with only the counts it
- * leaves every leftover classified as `added` / `removed` — which is the pre-`skippedFiles`
- * behaviour, and is exactly the confident-but-wrong report the field exists to prevent. It
- * cannot invent the list: guessing from `totalFiles > parsedFiles` would attach the doubt to
- * whichever Symbols happened to be missing.
- *
- * So the diff says nothing wrong and the CLI says what it could not check. Both sides are
- * examined, because a base written by an older scan makes phantom `added` entries the same
- * way a head makes phantom `removed` ones.
- */
-function warnOnUnenumerableLosses(ir: IR, side: DiffSide, warn: WarnFn): void {
-  if (ir.stats.skippedFiles !== undefined) return
-  const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
-  if (unparsed <= 0) return
-  const consequence = side === "head" ? "removed" : "added"
-  warn(
-    `⚠ ${side} IR reports ${unparsed} file(s) it did not parse but has no stats.skippedFiles to name them, so this diff cannot tell a lost file from a deleted one. Symbols from those files are reported as ${consequence}. Re-run \`aburi scan\` on the ${side} revision to record the list.`,
-  )
-}
-
-/**
- * Files neither revision analysed produce no `unknown` entry, so nothing at the Symbol level
- * mentions them.
- *
- * `unknown` is derived from the matcher's leftovers: a Symbol one document has and the other
- * lacks. When a file is skipped on both sides there are no Symbols from it anywhere and no
- * leftovers, so no status can carry the loss. The document says it one level up, in
- * `notCompared[]` (`diff-algorithm.md`), and this line is the cover note for the reader
- * watching the command rather than reading the file it wrote.
- *
- * Deliberately shorter than the artifact: a count, a capped list of paths, and no reasons,
- * because a terminal line that grows with the size of a workspace's blind spot stops being
- * read. It points at the field instead, which is where the pair of reasons lives.
- *
- * Reads the array the document carries rather than intersecting the two skip lists again.
- * `buildDiff` computes it once from the side views its own Symbol classification uses, and a
- * second implementation here would be a second answer to "which files did neither side read",
- * with nothing to detect the two drifting apart.
- */
-function warnOnSymmetricLosses(notCompared: readonly NotComparedFile[], warn: WarnFn): void {
-  if (notCompared.length === 0) return
-  warn(
-    `⚠ ${notCompared.length} file(s) were skipped by both scans; see notCompared[] in diff.json: ${joinCapped(notCompared.map(notComparedName))}.`,
-  )
-}
-
-/**
- * A renamed file by both its names, as `diff.md` prints it: the line drops reasons, not
- * identity, and the base scan's own warning above names the file under the base's name.
- */
-function notComparedName(file: NotComparedFile): string {
-  return file.basePath === undefined ? file.path : `${file.basePath} → ${file.path}`
-}
-
-/** Trigger phrasing so the CLI wrapper can pipe it to stderr. */
-export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {
-  return formatTriggered(triggered.clause, triggered.observed)
-}
-
-interface RefSpec {
-  base: string
-  head: string
-}
-
-/**
- * `<base>..<head>`, split at the first separator rather than at every `..` (`cli-spec.md`),
- * so the three-dot form is named for what it is (exit 2) instead of running with
- * `.HEAD` as the head ref. The merge-base advice uses placeholders rather than the caller's
- * refs: a ref name is not shell-safe, so a copy-pasteable command built from one hands the
- * reader a substitution to run.
- *
- * The three checks are ordered by what each can still say truthfully:
- *
- * - **Emptiness first**, so `main...` reads as a missing head ref rather than as a three-dot
- *   spec whose suggested rewrite would be `main..`.
- * - **A second separator next**, so `a...b..c` — a three-dot run *followed* by another `..` —
- *   gets the generic message. Judged first, the three-dot branch would suggest `a..b..c`,
- *   which this same function rejects, and would name `b..c` as a ref: the very defect this
- *   parse fixes. `base` cannot hold one, `indexOf` having taken the first, so `head` is the
- *   whole test.
- * - **The dot run last**, where a rewrite naming two refs is finally something that parses.
- */
-function parseRefSpec(spec: string): RefSpec {
-  const separator = spec.indexOf("..")
-  if (separator === -1) throw malformedRefSpec(spec)
-  // The whole run of dots, so `a...b` is one separator the caller spelled wrong rather than a
-  // `..` followed by a ref whose name begins with a dot (git refuses those anyway).
-  let afterDots = separator + 2
-  while (spec[afterDots] === ".") afterDots++
-  const base = spec.slice(0, separator)
-  const head = spec.slice(afterDots)
-  if (base.length === 0 || head.length === 0) {
-    throw new CliError(
-      `diff argument "${spec}" must contain non-empty base and head refs on either side of "..".`,
-      "input-error",
-    )
-  }
-  if (head.includes("..")) throw malformedRefSpec(spec)
-  if (afterDots - separator === 3) {
-    throw new CliError(
-      `diff argument "${spec}" uses the three-dot form. aburi diff compares the two revisions directly, so write it as "${base}..${head}". To compare the head against the merge base instead, resolve it yourself with: git merge-base <base> <head>.`,
-      "input-error",
-    )
-  }
-  // A longer dot run: it names two refs, but nothing about it says where the separator was
-  // meant to end, so there is no rewrite worth guessing at.
-  if (afterDots - separator !== 2) throw malformedRefSpec(spec)
-  return { base, head }
-}
-
-function malformedRefSpec(spec: string): CliError {
-  return new CliError(
-    `diff argument "${spec}" is not a valid ref spec. Use <base>..<head> (e.g. main..HEAD) or supply --base and --head with IR paths.`,
-    "input-error",
-  )
-}
-
-type ScanPair = Record<DiffSide, ScanReport>
-
-interface ResolvedIRs {
-  baseIR: IR
-  headIR: IR
-  baseRef: string
-  headRef: string
-  gitRenames: GitRenameMap | null
-  /** The two scans this command ran, or `null` when both documents came off disk. */
-  scans: ScanPair | null
-}
-
-/** Which of the two forms `cli-spec.md` gives this command was asked for. */
-type DiffInputs = { kind: "refs"; spec: RefSpec } | { kind: "files"; base: string; head: string }
-
-/**
- * The form the options spell, decided before anything touches the disk: a malformed spec or a
- * half-given file pair is refused with nothing created for it.
- */
-function chooseInputs(options: DiffOptions): DiffInputs {
-  if (options.refSpec !== undefined && options.refSpec !== null && options.refSpec.length > 0) {
-    if (options.base !== undefined && options.base !== null) {
-      throw new CliError(
-        `--base cannot be combined with a ref spec argument. Use one or the other.`,
-        "input-error",
-      )
-    }
-    return { kind: "refs", spec: parseRefSpec(options.refSpec) }
-  }
-  if (options.base === undefined || options.base === null || options.base.length === 0) {
-    throw new CliError(
-      `aburi diff needs either <base>..<head> or --base <ir.json> --head <ir.json>.`,
-      "input-error",
-    )
-  }
-  if (options.head === undefined || options.head === null || options.head.length === 0) {
-    throw new CliError(`--base was supplied without a matching --head <ir.json>.`, "input-error")
-  }
-  return { kind: "files", base: options.base, head: options.head }
-}
-
-async function resolveIRs(
-  inputs: DiffInputs,
-  options: DiffOptions,
-  cwd: string,
-  pinConfigOnce: () => Promise<PinnedConfig>,
-  warn: WarnFn,
-): Promise<ResolvedIRs> {
-  if (inputs.kind === "refs") return resolveViaGit(options, cwd, inputs.spec, pinConfigOnce, warn)
-  const baseIR = await readIR(resolve(cwd, inputs.base))
-  const headIR = await readIR(resolve(cwd, inputs.head))
-  return {
-    baseIR,
-    headIR,
-    baseRef: inputs.base,
-    headRef: inputs.head,
-    gitRenames: null,
-    scans: null,
-  }
-}
-
-async function resolveViaGit(
-  options: DiffOptions,
-  cwd: string,
-  spec: RefSpec,
-  pinConfigOnce: () => Promise<PinnedConfig>,
-  warn: WarnFn,
-): Promise<ResolvedIRs> {
-  const git = options.git ?? defaultGitRunner
-  await assertRefResolvable(git, cwd, spec.base, "base")
-  await assertRefResolvable(git, cwd, spec.head, "head")
-  await assertNotShallow(git, cwd)
-  await assertNotSparse(git, cwd)
-
-  // Pinned before the worktree exists, and therefore against the caller's own directory.
-  // `cli-spec.md` gives the base scan the *head* `aburi.json`: a config as of the base ref
-  // would make any commit that edits one read as "the entire IR changed". Discovery from
-  // inside the worktree returns the base copy, and so does a relative `--config`, so the
-  // rule holds only if the answer is fixed here and handed to both scans.
-  const pinnedConfig = await pinConfigOnce()
-  // Two things read this, and both are "the base is interpreted through the head's view":
-  // the name to materialise the base under, and where a relative
-  // `./plugins/*.mjs` ref in the head's config resolves from (`cli-spec.md` pins the plugin
-  // set to the head environment). The worktree materialises the base *sources*; it has no
-  // claim on either.
-  const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
-  const submoduleIgnore = await submodulePatterns(git, headWorkspaceRoot, warn)
-  // Before the temp directory exists, so that no `await` separates `mkdtemp` resolving from the
-  // signal handler being registered below. Signals reach a listener as event-loop events, so
-  // none can land in between and find the directory unguarded; with this call in between, the
-  // directory sat unguarded for the whole of a slow `git diff --find-renames`, and outside the
-  // `try`, so a throw from it left the directory behind.
-  const renames = await collectRenames(git, cwd, spec, warn)
-  const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
-  // Under a directory of its own, so the leaf below is free to be any name the head workspace
-  // has — including `base-out` or `head-out`, which as siblings would be the temp run's own
-  // output directories.
-  const worktreeParent = resolve(tempParent, "base")
-  const worktreeDir = resolve(worktreeParent, baseWorktreeLeaf(headWorkspaceRoot))
-  const baseOutputDir = resolve(tempParent, "base-out")
-  const headOutputDir = resolve(tempParent, "head-out")
-  let baseIR: IR
-  let headIR: IR
-  let scans: ScanPair
-  // Whether there is a worktree to clean up: a `worktree remove` after a failed `add` reports
-  // a cleanup failure advising `git worktree prune` ahead of the exception that ended the run.
-  let worktreeAdded = false
-  // A Ctrl-C or a cancelled CI job ends the process without running the `finally` below, which
-  // left a registered worktree and a full base checkout behind on every interrupted run. The
-  // same cleanup runs synchronously on the signal instead, through the real `git`: an injected
-  // runner is asynchronous, and nothing asynchronous finishes once the signal is re-raised.
-  // The consequence for an embedder that injects a `GitRunner` (a wrapper, or a git outside
-  // `PATH`) is that this path still runs whatever `git` is on `PATH`: it may fail to remove the
-  // worktree, which is then reported on stderr, or remove it through a different git.
-  // The remove is tried even before `worktreeAdded` is set: a signal can land while `worktree
-  // add` is still running, after git has registered the worktree, and a remove of one that is
-  // not there fails harmlessly. That narrows the window rather than closing it: a signal sent to
-  // this process alone, not to its process group, leaves the `worktree add` child running, and
-  // it can finish registering the worktree after this cleanup has run.
-  const releaseSignals = cleanUpOnFatalSignal(() => {
-    // Taken first, so a signal that lands after the `finally` below has already removed the
-    // checkout does not report the remove of a worktree that is gone as a failure.
-    const hadCheckout = existsSync(worktreeDir)
-    const removal = spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
-      cwd,
-      env: gitChildEnv(),
-      stdio: "ignore",
+    written.diffFullMdPath = fullMdPath
+    markdown = projectDiff(diff, {
+      maxBytes: options.maxBytes,
+      fullReportLocation: `\`${DIFF_FULL_MD_FILENAME}\` beside \`${DIFF_MD_FILENAME}\``,
     })
-    if (hadCheckout && (removal.error !== undefined || removal.status !== 0)) {
-      const why = removal.error?.message ?? `git exited ${removal.status ?? removal.signal}`
-      // No `git worktree prune` here: it acts on the whole repository, and would also remove
-      // prunable worktrees other people or tools made.
-      reportFromSignal(
-        `⚠ git worktree cleanup failed for "${worktreeDir}"; ${why}. Consider running \`git worktree prune\`.`,
-      )
-    }
-    try {
-      rmSync(tempParent, { recursive: true, force: true })
-    } catch (error) {
-      reportFromSignal(
-        `⚠ Failed to remove the temporary directory "${tempParent}"; ${errorMessage(error)}. It can be deleted by hand.`,
-      )
-    }
-  })
-  try {
-    // git creates the leading directories of a worktree path itself, so this is belt and
-    // braces for the one level this run invented rather than something git needs.
-    await mkdir(worktreeParent, { recursive: true })
-    await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
-    worktreeAdded = true
-    const baseReport = await runScanInDir(
-      worktreeDir,
-      options,
-      baseOutputDir,
-      warn,
-      pinnedConfig,
-      headWorkspaceRoot,
-      { side: "base", ref: spec.base },
-      submoduleIgnore,
-    )
-    // The base scan finds its own root, and lands on the checkout git made only because the
-    // worktree's `.git` file ends the walk there (`component-detect.md` §2.1). A root anywhere
-    // else would compare a different tree against the head, so it is refused, not diffed.
-    if (baseReport.workspaceRoot !== worktreeDir) {
-      throw internalFault(
-        ` while scanning base ref "${spec.base}"`,
-        `the scan rooted at ${baseReport.workspaceRoot} instead of the worktree ${worktreeDir}, so the two sides would describe different trees`,
-        null,
-      )
-    }
-    if (baseReport.irPath === null) {
-      throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
-    }
-    baseIR = await readIR(baseReport.irPath)
-
-    const headReport = await runScanInDir(
-      cwd,
-      options,
-      headOutputDir,
-      warn,
-      pinnedConfig,
-      headWorkspaceRoot,
-      { side: "head" },
-      submoduleIgnore,
-    )
-    if (headReport.irPath === null) {
-      throw new CliError("scan for head ref produced no IR file.", "runtime-error")
-    }
-    headIR = await readIR(headReport.irPath)
-    scans = { base: baseReport, head: headReport }
-  } finally {
-    if (worktreeAdded) {
-      try {
-        await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
-      } catch (error) {
-        warn(
-          `⚠ git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
-        )
-      }
-    }
-    try {
-      await rm(tempParent, { recursive: true, force: true })
-    } catch (error) {
-      // `force` swallows ENOENT and nothing else; EBUSY / EPERM / ENOTEMPTY still throw, and a
-      // throw from `finally` replaces whatever exception was in flight — so a scan that failed
-      // to produce an IR would be reported as an fs error against a temp directory the caller
-      // never named. Leaving the directory behind is the lesser loss, and it is under `tmpdir`.
+    const bytes = Buffer.byteLength(markdown, "utf8")
+    if (bytes > options.maxBytes) {
       warn(
-        `⚠ Failed to remove the temporary directory "${tempParent}"; ${errorMessage(error)}. It can be deleted by hand.`,
+        `⚠ ${DIFF_MD_FILENAME} is ${bytes} bytes, over the ${options.maxBytes} requested: every section was dropped and the title and summary alone exceed it. Raise --max-bytes.`,
       )
     }
-    // Last, not first: the asynchronous removal above takes as long as the checkout is large,
-    // and a signal during it would otherwise take the default action and leave both behind.
-    // Running the synchronous cleanup after part of this has finished is harmless: a `worktree
-    // remove --force` of a checkout that is gone exits 0, and `rmSync` is `force`.
-    releaseSignals()
   }
-
-  return {
-    baseIR,
-    headIR,
-    baseRef: spec.base,
-    headRef: spec.head,
-    gitRenames: renames,
-    scans,
-  }
-}
-
-/**
- * The directory name to materialise the base revision under: the head workspace's own leaf
- * (`cli-spec.md` — Component detection reads that name). The two substitutions
- * are an empty leaf (only at the filesystem root) and `@`, which `git worktree add` cannot
- * spell under `.git/worktrees/`; both kebab-case to nothing, so neither could supply a
- * Component id that differs from the head's.
- */
-function baseWorktreeLeaf(headWorkspaceRoot: string): string {
-  const leaf = basename(headWorkspaceRoot)
-  return leaf.length === 0 || leaf === "@" ? "base" : leaf
-}
-
-/**
- * What a scan covered, in the only two shapes there are.
- *
- * The head carries no ref because `cli-spec.md` scans the working tree whatever the ref spec
- * calls it, so `main..v1.1.0` from a `v1.0.0` checkout must not produce a `head ref "v1.1.0"`
- * label. As a union that mislabelling is unwritable rather than caught by a test.
- */
-type ScanTarget = { side: "base"; ref: string } | { side: "head" }
-
-function labelFor(target: ScanTarget): string {
-  return target.side === "base" ? `base ref "${target.ref}"` : "head (working tree)"
-}
-
-/**
- * One scan of one side, reading the config both sides share. `pinnedConfig` replaces
- * `options.configPath`: the flag is relative to the caller's directory and the base scan runs
- * in the worktree. `pluginRefRoot` is the head's absolute path on both sides, because the plugin
- * set is pinned to the head environment (`cli-spec.md` §6.4.1.5), so the sides differ only in
- * their sources.
- *
- * `submoduleIgnore` reaches both sides for another reason: it holds workspace-root-relative
- * patterns that each scan resolves against its own root, so passing it to both removes the same
- * sources from each. `runScan` appends it to the config's own `ignore` (`mergeCliOverrides`)
- * rather than replacing that, and none of it is the user's: `aburi diff` has no `--ignore`.
- */
-async function runScanInDir(
-  cwd: string,
-  options: DiffOptions,
-  outputDir: string,
-  warn: WarnFn,
-  pinnedConfig: PinnedConfig,
-  pluginRefRoot: string,
-  target: ScanTarget,
-  submoduleIgnore: readonly string[],
-): Promise<ScanReport> {
-  const scanOptions: Parameters<typeof runScan>[0] = {
-    cwd,
-    command: "diff",
-    outputDir,
-    format: "json",
-    incidents: { warn, label: labelFor(target) },
-    pinnedConfig,
-    pluginRefRoot,
-    ...(submoduleIgnore.length === 0 ? {} : { ignore: submoduleIgnore }),
-    ...(options.compact === undefined ? {} : { compact: options.compact }),
-  }
-  return runScan(scanOptions)
-}
-
-/**
- * `git rev-parse --verify` fails distinguishably for a git that could not be started — the
- * `ENOENT` spawn failure `isGitMissing` picks out, which is the machine's (exit 1) and would be
- * a wrong-remediation nightmare in CI logs reported as "base ref not found" — and
- * indistinguishably for everything else. Under exit 128, `Needed a single revision` is what git
- * says for a ref that names nothing and for a repository with no commits alike, and a directory
- * outside any repository is refused the same way as one git will not open. So once a ref has
- * failed, the run asks git two more questions, and an *answer* to each is what becomes a
- * diagnosis:
- *   1. The directory is not inside a git repository. `git fetch` cannot help.
- *   2. The repository has no commits yet, so no ref — not even `HEAD~1` — names a revision.
- *   3. The ref cannot be resolved: a bad name, or a branch never fetched.
- * All three are about what the reader named and where they ran the command, so they are input
- * errors (exit 2, `cli-spec.md` §6.5). A question git does not answer ends the run at exit 1
- * with git's own words, which are the one piece of evidence that survives a diagnosis being
- * wrong — and every diagnosis carries them too, for the same reason.
- */
-async function assertRefResolvable(
-  git: GitRunner,
-  cwd: string,
-  ref: string,
-  role: "base" | "head",
-): Promise<void> {
-  try {
-    await git.run(["rev-parse", "--verify", ref], { cwd })
-  } catch (error) {
-    if (isGitMissing(error)) {
-      throw new CliError(
-        "git executable not found in PATH. aburi diff <base>..<head> requires a working git installation. Install git or use --base/--head with pre-generated IR files.",
-        "runtime-error",
-        { cause: error },
-      )
-    }
-    throw await diagnoseUnresolvedRef(git, cwd, ref, role, error)
-  }
-}
-
-/**
- * Which of the three reader-side reasons a ref did not resolve, as the error to throw — or,
- * when git would not say, the failure itself.
- *
- * Asked only after a ref has failed, so a healthy run pays for no extra git calls. A probe git
- * refuses answers `null` rather than a guess, because whatever refused the ref — dubious
- * ownership of the repository, a directory removed under the run — is still in force when the
- * probe runs, and reading its refusal as "not a repository" would replace git's precise report
- * with a wrong one at the wrong exit code.
- */
-async function diagnoseUnresolvedRef(
-  git: GitRunner,
-  cwd: string,
-  ref: string,
-  role: "base" | "head",
-  cause: unknown,
-): Promise<CliError> {
-  const prefix = `${role === "base" ? "Base" : "Head"} ref '${ref}' could not be resolved`
-  const said = errorMessage(cause).trim()
-  const outside = "Run aburi diff from inside one, or compare IR files with --base/--head."
-  const unanswered = (): CliError =>
-    new CliError(
-      `${prefix}, and git would not say why. What it reported: ${said}`,
-      "runtime-error",
-      { cause },
-    )
-
-  const inside = await isInsideWorkTree(git, cwd)
-  if (inside === null) {
-    // Outside any repository the refusal is the expected one, and the filesystem can vouch
-    // for it: nothing git would open stands between `cwd` and the root. Anything standing
-    // there means the refusal was about that repository, and git's report says what.
-    if (await gitRepositoryAbove(cwd)) return unanswered()
-    return new CliError(
-      `${prefix}: ${cwd} is not inside a git repository. ${outside} (${said})`,
-      "input-error",
-      { cause },
-    )
-  }
-  if (!inside) {
-    return new CliError(
-      `${prefix}: ${cwd} is inside a git directory, not a working tree. ${outside} (${said})`,
-      "input-error",
-      { cause },
-    )
-  }
-  const commits = await hasCommits(git, cwd)
-  if (commits === null) return unanswered()
-  if (!commits) {
-    return new CliError(
-      `${prefix}: the repository at ${cwd} has no commits yet, so there is no revision to compare. (${said})`,
-      "input-error",
-      { cause },
-    )
-  }
-  return new CliError(
-    `${prefix}: no such revision in this repository. Check the spelling, or fetch the branch first. (${said})`,
-    "input-error",
-    { cause },
+  await writeOutputFile(
+    { command: "diff", artefact: "the diff Markdown", path: diffMdPath },
+    markdown,
   )
-}
-
-/**
- * Whether `cwd` is inside a git working tree: `true` or `false` as git prints it (`false`
- * from inside `.git` itself), `null` when git refused the question.
- */
-async function isInsideWorkTree(git: GitRunner, cwd: string): Promise<boolean | null> {
-  try {
-    const { stdout } = await git.run(["rev-parse", "--is-inside-work-tree"], { cwd })
-    return stdout.trim() === "true"
-  } catch {
-    return null
-  }
-}
-
-/**
- * Whether any ref names a commit. `rev-list --all` prints nothing in a repository with no
- * commits and exits 0, which `rev-parse --verify HEAD` does not distinguish from a bad name.
- * `null` when git refused the question: "no commits" is a claim this must not make on no
- * evidence, and neither is "no such revision".
- */
-async function hasCommits(git: GitRunner, cwd: string): Promise<boolean | null> {
-  try {
-    const { stdout } = await git.run(["rev-list", "--all", "--max-count=1"], { cwd })
-    return stdout.trim().length > 0
-  } catch {
-    return null
-  }
-}
-
-/**
- * Whether anything git would open as a repository stands at `cwd` or above it: a `.git`
- * directory, or the file a linked worktree keeps in its place. `GIT_DIR` names one outright,
- * wherever it is, and is taken at its word. This walks what git's own discovery walks, minus
- * the ceilings that only ever make git find *less* — so "nothing here" is a finding git would
- * agree with, and "something here" merely hands the failure back to git's own report.
- */
-async function gitRepositoryAbove(cwd: string): Promise<boolean> {
-  if (process.env.GIT_DIR !== undefined) return true
-  let directory = resolve(cwd)
-  for (;;) {
-    if (await pathExists(join(directory, ".git"))) return true
-    const parent = dirname(directory)
-    if (parent === directory) return false
-    directory = parent
-  }
-}
-
-function isGitMissing(error: unknown): boolean {
-  return errorCode(error) === "ENOENT"
-}
-
-async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
-  const { stdout } = await git.run(["rev-parse", "--is-shallow-repository"], { cwd })
-  if (stdout.trim() === "true") {
-    throw new CliError(
-      "Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow",
-      "runtime-error",
-    )
-  }
-}
-
-/**
- * `cli-spec.md` §6.4.1: a sparse checkout is missing files the diff would read as removed.
- * `--bool` because git also takes `1`, `yes` and `on` for true and, untyped, prints the value as
- * written; `--bool` normalises every spelling to the `true` compared below. `--default false`
- * because `git config` exits 1 for a key that is not set, the usual case.
- */
-async function assertNotSparse(git: GitRunner, cwd: string): Promise<void> {
-  const { stdout } = await git.run(
-    ["config", "--bool", "--default", "false", "core.sparseCheckout"],
-    { cwd },
-  )
-  if (stdout.trim() === "true") {
-    throw new CliError(
-      "Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable",
-      "runtime-error",
-    )
-  }
-}
-
-/**
- * Ignore patterns that leave every submodule out of both file scans, after the §6.4.1 warning.
- *
- * `git worktree add` does not populate submodules, so the base side sees each one as an empty
- * directory while the head side, whose submodules are checked out, walks into them as ordinary
- * sources: every Symbol in an unchanged submodule would read as added. Leaving them out of both
- * file scans is what makes the warning describe a limitation rather than excuse a wrong report,
- * and it needs no network access, which `git submodule update --init` in the worktree would.
- * Component detection is not covered, since it looks for manifests without `ignore`: a submodule
- * that is itself a workspace package still yields a Component on the head side only, which the
- * warning says.
- *
- * The submodules are the gitlinks (mode `160000`) in the index, which is the list
- * `git submodule status` prints, one decorated line each. `ls-files -z` is asked instead, and the
- * `-z` is the point: without it git renders a path outside printable ASCII the way
- * `core.quotePath` asks — double-quoted and octal-escaped — while under it each record is
- * NUL-terminated and git's path quoting is bypassed entirely, so a record survives any path, a
- * newline or a tab in it included (`diff-algorithm.md` states the same contract for renames).
- * Run at the head workspace root, so the paths are relative to the root both scans share.
- */
-async function submodulePatterns(
-  git: GitRunner,
-  workspaceRoot: string,
-  warn: WarnFn,
-): Promise<string[]> {
-  const { stdout } = await git.run(["ls-files", "-z", "--stage"], { cwd: workspaceRoot })
-  const paths = parseSubmodulePaths(stdout)
-  if (paths.length === 0) return []
-  warn(
-    `⚠ Submodules detected: ${paths.join(", ")}. Submodule-aware diff is not yet supported, so their files are left out of both file scans. Component detection still walks them, so a workspace package inside one can still be reported as a Component added or removed.`,
-  )
-  return paths.map((path) => `${escapeGlob(path)}/**`)
-}
-
-/**
- * The gitlink paths in `git ls-files -z --stage` output: `<mode> <sha> <stage>\t<path>\0`.
- *
- * Collected in a `Set` because an unmerged gitlink is listed once per stage (1, 2 and 3), and
- * sorted so the warning text and the pattern order are stable. Not normalised to NFC, unlike
- * `parseRenameRecords` below: these become `ignore` globs, which match the spelling on disk,
- * while rename records are looked up against IR paths, which are NFC.
- */
-export function parseSubmodulePaths(stdout: string): string[] {
-  const paths = new Set<string>()
-  for (const record of stdout.split("\0")) {
-    const tab = record.indexOf("\t")
-    if (tab === -1) continue
-    if (!record.startsWith("160000 ")) continue
-    paths.add(record.slice(tab + 1))
-  }
-  return [...paths].sort()
-}
-
-/**
- * A path as glob text that matches it literally; the caller appends `/**` to take in the
- * subtree under it. Patterns reach picomatch (through tinyglobby), and the escaped set is the
- * characters its parser gives meaning to: `\` itself, which it spends as an escape, the
- * wildcards `*` and `?`, the class `[ ]`, the braces `{ }`, the group `( | )`, and the extglob
- * prefixes `!`, `+` and `@` (`!` also negates at the start of a pattern). Every other character
- * a path can hold, `.`, `$`, `^`, `,` and `#` among them, picomatch already matches as itself.
- */
-function escapeGlob(path: string): string {
-  return path.replace(/[\\()[\]{}*?|!+@]/g, "\\$&")
-}
-
-/**
- * `git diff --find-renames --name-status -z` powers the diff engine's stage-2 rename map
- * (`diff-algorithm.md`, which is where the `-z` contract is stated and why).
- *
- * A failure here is non-fatal — the diff still runs, just without the rename hints — so it warns
- * on stderr instead of aborting, loudly enough that a reviewer noticing "moved -> removed +
- * added" churn can trace the cause.
- *
- * Three ways this comes back useless, and only one of them is an error. git can fail; the record
- * stream can be unreadable; and git can *succeed* having quietly given up on rename detection —
- * over `diff.renameLimit` it exits 0, writes a warning to stderr, and reports every move as a
- * `D` plus an `A`. That last one used to be invisible here, and it fires on exactly the large
- * refactor where stage 2 matters most.
- */
-async function collectRenames(
-  git: GitRunner,
-  cwd: string,
-  spec: RefSpec,
-  warn: WarnFn,
-): Promise<GitRenameMap | null> {
-  let stdout: string
-  try {
-    const result = await git.run(
-      ["diff", "--find-renames", "--name-status", "-z", `${spec.base}..${spec.head}`],
-      { cwd },
-    )
-    stdout = result.stdout
-    // A diagnostic on a run that exited 0 — `diff.renameLimit` exceeded, a file it could not
-    // read. Nothing here can act on it, and the hints it costs are silent by construction: the
-    // records parse, the map is merely emptier than the refactor was.
-    if (result.stderr.trim().length > 0) {
-      warn(
-        `⚠ git reported while collecting renames for ${spec.base}..${spec.head}: ${result.stderr.trim()}. ` +
-          `Rename hints may be missing (raise diff.renameLimit if it says so); moves without one are reported as removed + added, ${RENAMED_AND_SKIPPED}.`,
-      )
-    }
-  } catch (error) {
-    warn(
-      `⚠ Failed to collect git renames (${errorMessage(error)}); the diff will treat renamed files as removed + added, ${RENAMED_AND_SKIPPED}.`,
-    )
-    return null
-  }
-  // Outside the `try`, so a defect in the parser is never reported as git having failed.
-  const parsed = parseRenameRecords(stdout)
-  if (!parsed.ok) {
-    warn(
-      `⚠ git diff --name-status -z for ${spec.base}..${spec.head} produced a record this parser could not read ` +
-        `(field ${parsed.index}: ${describeBadField(parsed.field)}); the diff will treat renamed files as removed + added, ${RENAMED_AND_SKIPPED}.`,
-    )
-    return null
-  }
-  return parsed.renames
-}
-
-/**
- * The other cost of a missing rename hint. The map also decides whether a file one scan skipped
- * is the one the other scan has under another name (`diff-algorithm.md` §3.5.1), so without it
- * that file's Symbols are a lone removal or addition — no matching half — and `--fail-on removed`
- * fires on a file nobody deleted.
- */
-const RENAMED_AND_SKIPPED =
-  "and the Symbols of a renamed file one scan skipped as removed or added rather than unknown"
-
-/** A field goes into a warning quoted and capped: it is a path, so it can carry control bytes. */
-function describeBadField(field: string): string {
-  const quoted = JSON.stringify(field)
-  return quoted.length <= MAX_REPORTED_FIELD_LENGTH
-    ? quoted
-    : `${quoted.slice(0, MAX_REPORTED_FIELD_LENGTH)}…`
-}
-
-const MAX_REPORTED_FIELD_LENGTH = 120
-
-/**
- * A `--name-status` status field: one letter, and on `R` / `C` a similarity score after it.
- *
- * Matching the score rather than assuming a one-character field is what keeps the shape check
- * below honest about what git actually writes (`R094`, not `R`).
- */
-const NAME_STATUS_FIELD = /^[A-Z]\d*$/
-
-/**
- * What the reader made of the stream: the renames, or where it stopped being readable.
- *
- * The failure carries its position because the caller has to write the warning somebody reads in
- * a CI log, and "could not read the output" with nothing else in it is a dead end for whoever
- * has to reproduce it.
- */
-export type RenameRecords =
-  | { ok: true; renames: GitRenameMap }
-  | { ok: false; index: number; field: string }
-
-/**
- * NUL-separated `--name-status` records into `{oldPath: newPath}`.
- *
- * Under `-z` the output is a flat sequence of fields rather than lines: a status, then the one
- * path it applies to — or, for the two statuses that carry a second path, `R` (rename) and `C`
- * (copy), two of them. The record length is therefore decided by the status, and every field of
- * a record has to be consumed even when the record is not a rename: skipping a `C` by its status
- * alone leaves the reader one field short and every record after it misread. Only `R` enters the
- * map — a copy's source file is still there, so it is not a move.
- *
- * Paths are normalized to NFC because that is the form they are compared against:
- * `toRelativePosix` normalizes every `source.file`, and `matchStageGitRename` looks a path up in
- * this map with a bare `Map.get`. A repository holding a path decomposed (macOS with
- * `core.precomposeUnicode` off) would otherwise produce a map that cannot match anything — the
- * failure this whole reader exists to prevent, on the class of path it is about.
- *
- * A failure, not a partial map, when a field is not a status where one must be or the stream
- * stops mid-field. A desynced reader produces *plausible* pairs — a path read as a status, the
- * next path read as its target — and a wrong rename is worse for stage 2 than no rename at all:
- * it pairs two unrelated Symbols and reports the move as settled. The caller degrades to no hints
- * and says so, which is the fallback a `git` that failed outright already gets.
- */
-export function parseRenameRecords(stdout: string): RenameRecords {
-  const fields = stdout.split("\0")
-  // `-z` *terminates* each field, so a complete stream ends in an empty tail and anything else
-  // there is a stream that was cut mid-field — the one truncation that would otherwise read as a
-  // whole record, mapping a rename onto a chopped path. Empty stdout, nothing changed between
-  // the refs, is that tail and nothing else.
-  const tail = fields.pop()
-  if (tail !== "") return { ok: false, index: fields.length, field: tail ?? "" }
-  const renames = new Map<string, string>()
-  let index = 0
-  while (index < fields.length) {
-    const status = fields[index]
-    if (status === undefined || !NAME_STATUS_FIELD.test(status)) {
-      return { ok: false, index, field: status ?? "" }
-    }
-    const pathCount = status.startsWith("R") || status.startsWith("C") ? 2 : 1
-    // A record the stream ends in the middle of is truncated output, not a record we can read.
-    if (index + pathCount > fields.length - 1) return { ok: false, index, field: status }
-    index += 1 + pathCount
-    if (!status.startsWith("R")) continue
-    const oldPath = fields[index - 2]
-    const newPath = fields[index - 1]
-    // Unreachable — the bounds check above is what makes both defined — but `fields` is indexed
-    // under `noUncheckedIndexedAccess`, so the guard is what makes this typecheck.
-    if (oldPath === undefined || newPath === undefined) return { ok: false, index, field: status }
-    renames.set(oldPath.normalize("NFC"), newPath.normalize("NFC"))
-  }
-  return { ok: true, renames }
+  written.diffMdPath = diffMdPath
+  return written
 }
 
 function irRef(refName: string, ir: IR): IRRef {
   return { ref: refName, irSchema: ir.$schema }
-}
-
-/**
- * Removed from the environment of every git command `aburi diff` runs, because a commit hook
- * exports them and they describe the commit being made rather than the repository.
- *
- * `GIT_INDEX_FILE` names the index of that commit, and `git worktree add` checks the base out
- * through whatever index it names. Inherited as an absolute path, it overwrote that index and
- * the commit recorded the base revision's tree: `commit -a` and `commit <paths>` export one in
- * the main worktree, and every commit exports one in a linked worktree. Inherited as the
- * relative `.git/index` a plain `commit` exports in the main worktree, the worktree step failed
- * on the new worktree's `.git` file. `GIT_PREFIX` is the hook's directory inside the caller's
- * tree, which no command here is about.
- *
- * Everything else passes through. `GIT_DIR` names the repository, which both scans are about,
- * and a caller that points git at one discovery would not find (a bare repository driven with
- * `GIT_WORK_TREE`) has nothing else naming it. `GIT_WORK_TREE` stays for that same caller: the
- * pre-validation's `--is-inside-work-tree` asks about the caller's tree, and without it a
- * mistyped ref there is diagnosed as a run from inside a git directory. The caller's `-c`
- * settings arrive as `GIT_CONFIG_PARAMETERS` and stay theirs.
- */
-const UNINHERITED_GIT_ENV: readonly string[] = ["GIT_INDEX_FILE", "GIT_PREFIX"]
-
-/**
- * Write a line to stderr from a signal listener, where `warn` cannot be used: it ends in an
- * asynchronous `stderr.write` on a pipe, which does not flush before the signal is re-raised.
- */
-function reportFromSignal(message: string): void {
-  try {
-    writeSync(2, `${message}\n`)
-  } catch {
-    // Left empty on purpose: stderr may already be gone (a closed terminal is one of these
-    // signals), there is nowhere else to report to, and a throw out of a signal listener would
-    // end the process with exit 1 instead of the signal.
-  }
-}
-
-/** The environment a git command is spawned with: `env` without `UNINHERITED_GIT_ENV`. */
-export function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const child = { ...env }
-  for (const name of UNINHERITED_GIT_ENV) delete child[name]
-  return child
-}
-
-/**
- * Chunks are joined as bytes and decoded once: a stream splits wherever it splits, so decoding
- * each chunk on its own turns a multi-byte character that straddles two of them into U+FFFD.
- */
-const defaultGitRunner: GitRunner = {
-  async run(
-    args: readonly string[],
-    options?: { cwd?: string },
-  ): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolvePromise, rejectPromise) => {
-      const child = spawn("git", args, { cwd: options?.cwd, env: gitChildEnv() })
-      const stdoutChunks: Buffer[] = []
-      const stderrChunks: Buffer[] = []
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdoutChunks.push(chunk)
-      })
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderrChunks.push(chunk)
-      })
-      child.on("error", rejectPromise)
-      child.on("close", (code, signal) => {
-        const stdout = Buffer.concat(stdoutChunks).toString("utf8")
-        const stderr = Buffer.concat(stderrChunks).toString("utf8")
-        if (code === 0) return resolvePromise({ stdout, stderr })
-        // A killed git has a null code and a signal; "exited with code null" would drop the one
-        // fact that explains it, and this string is what the caller puts in front of the user.
-        const how =
-          code === null ? `was killed by ${signal ?? "a signal"}` : `exited with code ${code}`
-        rejectPromise(new Error(`git ${args.join(" ")} ${how}: ${stderr}`))
-      })
-    })
-  },
 }

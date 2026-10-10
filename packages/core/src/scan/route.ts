@@ -1,31 +1,23 @@
 import type { LanguagePlugin } from "@aburi/types"
+import { toNfc } from "../codepoints"
 import { CoreError } from "../errors"
 
-/**
- * The lowercased extension of `path`, dot included (`src/A.TSX` → `.tsx`), or `null` when the
- * name has none. The one spelling the router, discovery and the language census key by.
- */
 export function fileExtension(path: string): string | null {
   const dot = path.lastIndexOf(".")
-  return dot < 0 ? null : path.slice(dot).toLowerCase()
+  return dot < 0 ? null : extensionKey(path.slice(dot))
 }
 
-/**
- * Build a case-insensitive extension → LanguagePlugin dispatch table. Each plugin
- * publishes its handled extensions via `fileExtensions` (e.g. `[".ts", ".tsx"]`) and
- * the scan orchestrator uses the map to pick the right parser for each discovered file.
- *
- * A given extension may only be owned by one plugin; a duplicate throws because
- * plugin-registry already enforces manifest uniqueness at load time and reaching here
- * with a collision means something in the caller wiring is inconsistent.
- */
+function extensionKey(extension: string): string {
+  return toNfc(extension.toLowerCase())
+}
+
 export function buildLanguageRouter(
   plugins: readonly LanguagePlugin<unknown, unknown>[],
 ): LanguageRouter {
   const table = new Map<string, LanguagePlugin<unknown, unknown>>()
   for (const plugin of plugins) {
     for (const ext of plugin.fileExtensions) {
-      const key = ext.toLowerCase()
+      const key = extensionKey(ext)
       const prior = table.get(key)
       if (prior && prior !== plugin) {
         throw new CoreError(
@@ -39,10 +31,6 @@ export function buildLanguageRouter(
   return new LanguageRouter(table)
 }
 
-/**
- * Extension-to-plugin dispatcher. Constructed only via `buildLanguageRouter` so the
- * collision check cannot be bypassed by a direct `new LanguageRouter(...)` call.
- */
 export class LanguageRouter {
   readonly #table: ReadonlyMap<string, LanguagePlugin<unknown, unknown>>
 
@@ -51,16 +39,10 @@ export class LanguageRouter {
     this.#table = table
   }
 
-  /** Every extension a plugin has claimed, lowercased and prefixed with `.`. */
   get knownExtensions(): readonly string[] {
     return [...this.#table.keys()]
   }
 
-  /**
-   * Route a file path to its owning plugin. Returns `null` when the extension is not
-   * claimed by any plugin — the scan pipeline records those as `skipped.reason ===
-   * "unroutable"` rather than guessing a fallback.
-   */
   route(path: string): LanguagePlugin<unknown, unknown> | null {
     const extension = fileExtension(path)
     return extension === null ? null : (this.#table.get(extension) ?? null)

@@ -212,7 +212,7 @@ Cluster identity is NOT a stable name across PRs. Two PRs that both touch "the r
 
    The derivation clause is true by construction inside the pass, which builds the id from `members[0]` itself; the two `members[]` clauses are the ones that can actually fire. That is the point. `members[0]` is the anchor only because the weakly-connected-components utility (§6) returns each component sorted ascending — a guarantee that lives one layer below the pass and is invisible from it. Should it ever weaken, the pass would otherwise keep emitting well-formed-looking Slices naming the wrong anchor.
 
-2. **Validator keyword.** A `SliceRecord` that arrives from outside the process — a document written by a third-party or older producer — cannot be checked by the schema alone, so a validating consumer registers the derivation as a custom keyword and rejects a wrong anchor at the same boundary where a wrong prefix is rejected. `@aburi/diff` exports the predicate (`sliceRecordViolation`) for exactly this, and the repository's own schema-validation suite is currently its only instance: Aburi itself never reads a diff document it did not just produce, so no shipping command runs this layer today. The keyword is deliberately **not** written into `aburi.diff.v1.json`. That schema is a frozen v1 artifact and MUST stay expressible in standard JSON Schema 2020-12, which has no cross-property comparison; a non-standard keyword in the file would fail every strict-mode validator that reads it, including the validators outside this repository that the published schema exists for.
+2. **Validator keyword.** A `SliceRecord` that arrives from outside the process — a document written by a third-party or older producer — cannot be checked by the schema alone, so a validating consumer registers the derivation as a custom keyword and rejects a wrong anchor at the same boundary where a wrong prefix is rejected. `@aburi/diff` exports the predicate (`sliceRecordViolation`) for exactly this. Aburi itself never reads a diff document it did not just produce, so no shipping command runs this layer today. The keyword is deliberately **not** written into `aburi.diff.v1.json`. That schema is a frozen v1 artifact and MUST stay expressible in standard JSON Schema 2020-12, which has no cross-property comparison; a non-standard keyword in the file would fail every strict-mode validator that reads it, including the validators outside this repository that the published schema exists for.
 
    The predicate accepts unvalidated input by contract. A validator receives data that has not been type-checked by definition, so a signature promising a well-formed `SliceRecord` would crash on precisely the documents this layer exists to reject.
 
@@ -412,7 +412,7 @@ Directly under the section heading, when any member carries at least one `resolv
 ```md
 ## 🧵 Slice View
 
-> ⚠ 2 of the changed symbols below make 5 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected (call-resolution.md §8.1).
+> ⚠ 2 of the changed symbols below make 5 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.
 ```
 
 And on the individual members — appended to the `↳` follow-up line of a §12.2 bullet, and to the label of a §12.3 singleton:

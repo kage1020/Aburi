@@ -411,8 +411,10 @@ any top-level export whose value has a `manifest` field. The first hit wins.
   JSX-body walkers).
 - Snapshot-verify the manifest against `schema/aburi.plugin.v1.json`, reusing
   the schema validation helpers in `@aburi/plugin-registry`.
-- Wire the plugin into `packages/e2e-integration` for an integration pass
-  against a small handwritten fixture project.
+- Add an integration pass in the plugin's own `test/`: write a small source
+  tree with `useScratchWorkspace` from `@aburi/test-support` and scan it for
+  real with `scanWith` from `@aburi/test-harness`, the TypeScript plugin in the
+  lineup beside yours.
 
 ## Publishing
 

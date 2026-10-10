@@ -1,145 +1,89 @@
-import { noopRegistry } from "@aburi/test-support"
-import type { CallCandidate, ClassifyContext, EffectPlugin, EffectsManifest } from "@aburi/types"
+import { makeCall, makeCtx, spend } from "@aburi/test-support"
+import type { EffectClassification, EffectPlugin } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { type ClassifyTimeoutEvent, classifyWithTimeout } from "../../src"
-import { symbolId } from "../fixtures/ir"
-import { effectsManifest } from "../fixtures/plugins"
+import {
+  CLASSIFY_TIMEOUT_MIN_MS,
+  type ClassifyTimeoutEvent,
+  type ClassifyWithTimeoutOptions,
+  CoreError,
+  classifyWithTimeout,
+} from "../../src"
+import { stubEffectsPlugin } from "../fixtures/plugins"
 
-const stubManifest: EffectsManifest = {
-  ...effectsManifest(),
-  provides: { ...effectsManifest().provides, derivedByPrefixes: ["effects-plugin:stub"] },
+const READ: EffectClassification = { effectId: "db.read", confidence: "high", derivedBy: "stub:x" }
+
+function slowPlugin(ms: number): EffectPlugin {
+  return stubEffectsPlugin("effects-stub", () => {
+    spend(ms)
+    return READ
+  })
 }
 
-function makeCall(target: string): CallCandidate {
-  return { target, line: 3, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
-}
-
-function makeCtx(): ClassifyContext {
-  return {
-    owner: {
-      id: symbolId("ts:test.ts#Fn"),
-      kind: "function",
-      name: "Fn",
-      extKind: null,
-      decorators: [],
-      component: null,
-    },
-    file: { path: "test.ts", imports: [] },
-    language: "ts",
-    registry: noopRegistry,
-    config: {},
-  }
+function classify(plugin: EffectPlugin, options: ClassifyWithTimeoutOptions = {}) {
+  return classifyWithTimeout(
+    plugin,
+    makeCall({ target: "slow.op", line: 3 }),
+    makeCtx(),
+    { symbolId: "ts:test.ts#Fn", file: "test.ts" },
+    options,
+  )
 }
 
 describe("classifyWithTimeout", () => {
-  it("passes through the classification when the classifier finishes on time", () => {
-    const plugin: EffectPlugin = {
-      manifest: stubManifest,
-      init: async () => {},
-      classify: () => ({
-        effectId: "db.read",
-        confidence: "high",
-        derivedBy: "effects-plugin:stub:x",
-      }),
-    }
-    const result = classifyWithTimeout(plugin, makeCall("foo.bar"), makeCtx(), {
-      symbolId: "ts:test.ts#Fn",
-      file: "test.ts",
-    })
-    expect(result?.effectId).toBe("db.read")
+  it("passes the classification through when the classifier finishes inside its budget", () => {
+    expect(classify(slowPlugin(0))).toEqual(READ)
   })
 
-  it("returns null and fires onTimeout when the wall-clock exceeds the budget", () => {
-    const plugin: EffectPlugin = {
-      manifest: stubManifest,
-      init: async () => {},
-      classify: () => {
-        const start = performance.now()
-        while (performance.now() - start < 80) {
-          /* busy-wait past the budget */
-        }
-        return { effectId: "db.read", confidence: "high", derivedBy: "effects-plugin:stub:x" }
-      },
-    }
+  it("answers null and reports the plugin, the call and the budget when the classifier overruns", () => {
     const events: ClassifyTimeoutEvent[] = []
-    const result = classifyWithTimeout(
-      plugin,
-      makeCall("slow.op"),
-      makeCtx(),
-      { symbolId: "ts:test.ts#Fn", file: "test.ts" },
-      { timeoutMs: 50, onTimeout: (event) => events.push(event) },
-    )
+    const result = classify(slowPlugin(80), { timeoutMs: 50, onTimeout: (e) => events.push(e) })
+
     expect(result).toBeNull()
-    expect(events).toHaveLength(1)
-    expect(events[0]?.plugin).toBe("effects-stub")
-    expect(events[0]?.symbolId).toBe("ts:test.ts#Fn")
-    expect(events[0]?.target).toBe("slow.op")
-    expect(events[0]?.budgetMs).toBe(50)
+    expect(events).toEqual([
+      {
+        plugin: "effects-stub",
+        symbolId: "ts:test.ts#Fn",
+        target: "slow.op",
+        file: "test.ts",
+        line: 3,
+        budgetMs: 50,
+        elapsedMs: expect.any(Number),
+      },
+    ])
     expect(events[0]?.elapsedMs).toBeGreaterThan(50)
   })
 
-  it("throws CoreError when the classifier violates the sync contract by returning a Promise", () => {
-    const plugin: EffectPlugin = {
-      manifest: stubManifest,
-      init: async () => {},
-      classify: (() => Promise.resolve(null)) as never,
-    }
+  it("raises a budget below the minimum to the minimum", () => {
     const events: ClassifyTimeoutEvent[] = []
-    expect(() =>
-      classifyWithTimeout(
-        plugin,
-        makeCall("bad.op"),
-        makeCtx(),
-        { symbolId: "ts:test.ts#Fn", file: "test.ts" },
-        { onTimeout: (event) => events.push(event) },
-      ),
-    ).toThrow(/sync contract/)
-    // The throw pre-empts onTimeout — the timeout event list stays empty.
-    expect(events).toHaveLength(0)
-  })
-
-  it("clamps timeoutMs below the minimum (10 ms) up to the floor before comparing", () => {
-    let observed = 0
-    const plugin: EffectPlugin = {
-      manifest: stubManifest,
-      init: async () => {},
-      classify: () => {
-        const start = performance.now()
-        while (performance.now() - start < 20) {
-          /* burn past the clamped budget */
-        }
-        return { effectId: "db.read", confidence: "high", derivedBy: "effects-plugin:stub:x" }
-      },
-    }
-    const result = classifyWithTimeout(
-      plugin,
-      makeCall("x.y"),
-      makeCtx(),
-      { symbolId: "ts:test.ts#Fn", file: "test.ts" },
-      { timeoutMs: 1, onTimeout: (event) => (observed = event.budgetMs) },
-    )
+    const result = classify(slowPlugin(CLASSIFY_TIMEOUT_MIN_MS + 10), {
+      timeoutMs: 1,
+      onTimeout: (e) => events.push(e),
+    })
     expect(result).toBeNull()
-    expect(observed).toBe(10)
+    expect(events.map((e) => e.budgetMs)).toEqual([CLASSIFY_TIMEOUT_MIN_MS])
   })
 
-  it("clamps timeoutMs above the maximum (5000 ms) down to the ceiling", () => {
-    let observed = 0
-    const plugin: EffectPlugin = {
-      manifest: stubManifest,
-      init: async () => {},
-      classify: () => {
-        return { effectId: "db.read", confidence: "high", derivedBy: "effects-plugin:stub:x" }
-      },
+  it("refuses a classifier that returns a Promise, before any timeout is reported", () => {
+    const events: ClassifyTimeoutEvent[] = []
+    const plugin = stubEffectsPlugin("effects-async", (() => Promise.resolve(null)) as never)
+
+    expect(() => classify(plugin, { onTimeout: (e) => events.push(e) })).toThrow(CoreError)
+    expect(() => classify(plugin)).toThrow(/sync contract/)
+    expect(events).toEqual([])
+  })
+
+  it("leaves no rejection unhandled when the Promise a classifier returned rejects", async () => {
+    const unhandled: unknown[] = []
+    const record = (reason: unknown) => unhandled.push(reason)
+    process.on("unhandledRejection", record)
+    try {
+      const plugin = stubEffectsPlugin("effects-async", (() =>
+        Promise.reject(new Error("classifier failed"))) as never)
+      expect(() => classify(plugin)).toThrow(CoreError)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    } finally {
+      process.off("unhandledRejection", record)
     }
-    classifyWithTimeout(
-      plugin,
-      makeCall("x.y"),
-      makeCtx(),
-      { symbolId: "ts:test.ts#Fn", file: "test.ts" },
-      { timeoutMs: 99_999, onTimeout: (event) => (observed = event.budgetMs) },
-    )
-    // The classifier resolved fast so no timeout event fires; we only assert the
-    // clamp had a chance to run by verifying the plugin actually classified.
-    expect(observed).toBe(0)
+    expect(unhandled).toEqual([])
   })
 })

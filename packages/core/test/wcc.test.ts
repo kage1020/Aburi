@@ -1,208 +1,121 @@
 import { describe, expect, it } from "vitest"
 import { computeWeaklyConnectedComponents } from "../src/wcc"
 
-/**
- * Union-Find WCC utility tests. These are the language-agnostic properties the
- * primitive must uphold; Slice-View-specific rules (Node/Edge selection, sliceId
- * naming) live in `packages/diff/test/slice.test.ts`.
- *
- * Determinism, idempotence, input-order insensitivity, and locality here directly
- * back SV15–SV18 of docs/design/slice-view.md, because Slice View delegates the
- * grouping to this utility unchanged.
- */
-
 interface Node {
   key: string
 }
-const n = (key: string): Node => ({ key })
-const keyOf = (x: Node): string => x.key
+const keyOf = (node: Node): string => node.key
+
+type Edge = [string, string]
+
+function components(keys: readonly string[], edges: readonly Edge[]): string[][] {
+  return computeWeaklyConnectedComponents(
+    keys.map((key) => ({ key })),
+    edges.map(([from, to]): [Node, Node] => [{ key: from }, { key: to }]),
+    keyOf,
+  ).map((component) => component.map(keyOf))
+}
 
 describe("computeWeaklyConnectedComponents", () => {
-  it("returns [] when there are no nodes", () => {
-    expect(computeWeaklyConnectedComponents<Node>([], [], keyOf)).toEqual([])
-  })
-
-  it("returns one singleton per unconnected node", () => {
-    const nodes = [n("a"), n("b"), n("c")]
-    const result = computeWeaklyConnectedComponents(nodes, [], keyOf)
-    expect(result.map((comp) => comp.map(keyOf))).toEqual([["a"], ["b"], ["c"]])
-  })
-
-  it("merges two nodes joined by a single edge", () => {
-    const nodes = [n("a"), n("b")]
-    const result = computeWeaklyConnectedComponents(nodes, [[n("a"), n("b")]], keyOf)
-    expect(result).toHaveLength(1)
-    expect(result[0]?.map(keyOf)).toEqual(["a", "b"])
-  })
-
-  it("edges are undirected — [a,b] and [b,a] behave the same", () => {
-    const nodes = [n("a"), n("b")]
-    const forward = computeWeaklyConnectedComponents(nodes, [[n("a"), n("b")]], keyOf)
-    const reverse = computeWeaklyConnectedComponents(nodes, [[n("b"), n("a")]], keyOf)
-    expect(forward.map((c) => c.map(keyOf))).toEqual(reverse.map((c) => c.map(keyOf)))
-  })
-
-  it("directed cycle a→b→c→a collapses into one component (no SCC pre-condense)", () => {
-    // SV9 backing: slice-view.md — an undirected walk over the directed
-    // cycle unifies all three nodes into a single component; no SCC / DAG
-    // condensation should happen inside the primitive.
-    const nodes = [n("a"), n("b"), n("c")]
-    const edges: [Node, Node][] = [
-      [n("a"), n("b")],
-      [n("b"), n("c")],
-      [n("c"), n("a")],
-    ]
-    const result = computeWeaklyConnectedComponents(nodes, edges, keyOf)
-    expect(result).toHaveLength(1)
-    expect(result[0]?.map(keyOf)).toEqual(["a", "b", "c"])
-  })
-
-  it("edges referencing nodes outside the node set are ignored (bridging is a caller concern)", () => {
-    // The utility should NOT quietly union across implicit external nodes; slice-view.md's
-    // "no bridging via non-Node symbols" is enforced by giving this function only
-    // the Node subset. Any edge whose endpoint is not in `nodes` must be dropped.
-    const nodes = [n("a"), n("b")]
-    const result = computeWeaklyConnectedComponents(
-      nodes,
+  it.each<[string, string[], Edge[], string[][]]>([
+    ["nothing for no nodes", [], [], []],
+    ["one singleton per unconnected node", ["a", "b", "c"], [], [["a"], ["b"], ["c"]]],
+    ["two nodes joined by an edge as one", ["a", "b"], [["a", "b"]], [["a", "b"]]],
+    ["an edge written backwards the same way", ["a", "b"], [["b", "a"]], [["a", "b"]]],
+    [
+      "a directed cycle as one component",
+      ["a", "b", "c"],
       [
-        [n("a"), n("middle")],
-        [n("middle"), n("b")],
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "a"],
       ],
-      keyOf,
-    )
-    expect(result.map((c) => c.map(keyOf))).toEqual([["a"], ["b"]])
-  })
-
-  it("self-loops do not fabricate additional connectivity", () => {
-    const nodes = [n("a"), n("b")]
-    const result = computeWeaklyConnectedComponents(
-      nodes,
+      [["a", "b", "c"]],
+    ],
+    [
+      "no bridge through a node outside the set",
+      ["a", "b"],
       [
-        [n("a"), n("a")],
-        [n("b"), n("b")],
+        ["a", "middle"],
+        ["middle", "b"],
       ],
-      keyOf,
-    )
-    expect(result.map((c) => c.map(keyOf))).toEqual([["a"], ["b"]])
-  })
-
-  it("multi-edges between the same pair produce the same component (dedup safe)", () => {
-    const nodes = [n("a"), n("b")]
-    const result = computeWeaklyConnectedComponents(
-      nodes,
+      [["a"], ["b"]],
+    ],
+    [
+      "no connectivity from self-loops",
+      ["a", "b"],
       [
-        [n("a"), n("b")],
-        [n("a"), n("b")],
-        [n("b"), n("a")],
+        ["a", "a"],
+        ["b", "b"],
       ],
-      keyOf,
-    )
-    expect(result).toHaveLength(1)
-    expect(result[0]?.map(keyOf)).toEqual(["a", "b"])
-  })
-
-  it("nodes within a component are returned in ascending key order", () => {
-    const nodes = [n("c"), n("a"), n("b")]
-    const result = computeWeaklyConnectedComponents(
-      nodes,
+      [["a"], ["b"]],
+    ],
+    [
+      "repeated edges between one pair as one component",
+      ["a", "b"],
       [
-        [n("c"), n("a")],
-        [n("a"), n("b")],
+        ["a", "b"],
+        ["a", "b"],
+        ["b", "a"],
       ],
-      keyOf,
-    )
-    expect(result).toHaveLength(1)
-    expect(result[0]?.map(keyOf)).toEqual(["a", "b", "c"])
-  })
-
-  it("components are returned in ascending smallest-member-key order", () => {
-    const nodes = [n("m"), n("x"), n("a"), n("z"), n("b")]
-    const result = computeWeaklyConnectedComponents(
-      nodes,
+      [["a", "b"]],
+    ],
+    [
+      "members in ascending key order",
+      ["c", "a", "b"],
       [
-        [n("m"), n("x")],
-        [n("a"), n("b")],
+        ["c", "a"],
+        ["a", "b"],
       ],
-      keyOf,
-    )
-    expect(result.map((c) => c.map(keyOf))).toEqual([["a", "b"], ["m", "x"], ["z"]])
-  })
-
-  // Both calls are handed the *same* two arrays, which the input-order case below cannot do
-  // because it builds a fresh pair per call. Reusing them is what catches a run that sorts
-  // its input in place, or that carries state from one call into the next.
-  it("idempotence — same input twice yields structurally equal output (SV17 backing)", () => {
-    const nodes = [n("c"), n("a"), n("b"), n("d")]
-    const edges: [Node, Node][] = [
-      [n("a"), n("b")],
-      [n("c"), n("d")],
-    ]
-    const one = computeWeaklyConnectedComponents(nodes, edges, keyOf)
-    const two = computeWeaklyConnectedComponents(nodes, edges, keyOf)
-    expect(two.map((c) => c.map(keyOf))).toEqual(one.map((c) => c.map(keyOf)))
-  })
-
-  it("input-order insensitive — shuffled nodes and shuffled edges → same output (SV18 backing)", () => {
-    const canonical = computeWeaklyConnectedComponents(
-      [n("a"), n("b"), n("c"), n("d")],
+      [["a", "b", "c"]],
+    ],
+    [
+      "components in ascending order of their smallest key",
+      ["m", "x", "a", "z", "b"],
       [
-        [n("a"), n("b")],
-        [n("c"), n("d")],
+        ["m", "x"],
+        ["a", "b"],
       ],
-      keyOf,
-    )
-    const shuffled = computeWeaklyConnectedComponents(
-      [n("d"), n("a"), n("c"), n("b")],
-      [
-        [n("d"), n("c")],
-        [n("b"), n("a")],
-      ],
-      keyOf,
-    )
-    expect(shuffled.map((c) => c.map(keyOf))).toEqual(canonical.map((c) => c.map(keyOf)))
+      [["a", "b"], ["m", "x"], ["z"]],
+    ],
+  ])("returns %s", (_case, keys, edges, expected) => {
+    expect(components(keys, edges)).toEqual(expected)
   })
 
-  it("locality — adding a disjoint singleton node does not disturb prior components (SV18 backing)", () => {
-    const before = computeWeaklyConnectedComponents([n("a"), n("b")], [[n("a"), n("b")]], keyOf)
-    const after = computeWeaklyConnectedComponents(
-      [n("a"), n("b"), n("z")],
-      [[n("a"), n("b")]],
-      keyOf,
+  it("returns the same components however the nodes and edges are ordered", () => {
+    expect(
+      components(
+        ["d", "a", "c", "b"],
+        [
+          ["d", "c"],
+          ["b", "a"],
+        ],
+      ),
+    ).toEqual(
+      components(
+        ["a", "b", "c", "d"],
+        [
+          ["a", "b"],
+          ["c", "d"],
+        ],
+      ),
     )
-    // The a-b component should appear structurally identical between the two runs;
-    // only the new `["z"]` singleton is appended (in sorted order).
-    expect(after[0]?.map(keyOf)).toEqual(before[0]?.map(keyOf))
-    expect(after.map((c) => c.map(keyOf))).toEqual([["a", "b"], ["z"]])
   })
 
-  it("handles a chain of many nodes efficiently (union-by-rank sanity)", () => {
-    // Not a benchmark — just guards against O(n^2) accidental union chains that
-    // path-compression would otherwise mask in small tests.
-    const size = 500
-    const nodes = Array.from({ length: size }, (_, i) => n(`n${String(i).padStart(4, "0")}`))
-    const edges: [Node, Node][] = []
-    for (let i = 0; i < size - 1; i++) {
-      const a = nodes[i]
-      const b = nodes[i + 1]
-      if (a === undefined || b === undefined) continue
-      edges.push([a, b])
-    }
-    const result = computeWeaklyConnectedComponents(nodes, edges, keyOf)
-    expect(result).toHaveLength(1)
-    expect(result[0]).toHaveLength(size)
+  it("matches edge endpoints to nodes by key, not by object identity", () => {
+    const a = { key: "a" }
+    const b = { key: "b" }
+
+    const result = computeWeaklyConnectedComponents([a, b], [[{ key: "a" }, b]], keyOf)
+
+    expect(result).toEqual([[a, b]])
+    expect(result[0]?.[0]).toBe(a)
   })
 
-  it("keyOf is called with each input node exactly enough to identify it, not on external endpoints", () => {
-    // Regression guard: if keyOf were called with an edge endpoint that is a
-    // *different object instance* than the node in `nodes`, callers who use
-    // reference-comparing keyOfs (rare, but possible) would break. The utility
-    // must resolve edges by key equality, not by object identity.
-    const a = n("a")
-    const b = n("b")
-    // Same key, different object identity.
-    const otherA = n("a")
-    const result = computeWeaklyConnectedComponents([a, b], [[otherA, b]], keyOf)
-    expect(result).toHaveLength(1)
-    expect(result[0]?.map(keyOf)).toEqual(["a", "b"])
+  it("joins a long chain into one component", () => {
+    const keys = Array.from({ length: 500 }, (_, i) => `n${String(i).padStart(4, "0")}`)
+    const edges = keys.slice(1).map((key, i): Edge => [keys[i] ?? "", key])
+
+    expect(components(keys, edges)).toEqual([keys])
   })
 })

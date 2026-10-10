@@ -13,7 +13,6 @@ import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan } from "./scan"
 
-/** What this command's one artefact is called when a write of it fails. */
 const MARKDOWN_ARTEFACT = "the explain Markdown"
 
 export interface ExplainOptions {
@@ -23,19 +22,7 @@ export interface ExplainOptions {
   irPath?: string
   outputPath?: string
   noRescan?: boolean
-  /**
-   * Append the per-call `## Call resolution` table of `call-resolution.md`.
-   * The buckets are per-run diagnostics that the IR deliberately does not
-   * persist, so this always rescans the workspace — an on-disk IR simply cannot
-   * answer the question.
-   */
   debugResolution?: boolean
-  /**
-   * Sink for the incidents of the scan this command runs when no IR is on disk (`cli-spec.md`), and
-   * for the one line reading an existing IR can produce: which document answered, when it was
-   * not the one under the working directory. Otherwise reading an IR reports nothing — the
-   * live signal fired when `aburi scan` wrote the file.
-   */
   warn?: WarnFn
 }
 
@@ -56,74 +43,18 @@ export type ExplainOutcome =
     }
   | { kind: "ambiguous"; candidates: readonly IRSymbol[]; exitCode: ExitCode }
   | { kind: "not-found"; exitCode: ExitCode; coverage: CoverageDoubt | null }
-  /**
-   * The argument names a file no Document can hold, so no answer about it would be safe.
-   *
-   * Separate from `unknown`, which carries the `SkippedFile` the document recorded. There is no
-   * such entry here and there cannot be one: the path a skip entry would take is held to the
-   * shared rule, which refuses the character. Deciding it from the argument alone is what lets
-   * this answer hold for a document read off disk as readily as for one just scanned — neither
-   * has anything to say about the file, and for the same reason.
-   */
   | { kind: "unnameable"; path: string; unnameablePrefix: string; exitCode: ExitCode }
-  /**
-   * The question named a file, and the document says that file was never analysed. Not an
-   * absence: the answer is that this IR cannot have one.
-   */
   | {
       kind: "unknown"
-      /**
-       * Always the gate. An answer the document cannot give must not be reportable as one of
-       * the codes that says it did, and the type is where that is cheapest to enforce.
-       */
       exitCode: typeof EXIT.GATE
       skipped: SkippedFile
-      /** Whether the file came from the argument itself or from the file segment of an id. */
       namedBy: "id" | "path"
     }
 
-/**
- * What an IR says about its own coverage, attached to a lookup that found nothing.
- *
- * Attached to every miss, in every arm, that the document could not tie to a file. The id and
- * file arms do name one, but naming it is not enough: the answer is `unknown` only when that
- * path is in the skip list, and a miss on a file the document did analyse carries this doubt
- * like any other. A hit carries nothing — the document is speaking about a Symbol it holds, and
- * an `over-size` file is skipped by every run of a workspace, so a caveat on hits would be a
- * permanent one.
- */
 export type CoverageDoubt =
-  /**
-   * `stats.skippedFiles` names the files, and one of them may hold the answer. The entries
-   * rather than a count, so the number cannot drift from the list it describes; non-empty,
-   * so "no doubt" cannot be spelled as a doubt over zero files. What to print out of them is
-   * the CLI wrapper's decision, not this type's.
-   */
   | { kind: "named-losses"; files: readonly [SkippedFile, ...SkippedFile[]] }
-  /** The document predates `stats.skippedFiles`: it counts its losses but cannot name them. */
   | { kind: "unnamed-losses"; fileCount: number }
 
-/**
- * `aburi explain <id-or-pattern>` — three-arm dispatch mirrored from
- * `docs/design/cli-spec.md`:
- *
- * - argument contains `#` → full Symbol id lookup.
- * - argument contains `/` but no `#` AND either resolves to an existing file or is named in
- *   `stats.skippedFiles` → all Symbols whose `source.file` matches (compared against the
- *   workspace-root-relative POSIX path so a run from a subdirectory still hits the right
- *   rows). The second leg is what `--ir` / `--no-rescan` are for: a pinned artifact is read
- *   in a tree that need not hold the file, and requiring it on disk would drop the question
- *   into the substring arm.
- * - otherwise → case-sensitive substring match on `Symbol.name`.
- *
- * When the substring match hits more than one Symbol the caller receives an
- * `ambiguous` outcome (exit 2) so they can add more of the qualified name. Zero hits
- * become `not-found` (exit 1), or `unknown` (exit 3) when the question named a file the
- * document says it never analysed (`cli-spec.md`). Every code is overridden by `withScanFault` when
- * the scan this command ran did not exit clean. A "single" / "file" outcome carries the
- * resolved `writtenTo` path when `--output` was supplied so the CLI wrapper can suppress the
- * stdout mirror.
- */
 export async function runExplain(options: ExplainOptions): Promise<ExplainOutcome> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
@@ -133,9 +64,6 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
     await locate(resolved, cwd, workspaceRoot, options),
     resolved.scanFaulted,
   )
-  // The one place the Markdown is written, so `locate` stays the pure lookup its name says.
-  // Written even when the scan faulted: the outcome carries the answer, and the gate is about
-  // whether to trust it, not about whether the caller may read it.
   if ("writtenTo" in outcome && outcome.writtenTo !== null) {
     await writeOutputFile(
       { command: "explain", artefact: MARKDOWN_ARTEFACT, path: outcome.writtenTo },
@@ -145,19 +73,6 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
   return outcome
 }
 
-/**
- * A scan that did not exit clean outranks whatever the lookup concluded.
- *
- * Every outcome is suspect in that state, including the successful ones: a file the scan
- * withdrew is absent from the IR, so a `single` answer may have had a competing candidate that
- * would have made it `ambiguous`, and a `not-found` may be describing the withdrawal rather
- * than the workspace. Reporting `0` for the first and `1` for the second would let a broken
- * toolchain look like a clean answer, which is the state `cli-spec.md` already refuses to call
- * green for `aburi scan`; the command asking the question does not change that.
- *
- * The condition is the scan's own exit code rather than a named incident, so a second reason to
- * gate — `runScan` says outright that there may be one — arrives here without an edit.
- */
 function withScanFault(outcome: ExplainOutcome, scanFaulted: boolean): ExplainOutcome {
   if (!scanFaulted) return outcome
   return { ...outcome, exitCode: EXIT.GATE }
@@ -193,40 +108,15 @@ async function locate(
         writtenTo: outputPath,
       }
     }
-    // A miss answers as a missed *id* only when the argument is one. `#` is what makes this
-    // arm worth trying, not proof that it applies: a path can hold one too, since a file
-    // whose name cannot host a Symbol id is still recorded in `stats.skippedFiles[]` — the
-    // Document's path rule admits both id separators and only the id grammar refuses them.
-    // Returning here for a string that is provably not an id would make the path arm below
-    // unreachable for exactly the files that most need it.
     const claimed = symbolIdFile(arg)
     if (claimed !== null) return missed(skippedByPath.get(claimed), "id", coverage)
   }
 
   if (arg.includes("/")) {
-    // Normalised into the space the document is in: `stats.skippedFiles[].path` and
-    // `symbols[].source.file` are NFC by schema and by invariant #19, while the argument is
-    // whatever the shell handed over — and a name carrying a combining mark survives an
-    // archive or a rename in decomposed form. Both lookups below key on this string.
-    // Not `toPosixRelative`: it throws on `..` and on absolute paths, and an argument
-    // shaped like either has to fall through to the substring arm rather than error.
-    //
-    // The separator conversion is conditional, the way `toRelativePosix` does it in the core.
-    // `relative` returns a native path, and only where the platform separator is a backslash
-    // is a backslash in it a separator — POSIX allows one in a filename, and rewriting it
-    // there turns the argument into a path naming a directory nobody has.
     const nativeRelative = relative(workspaceRoot, resolve(cwd, arg))
     const documentPath = (
       sep === "/" ? nativeRelative : nativeRelative.split(sep).join("/")
     ).normalize("NFC")
-    // Before the skip list and before the disk, because neither can answer. A name holding a
-    // backslash has no spelling in a Document path, so it is in no `stats.skippedFiles[]` and
-    // never will be, and the file existing says nothing about whether the IR could describe it.
-    // Left to the two lookups below this reports `No matches` about a file that is right there,
-    // which is the silence the scan-side gate exists to prevent, one command along.
-    //
-    // Unreachable on Windows, and correctly so: the conversion above spends every backslash as
-    // a separator there, which is what one is, and no Windows filename can hold the character.
     const unnameable = backslashSite(documentPath)
     if (unnameable !== null) {
       return {
@@ -236,9 +126,6 @@ async function locate(
         exitCode: EXIT.GATE,
       }
     }
-    // The skip list is consulted before the disk probe, not after: a file the document
-    // already describes needs no filesystem to answer for it, and `unreadable` is a reason
-    // whose file may well refuse the probe too.
     const skipped = skippedByPath.get(documentPath)
     if (skipped !== undefined || (await pathExists(resolve(cwd, arg)))) {
       const inFile = ir.symbols.filter((s) => s.source.file === documentPath)
@@ -271,21 +158,6 @@ async function locate(
   }
 }
 
-/**
- * A lookup that found nothing, answered as precisely as the document allows.
- *
- * The split is between a doubt the document can attach to the question and one it can only
- * state about the run. The id and file arms name a file, so `stats.skippedFiles` either holds
- * it — in which case the document positively contradicts "not found", and the honest answer
- * is that it has none — or it does not, and the miss stands as one, qualified by whatever
- * else the run lost.
- *
- * Called on a miss only. A Symbol that is present is answered from the document, however its
- * id reads: the id's file segment is where the Symbol was declared to live when the id was
- * minted, and `source.file` is where the document says it is, so consulting the skip list
- * first would let a re-exported or generated Symbol be reported as unanswerable while it sits
- * in `symbols[]`.
- */
 function missed(
   skipped: SkippedFile | undefined,
   namedBy: "id" | "path",
@@ -295,19 +167,6 @@ function missed(
   return { kind: "unknown", exitCode: EXIT.GATE, skipped, namedBy }
 }
 
-/**
- * What the document knows about its own gaps, read straight out of `stats`.
- *
- * A present-but-empty `skippedFiles` is no doubt at all: the key is Class B and writers omit
- * it when nothing was lost, but a document that spells the empty case out is still saying the
- * scan covered everything. Absent, the arithmetic is the only trace left — `aburi diff` warns
- * about the same shape per side — and it can be counted but not named.
- *
- * The zero guard covers a scan that lost nothing, not a document that contradicts itself:
- * invariant #21 holds `parsedFiles` to no more than `totalFiles` whether or not the list is
- * present, so a subtraction that came back negative was refused by `readIR` before reaching
- * here.
- */
 function coverageDoubt(ir: IR): CoverageDoubt | null {
   const skippedFiles = ir.stats.skippedFiles
   if (skippedFiles !== undefined) {
@@ -320,23 +179,17 @@ function coverageDoubt(ir: IR): CoverageDoubt | null {
   return { kind: "unnamed-losses", fileCount: unnamed }
 }
 
-/**
- * `--debug-resolution` needs diagnostics that only a live scan produces, so the
- * two flags that pin `explain` to an existing artifact are incompatible with it.
- * Failing loudly beats silently rescanning a workspace the user asked us not to
- * touch, or emitting an empty table that reads like "nothing unresolved".
- */
 function assertDebugResolutionCombination(options: ExplainOptions): void {
   if (options.debugResolution !== true) return
   if (options.noRescan) {
     throw new CliError(
-      "--debug-resolution needs a fresh scan (call-resolution.md keeps the per-call buckets out of the IR), so it cannot be combined with --no-rescan.",
+      "--debug-resolution needs a fresh scan (the IR does not keep the per-call buckets), so it cannot be combined with --no-rescan.",
       "input-error",
     )
   }
   if (options.irPath !== undefined) {
     throw new CliError(
-      "--debug-resolution needs a fresh scan (call-resolution.md keeps the per-call buckets out of the IR), so it cannot read an existing --ir file.",
+      "--debug-resolution needs a fresh scan (the IR does not keep the per-call buckets), so it cannot read an existing --ir file.",
       "input-error",
     )
   }
@@ -344,17 +197,7 @@ function assertDebugResolutionCombination(options: ExplainOptions): void {
 
 interface ResolvedIR {
   ir: IR
-  /**
-   * Diagnostics from the scan that produced `ir`, or `null` when the IR was
-   * read from disk (the file cannot carry them) or `--debug-resolution` was not
-   * requested.
-   */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[] | null
-  /**
-   * Whether the scan behind `ir` reported a fault of its own. `false` when the IR came off
-   * disk: that document is whatever the scan that wrote it produced, and its incidents were
-   * reported then.
-   */
   scanFaulted: boolean
 }
 
@@ -371,18 +214,11 @@ async function readOrScanIR(
       return { ir: await readIR(explicit), unresolvedCalls: null, scanFaulted: false }
     }
 
-    // Only now, after `--ir` has had its chance: that flag names the document outright, so a
-    // run using it has no reason to care where a scan would have put one, and no reason to
-    // fail on a config it does not consult.
     const outputDir = await configuredOutputDir(await pinConfig(cwd, options.configPath))
     const candidates = irSearchPath(cwd, workspaceRoot, outputDir)
     const [nearest] = candidates
     for (const candidate of candidates) {
       if (await pathExists(candidate)) {
-        // Which document answered, when it is not the one under the caller's feet. The lookup
-        // can now reach any ancestor up to the workspace root, and the answer carries no trace
-        // of where it came from — `ir.workspace.root` is `"."` in every document by schema, so
-        // the file's own location is the only signal there is.
         if (candidate !== nearest) {
           options.warn?.(`Answering from ${candidate}; there is no IR under ${resolve(cwd)}.`)
         }
@@ -418,15 +254,6 @@ async function readOrScanIR(
   }
 }
 
-/**
- * Where a written IR might be, nearest first: `aburi scan` writes under the directory it was
- * run from, which may be this one or any ancestor, and either document describes the whole
- * workspace.
- *
- * Unlike `findConfig`, the walk **stops at the workspace root**: an output directory above it
- * holds a document about a different tree. An absolute `outputDir` names one place from every
- * rung, so repeats are dropped and the miss message does not offer directories never searched.
- */
 function irSearchPath(
   cwd: string,
   workspaceRoot: string,
@@ -438,10 +265,6 @@ function irSearchPath(
   let directory = resolve(cwd)
   while (directory !== root) {
     const parent = dirname(directory)
-    // `resolveWorkspaceRoot` returns `cwd` or an ancestor of it, so the loop condition is what
-    // normally ends this. The guard is for an invariant that no longer holds: `dirname` is a
-    // fixed point at the filesystem root, and without it a `root` the walk can never reach
-    // would spin here forever.
     if (parent === directory) break
     directory = parent
     const candidate = join(resolveOutputDir(directory, undefined, outputDir), IR_JSON_FILENAME)

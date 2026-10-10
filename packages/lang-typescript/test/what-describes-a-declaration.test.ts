@@ -1,16 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeAst } from "../src/index"
-import { symbolOf } from "./fixtures/ctx"
-
-/**
- * Which node `normalizeAst` describes a declaration by: its own body, or the whole declaration.
- *
- * The answer is read from the tree — a body that is a direct child of the declaration's node is
- * the declaration's own — so it rests on how each producer pairs the two. A producer that widened
- * its full node past its body's parent would move the `syntax` fingerprint of every Symbol of its
- * kind, and every test that only compares two normalized strings would still pass. So each
- * producer's answer is pinned here, by the node its string opens with.
- */
+import { normalizedOf } from "./fixtures/ctx"
 
 /** The node type a normalized string opens with: `(statement_block (…))` → `statement_block`. */
 function headOf(normalized: string): string | undefined {
@@ -18,7 +7,7 @@ function headOf(normalized: string): string | undefined {
 }
 
 async function normalizedHead(source: string, name: string): Promise<string | undefined> {
-  return headOf(normalizeAst(await symbolOf(source, `ts:src/a.ts#${name}`)))
+  return headOf(await normalizedOf(source, `ts:src/a.ts#${name}`))
 }
 
 describe("a declaration with a body of its own is described by the body", () => {
@@ -122,8 +111,6 @@ describe("a binding whose body is the object literal it holds is described whole
     ["a const holding an object", "export const o = { m() { a() }, n: b() }", "o"],
     ["a const holding a wrapped object", "export const o = { m() { a() } } satisfies O", "o"],
   ])("%s", async (_label, source, name) => {
-    // The object is the binding's body and is not the declaration's own child, so the string is
-    // the one the binding had while it had no body, and no syntax fingerprint moves.
     expect(await normalizedHead(source, name)).toBe("lexical_declaration")
   })
 })
@@ -149,12 +136,7 @@ describe("a declaration whose body is a function written inside it is described 
 })
 
 describe("a Symbol several declarations wrote describes each of them once", () => {
-  // Positionless, so a declaration serializes the same alone and beside another: the merged
-  // string is the parts, joined in source order. A class's head stays with its own class, so
-  // that holds whether the class leads or follows.
-  async function alone(source: string, name: string): Promise<string> {
-    return normalizeAst(await symbolOf(source, `ts:src/a.ts#${name}`))
-  }
+  const alone = (source: string, name: string) => normalizedOf(source, `ts:src/a.ts#${name}`)
 
   it.each([
     [

@@ -1,134 +1,95 @@
 import { describe, expect, it } from "vitest"
 import { byId, symbolsOf } from "./fixtures/ctx"
 
-/**
- * LP13a: what a JSDoc `@throws` tag contributes to `signature.throws`. `throws` is an input of
- * the api fingerprint, so a word of prose recorded as a type turns a reworded comment into an
- * API change. The rule favours recording nothing when a tag's text is not plainly a type.
- */
-
 async function throwsOf(doc: string): Promise<readonly string[] | undefined> {
   const symbols = await symbolsOf(`${doc}\nexport function f() {}\n`)
   return byId(symbols, "#f").signature?.throws
 }
 
-describe("LP13a: JSDoc @throws", () => {
-  it("records nothing for a free-text description", async () => {
-    expect(await throwsOf("/** @throws If the id is unknown. */")).toEqual([])
-    expect(await throwsOf("/** @throws Will throw an error if the argument is null. */")).toEqual(
+describe("JSDoc @throws", () => {
+  it.each([
+    ["a free-text description", "/** @throws If the id is unknown. */", []],
+    [
+      "a description that starts with a type name",
+      "/** @throws NotFoundError when the row is missing */",
       [],
-    )
-  })
-
-  it("reads a reworded description the same as before", async () => {
-    const before = await throwsOf("/**\n * Loads a record.\n * @throws If the id is unknown.\n */")
-    const after = await throwsOf("/**\n * Loads a record.\n * @throws When the id is unknown.\n */")
-    expect(after).toEqual(before)
-  })
-
-  it("does not take a type name that a description starts with", async () => {
-    expect(await throwsOf("/** @throws NotFoundError when the row is missing */")).toEqual([])
-  })
-
-  it("keeps a bare type name that is the tag's whole text", async () => {
-    expect(await throwsOf("/** @throws PaymentDeclined */")).toEqual(["PaymentDeclined"])
-    expect(await throwsOf("/**\n * @throws Errors.NotFound\n * @returns nothing\n */")).toEqual([
-      "Errors.NotFound",
-    ])
-  })
-
-  it("keeps a bare type name written on the line after the tag", async () => {
-    expect(await throwsOf("/**\n * @throws\n * NotFound\n */")).toEqual(["NotFound"])
-  })
-
-  it("does not keep a lower-case or non-identifier word", async () => {
-    expect(await throwsOf("/** @throws error */")).toEqual([])
-    expect(await throwsOf("/** @throws - */")).toEqual([])
-  })
-
-  it("holds only a bare name's first segment to upper case, and takes no trailing full stop", async () => {
-    expect(await throwsOf("/** @throws Errors.notFound */")).toEqual(["Errors.notFound"])
-    expect(await throwsOf("/** @throws errors.Gone */")).toEqual([])
-    expect(await throwsOf("/** @throws {errors.Gone} */")).toEqual(["errors.Gone"])
-    expect(await throwsOf("/** @throws PaymentDeclined. */")).toEqual([])
-  })
-
-  it("does not take a description that continues on the next line", async () => {
-    expect(await throwsOf("/**\n * @throws Whenever\n *   the id is unknown.\n */")).toEqual([])
-  })
-
-  it("records the type of a braced tag and ignores its description", async () => {
-    expect(await throwsOf("/** @throws {NotFoundError} if the row is missing */")).toEqual([
-      "NotFoundError",
-    ])
-  })
-
-  it("records what the braces hold verbatim, and nothing for empty ones", async () => {
-    expect(await throwsOf("/** @throws {} */")).toEqual([])
-    expect(await throwsOf("/** @throws { } */")).toEqual([])
-    expect(await throwsOf("/** @throws {A | B} */")).toEqual(["A | B"])
-    expect(await throwsOf("/** @throws {A}{B} */")).toEqual(["A"])
-  })
-
-  it("reads braces only when they open and close on the tag's own line", async () => {
-    expect(await throwsOf("/**\n * @throws {Err\n * @returns {Bar}\n */")).toEqual([])
-    expect(await throwsOf("/**\n * @throws\n * {NotFoundError} if missing\n */")).toEqual([])
-  })
-
-  it("records the target of a TSDoc {@link}", async () => {
-    expect(await throwsOf("/** @throws {@link NotFoundError} if the row is missing */")).toEqual([
-      "NotFoundError",
-    ])
-    expect(await throwsOf("/** @throws {@linkcode errors.Gone} */")).toEqual(["errors.Gone"])
-    expect(await throwsOf("/** @throws {@linkcode errors.Gone | Gone} */")).toEqual(["errors.Gone"])
-    expect(await throwsOf("/** @throws {@linkplain Conflict the conflict} */")).toEqual([
-      "Conflict",
-    ])
-  })
-
-  it("records nothing for a link that names no declaration, or another inline tag", async () => {
-    expect(await throwsOf("/** @throws {@link} */")).toEqual([])
-    expect(await throwsOf("/** @throws {@link https://e.com/x | site} */")).toEqual([])
-    expect(await throwsOf("/** @throws {@inheritDoc} */")).toEqual([])
-  })
-
-  it("reads every tag in a block", async () => {
-    const doc = [
-      "/**",
-      " * @throws {A} first",
-      " * @exception B",
-      " * @throw If something else.",
-      " */",
-    ].join("\n")
-    expect(await throwsOf(doc)).toEqual(["A", "B"])
-  })
-
-  it("reads the singular @throw spelling, and no longer tag name", async () => {
-    expect(await throwsOf("/** @throw Gone */")).toEqual(["Gone"])
-    expect(await throwsOf("/** @throwsFoo */")).toEqual([])
-  })
-
-  it("ends a tag's text at a tag written later on the same line", async () => {
-    expect(await throwsOf("/** @throws {A} first @throws {B} second */")).toEqual(["A", "B"])
-    expect(await throwsOf("/** @throws A @throws B */")).toEqual(["A", "B"])
-    expect(await throwsOf("/** @throws E @internal */")).toEqual(["E"])
-    expect(await throwsOf("/** @internal @throws E */")).toEqual(["E"])
-  })
-
-  it("ends a tag's text where its comment closes, on one * or several", async () => {
-    expect(await throwsOf("/** @throws Foo */")).toEqual(["Foo"])
-    expect(await throwsOf("/** @throws Foo **/")).toEqual(["Foo"])
-  })
-
-  it("does not read into the next block of the run", async () => {
-    expect(await throwsOf("/** @throws Gone */\n/** Explains Gone. */")).toEqual(["Gone"])
-    expect(await throwsOf("/** @throws {Foo */\n/** @param x {y} */")).toEqual([])
+    ],
+    [
+      "a description that continues on the next line",
+      "/**\n * @throws Whenever\n *   the id is unknown.\n */",
+      [],
+    ],
+    ["a lower-case word", "/** @throws error */", []],
+    ["a word that is no identifier", "/** @throws - */", []],
+    ["a bare name followed by a full stop", "/** @throws PaymentDeclined. */", []],
+    ["a bare name whose first segment is lower case", "/** @throws errors.Gone */", []],
+    [
+      "a bare type name that is the tag's whole text",
+      "/** @throws PaymentDeclined */",
+      ["PaymentDeclined"],
+    ],
+    [
+      "a dotted bare name",
+      "/**\n * @throws Errors.NotFound\n * @returns nothing\n */",
+      ["Errors.NotFound"],
+    ],
+    [
+      "a dotted bare name with a lower-case tail",
+      "/** @throws Errors.notFound */",
+      ["Errors.notFound"],
+    ],
+    ["a bare name on the line after the tag", "/**\n * @throws\n * NotFound\n */", ["NotFound"]],
+    [
+      "a braced type, and not its description",
+      "/** @throws {NotFoundError} if the row is missing */",
+      ["NotFoundError"],
+    ],
+    ["a braced type whatever its case", "/** @throws {errors.Gone} */", ["errors.Gone"]],
+    ["empty braces", "/** @throws {} */", []],
+    ["braces holding a space", "/** @throws { } */", []],
+    ["what braces hold, verbatim", "/** @throws {A | B} */", ["A | B"]],
+    ["only the first of two braced types", "/** @throws {A}{B} */", ["A"]],
+    ["braces that close on another line", "/**\n * @throws {Err\n * @returns {Bar}\n */", []],
+    ["braces that open on another line", "/**\n * @throws\n * {NotFoundError} if missing\n */", []],
+    [
+      "the target of a {@link}",
+      "/** @throws {@link NotFoundError} if the row is missing */",
+      ["NotFoundError"],
+    ],
+    ["the target of a {@linkcode}", "/** @throws {@linkcode errors.Gone} */", ["errors.Gone"]],
+    [
+      "a {@linkcode} target before its label",
+      "/** @throws {@linkcode errors.Gone | Gone} */",
+      ["errors.Gone"],
+    ],
+    [
+      "the target of a {@linkplain}",
+      "/** @throws {@linkplain Conflict the conflict} */",
+      ["Conflict"],
+    ],
+    ["a link with no target", "/** @throws {@link} */", []],
+    ["a link to a URL", "/** @throws {@link https://e.com/x | site} */", []],
+    ["another inline tag", "/** @throws {@inheritDoc} */", []],
+    ["the singular @throw spelling", "/** @throw Gone */", ["Gone"]],
+    ["a longer tag name", "/** @throwsFoo */", []],
+    [
+      "every tag in a block",
+      "/**\n * @throws {A} first\n * @exception B\n * @throw If something else.\n */",
+      ["A", "B"],
+    ],
+    ["two braced tags on one line", "/** @throws {A} first @throws {B} second */", ["A", "B"]],
+    ["two bare tags on one line", "/** @throws A @throws B */", ["A", "B"]],
+    ["a tag ended by a later tag", "/** @throws E @internal */", ["E"]],
+    ["a tag after another tag", "/** @internal @throws E */", ["E"]],
+    ["a tag ended by the comment's close", "/** @throws Foo */", ["Foo"]],
+    ["a tag ended by a close of several stars", "/** @throws Foo **/", ["Foo"]],
+    ["one block of a run, not the next", "/** @throws Gone */\n/** Explains Gone. */", ["Gone"]],
+    ["unclosed braces, not the next block's", "/** @throws {Foo */\n/** @param x {y} */", []],
+  ])("reads %s", async (_label, doc, expected) => {
+    expect(await throwsOf(doc)).toEqual(expected)
   })
 
   it("reads a long run of * or of blanks in linear time", async () => {
-    // Asking at every `*` of a run whether a `/` ends it, or splitting a run of blanks between
-    // two `[ \t]*`s, costs the square of the run: seconds at this length, where a linear scan
-    // takes about a millisecond.
     const length = 100_000
     for (const doc of [
       `/** @throws Foo ${"*".repeat(length)}x */`,

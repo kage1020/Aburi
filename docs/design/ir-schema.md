@@ -76,7 +76,7 @@ Most of the table is convention that the schema cannot express, and the rows mar
 
 **Why the schema does not use `"default": null`.** JSON Schema's `default` is an annotation; it does not participate in validation. Writing it would look like a declaration that absence means `null` while no validator treats it that way. The rule lives here and in each property's `description` instead.
 
-**Adding an optional field to v1** means adding a row to the table above and stating the class in the property's `description` in `schema/aburi.ir.v1.json`. An optional property with no `description` has not declared its class, and `packages/types/test/schema-conventions.test.ts` fails on it.
+**Adding an optional field to v1** means adding a row to the table above and stating the class in the property's `description` in `schema/aburi.ir.v1.json`. An optional property with no `description` has not declared its class.
 
 ### 1.2 Unicode normalization
 
@@ -238,7 +238,7 @@ Two rules keep the namespaces from overlapping:
 1. **`slice` is a reserved language token.** A language plugin claiming it would mint Symbol IDs shaped exactly like Slice IDs, and deriving a Slice ID from one of those would produce `slice:slice:…`. `makeSymbolId` rejects the token; see [multi-language-id.md](./multi-language-id.md) Rule L-11.
 2. **The three types are nominal, not structural.** On the wire all three are JSON strings, and JSON Schema has no way to say otherwise. `@aburi/types` layers a brand onto each generated alias so `SymbolId`, `ComponentId`, and `SliceId` are mutually non-assignable in TypeScript and a bare `string` satisfies none of them.
 
-A brand is minted only by the constructors above. Assertions (`x as SymbolId`) live in four documented places and nowhere else, and a test in `@aburi/e2e-integration` fails if a fifth appears under `packages/*/src`:
+A brand is minted only by the constructors above. Assertions (`x as SymbolId`) live in four documented places and nowhere else:
 
 | Where | Why |
 |---|---|

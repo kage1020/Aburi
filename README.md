@@ -72,11 +72,11 @@ Exit code `3` means a gate tripped. The full walkthrough is in
 ### In GitHub Actions
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with: { fetch-depth: 0 }
-- uses: pnpm/action-setup@v4
+- uses: pnpm/action-setup@v6
   with: { version: 10 }
-- uses: actions/setup-node@v4
+- uses: actions/setup-node@v7
   with: { node-version: 24, cache: pnpm }
 - run: pnpm install --frozen-lockfile
 - uses: kage1020/Aburi/packages/github-action@v0

@@ -1,0 +1,8 @@
+{
+  "name": "user-api",
+  "private": true,
+  "dependencies": {
+    "drizzle-orm": "^0.44.0",
+    "express": "^5.0.0"
+  }
+}

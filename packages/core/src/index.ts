@@ -155,9 +155,8 @@ export {
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {
   type DetectManagersResult,
-  type DetectWorkspaceRootOptions,
   detectManagers,
-  detectWorkspaceRoot,
   type UnresolvedDeclaration,
   type WorkspaceCandidate,
 } from "./workspace"
+export { type DetectWorkspaceRootOptions, detectWorkspaceRoot } from "./workspace-root"

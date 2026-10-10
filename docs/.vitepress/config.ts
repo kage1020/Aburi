@@ -1,4 +1,5 @@
 import { defineConfig } from "vitepress"
+import { readShowcase } from "../showcase/showcase.ts"
 
 export default defineConfig({
   title: "Aburi",
@@ -33,6 +34,7 @@ export default defineConfig({
     logo: { light: "/brand/mark.svg", dark: "/brand/mark-dark.svg", alt: "Aburi" },
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
+      { text: "Showcase", link: "/showcase/" },
       { text: "Reference", link: "/reference/cli" },
       { text: "Extend", link: "/extend/architecture" },
       { text: "Roadmap", link: "/roadmap" },
@@ -48,6 +50,14 @@ export default defineConfig({
           { text: "Configuration", link: "/guide/configuration" },
           { text: "CI integration", link: "/guide/ci-integration" },
         ],
+      },
+      {
+        text: "Showcase",
+        link: "/showcase/",
+        items: readShowcase().map(({ slug, title }) => ({
+          text: title,
+          link: `/showcase/${slug}`,
+        })),
       },
       {
         text: "Reference",

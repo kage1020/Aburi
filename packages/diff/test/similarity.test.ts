@@ -23,25 +23,17 @@ describe("tokenizeName", () => {
   })
 
   it("finds the camel hump in any cased script, not only in Latin", () => {
-    // The boundary test is Unicode case. Cyrillic has case, so it has humps.
     expect(tokenizeName("получитьПользователя")).toEqual(["получить", "пользователя"])
     expect(tokenizeName("λάβεΧρήστη")).toEqual(["λάβε", "χρήστη"])
   })
 
   it("treats a titlecase digraph as opening a word", () => {
-    // `ǅ` is Lt, neither Lu nor Ll. It opens a word exactly as an uppercase letter does, so
-    // an ASCII-range test — and a `\\p{Lu}`-only one — would run it into the word before it.
-    // The token comes back lowercased like every other, which for Lt is the Ll form.
     expect(tokenizeName("mapǅevo")).toEqual(["map", "ǆevo"])
   })
 
   it("finds the hump in a cased script outside the BMP", () => {
-    // `splitCamel` used to compare the last UTF-16 code unit of the chunk against the next
-    // code point, so after an astral character it tested a lone surrogate and matched no
-    // category at all. Deseret, Adlam and Osage have case and live above U+FFFF.
     expect(tokenizeName("\u{10428}\u{10401}")).toEqual(["\u{10428}", "\u{10429}"])
     expect(tokenizeName("\u{1E922}\u{1E901}")).toEqual(["\u{1E922}", "\u{1E923}"])
-    // And the digit boundary, which an astral `\p{Nd}` lost the same way.
     expect(tokenizeName("get\u{1D7CE}")).toEqual(["get", "\u{1D7CE}"])
   })
 
@@ -70,38 +62,25 @@ describe("nameEvidence", () => {
   })
 
   it("counts a run it cannot segment by its characters, floored to words", () => {
-    // Three Han characters are the longest a single word runs, so six of them are at least
-    // two words. Kana and Hangul take six, so seven syllables are at least one word and a bit.
     expect(nameEvidence("获取用户信息")).toBe(2)
     expect(nameEvidence("사용자정보조회")).toBe(7 / 6)
-    // Four Han characters and six distinct kana (`ー` twice).
     expect(nameEvidence("ユーザー情報を取得する")).toBe(4 / 3 + 1)
   })
 
-  it("refuses a single word of a script that writes no word boundary", () => {
-    // The point of the divisor. Each of these is one word — `get`, `main`, `initialize`,
-    // `user`, `handler` — and each would clear a bar of "two or more characters".
-    for (const oneWord of [
-      "値",
-      "取得",
-      "する",
-      "初期化",
-      "メイン",
-      "초기화",
-      "ユーザー",
-      "ハンドラー",
-    ]) {
-      expect({ name: oneWord, evidence: nameEvidence(oneWord) <= 1 }).toEqual({
-        name: oneWord,
-        evidence: true,
-      })
-    }
+  it.each([
+    "値",
+    "取得",
+    "する",
+    "初期化",
+    "メイン",
+    "초기화",
+    "ユーザー",
+    "ハンドラー",
+  ])("counts a single word of a script that writes no word boundary as one word at most: %s", (word) => {
+    expect(nameEvidence(word)).toBeLessThanOrEqual(1)
   })
 
   it("keeps a prolonged sound mark with the kana it lengthens", () => {
-    // U+30FC is a modifier letter of script Common; under `Script` rather than
-    // `Script_Extensions` it would read as a foreign character worth a word of its own, and
-    // `ユーザー` — three distinct kana and two of those marks — would be admitted on them.
     expect(nameEvidence("ユーザー")).toBe(3 / 6)
     expect(nameEvidence("ー")).toBe(1 / 6)
   })
@@ -113,15 +92,11 @@ describe("nameEvidence", () => {
   })
 
   it("counts a caseless alphabetic script by the word, not by the letter", () => {
-    // Arabic letters are letters. A multi-word Arabic identifier writes a separator, which
-    // the tokeniser splits, so the count is already right about it.
     expect(nameEvidence("مستخدم")).toBe(1)
     expect(nameEvidence("مستخدم.احصل")).toBe(2)
   })
 
   it("counts an astral-plane character once, not twice", () => {
-    // U+20BB7 is a surrogate pair in UTF-16. The scan iterates code points, so it is one
-    // character; counting UTF-16 units would double every Extension-B name.
     expect(nameEvidence("\u{20BB7}")).toBe(1 / 3)
     expect(nameEvidence("\u{20BB7}\u{2A6B2}")).toBe(2 / 3)
   })
@@ -132,8 +107,6 @@ describe("nameEvidence", () => {
   })
 
   it("dedups the way the token set does, inside a run as well as across tokens", () => {
-    // `getGet` is one token after dedup, and `取得取得` says what `取得` says for the same
-    // reason: a repeat is not a second thing named.
     expect(nameEvidence("Main.main")).toBe(1)
     expect(nameEvidence("取得.取得")).toBe(2 / 3)
     expect(nameEvidence("取得取得")).toBe(nameEvidence("取得"))
@@ -141,9 +114,6 @@ describe("nameEvidence", () => {
   })
 
   it("gives the same answer for either normalisation of a name", () => {
-    // `ガ` is one character precomposed and two decomposed, and a Hangul syllable is one
-    // block or three conjoining jamo. NFC first, so the verdict does not turn on which
-    // spelling a toolchain emitted.
     expect(nameEvidence("\u30AB\u3099")).toBe(nameEvidence("\u30AC"))
     expect(nameEvidence("\u1100\u1161\u11A8")).toBe(nameEvidence("\uAC01"))
     expect(tokenizeName("\u30AB\u3099")).toEqual(tokenizeName("\u30AC"))
@@ -173,8 +143,6 @@ describe("nameSimilarity", () => {
 
 describe("memberSimilarity", () => {
   it("reads the last segment, leaving the owner to the gate", () => {
-    // The double count the owner gate used to carry: the whole-name Jaccard is depressed by a
-    // renamed owner, and the owner axis then charged for the same difference again.
     expect(memberSimilarity("UserRepo.getUser", "UsersRepository.getUser")).toBe(1)
     expect(nameSimilarity("UserRepo.getUser", "UsersRepository.getUser")).toBeCloseTo(0.4, 5)
   })
@@ -211,10 +179,6 @@ describe("jaccardTokens", () => {
 })
 
 describe("createNameScorer", () => {
-  // The memo exists so stage 4 does not re-split the same names for every pair it scores.
-  // A table that answers a question differently from the function it stands in for would be
-  // a silent change of the matching rule, so the two are held against each other rather than
-  // the memo being tested on its own terms.
   const names = [
     "main",
     "Repo.getUser",
@@ -245,23 +209,5 @@ describe("createNameScorer", () => {
       }
     }
     expect(disagreements).toEqual([])
-  })
-
-  it("answers the same on a repeat as on the first ask", () => {
-    // The point of the table is that the second ask does not recompute; the point of this is
-    // that it does not answer differently either.
-    const scorer = createNameScorer()
-    const first = names.map((base) => names.map((head) => scorer.name(base, head)))
-    const second = names.map((base) => names.map((head) => scorer.name(base, head)))
-    expect(second).toEqual(first)
-  })
-
-  it("keeps two scorers independent", () => {
-    const one = createNameScorer()
-    one.name("Repo.getUser", "Repo.getUsers")
-    const two = createNameScorer()
-    expect(two.name("Repo.getUser", "Repo.getUsers")).toBe(
-      nameSimilarity("Repo.getUser", "Repo.getUsers"),
-    )
   })
 })

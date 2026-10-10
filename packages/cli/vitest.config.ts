@@ -1,9 +1,12 @@
-import { defineConfig } from "vitest/config"
+import { defineConfig, mergeConfig } from "vitest/config"
+import shared from "../../vitest.shared.ts"
 
-export default defineConfig({
-  test: {
-    include: ["test/**/*.test.ts"],
-    environment: "node",
-    testTimeout: 30_000,
-  },
-})
+export default mergeConfig(
+  shared,
+  defineConfig({
+    test: {
+      // test/e2e runs real git, tree-sitter and language servers.
+      testTimeout: 60_000,
+    },
+  }),
+)

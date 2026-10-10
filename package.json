@@ -20,6 +20,7 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "check": "biome check .",
+    "hygiene": "node scripts/check-references.mjs",
     "format": "biome check . --write",
     "changeset": "changeset",
     "version-packages": "changeset version",

@@ -19,18 +19,9 @@ import { parseTypescriptFile, TYPESCRIPT_FILE_EXTENSIONS } from "./parser"
 import { TYPESCRIPT_LANGUAGE_ID } from "./qname"
 import { walkBody } from "./walk-body"
 
-/**
- * Language plugin surface described in lang-plugin.md. Every method delegates to a
- * focused sub-module so the assembly here stays a small binding layer rather than a
- * dumping ground for parser state.
- */
 class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   readonly manifest = langTypescriptManifest
-  // Shared with the qname builder so the id prefix this plugin writes and the LanguageId
-  // it reports to core are the same string by construction.
   readonly languageId = TYPESCRIPT_LANGUAGE_ID
-  // Derived from parser.ts's EXTENSION_GRAMMAR so this list cannot drift from the grammar
-  // dispatch table — adding an entry to the map is the only change needed.
   readonly fileExtensions: string[] = [...TYPESCRIPT_FILE_EXTENSIONS]
   readonly capabilities: LanguageCapabilities = {
     hasDecorators: true,
@@ -47,20 +38,13 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   }
   readonly fileDropPatterns: string[] = [...TYPESCRIPT_FILE_DROP_PATTERNS]
 
-  async init(_ctx: PluginContext): Promise<void> {
-    // Parser and grammar init happens lazily inside parseFile so init() stays a cheap
-    // no-op the pipeline can await unconditionally; the actual WASM setup pays its cost
-    // on the first parse.
-  }
+  async init(_ctx: PluginContext): Promise<void> {}
 
   async parseFile(file: SourceFile): Promise<ParseResult<Tree>> {
     return parseTypescriptFile(file)
   }
 
   releaseTree(tree: Tree): void {
-    // The WASM half of the memory convention lang-plugin.md describes: `parseFile` frees
-    // the parser it created, and the core frees the tree here once its last reader is done —
-    // neither handle is anything the JavaScript garbage collector can reach.
     tree.delete()
   }
 
@@ -81,17 +65,6 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   }
 }
 
-/**
- * Default plugin instance. Callers pass this to `@aburi/plugin-registry` or to a core
- * scan pipeline. Creating instances via `new LangTypescriptPlugin()` is also supported
- * for consumers that want a fresh copy per registry.
- *
- * `satisfies` rather than an annotation, so the conformance check still runs and the exported
- * type keeps what the class declares. Annotating it widened the optional members back to
- * optional — a caller could not call `releaseTree` without checking a method this plugin
- * always has.
- */
 export const langTypescriptPlugin = new LangTypescriptPlugin() satisfies LanguagePlugin<Tree, Node>
 
-/** Class export for consumers that want to wrap or extend the plugin. */
 export { LangTypescriptPlugin }

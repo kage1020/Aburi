@@ -1,0 +1,94 @@
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
+import { diffOfEditWith } from "@aburi/test-harness"
+import { symbolById, useScratchWorkspace } from "@aburi/test-support"
+import type { DiffResult } from "@aburi/types"
+import { describe, expect, it } from "vitest"
+import { expressFrameworkPlugin } from "../src/index"
+
+const workspace = useScratchWorkspace("registration-insert")
+
+const SOURCE = "src/server.ts"
+
+const lineup = { languages: [langTypescriptPlugin], frameworks: [expressFrameworkPlugin] }
+
+const diffOfEdit = (before: string, after: string) =>
+  diffOfEditWith(workspace, lineup, SOURCE, before, after)
+
+const lines = (...rows: string[]) => [...rows, ""].join("\n")
+
+const HEAD = ['import express from "express"', "const app = express()"]
+
+const AUTH = [
+  "app.use((req, res, next) => {",
+  "  if (!req.headers.authorization) return res.status(401).end()",
+  "  next()",
+  "})",
+]
+
+function idsWith(diff: DiffResult, status: "added" | "removed"): string[] {
+  const ids: string[] = []
+  for (const change of diff.symbols) {
+    if (change.status !== status) continue
+    if (change.status === "added" || change.status === "removed") ids.push(change.symbol.id)
+  }
+  return ids
+}
+
+describe("diff — a registration inserted above others", () => {
+  it("is one addition for middleware with no path", async () => {
+    const { diff } = await diffOfEdit(
+      lines(...HEAD, "app.use(cors())", "app.use(helmet())", ...AUTH),
+      lines(...HEAD, "app.use(compression())", "app.use(cors())", "app.use(helmet())", ...AUTH),
+    )
+
+    expect(diff.summary).toMatchObject({ added: 1, removed: 0, changed: 0, moved: 0 })
+    expect(idsWith(diff, "added")).toEqual(["ts:src/server.ts#app__use__compression__d0"])
+  })
+
+  it("is one addition for routes whose paths are written in backticks", async () => {
+    const users = "app.get(`/users`, async (req, res) => { res.json(await listUsers()) })"
+    const admin =
+      "app.get(`/admin`, async (req, res) => { await requireAdmin(req); res.json(await stats()) })"
+    const mount = "app.use(`/api`, apiRouter)"
+    const { head, diff } = await diffOfEdit(
+      lines(...HEAD, users, admin, mount),
+      lines(...HEAD, 'app.get(`/health`, (req, res) => { res.send("ok") })', users, admin, mount),
+    )
+
+    expect(diff.summary).toMatchObject({ added: 1, removed: 0, changed: 0, moved: 0 })
+    expect(idsWith(diff, "added")).toEqual(["ts:src/server.ts#app__get__$health__d0"])
+
+    expect(symbolById(head, "ts:src/server.ts#app__get__$users__d0").extKind).toBe(
+      "framework:express:route",
+    )
+    expect(symbolById(head, "ts:src/server.ts#app__use__$api__d0").extKind).toBe(
+      "framework:express:mount",
+    )
+  })
+
+  it("is one addition for routes mounted through app.route with one handler name", async () => {
+    const a = "app.route('/a').get(async (req, res) => { res.json(await listA()) })"
+    const b =
+      "app.route('/b').get(async (req, res) => { await audit(req); res.json(await listB()) })"
+    const { diff } = await diffOfEdit(
+      lines(...HEAD, a, b),
+      lines(...HEAD, "app.route('/health').get((req, res) => { res.send('ok') })", a, b),
+    )
+
+    expect(diff.summary).toMatchObject({ added: 1, removed: 0, changed: 0, moved: 0 })
+    expect(idsWith(diff, "added")).toEqual(["ts:src/server.ts#app__get__$health__d0"])
+  })
+})
+
+describe("diff — a registration with no path gains an argument", () => {
+  it("reports it removed and added, and leaves the inline middleware below it alone", async () => {
+    const { diff } = await diffOfEdit(
+      lines(...HEAD, "app.use(authMw)", ...AUTH),
+      lines(...HEAD, "app.use(authMw, audit)", ...AUTH),
+    )
+
+    expect(diff.summary).toMatchObject({ added: 1, removed: 1, changed: 0, moved: 0 })
+    expect(idsWith(diff, "removed")).toEqual(["ts:src/server.ts#app__use__authMw__d0"])
+    expect(idsWith(diff, "added")).toEqual(["ts:src/server.ts#app__use__authMw$audit__d0"])
+  })
+})

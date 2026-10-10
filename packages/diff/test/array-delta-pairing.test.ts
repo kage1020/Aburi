@@ -1,512 +1,276 @@
 import { call, decorator, effect, fp, makeSymbol, rule } from "@aburi/test-support"
-import type { Effect, Symbol as IRSymbol } from "@aburi/types"
+import type { Effect, Symbol as IRSymbol, Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { computeSymbolDelta } from "../src"
 
-/**
- * The array diff (diff-algorithm.md) pairs the elements of `rules`, `calls` and `decorators` by an
- * identity key — an unchanged element however far it moved, an edited one within ±`lineFuzz` —
- * so a shift is not reported as a change. A key does not identify one element — a Symbol
- * routinely holds two `guard` rules, two calls to one target, two `@Get` — so which base element
- * a head element takes is a choice, and the same doc is where the rule for making it lives.
- *
- * The cases here are the ones that distinguish it from the near misses: pairing by array
- * order, pairing by proximity alone, and pairing greedily rather than as a set.
- */
+const NOTHING = { added: [], removed: [], modified: [] }
 
-const GUARD_PAIR = [
-  rule({ type: "guard", line: 1, condition: "!user" }),
-  rule({ type: "guard", line: 3, condition: "!invoice" }),
-]
+const guard = (line: number, condition: string): Rule => rule({ type: "guard", line, condition })
 
-function withRules(rules: IRSymbol["rules"], seed: string): IRSymbol {
-  return makeSymbol({ id: "ts:src/a.ts#handle", name: "handle", rules, fingerprint: fp(seed) })
+const GUARD_PAIR = [guard(1, "!user"), guard(3, "!invoice")]
+
+function deltaOf(base: Partial<IRSymbol>, head: Partial<IRSymbol>, lineFuzz?: number) {
+  const symbol = (arrays: Partial<IRSymbol>, seed: string) =>
+    makeSymbol({ id: "ts:src/a.ts#handle", name: "handle", fingerprint: fp(seed), ...arrays })
+  return computeSymbolDelta(
+    symbol(base, "a"),
+    symbol(head, "b"),
+    lineFuzz === undefined ? {} : { lineFuzz },
+  )
 }
 
-/** `[added, removed, modified]` conditions, so a case reads as what the reviewer would see. */
-function ruleDelta(base: IRSymbol["rules"], head: IRSymbol["rules"], lineFuzz = 2) {
-  const delta = computeSymbolDelta(withRules(base, "a"), withRules(head, "b"), { lineFuzz })
+/** Each bucket as the conditions in it, so a case reads as what the reviewer would see. */
+function ruleDelta(base: Rule[], head: Rule[], lineFuzz?: number) {
+  const rules = deltaOf({ rules: base }, { rules: head }, lineFuzz).rules
   const conditions = (items: readonly unknown[] | undefined) =>
-    (items ?? []).map((item) => (item as { condition: string | null }).condition)
+    (items ?? []).map((item) => (item as Rule).condition)
   return {
-    added: conditions(delta.rules?.added),
-    removed: conditions(delta.rules?.removed),
-    modified: conditions(delta.rules?.modified),
+    added: conditions(rules?.added),
+    removed: conditions(rules?.removed),
+    modified: conditions(rules?.modified),
   }
 }
 
-describe("an element is paired with its own counterpart, not the nearest key", () => {
-  it("reports the deleted guard, and only that", () => {
-    expect(
-      ruleDelta(GUARD_PAIR, [rule({ type: "guard", line: 3, condition: "!invoice" })]),
-    ).toEqual({ added: [], removed: ["!user"], modified: [] })
+describe("an unchanged rule is paired with its own counterpart", () => {
+  it.each([
+    [
+      "the second of two guards was deleted",
+      GUARD_PAIR,
+      [guard(3, "!invoice")],
+      { ...NOTHING, removed: ["!user"] },
+    ],
+    [
+      "the first of two guards survived",
+      GUARD_PAIR,
+      [guard(1, "!user")],
+      { ...NOTHING, removed: ["!invoice"] },
+    ],
+    [
+      "another rule of its key sits nearer",
+      [guard(1, "!invoice"), guard(2, "!user")],
+      [guard(3, "!invoice")],
+      { ...NOTHING, removed: ["!user"] },
+    ],
+    [
+      "a block of rules shifted down a line",
+      [guard(1, "!a"), guard(2, "!b")],
+      [guard(2, "!a"), guard(3, "!b")],
+      NOTHING,
+    ],
+    [
+      "two guards swapped places",
+      [guard(1, "!a"), guard(2, "!b")],
+      [guard(1, "!b"), guard(2, "!a")],
+      NOTHING,
+    ],
+    [
+      "a block of identical rules moved far",
+      [guard(1, "!same"), guard(2, "!same")],
+      [guard(40, "!same"), guard(41, "!same")],
+      NOTHING,
+    ],
+    [
+      "its counterpart moved far while an edit landed near",
+      [guard(10, "!x")],
+      [guard(11, "!y"), guard(60, "!x")],
+      { ...NOTHING, added: ["!y"] },
+    ],
+    [
+      "it moved into the place of a neighbour that was replaced",
+      [guard(10, "!a"), guard(20, "!b")],
+      [guard(10, "!b"), guard(20, "!c")],
+      { ...NOTHING, added: ["!c"], removed: ["!a"] },
+    ],
+    [
+      "two head rules could claim it",
+      [guard(2, "!kept")],
+      [guard(1, "!kept"), guard(3, "!added")],
+      { ...NOTHING, added: ["!added"] },
+    ],
+    [
+      "it moved past a sibling of its key, which is not a line shift",
+      [guard(1, "!a"), guard(2, "!b")],
+      [guard(1, "!b"), guard(31, "!a")],
+      { ...NOTHING, added: ["!a"], removed: ["!a"] },
+    ],
+  ])("when %s", (_, base, head, expected) => {
+    expect(ruleDelta(base, head)).toEqual(expected)
   })
 
-  it("does the same when the survivor is the first one", () => {
-    expect(ruleDelta(GUARD_PAIR, [rule({ type: "guard", line: 1, condition: "!user" })])).toEqual({
-      added: [],
-      removed: ["!invoice"],
+  it.each([0, 2, 10])("however far it moved, at lineFuzz=%i", (lineFuzz) => {
+    expect(ruleDelta([guard(1, "!user")], [guard(40, "!user")], lineFuzz)).toEqual(NOTHING)
+  })
+})
+
+describe("an edited rule is paired with a free candidate within the window", () => {
+  it.each([
+    [
+      "one of two guards changed",
+      GUARD_PAIR,
+      [guard(1, "!owner"), guard(3, "!invoice")],
+      2,
+      { ...NOTHING, modified: ["!owner"] },
+    ],
+    [
+      "the body around it moved too",
+      [guard(1, "!user"), guard(2, "!owner"), guard(3, "!invoice")],
+      [guard(21, "!user"), guard(22, "!admin"), guard(23, "!invoice")],
+      2,
+      { ...NOTHING, added: ["!admin"], removed: ["!owner"] },
+    ],
+    [
+      "the nearest candidate is not the first one written",
+      [guard(1, "!far"), guard(3, "!near")],
+      [guard(3, "!edited")],
+      2,
+      { ...NOTHING, removed: ["!far"], modified: ["!edited"] },
+    ],
+    [
+      "two edits sit at the edge of the window",
+      [guard(1, "!a"), guard(2, "!b")],
+      [guard(2, "!aEdited"), guard(3, "!bEdited")],
+      1,
+      { ...NOTHING, modified: ["!aEdited", "!bEdited"] },
+    ],
+    [
+      "both neighbours of two edits moved",
+      [guard(1, "!first"), guard(2, "!second")],
+      [guard(3, "!firstEdited"), guard(4, "!secondEdited")],
+      2,
+      { ...NOTHING, modified: ["!firstEdited", "!secondEdited"] },
+    ],
+    [
+      "two candidates are equally near, settling on the lower index",
+      [guard(1, "!first"), guard(3, "!second")],
+      [guard(2, "!edited")],
+      2,
+      { ...NOTHING, removed: ["!second"], modified: ["!edited"] },
+    ],
+    [
+      "two candidates are equally near, written the other way round",
+      [guard(3, "!second"), guard(1, "!first")],
+      [guard(2, "!edited")],
+      2,
+      { ...NOTHING, removed: ["!first"], modified: ["!edited"] },
+    ],
+  ])("when %s", (_, base, head, lineFuzz, expected) => {
+    expect(ruleDelta(base, head, lineFuzz)).toEqual(expected)
+  })
+
+  it.each<[number, string, number | undefined]>([
+    [2, "left unset", undefined],
+    [0, "0", 0],
+    [1, "1", 1],
+    [10, "10", 10],
+  ])("pairs an edit %i lines away and no further when lineFuzz is %s", (within, _, lineFuzz) => {
+    const base = [guard(1, "!user")]
+    expect(ruleDelta(base, [guard(1 + within, "!admin")], lineFuzz)).toEqual({
+      ...NOTHING,
+      modified: ["!admin"],
+    })
+    expect(ruleDelta(base, [guard(2 + within, "!admin")], lineFuzz)).toEqual({
+      added: ["!admin"],
+      removed: ["!user"],
       modified: [],
     })
   })
 
-  it("prefers the exact counterpart over a closer element of the same key", () => {
-    // `!invoice` sits 2 lines away and `!user` 1 — nearest-line alone pairs the wrong one and
-    // reports the untouched guard as modified.
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!invoice" }),
-          rule({ type: "guard", line: 2, condition: "!user" }),
-        ],
-        [rule({ type: "guard", line: 3, condition: "!invoice" })],
-      ),
-    ).toEqual({ added: [], removed: ["!user"], modified: [] })
-  })
-
-  it("keeps a whole block of shifted rules quiet", () => {
-    // Two guards moved down one line together, nothing edited. Every element has an exact
-    // counterpart, so nothing is reported — this is what the exact pass is for.
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!a" }),
-          rule({ type: "guard", line: 2, condition: "!b" }),
-        ],
-        [
-          rule({ type: "guard", line: 2, condition: "!a" }),
-          rule({ type: "guard", line: 3, condition: "!b" }),
-        ],
-      ),
-    ).toEqual({ added: [], removed: [], modified: [] })
-  })
-
-  it("treats two guards that swapped places as unchanged", () => {
-    // Both conditions are still present within the window, so there is nothing to report. By
-    // array order or by proximity this reads as two edits.
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!a" }),
-          rule({ type: "guard", line: 2, condition: "!b" }),
-        ],
-        [
-          rule({ type: "guard", line: 1, condition: "!b" }),
-          rule({ type: "guard", line: 2, condition: "!a" }),
-        ],
-      ),
-    ).toEqual({ added: [], removed: [], modified: [] })
+  it("answers the same whichever way either side is written", () => {
+    const head = [guard(1, "!owner"), guard(3, "!invoice")]
+    const expected = ruleDelta(GUARD_PAIR, head)
+    expect(ruleDelta([...GUARD_PAIR].reverse(), head)).toEqual(expected)
+    expect(ruleDelta(GUARD_PAIR, [...head].reverse())).toEqual(expected)
+    const near = guard(1, "!near")
+    const far = guard(3, "!far")
+    const base = [guard(1, "!original")]
+    expect(ruleDelta(base, [far, near])).toEqual(ruleDelta(base, [near, far]))
+    expect(ruleDelta(base, [near, far])).toEqual({
+      ...NOTHING,
+      added: ["!far"],
+      modified: ["!near"],
+    })
   })
 })
 
-describe("a genuine edit is still a modification", () => {
-  it("reports an edited condition rather than an add and a remove", () => {
-    expect(
-      ruleDelta(
-        [rule({ type: "guard", line: 1, condition: "!user" })],
-        [rule({ type: "guard", line: 2, condition: "!admin" })],
-      ),
-    ).toEqual({ added: [], removed: [], modified: ["!admin"] })
-  })
-
-  it("edits the one guard that changed, leaving its neighbour alone", () => {
-    // The exact pass takes `!invoice`, so the edit has only `!user` left to pair with — which
-    // is the pairing a reader would make.
-    expect(
-      ruleDelta(GUARD_PAIR, [
-        rule({ type: "guard", line: 1, condition: "!owner" }),
-        rule({ type: "guard", line: 3, condition: "!invoice" }),
-      ]),
-    ).toEqual({ added: [], removed: [], modified: ["!owner"] })
-  })
-
-  it("reports an add and a remove once an edit drifts past the window", () => {
-    // The window is what tells an edit from a deletion and an unrelated insertion that share
-    // a key, and it still holds for an element whose content changed.
-    expect(
-      ruleDelta(
-        [rule({ type: "guard", line: 1, condition: "!user" })],
-        [rule({ type: "guard", line: 40, condition: "!admin" })],
-      ),
-    ).toEqual({ added: ["!admin"], removed: ["!user"], modified: [] })
-  })
-
-  it("refuses an edit one line past the window", () => {
-    // Δ = 3 = the default fuzz + 1: the rejecting side of the window's boundary.
-    expect(
-      ruleDelta(
-        [rule({ type: "guard", line: 1, condition: "!user" })],
-        [rule({ type: "guard", line: 4, condition: "!admin" })],
-      ),
-    ).toEqual({ added: ["!admin"], removed: ["!user"], modified: [] })
-  })
-
-  it("pairs strictly by line when fuzz is off", () => {
-    expect(
-      ruleDelta(GUARD_PAIR, [rule({ type: "guard", line: 3, condition: "!invoice" })], 0),
-    ).toEqual({ added: [], removed: ["!user"], modified: [] })
-  })
-})
-
-describe("an unchanged element pairs however far the body moved", () => {
-  // The exact pass has no line window (diff-algorithm.md §5.2.0): non-crossing already keeps an
-  // element beside its neighbours, and an absolute distance would refuse precisely the body
-  // that moved intact. Both ends of the configurable range and the default are covered: none
-  // of them reaches an ordinary shift — one guard inserted above a block moves it further.
-
-  it.each([0, 2, 10])("keeps a moved rule quiet at lineFuzz=%i", (lineFuzz) => {
-    expect(
-      ruleDelta(
-        [rule({ type: "guard", line: 1, condition: "!user" })],
-        [rule({ type: "guard", line: 40, condition: "!user" })],
-        lineFuzz,
-      ),
-    ).toEqual({ added: [], removed: [], modified: [] })
-  })
-
+describe("calls and decorators are paired under the same rule", () => {
   it("keeps the calls of a function that moved 14 lines down its file quiet", () => {
-    // A function that moved 14 lines down its file: nothing about it changed, and the report
-    // listed `dirname`, `mkdir` and `writeFile` as both added and removed.
     const calls = (at: number) => [
       call({ target: "dirname", line: at }),
       call({ target: "mkdir", line: at }),
       call({ target: "writeFile", line: at + 1 }),
     ]
-    const delta = computeSymbolDelta(
-      makeSymbol({
-        id: "ts:src/a.ts#writeOutputFile",
-        name: "writeOutputFile",
-        calls: calls(32),
-        fingerprint: fp("a"),
-      }),
-      makeSymbol({
-        id: "ts:src/a.ts#writeOutputFile",
-        name: "writeOutputFile",
-        calls: calls(46),
-        fingerprint: fp("b"),
-      }),
-    )
-    expect(delta.calls).toEqual({ added: [], removed: [], modified: [] })
+    expect(deltaOf({ calls: calls(32) }, { calls: calls(46) }).calls).toEqual(NOTHING)
+  })
+
+  it("pairs a call that moved past a call to a different target", () => {
+    expect(
+      deltaOf(
+        { calls: [call({ target: "scan", line: 10 }), call({ target: "mkdir", line: 14 })] },
+        { calls: [call({ target: "mkdir", line: 12 }), call({ target: "scan", line: 30 })] },
+      ).calls,
+    ).toEqual(NOTHING)
+  })
+
+  it("holds a block of identical calls to one target together", () => {
+    const logs = (lines: number[]) => lines.map((line) => call({ target: "logger.info", line }))
+    expect(deltaOf({ calls: logs([1, 2]) }, { calls: logs([3, 4]) }, 2).calls).toEqual(NOTHING)
+  })
+
+  it("reports the deleted one of two calls to one target", () => {
+    const debug = call({ target: "log", line: 1, resolved: "ts:src/a.ts#debug" })
+    const info = call({ target: "log", line: 3, resolved: "ts:src/a.ts#info" })
+    expect(deltaOf({ calls: [debug, info] }, { calls: [info] }, 2).calls).toEqual({
+      ...NOTHING,
+      removed: [debug],
+    })
   })
 
   it("keeps a moved decorator quiet", () => {
     const at = (line: number) => [decorator({ name: "Get", line, arguments: ["/a"] })]
-    const delta = computeSymbolDelta(
-      makeSymbol({
-        id: "ts:src/a.ts#handle",
-        name: "handle",
-        decorators: at(3),
-        fingerprint: fp("a"),
-      }),
-      makeSymbol({
-        id: "ts:src/a.ts#handle",
-        name: "handle",
-        decorators: at(30),
-        fingerprint: fp("b"),
-      }),
-    )
-    expect(delta.decorators).toEqual({ added: [], removed: [], modified: [] })
+    expect(deltaOf({ decorators: at(3) }, { decorators: at(30) }).decorators).toEqual(NOTHING)
   })
 
-  it("pairs the survivors of a moved body and reports only what was edited", () => {
-    // A body moved 20 lines and one guard in it was rewritten. The two untouched guards pair
-    // across the distance; the rewritten one has no counterpart inside the window, so it is
-    // still an add and a remove rather than being pulled into a pairing by its key.
+  it("holds a block of identical decorators together", () => {
+    const stacked = (lines: number[]) =>
+      lines.map((line) => decorator({ name: "Roles", line, arguments: ["admin"] }))
     expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!user" }),
-          rule({ type: "guard", line: 2, condition: "!owner" }),
-          rule({ type: "guard", line: 3, condition: "!invoice" }),
-        ],
-        [
-          rule({ type: "guard", line: 21, condition: "!user" }),
-          rule({ type: "guard", line: 22, condition: "!admin" }),
-          rule({ type: "guard", line: 23, condition: "!invoice" }),
-        ],
-      ),
-    ).toEqual({ added: ["!admin"], removed: ["!owner"], modified: [] })
+      deltaOf({ decorators: stacked([1, 2]) }, { decorators: stacked([3, 4]) }, 2).decorators,
+    ).toEqual(NOTHING)
   })
 
-  it("pairs a call that moved past a call to a different target", () => {
-    // Order binds only elements of one key. `scan` moving below `mkdir` is a reordering of two
-    // calls that both survived, not the removal of one and the insertion of another.
-    const delta = computeSymbolDelta(
-      makeSymbol({
-        id: "ts:src/a.ts#run",
-        name: "run",
-        calls: [call({ target: "scan", line: 10 }), call({ target: "mkdir", line: 14 })],
-        fingerprint: fp("a"),
-      }),
-      makeSymbol({
-        id: "ts:src/a.ts#run",
-        name: "run",
-        calls: [call({ target: "mkdir", line: 12 }), call({ target: "scan", line: 30 })],
-        fingerprint: fp("b"),
-      }),
-    )
-    expect(delta.calls).toEqual({ added: [], removed: [], modified: [] })
-  })
-
-  it("still refuses an element that moved past a sibling sharing its key", () => {
-    // `!a` moved from above `!b` to 30 lines below it. Both have an exact counterpart, but the
-    // two pairings would cross, so only one can hold; `!b` is nearer and keeps its pairing.
-    // Pairing by key alone, without order, would report nothing here.
+  it("reports the deleted one of two decorators with one name", () => {
+    const first = decorator({ name: "Get", line: 1, arguments: ["/a"] })
+    const second = decorator({ name: "Get", line: 3, arguments: ["/b"] })
     expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!a" }),
-          rule({ type: "guard", line: 2, condition: "!b" }),
-        ],
-        [
-          rule({ type: "guard", line: 1, condition: "!b" }),
-          rule({ type: "guard", line: 31, condition: "!a" }),
-        ],
-      ),
-    ).toEqual({ added: ["!a"], removed: ["!a"], modified: [] })
-  })
-})
-
-describe("the exact pass runs first, and a far exact counterpart outranks a near edit", () => {
-  // The cost of the exact pass having no window (diff-algorithm.md §5.2.0): an element nothing
-  // touched claims its counterpart wherever it sits, before the second pass can read a nearer,
-  // edited neighbour as its edit. Each case fails if the two passes are run the other way round.
-
-  it("reads the near element as new when its would-be predecessor moved away intact", () => {
-    // `!x` claims its copy 50 lines down, so `!y` has no base element left to be an edit of.
-    expect(
-      ruleDelta(
-        [rule({ type: "guard", line: 10, condition: "!x" })],
-        [
-          rule({ type: "guard", line: 11, condition: "!y" }),
-          rule({ type: "guard", line: 60, condition: "!x" }),
-        ],
-      ),
-    ).toEqual({ added: ["!y"], removed: [], modified: [] })
+      deltaOf({ decorators: [first, second] }, { decorators: [second] }, 2).decorators,
+    ).toEqual({ ...NOTHING, removed: [first] })
   })
 
-  it("reports the displaced element as removed rather than edited", () => {
-    // `!b` moves up to take `!a`'s line and pairs with itself; `!a` is then gone, and `!c`,
-    // though it sits where `!b` was, is new rather than an edit of it.
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 10, condition: "!a" }),
-          rule({ type: "guard", line: 20, condition: "!b" }),
-        ],
-        [
-          rule({ type: "guard", line: 10, condition: "!b" }),
-          rule({ type: "guard", line: 20, condition: "!c" }),
-        ],
-      ),
-    ).toEqual({ added: ["!c"], removed: ["!a"], modified: [] })
-  })
-})
-
-describe("the same rule applies to the other keyed arrays", () => {
-  const symbolWith = (overrides: Partial<IRSymbol>, seed: string): IRSymbol =>
-    makeSymbol({ id: "ts:src/a.ts#handle", name: "handle", fingerprint: fp(seed), ...overrides })
-
-  it("calls: deleting the first of two to one target", () => {
-    const delta = computeSymbolDelta(
-      symbolWith(
-        {
-          calls: [
-            call({ target: "log", line: 1, resolved: "ts:src/a.ts#debug" }),
-            call({ target: "log", line: 3, resolved: "ts:src/a.ts#info" }),
-          ],
-        },
-        "a",
-      ),
-      symbolWith({ calls: [call({ target: "log", line: 3, resolved: "ts:src/a.ts#info" })] }, "b"),
-      { lineFuzz: 2 },
-    )
-    expect(delta.calls?.modified).toEqual([])
-    expect(delta.calls?.added).toEqual([])
-    expect(delta.calls?.removed?.map((c) => (c as { resolved: string }).resolved)).toEqual([
-      "ts:src/a.ts#debug",
-    ])
-  })
-
-  it("decorators: deleting the first of two with the same name", () => {
-    const delta = computeSymbolDelta(
-      symbolWith(
-        {
-          decorators: [
-            decorator({ name: "Get", line: 1, arguments: ["/a"] }),
-            decorator({ name: "Get", line: 3, arguments: ["/b"] }),
-          ],
-        },
-        "a",
-      ),
-      symbolWith({ decorators: [decorator({ name: "Get", line: 3, arguments: ["/b"] })] }, "b"),
-      { lineFuzz: 2 },
-    )
-    expect(delta.decorators?.modified).toEqual([])
-    expect(delta.decorators?.added).toEqual([])
-    expect(delta.decorators?.removed?.map((d) => (d as { arguments: string[] }).arguments)).toEqual(
-      [["/a"]],
-    )
-  })
-
-  it("decorators: an unchanged receiver is claimed before a nearer edited one", () => {
-    // `@tsed.Post` was written above an unchanged `@nest.Post`, pushing it down two lines. The
-    // edited one is nearer the base, but the exact pass pairs the unchanged one first, so the
-    // new decorator reads as added rather than as a receiver edit beside an added `@nest.Post`.
+  it("claims an unchanged receiver before a nearer edited one", () => {
     const post = (qualifier: string, line: number) =>
       decorator({ name: "Post", qualifier, line, arguments: ["/x"] })
-    const delta = computeSymbolDelta(
-      symbolWith({ decorators: [post("nest", 1)] }, "a"),
-      symbolWith({ decorators: [post("tsed", 1), post("nest", 3)] }, "b"),
-      { lineFuzz: 2 },
-    )
-    expect(delta.decorators).toEqual({ added: [post("tsed", 1)], removed: [], modified: [] })
+    expect(
+      deltaOf(
+        { decorators: [post("nest", 1)] },
+        { decorators: [post("tsed", 1), post("nest", 3)] },
+        2,
+      ).decorators,
+    ).toEqual({ ...NOTHING, added: [post("tsed", 1)] })
   })
 
-  it("decorators: a receiver edit that also moved beyond lineFuzz is added + removed", () => {
-    // The near pass does not reach it, as it does not reach a changed argument list that far.
-    const delta = computeSymbolDelta(
-      symbolWith({ decorators: [decorator({ name: "Post", qualifier: "nest", line: 1 })] }, "a"),
-      symbolWith({ decorators: [decorator({ name: "Post", qualifier: "tsed", line: 10 })] }, "b"),
-      { lineFuzz: 2 },
-    )
-    expect(delta.decorators).toEqual({
-      added: [decorator({ name: "Post", qualifier: "tsed", line: 10 })],
-      removed: [decorator({ name: "Post", qualifier: "nest", line: 1 })],
+  it("reports a receiver edit that also moved beyond the window as added + removed", () => {
+    const before = decorator({ name: "Post", qualifier: "nest", line: 1 })
+    const after = decorator({ name: "Post", qualifier: "tsed", line: 10 })
+    expect(deltaOf({ decorators: [before] }, { decorators: [after] }, 2).decorators).toEqual({
+      added: [after],
+      removed: [before],
       modified: [],
     })
   })
 })
 
-describe("pairings are chosen as a set, not one element at a time", () => {
-  // A greedy pass takes the pairing in front of it, and a nearer pairing can cost a farther
-  // one its only partner. Two guards shifted down together are the smallest case: the first
-  // head guard is nearest the *second* base guard, and claiming it can leave the other head
-  // without a partner. That only bites inside the window, so the two cases that show it have
-  // both guards edited: identical guards pair in the exact pass, which has no window, and the
-  // identical blocks below are kept as regressions of that pass rather than of the set choice.
-
-  it("pairs two edits at the edge of the window", () => {
-    // Both guards edited and shifted by exactly `lineFuzz`, so every pairing that holds is at
-    // the boundary; greedily, the first head guard takes the second base guard (one line away)
-    // and strands the other.
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!a" }),
-          rule({ type: "guard", line: 2, condition: "!b" }),
-        ],
-        [
-          rule({ type: "guard", line: 2, condition: "!aEdited" }),
-          rule({ type: "guard", line: 3, condition: "!bEdited" }),
-        ],
-        1,
-      ),
-    ).toEqual({ added: [], removed: [], modified: ["!aEdited", "!bEdited"] })
-  })
-
-  it("reports two edits as two edits when both neighbours moved", () => {
-    // Nothing survives the exact pass, so the whole block is the second pass's problem —
-    // and the answer is still two modifications rather than an add, a remove and an edit.
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!first" }),
-          rule({ type: "guard", line: 2, condition: "!second" }),
-        ],
-        [
-          rule({ type: "guard", line: 3, condition: "!firstEdited" }),
-          rule({ type: "guard", line: 4, condition: "!secondEdited" }),
-        ],
-      ),
-    ).toEqual({ added: [], removed: [], modified: ["!firstEdited", "!secondEdited"] })
-  })
-
-  it("keeps a block of identical rules quiet however far it moved", () => {
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!same" }),
-          rule({ type: "guard", line: 2, condition: "!same" }),
-        ],
-        [
-          rule({ type: "guard", line: 40, condition: "!same" }),
-          rule({ type: "guard", line: 41, condition: "!same" }),
-        ],
-      ),
-    ).toEqual({ added: [], removed: [], modified: [] })
-  })
-
-  it("holds a block of identical calls to one target together", () => {
-    const shifted = (lines: readonly number[]) =>
-      lines.map((line) => call({ target: "logger.info", line }))
-    const delta = computeSymbolDelta(
-      makeSymbol({
-        id: "ts:src/a.ts#handle",
-        name: "handle",
-        calls: shifted([1, 2]),
-        fingerprint: fp("a"),
-      }),
-      makeSymbol({
-        id: "ts:src/a.ts#handle",
-        name: "handle",
-        calls: shifted([3, 4]),
-        fingerprint: fp("b"),
-      }),
-      { lineFuzz: 2 },
-    )
-    // Calling one function twice is ordinary, and `callsEqual` reads only `target` and
-    // `resolved`, so identical duplicates are the common case rather than a contrived one.
-    expect(delta.calls).toEqual({ added: [], removed: [], modified: [] })
-  })
-
-  it("holds a block of identical decorators together", () => {
-    const stacked = (lines: readonly number[]) =>
-      lines.map((line) => decorator({ name: "Roles", line, arguments: ["admin"] }))
-    const delta = computeSymbolDelta(
-      makeSymbol({
-        id: "ts:src/a.ts#handle",
-        name: "handle",
-        decorators: stacked([1, 2]),
-        fingerprint: fp("a"),
-      }),
-      makeSymbol({
-        id: "ts:src/a.ts#handle",
-        name: "handle",
-        decorators: stacked([3, 4]),
-        fingerprint: fp("b"),
-      }),
-      { lineFuzz: 2 },
-    )
-    expect(delta.decorators).toEqual({ added: [], removed: [], modified: [] })
-  })
-
-  it("reads the head elements as a set too, whatever order they are written in", () => {
-    // One base guard and two head guards, only one of which can pair. Choosing per head
-    // element in enumeration order let the first one written take the base regardless of
-    // distance, so the answer followed the head array rather than the lines.
-    const base = [rule({ type: "guard", line: 1, condition: "!original" })]
-    const near = rule({ type: "guard", line: 1, condition: "!near" })
-    const far = rule({ type: "guard", line: 3, condition: "!far" })
-    expect(ruleDelta(base, [near, far])).toEqual({
-      added: ["!far"],
-      removed: [],
-      modified: ["!near"],
-    })
-    expect(ruleDelta(base, [far, near])).toEqual({
-      added: ["!far"],
-      removed: [],
-      modified: ["!near"],
-    })
-  })
-})
-
 describe("effects are paired under the same rule, with no line window", () => {
-  // `diffEffects` passes an infinite fuzz, so every same-key candidate is admitted and only
-  // the ranking is left. That ranking reads `line`, and a propagated effect has none —
-  // `line ?? 0` stands in, which is "at the top of the Symbol" rather than a neutral value.
-
-  const at = (plugin: string, line?: number) =>
+  const write = (plugin: string, line?: number) =>
     effect({
       id: "db.write",
       target: "prisma.user.create",
@@ -514,145 +278,48 @@ describe("effects are paired under the same rule, with no line window", () => {
       ...(line === undefined ? {} : { line }),
     })
 
-  const effectDelta = (base: Effect[], head: Effect[]) => {
-    const delta = computeSymbolDelta(
-      makeSymbol({ id: "ts:src/a.ts#f", name: "f", effects: base, fingerprint: fp("a") }),
-      makeSymbol({ id: "ts:src/a.ts#f", name: "f", effects: head, fingerprint: fp("b") }),
-    )
+  const effectPlugins = (base: Effect[], head: Effect[]) => {
+    const effects = deltaOf({ effects: base }, { effects: head }).effects
     const plugins = (items: readonly unknown[] | undefined) =>
-      (items ?? []).map((item) => (item as { plugin: string | null }).plugin)
+      (items ?? []).map((item) => (item as Effect).plugin)
     return {
-      added: plugins(delta.effects?.added),
-      removed: plugins(delta.effects?.removed),
-      modified: plugins(delta.effects?.modified),
+      added: plugins(effects?.added),
+      removed: plugins(effects?.removed),
+      modified: plugins(effects?.modified),
     }
   }
 
   it("pairs an unchanged effect with itself however far its line moved", () => {
-    expect(effectDelta([at("effects-prisma", 10)], [at("effects-prisma", 9000)])).toEqual({
-      added: [],
-      removed: [],
-      modified: [],
-    })
+    expect(effectPlugins([write("effects-prisma", 10)], [write("effects-prisma", 9000)])).toEqual(
+      NOTHING,
+    )
   })
 
   it("keeps two entries of one key apart by content rather than by line", () => {
-    // Same `(id, target)` on both sides, so the key settles nothing. The exact-content pass
-    // pairs each plugin with itself even though their lines crossed.
     expect(
-      effectDelta(
-        [at("effects-prisma", 1), at("effects-drizzle", 2)],
-        [at("effects-drizzle", 1), at("effects-prisma", 2)],
+      effectPlugins(
+        [write("effects-prisma", 1), write("effects-drizzle", 2)],
+        [write("effects-drizzle", 1), write("effects-prisma", 2)],
       ),
-    ).toEqual({ added: [], removed: [], modified: [] })
+    ).toEqual(NOTHING)
   })
 
   it("reports nothing for effects of different keys that changed places", () => {
-    // Order binds only effects that share `(id, target)`: three writes rotated through each
-    // other's lines are three writes that survived.
-    const write = (target: string, line: number) =>
+    const at = (target: string, line: number) =>
       effect({ id: "db.write", target, plugin: "effects-prisma", line })
-    const delta = computeSymbolDelta(
-      makeSymbol({
-        id: "ts:src/a.ts#f",
-        name: "f",
-        effects: [write("a.create", 1), write("b.create", 2), write("c.create", 3)],
-        fingerprint: fp("a"),
-      }),
-      makeSymbol({
-        id: "ts:src/a.ts#f",
-        name: "f",
-        effects: [write("c.create", 1), write("b.create", 2), write("a.create", 3)],
-        fingerprint: fp("b"),
-      }),
-    )
-    expect(delta.effects).toEqual({ added: [], removed: [], modified: [] })
+    expect(
+      deltaOf(
+        { effects: [at("a.create", 1), at("b.create", 2), at("c.create", 3)] },
+        { effects: [at("c.create", 1), at("b.create", 2), at("a.create", 3)] },
+      ).effects,
+    ).toEqual(NOTHING)
   })
 
   it("gives a propagated entry the nearest local one when it must choose", () => {
-    // Nothing matches on content, so the placeholder line decides: `0` is nearest the local
-    // effect at line 1. Documented rather than left to be discovered — a propagated effect
-    // reads as sitting at the top of the Symbol.
-    expect(effectDelta([at("far", 100), at("near", 1)], [at("propagated")])).toEqual({
+    expect(effectPlugins([write("far", 100), write("near", 1)], [write("propagated")])).toEqual({
       added: [],
       removed: ["far"],
       modified: ["propagated"],
     })
-  })
-})
-
-describe("array order decides only where it has to", () => {
-  // diff-algorithm.md makes Symbol pairing independent of array order, and an array delta cannot
-  // be: it pairs by line, and ir-schema.md #11 fixes the canonical order of these arrays, so
-  // reading it is reading the Document. What order must not decide is a pairing the lines already
-  // settle — which is what taking the first key hit got wrong.
-  it("answers the same with the base rules written the other way round", () => {
-    const head = [rule({ type: "guard", line: 3, condition: "!invoice" })]
-    expect(ruleDelta([...GUARD_PAIR].reverse(), head)).toEqual(ruleDelta(GUARD_PAIR, head))
-  })
-
-  it("answers the same with the head rules written the other way round", () => {
-    const head = [
-      rule({ type: "guard", line: 1, condition: "!owner" }),
-      rule({ type: "guard", line: 3, condition: "!invoice" }),
-    ]
-    expect(ruleDelta(GUARD_PAIR, [...head].reverse())).toEqual(ruleDelta(GUARD_PAIR, head))
-  })
-
-  it("settles a tie on the lower base index", () => {
-    // Two guards equidistant from one edited head guard, neither an exact match. Nothing
-    // distinguishes them by line, so the lower index is taken and the other is removed — fixed
-    // rather than left to the enumeration, and visible because their conditions differ.
-    const equidistant = [
-      rule({ type: "guard", line: 1, condition: "!first" }),
-      rule({ type: "guard", line: 3, condition: "!second" }),
-    ]
-    const edited = [rule({ type: "guard", line: 2, condition: "!edited" })]
-    expect(ruleDelta(equidistant, edited)).toEqual({
-      added: [],
-      removed: ["!second"],
-      modified: ["!edited"],
-    })
-    // Reversing the base array swaps which is taken, and that is not a defect: unlike Symbol
-    // pairing, an array delta reads array order, which ir-schema.md #11 fixes canonically — so the
-    // reversed input below is not a conforming Document, and what is asserted of it is only that
-    // the answer is determined. diff-algorithm.md records the distinction.
-    const reversedBase = [...equidistant].reverse()
-    expect(ruleDelta(reversedBase, edited)).toEqual(ruleDelta(reversedBase, edited))
-    expect(ruleDelta(reversedBase, edited)).toEqual({
-      added: [],
-      removed: ["!first"],
-      modified: ["!edited"],
-    })
-  })
-
-  it("pairs an edit with the nearest candidate, not the first one written", () => {
-    // Both survive the exact pass unclaimed, so the second pass decides. `!far@1` is written
-    // first and `!near@3` is 0 lines away — taking the first hit would call `!far` the edit and
-    // remove the guard that is still there.
-    expect(
-      ruleDelta(
-        [
-          rule({ type: "guard", line: 1, condition: "!far" }),
-          rule({ type: "guard", line: 3, condition: "!near" }),
-        ],
-        [rule({ type: "guard", line: 3, condition: "!edited" })],
-      ),
-    ).toEqual({ added: [], removed: ["!far"], modified: ["!edited"] })
-  })
-
-  it("lets one base element answer only one head element", () => {
-    // Two head guards, one base guard, both a line away. One is an addition rather than a
-    // second claim on the same element, and which one is settled by the pairing's ordering rather
-    // than by distance: the pairings may not cross, and the first head is above the second.
-    expect(
-      ruleDelta(
-        [rule({ type: "guard", line: 2, condition: "!kept" })],
-        [
-          rule({ type: "guard", line: 1, condition: "!kept" }),
-          rule({ type: "guard", line: 3, condition: "!added" }),
-        ],
-      ),
-    ).toEqual({ added: ["!added"], removed: [], modified: [] })
   })
 })

@@ -1,5 +1,6 @@
+import { importEdge } from "@aburi/test-support"
 import type { ImportEdge } from "@aburi/types"
 
-export function makeDrizzleImport(source = "drizzle-orm"): ImportEdge {
-  return { source, symbols: ["sql"], line: 1, dynamic: false }
+export function makeDrizzleImport(): ImportEdge {
+  return importEdge({ source: "drizzle-orm", symbols: ["sql"] })
 }
