@@ -110,7 +110,7 @@ function classify(hits: readonly RuleHit[]): SymbolClassification | null {
   return {
     ...(extKind === undefined ? {} : { extKind }),
     ...(hasBoundary ? { decoratorBoundaries: boundaries } : {}),
-    // The framework stage splits on ";" (`mergeDerivedBy` in @aburi/core).
+    // The framework stage splits it back apart on ";".
     derivedBy: derivedBy.join(";"),
   }
 }
@@ -122,12 +122,10 @@ function writtenForm(decorator: Decorator): string {
     : `${decorator.qualifier}.${decorator.name}`
 }
 
-/** A qualified name's last segment: `Outer.FooHandler` is matched as `FooHandler`. */
 function leafName(name: string): string {
   return name.slice(name.lastIndexOf(".") + 1)
 }
 
-/** `*` any run of characters, `?` exactly one, everything else itself; anchored at both ends. */
 function globToRegExp(glob: string): RegExp {
   let source = ""
   for (const char of glob) {

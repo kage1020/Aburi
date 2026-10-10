@@ -61,7 +61,6 @@ export function parseConfig(text: string, sourcePath: string): Config {
   return parsed
 }
 
-/** Read a config file on disk and hand its text to `parseConfig`. */
 export async function readConfigFile(path: string): Promise<Config> {
   let text: string
   try {
@@ -84,7 +83,6 @@ export async function readConfigFile(path: string): Promise<Config> {
   return parseConfig(text, path)
 }
 
-/** Refuse a key the text names twice in one object, or `__proto__` at all (`scanKeys`). */
 function rejectRepeatedKeys(text: string, sourcePath: string): void {
   const scan = scanKeys(text)
   if (scan.kind === "unreadable") {
@@ -136,7 +134,6 @@ function formatAjvErrors(errors: ErrorObject[]): string {
     .join("; ")
 }
 
-/** Format ajv's `params` (additionalProperty, allowedValues, missingProperty, …) inline. */
 function formatAjvParams(params: ErrorObject["params"]): string {
   if (params === null || typeof params !== "object") return ""
   const entries = Object.entries(params)
