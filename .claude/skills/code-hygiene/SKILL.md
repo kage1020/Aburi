@@ -12,7 +12,7 @@ reading both sides.
 
 ```bash
 similarity-ts packages/*/src --threshold 0.85 --min-lines 5            # functions
-similarity-ts packages/*/src --types-only --no-functions --threshold 0.85  # types
+similarity-ts packages/*/src --types --no-functions --threshold 0.85   # types and interfaces
 ```
 
 `similarity-ts` (cargo install similarity-ts) is structural: pairs such as a tokenizer and an assignment
@@ -35,12 +35,13 @@ different inputs is usually a table — fold those into `it.each`. Never delete 
 ## 3. References that rot
 
 ```bash
-node .claude/skills/code-hygiene/scripts/references.mjs [pathspecs…]
+pnpm hygiene        # node scripts/check-references.mjs [pathspecs…]
 ```
 
-Lists comments and `describe`/`it` titles that cite `§` sections, `*.md` files, spec ids (`CR5`, `LP8q`),
-invariant numbers or issues. Rewrite the sentence without the citation, or delete it if nothing is left.
-Exits non-zero while any remain.
+Lists citations of design docs (`§` sections, `docs/` file names), spec ids (`CR5`, `LP8q`), invariant
+numbers and issues in code comments, test titles (template literals included), YAML files and the JSON
+Schemas' descriptions — those ship as JSDoc in `@aburi/types`. CI runs it. Rewrite the sentence without the
+citation, or delete it if nothing is left. Exits 1 while any remain, and 2 when a pathspec matches no file.
 
 ## The rules these enforce
 
@@ -48,4 +49,4 @@ Exits non-zero while any remain.
   states behaviour is a test that has not been written — write the test and drop the comment.
 - Tests pin behaviour. No test reads repository files to check how they are written.
 - Shared test helpers live in `@aburi/test-support` (usable everywhere) or `@aburi/test-harness` (real scans
-  and diffs; only for packages above core, diff and plugin-registry), not copied between suites.
+  and diffs; for the plugins, lang-typescript and the CLI), not copied between suites.

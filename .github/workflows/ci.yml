@@ -40,6 +40,9 @@ jobs:
       - name: Biome check
         run: pnpm check
 
+      - name: No citations of design docs, spec ids or issues
+        run: pnpm hygiene
+
       - name: Typecheck
         run: pnpm typecheck
 

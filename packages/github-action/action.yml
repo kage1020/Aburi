@@ -26,8 +26,8 @@ inputs:
     default: ""
   fail-on:
     description: >-
-      Value passed to `aburi diff --fail-on`. Follows the CI gate grammar defined in
-      `docs/design/cli-spec.md` (e.g. `changed`, `removed:>10`, `dropped-toggled:to-dropped`).
+      Value passed to `aburi diff --fail-on`, in the CLI's gate grammar (e.g. `changed`,
+      `removed:>10`, `dropped-toggled:to-dropped`); see https://aburi.kage1020.com/reference/cli.
       Leave empty to run in report-only mode.
     required: false
     default: ""
@@ -66,7 +66,7 @@ inputs:
   max-bytes:
     description: >-
       Size cap for `diff.md`, in UTF-8 bytes, forwarded as `--max-bytes`. The report meets it
-      least-important-first (`docs/design/markdown-projection.md`) rather than being cut
+      least-important-first rather than being cut
       mid-block: sections of whole symbols are cut to names and locations before a section is
       dropped, and the report says at the top which sections are short and which went, pointing
       at `diff.full.md` for the rest. Left empty it is 65507:

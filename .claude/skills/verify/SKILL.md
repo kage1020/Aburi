@@ -29,16 +29,17 @@ pnpm exec vitest run [test/file.test.ts]
 pnpm exec tsc -p tsconfig.json --noEmit
 ```
 
-A package's tests import its own `src`, but every other `@aburi/*` package through its built `dist`. After
-changing a package other suites depend on, rebuild through turbo (`pnpm turbo run build --filter=<pkg>`)
-before trusting their results; `packages/cli/test/e2e` in particular runs the real pipeline over built
-plugins.
+A package's tests import its own `src`, every other published `@aburi/*` package through its built
+`dist`, and `@aburi/schema`, `@aburi/test-support` and `@aburi/test-harness` from source (no build needed).
+After changing a published package other suites depend on, rebuild it through turbo
+(`pnpm turbo run build --filter=<pkg>`) before trusting their results; `packages/cli/test/e2e` runs the real
+pipeline over built plugins and the CLI's own built bin.
 
 ## Known local-only failure
 
 `packages/github-action/test/resolve-cli-bin.test.ts` › "anchors on the working directory, not on its own
-location" fails locally on every branch: vitest's `NODE_PATH` exposes `@aburi/cli` from the pnpm store. It
-passes in CI. Report it as known rather than "fixing" it.
+location" fails in a long-lived checkout, where vitest's `NODE_PATH` exposes `@aburi/cli` from the pnpm
+store; it passes after a fresh install and in CI. Report it as known rather than "fixing" it.
 
 ## Reporting
 

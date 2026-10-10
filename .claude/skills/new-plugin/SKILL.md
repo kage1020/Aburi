@@ -16,8 +16,8 @@ contract it does not describe.
   (registration calls).
 - effects: `packages/effects-trpc` or `packages/effects-prisma` (import gate → receiver → method table).
 
-Keep the sibling's file split: `manifest.ts` (vocabulary it declares), `constants.ts`, `imports.ts`
-(the import gate), `classify.ts`, `plugin.ts`, `index.ts`. Copy `package.json`, `tsconfig.json`,
+Keep the sibling's file split — at least `manifest.ts` (the vocabulary it declares), `classify.ts`,
+`plugin.ts` and `index.ts`, plus `constants.ts` and `imports.ts` (the import gate) where the sibling has them. Copy `package.json`, `tsconfig.json`,
 `tsdown.config.ts` and `vitest.config.ts`; rename, reset `version` to `0.0.0`, rewrite `description`
 and the README. Then install the sibling's runtime dependencies (`@aburi/types`, plus
 `@aburi/plugin-registry` for effects or `@aburi/core` for frameworks) with the CLI, never by editing
