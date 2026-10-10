@@ -1,5 +1,32 @@
 # @aburi/framework-nestjs
 
+## 0.4.0
+
+### Minor Changes
+
+- 3b52db9: A call through a default import resolves to the module's default export
+
+  `import connect from "./client"` was read as a named import of `connect`, so `connect()` linked at `high` confidence to the module's named `connect` (and took its effects) when the default export was another function, and a default export that was anonymous (`export default () => …`) or imported under another name than its declaration's was never reached. The language plugin now reports a default binding as `default as <local>`, as `{ default as x }` already was, and call resolution looks it up as the file's `<default>` Symbol or the declaration carrying `export-default`, including a member reached through it (`Svc.run()`). A module with no default export leaves the call unresolved, bucketed `no-match`, and one with two (TS2528) leaves it `ambiguous`. `@aburi/core` exports the `"default"` half of that spelling as `DEFAULT_EXPORT_NAME`. The NestJS plugin reads a default-imported decorator by the name the file gave it, at `high` from `@nestjs/*` and `medium` from anywhere else, and `import { default as Controller }` now classifies the same way instead of being matched as `default`, which no vocabulary lists.
+
+  A default export written as an export clause, `export { connect as default }`, is not reached, because the TypeScript plugin does not read export clauses and nothing marks `connect` as the default export. `import connect from` followed by `connect()` used to resolve to `connect` there only because the two names matched, and is now unresolved, bucketed `no-match`. A default export that is a value (`export default withAuth(Page)`), a member of an anonymous default class and a default re-exported from another module stay unresolved, as they were. A language plugin that reports a default import as a bare name is read as before: nothing checks the spelling.
+
+  A call that resolves differently can change the effects its caller inherits, so with an effect plugin loaded this moves the `logic` fingerprint of every Symbol whose propagated effects change with it, including through an `export { X as default }` call that no longer resolves. A NestJS class or method whose decorator is imported as `{ default as … }` now classifies, which moves its `api` fingerprint. An IR scanned before this release, compared with one scanned after, reports those Symbols as changed. On this repository, which has no relative default import in its scanned sources and loads no effect plugin, scanning one tree with both versions gives a byte-identical IR. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugins and is unaffected.
+
+### Patch Changes
+
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [36fd72f]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [463d616]
+- Updated dependencies [47f8ef9]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+  - @aburi/plugin-registry@0.5.1
+
 ## 0.3.0
 
 ### Minor Changes
