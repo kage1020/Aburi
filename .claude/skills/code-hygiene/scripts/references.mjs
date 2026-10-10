@@ -23,6 +23,7 @@ const files = execFileSync(
     (file) =>
       file &&
       existsSync(file) &&
+      !file.startsWith(".claude/") &&
       !file.includes("/generated/") &&
       !/\/(projects|before|after)\//.test(file),
   )
