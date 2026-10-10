@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every base branch, so a pull request stacked on another one is tested before its base merges.
   pull_request:
 
+# Pushes to main always finish: the release run needs a completed CI run, not a cancelled one.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

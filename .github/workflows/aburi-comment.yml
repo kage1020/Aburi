@@ -5,6 +5,7 @@ on:
     workflows: [Aburi]
     types: [completed]
 
+# Keyed by head branch: on workflow_run, github.ref is the default branch for every run.
 concurrency:
   group: aburi-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
@@ -17,6 +18,8 @@ permissions:
 jobs:
   comment:
     name: post the report
+    # A failed run is posted too: a tripped --fail-on is the run whose report a reviewer needs. A
+    # cancelled one was superseded by a newer push, whose own run posts.
     if: >-
       github.event.workflow_run.event == 'pull_request'
       && (github.event.workflow_run.conclusion == 'success'

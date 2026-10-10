@@ -10,6 +10,7 @@ on:
         required: true
         type: string
 
+# Queued, never cancelled: a half-finished publish is harder to recover than a waiting one.
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -35,12 +36,14 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 
+      # No registry-url: setup-node would write an .npmrc whose _authToken line blocks pnpm's OIDC publish.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
 
+      # Written before changesets/action runs, or it writes an _authToken template that forces token auth.
       - name: Configure .npmrc for Trusted Publishing
         run: |
           {

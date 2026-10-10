@@ -4,6 +4,7 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# One site, so not keyed on the ref: a branch dispatch competes with the release for the same deploy.
 concurrency:
   group: docs-deploy
   cancel-in-progress: false
@@ -17,6 +18,7 @@ jobs:
     if: github.repository == 'kage1020/Aburi'
     runs-on: ubuntu-latest
     steps:
+      # Full history: VitePress' lastUpdated reads each page's date from the git log.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -34,8 +36,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build the site
-        run: pnpm turbo run build --filter=@aburi/docs
+        run: pnpm --filter @aburi/docs build
 
+      # The action brings Wrangler; as a workspace dependency it would add ~300 packages to every install.
       - name: Deploy
         uses: cloudflare/wrangler-action@v4
         with:
