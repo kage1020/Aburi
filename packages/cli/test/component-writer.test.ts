@@ -47,7 +47,7 @@ async function scanWithComponents(components: unknown[]): Promise<Record<string,
   return JSON.parse(await readFile(report.irPath as string, "utf8")) as Record<string, unknown>
 }
 
-describe("config-declared Components (ir-schema.md)", () => {
+describe("config-declared Components", () => {
   it("writes description as an explicit null and omits the empty Class B arrays", async () => {
     const ir = await scanWithComponents([{ id: "billing", roots: ["src"], languages: ["ts"] }])
     const components = ir.components as Array<Record<string, unknown>>

@@ -193,7 +193,7 @@ describe("checkIRIntegrity", () => {
     expect((caught as CoreError).violations?.some((v) => v.invariant === 10)).toBe(true)
   })
 
-  it(" detects a Symbol id whose qualified name has an empty segment", () => {
+  it("detects a Symbol id whose qualified name has an empty segment", () => {
     const ir = minimalIR()
     ir.symbols = [makeSymbol("ts:src/a.ts#A.", { name: "A" })]
     const violations = checkIRIntegrity(ir)
@@ -435,7 +435,7 @@ describe("checkIRIntegrity", () => {
   })
 })
 
-describe("callResolution stats census (call-resolution.md)", () => {
+describe("callResolution stats census", () => {
   function irWithOneUnresolvedCall(): ReturnType<typeof minimalIR> {
     const ir = minimalIR()
     ir.symbols = [
@@ -515,7 +515,7 @@ describe("assertIRIntegrity", () => {
   })
 })
 
-describe("checkIRIntegrity — id namespaces (#16)", () => {
+describe("checkIRIntegrity — id namespaces", () => {
   it("rejects a Symbol id in the reserved `slice:` namespace", () => {
     const ir = minimalIR()
     ir.symbols = [makeSymbol("slice:src/a.ts#foo")]
@@ -566,7 +566,7 @@ describe("checkIRIntegrity — id namespaces (#16)", () => {
   })
 })
 
-describe("invariant #18 — workspace.languages", () => {
+describe("invariant — workspace.languages", () => {
   it("rejects an empty list", () => {
     const ir = minimalIR()
     ir.workspace.languages = []
@@ -598,7 +598,7 @@ describe("invariant #18 — workspace.languages", () => {
   })
 })
 
-describe("checkIRIntegrity #19 — Unicode normalization", () => {
+describe("checkIRIntegrity — Unicode normalization", () => {
   const decomposed = "café".normalize("NFD")
   const composed = decomposed.normalize("NFC")
 
@@ -694,7 +694,7 @@ describe("checkIRIntegrity #19 — Unicode normalization", () => {
     expect(message).toContain("U+00E9")
   })
 
-  it("leaves a non-NFC Symbol id to #17, which refuses it in its own right", () => {
+  it("leaves a non-NFC Symbol id to the id-shape check, which refuses it in its own right", () => {
     const ir = minimalIR()
     ir.symbols = [makeSymbol(`ts:src/a.ts#${decomposed}`, { name: "foo" })]
 
@@ -703,7 +703,7 @@ describe("checkIRIntegrity #19 — Unicode normalization", () => {
     expect(violations.some((v) => v.invariant === 19)).toBe(false)
   })
 
-  it("reports a non-NFC Symbol.name here, because #17 stopped catching it", () => {
+  it("reports a non-NFC Symbol.name here, because the id-shape check does not catch it", () => {
     const ir = minimalIR()
     ir.symbols = [makeSymbol("ts:src/a.ts#foo", { name: decomposed })]
 

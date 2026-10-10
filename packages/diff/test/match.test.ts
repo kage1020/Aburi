@@ -140,7 +140,7 @@ describe("matchStageLogicFingerprint — a logic axis that names nothing", () =>
     }
   }
 
-  it("DF19f: does not pair a lone deleted function with an unrelated class", () => {
+  it("does not pair a lone deleted function with an unrelated class", () => {
     expect(
       stage3(
         [at("src/mail.ts", "sendWelcomeEmail")],
@@ -153,7 +153,7 @@ describe("matchStageLogicFingerprint — a logic axis that names nothing", () =>
     })
   })
 
-  it("DF19h: does not pair it with an unrelated function either (no lone-base shortcut)", () => {
+  it("does not pair it with an unrelated function either (no lone-base shortcut)", () => {
     expect(
       stage3([at("src/mail.ts", "sendWelcomeEmail")], [at("src/invoice.ts", "renderInvoiceTotal")]),
     ).toEqual({
@@ -163,7 +163,7 @@ describe("matchStageLogicFingerprint — a logic axis that names nothing", () =>
     })
   })
 
-  it("DF19h: covers a body that is only shape: one `for` loop, or one `try`", () => {
+  it("covers a body that is only shape: one `for` loop, or one `try`", () => {
     for (const shape of [rule({ type: "loop", loopKind: "for" }), rule({ type: "try" })]) {
       const base = symbolAt("src/mail.ts", "sendAllEmails", "function", [shape])
       const head = symbolAt("src/invoice.ts", "renderInvoiceRows", "function", [shape])
@@ -172,7 +172,7 @@ describe("matchStageLogicFingerprint — a logic axis that names nothing", () =>
     }
   })
 
-  it("DF19: leaves two unrelated top-level `main`s apart", () => {
+  it("leaves two unrelated top-level `main`s apart", () => {
     expect(stage3([at("src/tool-a.ts", "main")], [at("src/tool-b.ts", "main")])).toEqual({
       pairs: [],
       remainingBase: ["ts:src/tool-a.ts#main"],
@@ -180,7 +180,7 @@ describe("matchStageLogicFingerprint — a logic axis that names nothing", () =>
     })
   })
 
-  it("DF19g: pairs a class whose name says two words when it moves file", () => {
+  it("pairs a class whose name says two words when it moves file", () => {
     const base = at("src/old.ts", "InvoiceRenderer", "class")
     const head = at("src/new.ts", "InvoiceRenderer", "class")
     expect(stage3([base], [head])).toEqual({
@@ -190,7 +190,7 @@ describe("matchStageLogicFingerprint — a logic axis that names nothing", () =>
     })
   })
 
-  it("DF19g: leaves a class whose name says one word apart, while its method pairs", () => {
+  it("leaves a class whose name says one word apart, while its method pairs", () => {
     // The owner and its member are paired independently; nothing reconciles them.
     const oldMethod = at("src/old.ts", "Invoice.render", "method")
     const newMethod = at("src/new.ts", "Invoice.render", "method")

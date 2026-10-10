@@ -10,7 +10,7 @@ function strings(rule: Rule | undefined): (string | null)[] {
   return rule === undefined ? [] : [rule.condition, rule.what, rule.expr]
 }
 
-describe("LP19b: rule text drops comments", () => {
+describe("rule text drops comments", () => {
   it.each([
     ["block comment in a guard", "if (a /* why */ || b) throw x", "a || b"],
     ["line comment in a guard", "if (\n  a || // why\n  b\n) throw x", "a || b"],
@@ -74,7 +74,7 @@ describe("LP19b: rule text drops comments", () => {
   })
 })
 
-describe("LP19c: rule text is whitespace-collapsed", () => {
+describe("rule text is whitespace-collapsed", () => {
   it("reads a re-wrapped guard as the one-line guard", async () => {
     const [wrapped] = await rulesOf(
       "if (\n    a < 18 ||\n    b ||\n    c === 1\n  ) {\n    throw x\n  }",

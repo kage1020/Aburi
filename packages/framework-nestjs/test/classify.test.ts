@@ -4,7 +4,7 @@ import { classifyNestjsSymbol } from "../src/index"
 import { makeCandidate, makeCtx, makeDecorator } from "./fixtures/symbol"
 
 describe("classifyNestjsSymbol — class decorators", () => {
-  it("NF1: @Module → framework:nestjs:module", () => {
+  it("@Module → framework:nestjs:module", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -18,7 +18,7 @@ describe("classifyNestjsSymbol — class decorators", () => {
     expect(result?.derivedBy).toBe("framework:nestjs:module")
   })
 
-  it("NF2: @Controller → framework:nestjs:controller with Controller flagged boundary", () => {
+  it("@Controller → framework:nestjs:controller with Controller flagged boundary", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -32,7 +32,7 @@ describe("classifyNestjsSymbol — class decorators", () => {
     expect(result?.derivedBy).toBe("framework:nestjs:controller")
   })
 
-  it("NF3: @Injectable → framework:nestjs:provider", () => {
+  it("@Injectable → framework:nestjs:provider", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -46,7 +46,7 @@ describe("classifyNestjsSymbol — class decorators", () => {
     expect(result?.derivedBy).toBe("framework:nestjs:provider")
   })
 
-  it("NF4: @Catch → framework:nestjs:filter", () => {
+  it("@Catch → framework:nestjs:filter", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "class",
@@ -107,7 +107,7 @@ describe("classifyNestjsSymbol — method decorators", () => {
     "Options",
     "Head",
     "All",
-  ])("NF5/NF6: @%s → framework:nestjs:route + boundary on the method", (name) => {
+  ])("@%s → framework:nestjs:route + boundary on the method", (name) => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "method",
@@ -126,7 +126,7 @@ describe("classifyNestjsSymbol — method decorators", () => {
     "UseInterceptors",
     "UsePipes",
     "UseFilters",
-  ])("NF7: @%s marks a boundary but does NOT claim the route extKind", (name) => {
+  ])("@%s marks a boundary but does NOT claim the route extKind", (name) => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "method",
@@ -140,7 +140,7 @@ describe("classifyNestjsSymbol — method decorators", () => {
     expect(result?.derivedBy).toBe(`framework:nestjs:handler:${name}`)
   })
 
-  it("NF8: mixing HTTP method + Guard produces route extKind AND both boundaries", () => {
+  it("mixing HTTP method + Guard produces route extKind AND both boundaries", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "method",
@@ -161,7 +161,7 @@ describe("classifyNestjsSymbol — method decorators", () => {
     "MessagePattern",
     "EventPattern",
     "SubscribeMessage",
-  ])("NF9: pattern decorator @%s is a route-equivalent boundary", (name) => {
+  ])("pattern decorator @%s is a route-equivalent boundary", (name) => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "method",

@@ -74,7 +74,7 @@ describe("parsePluginManifest", () => {
   })
 })
 
-describe("V1a — parsePluginManifest given a key named twice in one object", () => {
+describe("parsePluginManifest given a key named twice in one object", () => {
   function refusalOf(text: string): RegistryError {
     try {
       parsePluginManifest(text, "inline")

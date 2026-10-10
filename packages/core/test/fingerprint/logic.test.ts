@@ -70,7 +70,7 @@ function base(): IRSymbol {
 describe("logicFingerprint — invariance", () => {
   const baseFp = logicFingerprint(base())
 
-  it("L1: renaming a local variable that does not appear in any rule/effect string is invariant", () => {
+  it("renaming a local variable that does not appear in any rule/effect string is invariant", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       source: {
@@ -86,7 +86,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(sym)).toBe(baseFp)
   })
 
-  it("L4: adding a call is invariant (calls are not on the logic axis)", () => {
+  it("adding a call is invariant (calls are not on the logic axis)", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       calls: [{ target: "console.log", line: 12, resolved: null }],
@@ -94,7 +94,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(sym)).toBe(baseFp)
   })
 
-  it("L5: changing decorators is invariant", () => {
+  it("changing decorators is invariant", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       decorators: [
@@ -110,7 +110,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(sym)).toBe(baseFp)
   })
 
-  it("L11: changing effects[].id but keeping the target is invariant (plugin-classification churn resistance)", () => {
+  it("changing effects[].id but keeping the target is invariant (plugin-classification churn resistance)", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       effects: [
@@ -136,7 +136,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(sym)).toBe(baseFp)
   })
 
-  it("L12: reordering the effects plugin lineup that produces the same targets is invariant", () => {
+  it("reordering the effects plugin lineup that produces the same targets is invariant", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       effects: [
@@ -161,7 +161,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(sym)).toBe(baseFp)
   })
 
-  it("L12a: an id change that reorders two propagated effects leaves the caller's logic alone", () => {
+  it("an id change that reorders two propagated effects leaves the caller's logic alone", () => {
     const before = caller([
       propagatedEffect("db.write", "prisma.invoice.create"),
       propagatedEffect("event.publish", "bus.emit"),
@@ -174,7 +174,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(after)).toBe(logicFingerprint(before))
   })
 
-  it("L12a: the same reorder leaves the caller's logic alone beside a local effect of its own", () => {
+  it("the same reorder leaves the caller's logic alone beside a local effect of its own", () => {
     const readsClock = localEffect("time.now", "Date.now", 4)
     const before = caller([
       readsClock,
@@ -190,7 +190,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(after)).toBe(logicFingerprint(before))
   })
 
-  it("L12b: one target reaching a caller under two ids hashes as it does once the ids agree", () => {
+  it("one target reaching a caller under two ids hashes as it does once the ids agree", () => {
     const split = caller([
       propagatedEffect("db.write", "prisma.invoice.create"),
       propagatedEffect("x-acme:create", "prisma.invoice.create"),
@@ -200,7 +200,7 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(split)).toBe(logicFingerprint(unified))
   })
 
-  it("L12c: a propagated target the caller already calls locally adds nothing, whatever its id", () => {
+  it("a propagated target the caller already calls locally adds nothing, whatever its id", () => {
     const own = localEffect("db.write", "prisma.invoice.create", 6)
     const split = caller([own, propagatedEffect("x-acme:create", "prisma.invoice.create")])
     const unified = caller([own])
@@ -253,17 +253,17 @@ describe("logicFingerprint — invariance", () => {
 describe("logicFingerprint — change conditions", () => {
   const baseFp = logicFingerprint(base())
 
-  it("L6: swapping rule order perturbs the hash (control flow order matters)", () => {
+  it("swapping rule order perturbs the hash (control flow order matters)", () => {
     const sym = makeSymbol(base().id, { ...base(), rules: [...base().rules].reverse() })
     expect(logicFingerprint(sym)).not.toBe(baseFp)
   })
 
-  it("L7: swapping effect order perturbs the hash (side effect order matters)", () => {
+  it("swapping effect order perturbs the hash (side effect order matters)", () => {
     const sym = makeSymbol(base().id, { ...base(), effects: [...base().effects].reverse() })
     expect(logicFingerprint(sym)).not.toBe(baseFp)
   })
 
-  it("L8: changing a rule condition perturbs the hash", () => {
+  it("changing a rule condition perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       rules: [
@@ -281,7 +281,7 @@ describe("logicFingerprint — change conditions", () => {
     expect(logicFingerprint(sym)).not.toBe(baseFp)
   })
 
-  it("L9: changing effect.target perturbs the hash", () => {
+  it("changing effect.target perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       effects: [
@@ -306,7 +306,7 @@ describe("logicFingerprint — change conditions", () => {
     expect(logicFingerprint(sym)).not.toBe(baseFp)
   })
 
-  it("L10: adding an effect perturbs the hash", () => {
+  it("adding an effect perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       effects: [
@@ -324,12 +324,12 @@ describe("logicFingerprint — change conditions", () => {
     expect(logicFingerprint(sym)).not.toBe(baseFp)
   })
 
-  it("L10: a propagated effect enters the hash, so a caller whose only effect is one moves", () => {
+  it("a propagated effect enters the hash, so a caller whose only effect is one moves", () => {
     const reachesWrite = caller([propagatedEffect("db.write", "prisma.invoice.create")])
     expect(logicFingerprint(reachesWrite)).not.toBe(logicFingerprint(caller([])))
   })
 
-  it("L8b: changing Rule.what perturbs the hash", () => {
+  it("changing Rule.what perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       rules: [
@@ -355,7 +355,7 @@ describe("logicFingerprint — change conditions", () => {
     expect(logicFingerprint(sym)).not.toBe(baseFp)
   })
 
-  it("L8c: changing Rule.type perturbs the hash", () => {
+  it("changing Rule.type perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       rules: [
@@ -381,7 +381,7 @@ describe("logicFingerprint — change conditions", () => {
     expect(logicFingerprint(sym)).not.toBe(baseFp)
   })
 
-  it("L8d: changing Rule.loopKind perturbs the hash", () => {
+  it("changing Rule.loopKind perturbs the hash", () => {
     const withFor = makeSymbol(base().id, {
       ...base(),
       rules: [
@@ -411,7 +411,7 @@ describe("logicFingerprint — change conditions", () => {
     expect(logicFingerprint(withFor)).not.toBe(logicFingerprint(withWhile))
   })
 
-  it("L8e: changing Rule.expr perturbs the hash", () => {
+  it("changing Rule.expr perturbs the hash", () => {
     const a = makeSymbol(base().id, {
       ...base(),
       rules: [

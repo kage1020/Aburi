@@ -28,7 +28,7 @@ async function callsFromMain(
 }
 
 describe("scan — calls through a default import", () => {
-  it("CR5: reaches an anonymous default export, in either spelling of the import", async () => {
+  it("reaches an anonymous default export, in either spelling of the import", async () => {
     const result = await callsFromMain(
       { "src/anon.ts": "export default (x: number) => x + 1\n" },
       ['import inc from "./anon"', 'import { default as add } from "./anon"'],
@@ -43,7 +43,7 @@ describe("scan — calls through a default import", () => {
     })
   })
 
-  it("CR5a: reaches a named default export under another name, declared with or apart from its export", async () => {
+  it("reaches a named default export under another name, declared with or apart from its export", async () => {
     const result = await callsFromMain(
       {
         "src/named.ts": "export default function makeApp() { return 3 }\n",
@@ -61,7 +61,7 @@ describe("scan — calls through a default import", () => {
     })
   })
 
-  it("CR5b: reaches a static member through a default-imported class", async () => {
+  it("reaches a static member through a default-imported class", async () => {
     const result = await callsFromMain(
       { "src/svc.ts": "export default class Svc {\n  static run() { return 5 }\n}\n" },
       ['import S from "./svc"'],
@@ -70,7 +70,7 @@ describe("scan — calls through a default import", () => {
     expect(result).toEqual({ resolved: [["S.run", "ts:src/svc.ts#Svc::run"]], unresolved: [] })
   })
 
-  it("CR5c: never takes the named export that shares the local name", async () => {
+  it("never takes the named export that shares the local name", async () => {
     const result = await callsFromMain(
       {
         "src/client.ts":
@@ -107,7 +107,7 @@ describe("scan — calls through a default import", () => {
     })
   })
 
-  it("leaves the default exports §4.4 does not reach unresolved, as known limits", async () => {
+  it("leaves the default exports import scope does not reach unresolved, as known limits", async () => {
     const result = await callsFromMain(
       {
         "src/clause.ts": "function connect() { return 1 }\nexport { connect as default }\n",

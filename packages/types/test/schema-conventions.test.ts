@@ -59,7 +59,7 @@ function admitsNull(node: SchemaNode, defs: Record<string, SchemaNode>): boolean
   return [...(node.oneOf ?? []), ...(node.anyOf ?? [])].some((branch) => admitsNull(branch, defs))
 }
 
-describe("aburi.ir.v1 optional-property conventions (ir-schema.md)", () => {
+describe("aburi.ir.v1 optional-property conventions", () => {
   it("every optional property declares its absent-vs-null convention in `description`", async () => {
     const undeclared = optionalProperties(await readIrSchema())
       .filter(({ property }) => (property.description ?? "").trim() === "")

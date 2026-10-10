@@ -33,7 +33,7 @@ function findChange(
   return hit
 }
 
-describe("DF1 — identical IRs", () => {
+describe("identical IRs", () => {
   it("emits an empty diff", () => {
     const s = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo" })
     const ir = makeIR({ symbols: [s] })
@@ -48,7 +48,7 @@ describe("DF1 — identical IRs", () => {
   })
 })
 
-describe("DF2 — one added symbol in head", () => {
+describe("one added symbol in head", () => {
   it("increments summary.added and lists the symbol", () => {
     const base = makeIR({ symbols: [] })
     const head = makeIR({
@@ -61,7 +61,7 @@ describe("DF2 — one added symbol in head", () => {
   })
 })
 
-describe("DF3 — one removed symbol in base", () => {
+describe("one removed symbol in base", () => {
   it("increments summary.removed", () => {
     const base = makeIR({
       symbols: [makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo" })],
@@ -73,7 +73,7 @@ describe("DF3 — one removed symbol in base", () => {
   })
 })
 
-describe("DF4 — rule condition changed", () => {
+describe("rule condition changed", () => {
   it("marks change with logicChanged=true, apiChanged=false", () => {
     const b = makeSymbol({
       id: "ts:src/a.ts#Foo",
@@ -96,7 +96,7 @@ describe("DF4 — rule condition changed", () => {
   })
 })
 
-describe("DF5 — signature outputs changed", () => {
+describe("signature outputs changed", () => {
   it("marks apiChanged=true", () => {
     const b = makeSymbol({
       id: "ts:src/a.ts#Foo",
@@ -117,7 +117,7 @@ describe("DF5 — signature outputs changed", () => {
   })
 })
 
-describe("DF6 — file renamed (git rename map)", () => {
+describe("file renamed (git rename map)", () => {
   it("emits moved with rationale git-rename", () => {
     const b = makeSymbol({ id: "ts:src/old.ts#Foo", name: "Foo" })
     const h = makeSymbol({
@@ -136,7 +136,7 @@ describe("DF6 — file renamed (git rename map)", () => {
   })
 })
 
-describe("DF7 — file renamed + rule added", () => {
+describe("file renamed + rule added", () => {
   it("emits moved+changed with git-rename rationale", () => {
     const b = makeSymbol({
       id: "ts:src/old.ts#Foo",
@@ -162,7 +162,7 @@ describe("DF7 — file renamed + rule added", () => {
   })
 })
 
-describe("DF8 — file renamed with logic-fp match (no git)", () => {
+describe("file renamed with logic-fp match (no git)", () => {
   it("emits moved with rationale logic-fingerprint", () => {
     const shared = fp("logic-shared")
     const b = makeSymbol({
@@ -184,7 +184,7 @@ describe("DF8 — file renamed with logic-fp match (no git)", () => {
   })
 })
 
-describe("DF9 — method rename in same file, same logic", () => {
+describe("method rename in same file, same logic", () => {
   it("emits moved with rationale logic-fingerprint", () => {
     const shared = fp("v1")
     const b = makeSymbol({
@@ -209,7 +209,7 @@ describe("DF9 — method rename in same file, same logic", () => {
   })
 })
 
-describe("DF10 — multiple base symbols share logic-fp, disambiguate by name", () => {
+describe("multiple base symbols share logic-fp, disambiguate by name", () => {
   it("picks the name-closest candidate", () => {
     const shared = fp("v1")
     const rival = makeSymbol({
@@ -236,7 +236,7 @@ describe("DF10 — multiple base symbols share logic-fp, disambiguate by name", 
   })
 })
 
-describe("DF11 — component added", () => {
+describe("component added", () => {
   it("lists the component under components.added", () => {
     const base = makeIR({ components: [] })
     const head = makeIR({ components: [component({ id: "billing", name: "billing" })] })
@@ -246,7 +246,7 @@ describe("DF11 — component added", () => {
   })
 })
 
-describe("DF12 — dependency added", () => {
+describe("dependency added", () => {
   it("lists the dependency under dependencies.added", () => {
     const base = makeIR({ dependencies: [] })
     const head = makeIR({
@@ -258,7 +258,7 @@ describe("DF12 — dependency added", () => {
   })
 })
 
-describe("DF13 — dropped symbol paired by ID", () => {
+describe("dropped symbol paired by ID", () => {
   it("counts as unchanged", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Dto",
@@ -276,7 +276,7 @@ describe("DF13 — dropped symbol paired by ID", () => {
   })
 })
 
-describe("DF14 — dropped symbol vanished with new basename", () => {
+describe("dropped symbol vanished with new basename", () => {
   it("counts under droppedRemoved when weak match fails", () => {
     const b = makeSymbol({
       id: "ts:src/a.ts#Dto",
@@ -298,7 +298,7 @@ describe("DF14 — dropped symbol vanished with new basename", () => {
   })
 })
 
-describe("DF14b — dropped symbol moved directories with same basename", () => {
+describe("dropped symbol moved directories with same basename", () => {
   it("recovers as moved via dropped-weak-match", () => {
     const b = makeSymbol({
       id: "ts:src/old/dto.ts#Dto",
@@ -323,7 +323,7 @@ describe("DF14b — dropped symbol moved directories with same basename", () => 
   })
 })
 
-describe("DF15 — schema mismatch", () => {
+describe("schema mismatch", () => {
   it("throws DiffError", () => {
     const base = makeIR({ $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" })
     const head = makeIR({ $schema: "https://aburi.kage1020.com/schema/aburi.ir.v2.json" as never })
@@ -331,7 +331,7 @@ describe("DF15 — schema mismatch", () => {
   })
 })
 
-describe("DF16 — same rule, line drift within fuzz (±2)", () => {
+describe("same rule, line drift within fuzz (±2)", () => {
   it("does not produce a modified delta", () => {
     const shared = fp("v1")
     const b = makeSymbol({
@@ -356,7 +356,7 @@ describe("DF16 — same rule, line drift within fuzz (±2)", () => {
   })
 })
 
-describe("DF17 — edited rule with big line drift (> fuzz)", () => {
+describe("edited rule with big line drift (> fuzz)", () => {
   const rulesDelta = (base: IRSymbol["rules"], head: IRSymbol["rules"]) => {
     const shared = fp("v1")
     const b = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", fingerprint: shared, rules: base })
@@ -378,7 +378,7 @@ describe("DF17 — edited rule with big line drift (> fuzz)", () => {
     expect(delta?.removed).toHaveLength(1)
   })
 
-  it("DF17a: an unchanged rule pairs however far it moved", () => {
+  it("an unchanged rule pairs however far it moved", () => {
     expect(
       rulesDelta(
         [rule({ type: "guard", line: 5, condition: "x > 0" })],
@@ -387,7 +387,7 @@ describe("DF17 — edited rule with big line drift (> fuzz)", () => {
     ).toEqual({ added: [], removed: [], modified: [] })
   })
 
-  it("DF17b: a rule that moved past a same-type sibling is still added + removed", () => {
+  it("a rule that moved past a same-type sibling is still added + removed", () => {
     const moved = rule({ type: "guard", line: 60, condition: "x > 0" })
     const delta = rulesDelta(
       [
@@ -404,7 +404,7 @@ describe("DF17 — edited rule with big line drift (> fuzz)", () => {
   })
 })
 
-describe("DF18 — syntax-only change", () => {
+describe("syntax-only change", () => {
   it("marks only syntaxChanged", () => {
     const b = makeSymbol({
       id: "ts:src/a.ts#Foo",
@@ -424,8 +424,8 @@ describe("DF18 — syntax-only change", () => {
   })
 })
 
-describe("DF18a–c — confidence-only change", () => {
-  it("DF18a: reports a confidence move with equal fingerprints as changed, on that axis alone", () => {
+describe("confidence-only change", () => {
+  it("reports a confidence move with equal fingerprints as changed, on that axis alone", () => {
     const b = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", confidence: "high" })
     const h = makeSymbol({ ...b, confidence: "medium" })
     const result = diff(makeIR({ symbols: [b] }), makeIR({ symbols: [h] }))
@@ -440,7 +440,7 @@ describe("DF18a–c — confidence-only change", () => {
     })
   })
 
-  it("DF18b: the same on a Symbol that also moved file is moved+changed", () => {
+  it("the same on a Symbol that also moved file is moved+changed", () => {
     const b = makeSymbol({ id: "ts:src/old.ts#Foo", name: "Foo", confidence: "high" })
     const h = makeSymbol({
       id: "ts:src/new.ts#Foo",
@@ -454,7 +454,7 @@ describe("DF18a–c — confidence-only change", () => {
     expect(result.summary.movedChanged).toBe(1)
   })
 
-  it("DF18c: the same on a pair dropped on both sides is unchanged, as DF13", () => {
+  it("the same on a pair dropped on both sides is unchanged, as any dropped pair paired by id", () => {
     const b = makeSymbol({
       id: "ts:src/a.ts#Dto",
       name: "Dto",

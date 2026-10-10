@@ -41,7 +41,7 @@ describe("runDiff refspec mode — head ref validation", () => {
   })
 })
 
-describe("CL30–CL32 — why a ref did not resolve", () => {
+describe("why a ref did not resolve", () => {
   const GIT_SAID = "fatal: Needed a single revision"
   const refused = (what: string) => () => {
     throw Object.assign(new Error(what), { code: 128 })
@@ -68,7 +68,7 @@ describe("CL30–CL32 — why a ref did not resolve", () => {
     return { error: error as CliError, asked: calls.map((c) => c.args.slice(0, 2).join(" ")) }
   }
 
-  it("CL30 — says the directory is not a git repository, and does not suggest fetching", async () => {
+  it("says the directory is not a git repository, and does not suggest fetching", async () => {
     const { error } = await failure({
       "rev-parse --is-inside-work-tree": refused("fatal: not a git repository"),
     })
@@ -103,7 +103,7 @@ describe("CL30–CL32 — why a ref did not resolve", () => {
     expect(error.message).toContain("--base/--head")
   })
 
-  it("CL31 — says the repository has no commits, and does not suggest fetching", async () => {
+  it("says the repository has no commits, and does not suggest fetching", async () => {
     const { error } = await failure({ "rev-list --all": () => gitOutput("") })
     expect(error.code).toBe("input-error")
     expect(error.message).toContain("has no commits yet")
@@ -119,7 +119,7 @@ describe("CL30–CL32 — why a ref did not resolve", () => {
     expect(error.message).toContain(GIT_SAID)
   })
 
-  it("CL32 — calls a ref no revision answers to an input error, with the spelling to check", async () => {
+  it("calls a ref no revision answers to an input error, with the spelling to check", async () => {
     const { error } = await failure({})
     expect(error.code).toBe("input-error")
     expect(error.message).toContain("Base ref 'main' could not be resolved")

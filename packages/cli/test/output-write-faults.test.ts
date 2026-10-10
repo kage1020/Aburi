@@ -40,7 +40,7 @@ async function run(argv: string[]): Promise<{ exitCode: number; stderr: string }
 
 const onPosixAsAUser = it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
 
-describe("CL28 — aburi scan with an --output-dir that cannot hold the outputs", () => {
+describe("aburi scan with an --output-dir that cannot hold the outputs", () => {
   it("names the command, the directory and the flag when a file stands where it would go", async () => {
     await writeTypeScriptWorkspace(scratch, "write-fixture")
     await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
@@ -99,7 +99,7 @@ describe("CL28 — aburi scan with an --output-dir that cannot hold the outputs"
   })
 })
 
-describe("CL29 — aburi scan into a place the machine refuses", () => {
+describe("aburi scan into a place the machine refuses", () => {
   onPosixAsAUser("names the IR when the directory may not be written to", async () => {
     await writeTypeScriptWorkspace(scratch, "write-fixture")
     const locked = resolve(scratch, "locked")
@@ -136,7 +136,7 @@ describe("CL29 — aburi scan into a place the machine refuses", () => {
   )
 })
 
-describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs", () => {
+describe("aburi diff with an --output-dir that cannot hold the outputs", () => {
   it("names the command and the directory when a file stands where it would go", async () => {
     const { base, head } = await writeIRPair()
     await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")

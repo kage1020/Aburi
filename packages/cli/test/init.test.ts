@@ -43,7 +43,7 @@ describe("runInit — happy path", () => {
   })
 })
 
-describe("CL4 — existing aburi.json without --force", () => {
+describe("existing aburi.json without --force", () => {
   it("throws CliError", async () => {
     await makeMinimalPnpmWorkspace()
     await writeFile(resolve(scratch, "aburi.json"), "{}", "utf8")
@@ -51,7 +51,7 @@ describe("CL4 — existing aburi.json without --force", () => {
   })
 })
 
-describe("CL5 — --force overwrites", () => {
+describe("--force overwrites", () => {
   it("succeeds and reports overwrote:true", async () => {
     await makeMinimalPnpmWorkspace()
     await writeFile(resolve(scratch, "aburi.json"), '{"$schema": "old"}', "utf8")
@@ -139,7 +139,7 @@ describe("aburi init and .gitignore", () => {
   })
 })
 
-describe("CL25 — --output under directories that do not exist", () => {
+describe("--output under directories that do not exist", () => {
   it("creates them and writes the config there", async () => {
     await makeMinimalPnpmWorkspace()
 
@@ -151,7 +151,7 @@ describe("CL25 — --output under directories that do not exist", () => {
   })
 })
 
-describe("CL27 — an --output that cannot hold a file", () => {
+describe("an --output that cannot hold a file", () => {
   it("names the path and the remedy instead of surfacing the errno", async () => {
     await makeMinimalPnpmWorkspace()
     await writeFile(resolve(scratch, "generated"), "not a directory\n", "utf8")

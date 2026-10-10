@@ -112,7 +112,7 @@ describe("computeWeaklyConnectedComponents", () => {
     expect(result.map((c) => c.map(keyOf))).toEqual([["a", "b"], ["m", "x"], ["z"]])
   })
 
-  it("idempotence — same input twice yields structurally equal output (SV17 backing)", () => {
+  it("idempotence — same input twice yields structurally equal output", () => {
     const nodes = [n("c"), n("a"), n("b"), n("d")]
     const edges: [Node, Node][] = [
       [n("a"), n("b")],
@@ -123,7 +123,7 @@ describe("computeWeaklyConnectedComponents", () => {
     expect(two.map((c) => c.map(keyOf))).toEqual(one.map((c) => c.map(keyOf)))
   })
 
-  it("input-order insensitive — shuffled nodes and shuffled edges → same output (SV18 backing)", () => {
+  it("input-order insensitive — shuffled nodes and shuffled edges → same output", () => {
     const canonical = computeWeaklyConnectedComponents(
       [n("a"), n("b"), n("c"), n("d")],
       [
@@ -143,7 +143,7 @@ describe("computeWeaklyConnectedComponents", () => {
     expect(shuffled.map((c) => c.map(keyOf))).toEqual(canonical.map((c) => c.map(keyOf)))
   })
 
-  it("locality — adding a disjoint singleton node does not disturb prior components (SV18 backing)", () => {
+  it("locality — adding a disjoint singleton node does not disturb prior components", () => {
     const before = computeWeaklyConnectedComponents([n("a"), n("b")], [[n("a"), n("b")]], keyOf)
     const after = computeWeaklyConnectedComponents(
       [n("a"), n("b"), n("z")],

@@ -8,56 +8,56 @@ async function normalizeFirstSymbol(source: string): Promise<string> {
   return normalizeAst(target)
 }
 
-describe("normalizeAst — the language plugin contract (fingerprint.md §7.7.1)", () => {
-  it("S1: adding a comment inside the body leaves the normalized form unchanged", async () => {
+describe("normalizeAst — the language plugin contract", () => {
+  it("adding a comment inside the body leaves the normalized form unchanged", async () => {
     const withoutComment = await normalizeFirstSymbol("export function f() { return 1 }")
     const withComment = await normalizeFirstSymbol("export function f() { /* note */ return 1 }")
     expect(withoutComment).toBe(withComment)
   })
 
-  it("S2: whitespace / indentation differences leave the normalized form unchanged", async () => {
+  it("whitespace / indentation differences leave the normalized form unchanged", async () => {
     const flat = await normalizeFirstSymbol("export function f(){return 1}")
     const pretty = await normalizeFirstSymbol("export function f() {\n  return 1\n}")
     expect(flat).toBe(pretty)
   })
 
-  it("S2a: the quotes around a string leave the normalized form unchanged", async () => {
+  it("the quotes around a string leave the normalized form unchanged", async () => {
     const single = await normalizeFirstSymbol("export function f() { save('x') }")
     const double = await normalizeFirstSymbol('export function f() { save("x") }')
     expect(single).toBe(double)
   })
 
-  it("S2b: a trailing comma leaves the normalized form unchanged", async () => {
+  it("a trailing comma leaves the normalized form unchanged", async () => {
     const without = await normalizeFirstSymbol("export function f() { save(a, b) }")
     const trailing = await normalizeFirstSymbol("export function f() { save(a, b,) }")
     expect(without).toBe(trailing)
   })
 
-  it("S2c: optional semicolons leave the normalized form unchanged", async () => {
+  it("optional semicolons leave the normalized form unchanged", async () => {
     const terminated = await normalizeFirstSymbol("export function f() { save(a); save(b); }")
     const bare = await normalizeFirstSymbol("export function f() {\n  save(a)\n  save(b)\n}")
     expect(terminated).toBe(bare)
   })
 
-  it("S3: adding a statement changes the normalized form", async () => {
+  it("adding a statement changes the normalized form", async () => {
     const one = await normalizeFirstSymbol("export function f() { return 1 }")
     const two = await normalizeFirstSymbol("export function f() { const x = 0; return 1 }")
     expect(one).not.toBe(two)
   })
 
-  it("S4: renaming an identifier changes the normalized form", async () => {
+  it("renaming an identifier changes the normalized form", async () => {
     const withX = await normalizeFirstSymbol("export function f(x: number) { return x }")
     const withY = await normalizeFirstSymbol("export function f(y: number) { return y }")
     expect(withX).not.toBe(withY)
   })
 
-  it("S5: changing a literal value changes the normalized form", async () => {
+  it("changing a literal value changes the normalized form", async () => {
     const one = await normalizeFirstSymbol("export function f() { return 1 }")
     const two = await normalizeFirstSymbol("export function f() { return 2 }")
     expect(one).not.toBe(two)
   })
 
-  it("S5a: changing an operator changes the normalized form", async () => {
+  it("changing an operator changes the normalized form", async () => {
     const plus = await normalizeFirstSymbol("export function f() { save(a + b) }")
     const minus = await normalizeFirstSymbol("export function f() { save(a - b) }")
     expect(plus).not.toBe(minus)
@@ -72,79 +72,70 @@ describe("normalizeAst — operators, keywords and modifiers", () => {
   }
   const fn = (body: string) => `export function f(a: any, b: any, x: any, v: any) { ${body} }`
 
+  it("a binary operator", changes(fn("const t = a + b; save(t)"), fn("const t = a - b; save(t)")))
+  it("a logical operator", changes(fn("audit(a && b)"), fn("audit(a || b)")))
+  it("a comparison", changes(fn("track(x === null)"), fn("track(x !== null)")))
   it(
-    "S5a: a binary operator",
-    changes(fn("const t = a + b; save(t)"), fn("const t = a - b; save(t)")),
-  )
-  it("S5a: a logical operator", changes(fn("audit(a && b)"), fn("audit(a || b)")))
-  it("S5a: a comparison", changes(fn("track(x === null)"), fn("track(x !== null)")))
-  it(
-    "S5a: a loop bound",
+    "a loop bound",
     changes(
       fn("for (let i = 0; i < x.length; i++) {}"),
       fn("for (let i = 0; i <= x.length; i++) {}"),
     ),
   )
-  it("S5a: a unary operator", changes(fn("send(!x)"), fn("send(-x)")))
-  it("S5a: an update operator", changes(fn("a++"), fn("a--")))
-  it("S5a: nullish against logical or", changes(fn('save(v ?? "x")'), fn('save(v || "x")')))
+  it("a unary operator", changes(fn("send(!x)"), fn("send(-x)")))
+  it("an update operator", changes(fn("a++"), fn("a--")))
+  it("nullish against logical or", changes(fn('save(v ?? "x")'), fn('save(v || "x")')))
+  it("a condition without an early exit", changes(fn("if (a > 0) go()"), fn("if (a < 0) go()")))
+  it("an augmented assignment", changes(fn("a += b"), fn("a -= b")))
+  it("`let` against `const`", changes(fn("let i = 0; use(i)"), fn("const i = 0; use(i)")))
   it(
-    "S5a: a condition without an early exit",
-    changes(fn("if (a > 0) go()"), fn("if (a < 0) go()")),
-  )
-  it("S5a: an augmented assignment", changes(fn("a += b"), fn("a -= b")))
-  it("S5a: `let` against `const`", changes(fn("let i = 0; use(i)"), fn("const i = 0; use(i)")))
-  it(
-    "S5a: `for…in` against `for…of`",
+    "`for…in` against `for…of`",
     changes(fn("for (const k in x) use(k)"), fn("for (const k of x) use(k)")),
   )
+  it("a primitive type in an assertion", changes(fn("save(x as string)"), fn("save(x as number)")))
   it(
-    "S5a: a primitive type in an assertion",
-    changes(fn("save(x as string)"), fn("save(x as number)")),
-  )
-  it(
-    "S5a: a concise arrow's operator",
+    "a concise arrow's operator",
     changes(
       "export const add = (a: number, b: number) => a + b",
       "export const add = (a: number, b: number) => a - b",
     ),
   )
   it(
-    "S5a: an accessibility modifier",
+    "an accessibility modifier",
     changes("export class C { private secret = 1 }", "export class C { public secret = 1 }"),
   )
   it(
-    "S5a: a field's primitive type",
+    "a field's primitive type",
     changes("export class C { count: number }", "export class C { count: string }"),
   )
-  it("S5a: `static`", changes("export class C { y = 2 }", "export class C { static y = 2 }"))
-  it("S5a: `readonly`", changes("export class C { y = 2 }", "export class C { readonly y = 2 }"))
+  it("`static`", changes("export class C { y = 2 }", "export class C { static y = 2 }"))
+  it("`readonly`", changes("export class C { y = 2 }", "export class C { readonly y = 2 }"))
   it(
-    "S5a: `async` on a method",
+    "`async` on a method",
     changes("export class C { async m() { go() } }", "export class C { m() { go() } }"),
   )
   it(
-    "S5a: an optional property",
+    "an optional property",
     changes("export interface I { a?: string }", "export interface I { a: string }"),
   )
   it(
-    "S5a: a definite assignment",
+    "a definite assignment",
     changes("export class C { x!: number }", "export class C { x: number }"),
   )
   it(
-    "S5a: `declare` on a field",
+    "`declare` on a field",
     changes("export class C { declare y: number }", "export class C { y: number }"),
   )
 
   const same = (before: string, after: string) => async () => {
     expect(await normalizeFirstSymbol(before)).toBe(await normalizeFirstSymbol(after))
   }
-  it("S2a: single against double quotes", same(fn("save('x')"), fn('save("x")')))
-  it("S2b: a trailing comma", same(fn("save(a, b)"), fn("save(a, b,)")))
-  it("S2b: a trailing comma in an array", same(fn("save([a, b])"), fn("save([a, b,])")))
-  it("S2c: optional semicolons", same(fn("save(a); save(b);"), fn("save(a)\n save(b)")))
+  it("single against double quotes", same(fn("save('x')"), fn('save("x")')))
+  it("a trailing comma", same(fn("save(a, b)"), fn("save(a, b,)")))
+  it("a trailing comma in an array", same(fn("save([a, b])"), fn("save([a, b,])")))
+  it("optional semicolons", same(fn("save(a); save(b);"), fn("save(a)\n save(b)")))
   it(
-    "S2c: interface member separators",
+    "interface member separators",
     same(
       "export interface I { a: string; b: number }",
       "export interface I { a: string, b: number }",

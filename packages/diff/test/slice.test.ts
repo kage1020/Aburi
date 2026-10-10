@@ -75,8 +75,8 @@ function edge(from: string, to: string, line = 1, confidence: Confidence = "high
   return { from: symbolId(from), to: symbolId(to), via: "call", confidence, line }
 }
 
-describe("computeSlices — Node selection (SV1–SV5)", () => {
-  it("SV1: two changed symbols connected by an edge form one Slice", () => {
+describe("computeSlices — Node selection", () => {
+  it("two changed symbols connected by an edge form one Slice", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const slices = computeSlices({
@@ -87,7 +87,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
     expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B] }])
   })
 
-  it("SV2: two changed symbols with no edge form two singletons", () => {
+  it("two changed symbols with no edge form two singletons", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const slices = computeSlices({
@@ -101,7 +101,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
     ])
   })
 
-  it("SV3: no bridging through an unchanged Symbol M (A→M→B does NOT unify A,B)", () => {
+  it("no bridging through an unchanged Symbol M (A→M→B does NOT unify A,B)", () => {
     const A = "ts:src/a.ts#A"
     const M = "ts:src/mid.ts#M"
     const B = "ts:src/b.ts#B"
@@ -116,7 +116,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
     ])
   })
 
-  it("SV4: pure moved symbol is NOT a Node and is absent from slices[] entirely", () => {
+  it("pure moved symbol is NOT a Node and is absent from slices[] entirely", () => {
     const A = "ts:src/a.ts#A"
     const OldMoved = "ts:src/old.ts#moved"
     const NewMoved = "ts:src/new.ts#moved"
@@ -128,7 +128,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
     expect(slices).toEqual([{ id: `slice:${A}`, members: [A] }])
   })
 
-  it("SV5a: a Symbol changed only in confidence is a Node and clusters with its callee", () => {
+  it("a Symbol changed only in confidence is a Node and clusters with its callee", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const unsure: SymbolChange = {
@@ -152,7 +152,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
     expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B] }])
   })
 
-  it("SV5: propagated-only changed callers (status: changed) are Nodes and cluster with their downstream callee", () => {
+  it("propagated-only changed callers (status: changed) are Nodes and cluster with their downstream callee", () => {
     const Ctl = "ts:src/ctl.ts#Ctl.route"
     const Svc = "ts:src/svc.ts#Svc.op"
     const propagatedWrite: Effect = {
@@ -186,8 +186,8 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
   })
 })
 
-describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
-  it("SV6: {C, oldS(removed), newS(added)} — rename with edge in base only for old, head only for new", () => {
+describe("computeSlices — Base/head edge union", () => {
+  it("{C, oldS(removed), newS(added)} — rename with edge in base only for old, head only for new", () => {
     const C = "ts:src/c.ts#Ctl.route"
     const oldS = "ts:src/svc.ts#Svc.old"
     const newS = "ts:src/svc.ts#Svc.new"
@@ -199,7 +199,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     expect(slices).toEqual([{ id: `slice:${C}`, members: [C, newS, oldS].sort() }])
   })
 
-  it("SV6a: SV6 with the controller relocated to another file reads its base edge under the head id", () => {
+  it("a controller relocated to another file reads its base edge under the head id", () => {
     const oldC = "ts:src/ctl.ts#handleRefund"
     const C = "ts:src/controller.ts#handleRefund"
     const oldS = "ts:src/refund.ts#refund"
@@ -212,7 +212,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     expect(slices).toEqual([{ id: `slice:${C}`, members: [C, oldS, newS].sort() }])
   })
 
-  it("SV6b: an inlined call keeps its base edge, and a newcomer at the old id stays out", () => {
+  it("an inlined call keeps its base edge, and a newcomer at the old id stays out", () => {
     const oldC = "ts:src/checkout.ts#submitCheckoutOrder"
     const C = "ts:src/orders/checkout.ts#submitCheckoutOrder"
     const S = "ts:src/helpers.ts#legacyNormalizeAmount"
@@ -227,7 +227,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     ])
   })
 
-  it("SV6c: a base edge into a callee under a new id reads the callee under its head id", () => {
+  it("a base edge into a callee under a new id reads the callee under its head id", () => {
     const C = "ts:src/checkout.ts#submitCheckoutOrder"
     const oldS = "ts:src/helpers.ts#normalizeAmount"
     const S = "ts:src/money/helpers.ts#normalizeAmount"
@@ -239,7 +239,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     expect(slices).toEqual([{ id: `slice:${C}`, members: [C, S].sort() }])
   })
 
-  it("SV6d: a caller renamed within its own file reads its base edge under the new name", () => {
+  it("a caller renamed within its own file reads its base edge under the new name", () => {
     const oldC = "ts:src/a.ts#oldName"
     const C = "ts:src/a.ts#newName"
     const S = "ts:src/b.ts#S"
@@ -251,7 +251,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     expect(slices).toEqual([{ id: `slice:${C}`, members: [C, S] }])
   })
 
-  it("SV7: edge only in headCallEdges still unifies its Nodes", () => {
+  it("edge only in headCallEdges still unifies its Nodes", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const slices = computeSlices({
@@ -263,7 +263,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     expect(slices[0]?.members).toEqual([A, B])
   })
 
-  it("SV8: edge only in baseCallEdges still unifies its Nodes", () => {
+  it("edge only in baseCallEdges still unifies its Nodes", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const slices = computeSlices({
@@ -276,8 +276,8 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
   })
 })
 
-describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
-  it("SV9: directed cycle A→B→C→A → one Slice with all three, no SCC pre-condense", () => {
+describe("computeSlices — Cycles and dropped", () => {
+  it("directed cycle A→B→C→A → one Slice with all three, no SCC pre-condense", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const C = "ts:src/c.ts#C"
@@ -289,7 +289,7 @@ describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
     expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B, C] }])
   })
 
-  it("SV10: dropped-toggled Symbol with no in-Node edges becomes a singleton", () => {
+  it("dropped-toggled Symbol with no in-Node edges becomes a singleton", () => {
     const X = "ts:src/x.ts#X"
     const slices = computeSlices({
       changes: [droppedToggled(X, X, "to-dropped")],
@@ -299,7 +299,7 @@ describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
     expect(slices).toEqual([{ id: `slice:${X}`, members: [X] }])
   })
 
-  it("SV11: dropped-toggled Symbol with a kept-side edge to another Node clusters", () => {
+  it("dropped-toggled Symbol with a kept-side edge to another Node clusters", () => {
     const X = "ts:src/x.ts#X"
     const K = "ts:src/k.ts#K"
     const slices = computeSlices({
@@ -310,7 +310,7 @@ describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
     expect(slices).toEqual([{ id: `slice:${K}`, members: [K, X] }])
   })
 
-  it("SV11a: SV11 with the dropped-toggled Symbol under a new id clusters under its head id", () => {
+  it("a dropped-toggled Symbol under a new id clusters under its head id", () => {
     const oldX = "ts:src/x.ts#X"
     const X = "ts:src/y.ts#X"
     const K = "ts:src/k.ts#K"
@@ -323,8 +323,8 @@ describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
   })
 })
 
-describe("computeSlices — Cluster identity and ordering (SV12–SV14)", () => {
-  it("SV12: sliceId = 'slice:' + smallest member id (verbatim, no sanitisation)", () => {
+describe("computeSlices — Cluster identity and ordering", () => {
+  it("sliceId = 'slice:' + smallest member id (verbatim, no sanitisation)", () => {
     const X = "ts:src/a.ts#X"
     const Y = "ts:src/a.ts#Y"
     const Z = "ts:src/a.ts#Z"
@@ -336,7 +336,7 @@ describe("computeSlices — Cluster identity and ordering (SV12–SV14)", () => 
     expect(slices).toEqual([{ id: `slice:${X}`, members: [X, Y, Z] }])
   })
 
-  it("SV13: slices[] is sorted by ascending anchor id", () => {
+  it("slices[] is sorted by ascending anchor id", () => {
     const M = "ts:src/m.ts#M"
     const X = "ts:src/x.ts#X"
     const A = "ts:src/a.ts#A"
@@ -349,7 +349,7 @@ describe("computeSlices — Cluster identity and ordering (SV12–SV14)", () => 
     expect(slices.map((s) => s.id)).toEqual([`slice:${A}`, `slice:${M}`])
   })
 
-  it("SV14: members[] within a Slice is sorted ascending", () => {
+  it("members[] within a Slice is sorted ascending", () => {
     const A = "ts:src/a.ts#Aa"
     const C = "ts:src/a.ts#Cc"
     const B = "ts:src/a.ts#Bb"
@@ -362,7 +362,7 @@ describe("computeSlices — Cluster identity and ordering (SV12–SV14)", () => 
   })
 })
 
-describe("computeSlices — Determinism (SV15–SV18)", () => {
+describe("computeSlices — Determinism", () => {
   const buildInputs = () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
@@ -378,14 +378,14 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
     }
   }
 
-  it("SV15: idempotence — two runs produce byte-identical JSON", () => {
+  it("idempotence — two runs produce byte-identical JSON", () => {
     const { changes, edges } = buildInputs()
     const one = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
     const two = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
     expect(JSON.stringify(two)).toBe(JSON.stringify(one))
   })
 
-  it("SV16: input-order insensitivity — shuffled inputs produce identical output", () => {
+  it("input-order insensitivity — shuffled inputs produce identical output", () => {
     const { changes, edges } = buildInputs()
     const canonical = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
     const shuffled = computeSlices({
@@ -396,14 +396,14 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
     expect(JSON.stringify(shuffled)).toBe(JSON.stringify(canonical))
   })
 
-  it("SV17: locality — adding an unchanged Symbol elsewhere does not change any slice", () => {
+  it("locality — adding an unchanged Symbol elsewhere does not change any slice", () => {
     const { changes, edges } = buildInputs()
     const before = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
     const after = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
     expect(after).toEqual(before)
   })
 
-  it("SV18: adding a new Node in a disjoint component leaves existing slices unchanged", () => {
+  it("adding a new Node in a disjoint component leaves existing slices unchanged", () => {
     const { A, B, C, D, changes, edges } = buildInputs()
     const before = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
 
@@ -420,8 +420,8 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
   })
 })
 
-describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + robustness)", () => {
-  it("SV19 (JSON side): a Node-less change set yields slices: []", () => {
+describe("computeSlices — Zero-Node and edge shape edge cases", () => {
+  it("a Node-less change set yields slices: []", () => {
     // Only pure `moved` — not a Node.
     const slices = computeSlices({
       changes: [moved("ts:src/a.ts#a", "ts:src/b.ts#a")],
@@ -475,7 +475,7 @@ describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + 
   })
 })
 
-describe("computeSlices — SV21: cross-language partition", () => {
+describe("computeSlices — cross-language partition", () => {
   it("partitions Nodes by language when the changes span multiple languages", () => {
     const tsCtl = "ts:src/ctl.ts#Ctl.route"
     const tsSvc = "ts:src/svc.ts#Svc.op"
@@ -504,7 +504,7 @@ describe("computeSlices — SV21: cross-language partition", () => {
   })
 })
 
-describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
+describe("computeSlices — anchor derivation invariant", () => {
   /** Assert the non-throwing and the throwing form agree on which clause broke. */
   function expectViolation(record: unknown, kind: SliceViolationKind, subject: string): void {
     const violation = sliceRecordViolation(record)
@@ -525,7 +525,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     }
   }
 
-  it("SV23: every SliceRecord the pass emits satisfies the invariant", () => {
+  it("every SliceRecord the pass emits satisfies the invariant", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const C = "ts:src/c.ts#C"
@@ -547,7 +547,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     }
   })
 
-  it("SV25: sliceAnchor returns members[0] without deriving it from the id", () => {
+  it("sliceAnchor returns members[0] without deriving it from the id", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const [slice] = computeSlices({
@@ -561,7 +561,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     expect(sliceAnchor({ id: sliceId(`slice:${B}`), members: [symbolId(A), symbolId(B)] })).toBe(A)
   })
 
-  it("SV23: rejects a correct `slice:` prefix whose id is not the anchor", () => {
+  it("rejects a correct `slice:` prefix whose id is not the anchor", () => {
     expectViolation(
       { id: "slice:ts:src/foo.ts#foo", members: ["ts:src/bar.ts#bar", "ts:src/baz.ts#baz"] },
       "id-not-derived",
@@ -569,7 +569,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     )
   })
 
-  it("SV23: rejects members[] that are not in strictly ascending order", () => {
+  it("rejects members[] that are not in strictly ascending order", () => {
     expectViolation(
       { id: "slice:ts:src/b.ts#B", members: ["ts:src/b.ts#B", "ts:src/a.ts#A"] },
       "members-unordered",
@@ -577,7 +577,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     )
   })
 
-  it("SV23: rejects duplicated members (a non-strict ascending run)", () => {
+  it("rejects duplicated members (a non-strict ascending run)", () => {
     expectViolation(
       { id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A", "ts:src/a.ts#A"] },
       "members-unordered",
@@ -585,7 +585,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     )
   })
 
-  it("SV23: rejects an empty members[]", () => {
+  it("rejects an empty members[]", () => {
     expectViolation(
       { id: "slice:ts:src/a.ts#A", members: [] },
       "members-empty",
@@ -593,7 +593,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     )
   })
 
-  it("SV23: rejects a missing `slice:` prefix through the same derivation check", () => {
+  it("rejects a missing `slice:` prefix through the same derivation check", () => {
     expectViolation(
       { id: "ts:src/a.ts#A", members: ["ts:src/a.ts#A"] },
       "id-not-derived",
@@ -601,14 +601,14 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     )
   })
 
-  it("SV25: sliceAnchor throws rather than returning undefined for an empty members[]", () => {
+  it("sliceAnchor throws rather than returning undefined for an empty members[]", () => {
     expect(() => sliceAnchor({ id: sliceId("slice:ts:src/a.ts#A"), members: [] })).toThrow(
       DiffError,
     )
   })
 })
 
-describe("sliceRecordViolation — untyped input (SV24)", () => {
+describe("sliceRecordViolation — untyped input", () => {
   it("reports a missing members[] instead of throwing", () => {
     const violation = sliceRecordViolation({ id: "slice:ts:src/a.ts#A" })
     expect(violation?.kind).toBe("malformed-shape")
@@ -640,7 +640,7 @@ describe("sliceRecordViolation — untyped input (SV24)", () => {
   })
 })
 
-describe("SV29: a Slice id cannot be built on an anchor from a reserved namespace", () => {
+describe("a Slice id cannot be built on an anchor from a reserved namespace", () => {
   it("rejects an anchor in the `slice:` namespace even though the derivation is self-consistent", () => {
     const violation = sliceRecordViolation({
       id: "slice:slice:src/a.ts#A",

@@ -40,7 +40,7 @@ const SECTIONS = {
   syntax: "## 🎨 Syntax-only changes",
 } as const
 
-describe("partition — delta-priority routing (C4)", () => {
+describe("partition — delta-priority routing", () => {
   it.each<[string, Partial<SymbolDelta>, keyof typeof SECTIONS | null]>([
     ["api+logic", { apiChanged: true, logicChanged: true }, "api"],
     ["api+syntax", { apiChanged: true, syntaxChanged: true }, "api"],

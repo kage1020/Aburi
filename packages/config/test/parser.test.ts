@@ -19,7 +19,7 @@ const VALID_JSONC = `{
 }`
 
 describe("parseConfig", () => {
-  it("C1 accepts an empty {} config", () => {
+  it("accepts an empty {} config", () => {
     expect(parseConfig("{}", "inline")).toEqual({})
   })
 
@@ -29,11 +29,11 @@ describe("parseConfig", () => {
     expect(config.components?.[0]?.id).toBe("billing")
   })
 
-  it("C2 allows empty effects array", () => {
+  it("allows empty effects array", () => {
     expect(parseConfig(JSON.stringify({ effects: [] }), "inline").effects).toEqual([])
   })
 
-  it("C3 preserves effects order (first-match-wins is consumer-side)", () => {
+  it("preserves effects order (first-match-wins is consumer-side)", () => {
     const config = parseConfig(
       JSON.stringify({ effects: ["effects-prisma", "effects-stripe"] }),
       "inline",
@@ -41,7 +41,7 @@ describe("parseConfig", () => {
     expect(config.effects).toEqual(["effects-prisma", "effects-stripe"])
   })
 
-  it("C5 keep/suppress overlap is accepted at parse time (precedence is consumer-side)", () => {
+  it("keep/suppress overlap is accepted at parse time (precedence is consumer-side)", () => {
     const config = parseConfig(
       JSON.stringify({ $schema: SCHEMA, suppress: ["logger"], keep: ["logger.audit"] }),
       "inline",
@@ -122,7 +122,7 @@ describe("parseConfig", () => {
     )
   })
 
-  it("C4 rejects duplicate component ids", async () => {
+  it("rejects duplicate component ids", async () => {
     const text = JSON.stringify({
       $schema: SCHEMA,
       components: [
@@ -135,7 +135,7 @@ describe("parseConfig", () => {
     expect(caught.value).toBe("billing")
   })
 
-  it("C6 rejects duplicate frameworkHints names", async () => {
+  it("rejects duplicate frameworkHints names", async () => {
     const text = JSON.stringify({
       $schema: SCHEMA,
       frameworkHints: [{ name: "acme" }, { name: "acme" }],
@@ -146,7 +146,7 @@ describe("parseConfig", () => {
   })
 })
 
-describe("C19 — a key named twice in one object", () => {
+describe("a key named twice in one object", () => {
   it.each([
     [
       "at the top level",

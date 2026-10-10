@@ -280,7 +280,7 @@ describe("classifyTrpcCall — upstream contract violations", () => {
 })
 
 describe("classifyTrpcCall — purity", () => {
-  it("returns an identical result across repeated invocations (effect-plugin.md EP2)", () => {
+  it("returns an identical result across repeated invocations", () => {
     const ctx = clientCtx()
     const call = makeCall({ target: "client.user.byId.query" })
     const runs = Array.from({ length: 5 }, () => classifyTrpcCall(call, ctx))

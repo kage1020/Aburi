@@ -8,7 +8,7 @@ function names(symbols: SymbolCandidate<Node>[]): string[] {
   return symbols.map((s) => s.name)
 }
 
-describe("LP35: abstract members", () => {
+describe("abstract members", () => {
   it("an abstract method is a member beside the implemented ones", async () => {
     const symbols = await symbolsOf("export abstract class A { abstract doIt(): void; run() {} }")
     expect(names(symbols).sort()).toEqual(["A", "A.doIt", "A.run"])
@@ -83,7 +83,7 @@ describe("LP35: abstract members", () => {
   })
 })
 
-describe("LP36: ambient declarations", () => {
+describe("ambient declarations", () => {
   it("declare function is the declaration, where a bare overload is not", async () => {
     const symbols = await symbolsOf("declare function f(): void")
     const f = byId(symbols, "#f")

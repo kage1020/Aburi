@@ -34,7 +34,7 @@ describe("detectWorkspaceRoot", () => {
     expect(await detectWorkspaceRoot({ cwd: inner })).toBe(tmp)
   })
 
-  it("CD32: stops at a repository nested under another marker", async () => {
+  it("stops at a repository nested under another marker", async () => {
     await mkdir(join(tmp, ".git"), { recursive: true })
     const inner = join(tmp, "vendor", "lib")
     await mkdir(join(inner, ".git"), { recursive: true })
@@ -43,7 +43,7 @@ describe("detectWorkspaceRoot", () => {
     expect(await detectWorkspaceRoot({ cwd: join(inner, "src") })).toBe(inner)
   })
 
-  it("CD32: stops at the `.git` file a linked worktree or a submodule has", async () => {
+  it("stops at the `.git` file a linked worktree or a submodule has", async () => {
     await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages: ['apps/*']", "utf8")
     await mkdir(join(tmp, ".git"), { recursive: true })
     const worktree = join(tmp, ".worktrees", "feat")
@@ -53,7 +53,7 @@ describe("detectWorkspaceRoot", () => {
     expect(await detectWorkspaceRoot({ cwd: join(worktree, "src") })).toBe(worktree)
   })
 
-  it("CD32: stops at a `.git` beside another marker, in any probing order", async () => {
+  it("stops at a `.git` beside another marker, in any probing order", async () => {
     await writeFile(join(tmp, "turbo.json"), "{}", "utf8")
     const repo = join(tmp, "repo")
     await mkdir(join(repo, ".git"), { recursive: true })
@@ -63,7 +63,7 @@ describe("detectWorkspaceRoot", () => {
     expect(await detectWorkspaceRoot({ cwd: join(repo, "src") })).toBe(repo)
   })
 
-  it("CD33: passes a `.git` file that is not a `gitdir:` pointer", async () => {
+  it("passes a `.git` file that is not a `gitdir:` pointer", async () => {
     await mkdir(join(tmp, ".git"), { recursive: true })
     const vendored = join(tmp, "vendor", "lib")
     await mkdir(join(vendored, "src"), { recursive: true })

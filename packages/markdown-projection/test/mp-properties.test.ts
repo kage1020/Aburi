@@ -22,7 +22,7 @@ import {
 } from "../src"
 import { emptySummary, makeDiff } from "./fixtures"
 
-describe("MP1 — projection is deterministic", () => {
+describe("projection is deterministic", () => {
   it("workspace renders identical bytes for identical input", () => {
     const ir = makeIR({
       symbols: [makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo" })],
@@ -47,7 +47,7 @@ describe("MP1 — projection is deterministic", () => {
   })
 })
 
-describe("MP2 — component projection normalises input order", () => {
+describe("component projection normalises input order", () => {
   it("emits identical Markdown when symbols come in reverse order", () => {
     const s1 = makeSymbol({
       id: "ts:src/a.ts#A",
@@ -66,7 +66,7 @@ describe("MP2 — component projection normalises input order", () => {
   })
 })
 
-describe("MP3 — Effects section is omitted when empty", () => {
+describe("Effects section is omitted when empty", () => {
   it("does not emit `**Effects**` for a Symbol with no effects", () => {
     const s = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo" })
     const md = projectComponent({
@@ -80,7 +80,7 @@ describe("MP3 — Effects section is omitted when empty", () => {
   })
 })
 
-describe("MP4 — Dropped section is a <details> fold-out", () => {
+describe("Dropped section is a <details> fold-out", () => {
   it("renders dropped symbols under a <details> block", () => {
     const dropped = makeSymbol({
       id: "ts:src/a.ts#Dto",
@@ -102,8 +102,8 @@ describe("MP4 — Dropped section is a <details> fold-out", () => {
   })
 })
 
-describe("MP5 / MP6 — confidence badge visibility", () => {
-  it("MP5: medium confidence Effect gets ⚠ medium badge", () => {
+describe("confidence badge visibility", () => {
+  it("medium confidence Effect gets ⚠ medium badge", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Foo",
       name: "Foo",
@@ -125,7 +125,7 @@ describe("MP5 / MP6 — confidence badge visibility", () => {
     expect(md).toContain("⚠ medium")
   })
 
-  it("MP6: high confidence Effect has no badge", () => {
+  it("high confidence Effect has no badge", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Foo",
       name: "Foo",
@@ -142,7 +142,7 @@ describe("MP5 / MP6 — confidence badge visibility", () => {
   })
 })
 
-describe("MP6a / MP6b — a Symbol's confidence on every heading that names it", () => {
+describe("a Symbol's confidence on every heading that names it", () => {
   const symbolAt = (confidence: "high" | "medium" | "low", i = 0) =>
     makeSymbol({ id: `ts:src/a.ts#Foo${i}`, name: `Foo${i}`, confidence })
 
@@ -172,7 +172,7 @@ describe("MP6a / MP6b — a Symbol's confidence on every heading that names it",
     return named
   }
 
-  it("MP6a: medium and low carry the badge after the kind", () => {
+  it("medium and low carry the badge after the kind", () => {
     for (const confidence of ["medium", "low"] as const) {
       for (const line of titles(confidence)) {
         expect(line).toContain(`\`Foo0\` *(function)* ⚠ ${confidence}`)
@@ -180,12 +180,12 @@ describe("MP6a / MP6b — a Symbol's confidence on every heading that names it",
     }
   })
 
-  it("MP6b: high carries none", () => {
+  it("high carries none", () => {
     for (const line of titles("high")) expect(line).not.toContain("⚠")
   })
 })
 
-describe("MP8 — explain a dropped Symbol shows drop reason only", () => {
+describe("explain a dropped Symbol shows drop reason only", () => {
   it("emits drop reason and omits detail sections", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Dto",
@@ -217,7 +217,7 @@ describe("MP8 — explain a dropped Symbol shows drop reason only", () => {
   })
 })
 
-describe("MP10 — syntax-only changes end up in the Syntax-only fold-out", () => {
+describe("syntax-only changes end up in the Syntax-only fold-out", () => {
   it("routes delta.syntaxChanged (and only syntaxChanged) to the Syntax-only section", () => {
     const before = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", fingerprint: fp("v1") })
     const after = makeSymbol({
@@ -252,7 +252,7 @@ describe("MP10 — syntax-only changes end up in the Syntax-only fold-out", () =
   })
 })
 
-describe("MP10a — a confidence-only change gets its own section", () => {
+describe("a confidence-only change gets its own section", () => {
   it("routes delta.confidenceChanged with neither API nor logic to Confidence changes", () => {
     const before = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", confidence: "high" })
     const after = { ...before, confidence: "low" as const }
@@ -282,7 +282,7 @@ describe("MP10a — a confidence-only change gets its own section", () => {
   })
 })
 
-describe("Folded section summary counts (§6.1)", () => {
+describe("Folded section summary counts", () => {
   it("counts entries in all three folded sections", () => {
     const makeToggle = (
       id: string,
@@ -356,7 +356,7 @@ describe("Folded section summary counts (§6.1)", () => {
   })
 })
 
-describe("MP11 — moved+changed renders outside the Moved fold-out", () => {
+describe("moved+changed renders outside the Moved fold-out", () => {
   it("emits a full detail block, not a bullet inside <details>", () => {
     const before = makeSymbol({
       id: "ts:src/old.ts#Foo",
@@ -402,7 +402,7 @@ describe("MP11 — moved+changed renders outside the Moved fold-out", () => {
   })
 })
 
-describe("MP12 — empty IR still projects workspace.md", () => {
+describe("empty IR still projects workspace.md", () => {
   it("emits a Components section that acknowledges emptiness", () => {
     const ir = makeIR({ components: [], symbols: [] })
     const md = projectWorkspace(ir)

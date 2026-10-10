@@ -20,7 +20,7 @@ describe("an empty module specifier produces no edge and one recoverable error",
       18,
       "dynamic import",
     ],
-  ])("LP26a: %s", async (_label, source, column, site) => {
+  ])("%s", async (_label, source, column, site) => {
     const { imports, errors, tree } = await parseSource(source)
     expect(imports).toEqual([])
     expect(emptySpecifierErrors(errors)).toEqual([
@@ -34,7 +34,7 @@ describe("an empty module specifier produces no edge and one recoverable error",
     expect(tree).not.toBeNull()
   })
 
-  it("LP26b: withdraws only the broken edge, not the file's other imports", async () => {
+  it("withdraws only the broken edge, not the file's other imports", async () => {
     const { imports, errors } = await importsOf(
       ['import { A } from "./a"', 'import b from ""', 'import { C } from "./c"'].join("\n"),
     )
@@ -46,18 +46,18 @@ describe("an empty module specifier produces no edge and one recoverable error",
     expect(emptySpecifierErrors(errors)[0]?.line).toBe(2)
   })
 
-  it("LP26c: reports each occurrence, including the two an edge dedupe would have merged", async () => {
+  it("reports each occurrence, including the two an edge dedupe would have merged", async () => {
     const { imports, errors } = await importsOf('import a from ""; import a from ""')
     expect(imports).toEqual([])
     expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([15, 33])
   })
 
-  it("LP26c: reports an occurrence per line as well", async () => {
+  it("reports an occurrence per line as well", async () => {
     const { errors } = await importsOf(['import a from ""', 'import b from ""'].join("\n"))
     expect(emptySpecifierErrors(errors).map((e) => e.line)).toEqual([1, 2])
   })
 
-  it("LP26d: keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
+  it("keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
     const { imports, errors } = await importsOf('import a from " "')
     expect(imports).toEqual([{ source: " ", symbols: ["default as a"], line: 1, dynamic: false }])
     expect(emptySpecifierErrors(errors)).toEqual([])

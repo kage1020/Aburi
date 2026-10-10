@@ -48,7 +48,7 @@ function describeChange(change: SymbolChange): string {
 const NONE = { removed: 0, added: 0, moved: 0, movedChanged: 0 }
 
 describe("e2e diff — Symbols whose logic axis names nothing", () => {
-  it("DF19f: reports a deleted function as removed, not as moved into an unrelated class", async () => {
+  it("reports a deleted function as removed, not as moved into an unrelated class", async () => {
     const diff = await diffOfChange(
       {
         "src/mail.ts":
@@ -73,7 +73,7 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
     ])
   })
 
-  it("DF19h: reports an unrelated function of the same kind as removed + added (no lone-base shortcut)", async () => {
+  it("reports an unrelated function of the same kind as removed + added (no lone-base shortcut)", async () => {
     const diff = await diffOfChange(
       {
         "src/mail.ts":
@@ -87,7 +87,7 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
     expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 1 })
   })
 
-  it("DF19h: does the same for a body that is one `for` loop over calls", async () => {
+  it("does the same for a body that is one `for` loop over calls", async () => {
     const diff = await diffOfChange(
       {
         "src/mail.ts":
@@ -101,7 +101,7 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
     expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 1 })
   })
 
-  it("DF19: reports two unrelated top-level `main`s as one removed and one added", async () => {
+  it("reports two unrelated top-level `main`s as one removed and one added", async () => {
     const diff = await diffOfChange(
       { "src/tool-a.ts": "export function main(x: string): void {\n  runA(x)\n}\n" },
       {
@@ -122,7 +122,7 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
       (name: string) =>
         `export function ${name}(u: { role: string }) {\n  return u.role === "admin"\n}\n`,
     ],
-  ])("DF19i: pairs %s moved and renamed on its logic fingerprint", async (_label, write) => {
+  ])("pairs %s moved and renamed on its logic fingerprint", async (_label, write) => {
     const diff = await diffOfChange(
       { "src/a.ts": write("isAdminUser") },
       { "src/b.ts": write("canAdministerSite") },
@@ -133,7 +133,7 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
     ])
   })
 
-  it("DF19g: still reports a class whose name says two words as moved, with its method", async () => {
+  it("still reports a class whose name says two words as moved, with its method", async () => {
     const source = [
       "export class InvoiceRenderer {",
       "  render(total: number): string {",
@@ -149,7 +149,7 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
     ])
   })
 
-  it("DF19g: reports a class whose name says one word as removed + added, while its method moves", async () => {
+  it("reports a class whose name says one word as removed + added, while its method moves", async () => {
     const source =
       "export class Invoice {\n  render(t: number) {\n    return t.toFixed(2)\n  }\n}\n"
     const diff = await diffOfChange({ "src/old.ts": source }, { "src/new.ts": source })

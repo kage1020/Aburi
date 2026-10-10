@@ -141,7 +141,7 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
   })
 })
 
-describe("integrity #21 — the list accounts for every unparsed file", () => {
+describe("integrity — the list accounts for every unparsed file", () => {
   function documentWith(stats: Partial<IR["stats"]>): IR {
     return {
       $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",

@@ -6,26 +6,26 @@ function typesOf(rules: Rule[]): string[] {
   return rules.map((r) => r.type)
 }
 
-describe("walkBody — rules (LP16-LP20)", () => {
-  it("LP16: `if (x) throw new E()` yields guard + throw", async () => {
+describe("walkBody — rules", () => {
+  it("`if (x) throw new E()` yields guard + throw", async () => {
     const { rules } = await walkFirstSymbol(
       "export function f(x: unknown) { if (x) throw new E() }",
     )
     expect(typesOf(rules)).toEqual(["guard", "throw"])
   })
 
-  it("LP17: `return 1` is trivial and does not surface as a rule", async () => {
+  it("`return 1` is trivial and does not surface as a rule", async () => {
     const { rules } = await walkFirstSymbol("export function f() { return 1 }")
     expect(rules).toEqual([])
   })
 
-  it("LP18: `return foo()` yields no rule but records the call", async () => {
+  it("`return foo()` yields no rule but records the call", async () => {
     const { rules, calls } = await walkFirstSymbol("export function f() { return foo() }")
     expect(rules).toEqual([])
     expect(calls.map((c) => c.target)).toEqual(["foo"])
   })
 
-  it("LP19: `return a + b` is non-trivial and yields a return rule", async () => {
+  it("`return a + b` is non-trivial and yields a return rule", async () => {
     const { rules } = await walkFirstSymbol(
       "export function f(a: number, b: number) { return a + b }",
     )
@@ -36,7 +36,7 @@ describe("walkBody — rules (LP16-LP20)", () => {
     expect(firstRule.expr).toBe("a + b")
   })
 
-  it("LP20: `for (let i...) ...` yields a loop rule with loopKind 'for'", async () => {
+  it("`for (let i...) ...` yields a loop rule with loopKind 'for'", async () => {
     const { rules } = await walkFirstSymbol(
       "export function f() { for (let i = 0; i < 3; i++) {} }",
     )
@@ -149,7 +149,7 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 })
 
-describe("walkBody — a concise arrow body (LP19a)", () => {
+describe("walkBody — a concise arrow body", () => {
   const rulesOf = async (source: string, path?: string) =>
     (await walkFirstSymbol(source, path)).rules
 
@@ -344,7 +344,7 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
   })
 })
 
-describe("walkBody — parameter defaults (LP20d)", () => {
+describe("walkBody — parameter defaults", () => {
   async function targetsOf(source: string): Promise<string[]> {
     return (await walkFirstSymbol(source)).calls.map((c) => c.target)
   }
@@ -380,7 +380,7 @@ describe("walkBody — parameter defaults (LP20d)", () => {
   })
 })
 
-describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", () => {
+describe("walkBody — dynamicReceiver", () => {
   it("flags a call-expression receiver", async () => {
     const { calls } = await walkFirstSymbol("export function f() { getRepo().save(x) }")
     const call = calls.find((c) => c.target === "getRepo.save")
@@ -525,7 +525,7 @@ describe("walkBody — unmodelled receivers answer `<computed>`", () => {
   })
 })
 
-describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
+describe("walkBody — a bracket access in a callee", () => {
   it("folds a string-literal index into the target as its own segment", async () => {
     const { calls } = await walkFirstSymbol(
       'export function f(prisma: any, data: unknown) { prisma["user"].create({ data }) }',

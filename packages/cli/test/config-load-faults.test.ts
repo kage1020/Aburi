@@ -26,7 +26,7 @@ function detailFor(code: ConfigErrorCode): ConstructorParameters<typeof ConfigEr
   }
 }
 
-describe("classifyConfigError — ConfigError to exit code (cli-spec.md)", () => {
+describe("classifyConfigError — ConfigError to exit code", () => {
   for (const code of READER_FAULTS) {
     it(`reports ${code} as the reader's to fix`, () => {
       const cliError = classifyConfigError(new ConfigError(`boom: ${code}`, detailFor(code)))

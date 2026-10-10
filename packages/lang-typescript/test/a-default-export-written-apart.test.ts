@@ -17,7 +17,7 @@ async function symbolNamed(source: string, name: string): Promise<SymbolCandidat
 /** A bare `export default` of something else, so a negative fixture reaches the matching pass. */
 const ANCHOR = "const Anchor = () => null\nexport default Anchor\n"
 
-describe("LP6a: a default export written apart from its declaration", () => {
+describe("a default export written apart from its declaration", () => {
   const FORMS: [string, string][] = [
     ["an arrow assigned to a const", "const Page = () => null\nexport default Page\n"],
     ["a function declaration", "function Page() { return null }\nexport default Page\n"],
@@ -26,7 +26,7 @@ describe("LP6a: a default export written apart from its declaration", () => {
     ["a declaration written after the export", "export default Page\nfunction Page() {}\n"],
   ]
 
-  it.each(FORMS)("LP6a: reaches %s", async (_label, source) => {
+  it.each(FORMS)("reaches %s", async (_label, source) => {
     const sym = await symbolNamed(source, "Page")
     expect(sym.derivedBy).toContain("export-default")
     expect(sym.visibility).toBe("public")
@@ -40,7 +40,7 @@ describe("LP6a: a default export written apart from its declaration", () => {
     ["wrappers nested", "((Page as FC)!)"],
   ]
 
-  it.each(WRAPPERS)("LP6a/LP7a: reads through %s", async (_label, written) => {
+  it.each(WRAPPERS)("reads through %s", async (_label, written) => {
     const sym = await symbolNamed(`const Page = () => null\nexport default ${written}\n`, "Page")
     expect(sym.derivedBy).toContain("export-default")
     expect(sym.visibility).toBe("public")

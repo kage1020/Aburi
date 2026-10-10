@@ -298,7 +298,7 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<Symbol["component"]>().toEqualTypeOf<ComponentId | null | undefined>()
   })
 
-  it("the write side of SourceRange is stricter than the read side (ir-schema.md)", () => {
+  it("the write side of SourceRange is stricter than the read side", () => {
     expectTypeOf<SymbolCandidate["source"]>().toEqualTypeOf<WrittenSourceRange>()
     expectTypeOf<WrittenSourceRange["startColumn"]>().toEqualTypeOf<number | null>()
     expectTypeOf<WrittenSourceRange["endColumn"]>().toEqualTypeOf<number | null>()

@@ -106,7 +106,7 @@ function run(options: {
 }
 
 describe("a strict run (the default)", () => {
-  it("V6: ends at an effect id the emitting plugin does not claim, naming plugin, value and place", async () => {
+  it("ends at an effect id the emitting plugin does not claim, naming plugin, value and place", async () => {
     const outcome = run({
       registry: registryOwning({}),
       effects: [effectPlugin("effects-acme", "x-acme:ping")],
@@ -137,7 +137,7 @@ describe("a strict run (the default)", () => {
     expect(ir.symbols.flatMap((s) => s.effects.map((e) => e.id))).toContain("db.read")
   })
 
-  it("V10: passes an effect id and an extKind their emitting plugins claim", async () => {
+  it("passes an effect id and an extKind their emitting plugins claim", async () => {
     const result = await run({
       registry: registryOwning({
         effects: [["x-acme:ping", "effects-acme"]],
@@ -149,7 +149,7 @@ describe("a strict run (the default)", () => {
     expect(result.undeclaredVocab).toEqual([])
   })
 
-  it("V7: ends at an extKind a framework plugin does not claim", async () => {
+  it("ends at an extKind a framework plugin does not claim", async () => {
     await expect(
       run({
         registry: registryOwning({}),

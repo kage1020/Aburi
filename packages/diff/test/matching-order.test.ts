@@ -249,7 +249,7 @@ describe("the thresholds moved into the candidate filter still hold", () => {
   })
 })
 
-describe("stage 4.5 against a direct reading of diff-algorithm.md", () => {
+describe("stage 4.5 against a direct reading of the matching rule", () => {
   /** Every pairing stage 4.5 identifies, from the cross-product rather than from a lookup. */
   function identifiedPairings(base: IRSymbol[], head: IRSymbol[]): [string, string][] {
     const droppedBase = base.filter((s) => s.dropped)

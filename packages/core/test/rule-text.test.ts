@@ -2,7 +2,7 @@ import type { Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { normalizeRuleStrings, normalizeRuleText, RULE_TEXT_LIMIT } from "../src/rule-text"
 
-describe("normalizeRuleText (ir-schema.md §8.2)", () => {
+describe("normalizeRuleText", () => {
   it("collapses every run of whitespace, newlines included, and trims", () => {
     expect(normalizeRuleText("  a <\n\t  b  ||\r\n c ")).toBe("a < b || c")
   })

@@ -69,7 +69,7 @@ describe("scan — integration through real plugins", () => {
     )
   })
 
-  it("buckets an expression-receiver call as `dynamic` (CR27, end to end)", async () => {
+  it("buckets an expression-receiver call as `dynamic`, end to end", async () => {
     await workspace.writeSource(
       "app/api/reports/route.ts",
       `export function GET() {\n  return getRepo().save({})\n}\n`,
@@ -216,7 +216,7 @@ describe("scan — integration through real plugins", () => {
     expect(callEdge).toBeDefined()
   })
 
-  it("emits every Class A key in the serialized IR (ir-schema.md)", async () => {
+  it("emits every Class A key in the serialized IR", async () => {
     await workspace.writeSource("package.json", JSON.stringify({ name: "billing-app" }))
     await workspace.writeSource(
       "src/InvoiceService.ts",
@@ -260,7 +260,7 @@ describe("scan — integration through real plugins", () => {
     expect(schemaViolations(parsed)).toEqual([])
   })
 
-  it("reads an IR whose Class A keys were never written (ir-schema.md reader rule)", async () => {
+  it("reads an IR whose Class A keys were never written as absent", async () => {
     await workspace.writeSource(
       "src/InvoiceService.ts",
       "export class InvoiceService {\n  create() {}\n}\n",

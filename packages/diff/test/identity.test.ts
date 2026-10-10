@@ -23,7 +23,7 @@ function thrownBy(run: () => unknown): DiffError | null {
 
 const foo = () => makeSymbol({ id: "ts:src/a.ts#foo", name: "foo" })
 
-describe("Symbol id collisions (ir-schema.md #1)", () => {
+describe("Symbol id collisions", () => {
   it("refuses a repeat on the head side instead of dropping one of the pair", () => {
     const head = makeIR({
       symbols: [
@@ -68,7 +68,7 @@ describe("Symbol id collisions (ir-schema.md #1)", () => {
   })
 })
 
-describe("Component id collisions (ir-schema.md #2)", () => {
+describe("Component id collisions", () => {
   const collidingComponents = () => [
     component({ id: "a", name: "A", roots: ["apps/a"] }),
     component({ id: "a", name: "A", roots: ["apps/a2"] }),
@@ -92,7 +92,7 @@ describe("Component id collisions (ir-schema.md #2)", () => {
   })
 })
 
-describe("Dependency triple collisions (ir-schema.md #13)", () => {
+describe("Dependency triple collisions", () => {
   const differingDirection = () => [
     dependency({ from: "a", to: "b", via: "import", direction: "outbound" }),
     dependency({ from: "a", to: "b", via: "import", direction: "inbound" }),
@@ -113,7 +113,7 @@ describe("Dependency triple collisions (ir-schema.md #13)", () => {
     expect(error?.message).toContain("headIR.dependencies[1]")
   })
 
-  it("identifies by the triple alone, as diff-algorithm.md does", () => {
+  it("identifies a Dependency by its (from, to, via) triple alone", () => {
     const differingEffect = makeIR({
       dependencies: [
         dependency({ from: "a", to: "b", via: "import", effect: "db.read" }),

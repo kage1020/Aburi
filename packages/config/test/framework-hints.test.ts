@@ -25,7 +25,7 @@ describe("normalizeFrameworkHints", () => {
     expect(normalizeFrameworkHints({})).toEqual([])
   })
 
-  it("C7 derives an ad-hoc framework plugin with hint:-prefixed extKindPrefixes", () => {
+  it("derives an ad-hoc framework plugin with hint:-prefixed extKindPrefixes", () => {
     const plugin = single(
       normalizeFrameworkHints(
         withHints(
@@ -182,7 +182,7 @@ function plugin(partial: Partial<FrameworkHint>): FrameworkPlugin {
   return only
 }
 
-describe("frameworkHintPlugins (config.md §8.1, §8.2)", () => {
+describe("frameworkHintPlugins", () => {
   it("carries the same manifest normalizeFrameworkHints returns", () => {
     const config = withHints(
       hint("acme", { decorators: { A: { extKind: "framework:acme:a", derivedBy: "acme:a" } } }),

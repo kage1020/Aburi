@@ -17,7 +17,7 @@ describe("parseTypescriptFile", () => {
     expect(result.tree?.rootNode).not.toBeNull()
   })
 
-  it("LP27: reports recoverable errors for a source with a syntax mistake", async () => {
+  it("reports recoverable errors for a source with a syntax mistake", async () => {
     const result = await parseSource("function foo( { return 1 }", "src/bad.ts")
     expect(result.errors.length).toBeGreaterThan(0)
     expect(result.errors.every((e) => e.recoverable)).toBe(true)

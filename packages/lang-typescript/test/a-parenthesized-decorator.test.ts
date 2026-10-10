@@ -13,14 +13,14 @@ describe("a decorator written in parentheses", () => {
     expect(UNNAMED_DECORATOR).toBe("<expression>")
   })
 
-  it("LP14g: reads a name through them, and quotes them in raw", async () => {
+  it("reads a name through them, and quotes them in raw", async () => {
     expect(await errorsOf("@(Controller)")).toBe(0)
     expect(await decoratorsOf("@(Controller)")).toStrictEqual([
       { name: "Controller", raw: "(Controller)", arguments: [], boundary: false, line: 1 },
     ])
   })
 
-  it("LP14g: reads a member path through them, receiver and all", async () => {
+  it("reads a member path through them, receiver and all", async () => {
     expect(await decoratorsOf("@(nest.Controller)")).toStrictEqual([
       {
         name: "Controller",
@@ -33,14 +33,14 @@ describe("a decorator written in parentheses", () => {
     ])
   })
 
-  it("LP14g: keeps a line break inside the parentheses out of the name", async () => {
+  it("keeps a line break inside the parentheses out of the name", async () => {
     const [decorator] = await decoratorsOf("@(nest\n  .Controller)")
     expect(decorator?.name).toBe("Controller")
     expect(decorator?.qualifier).toBe("nest")
     expect(decorator?.raw).toBe("(nest\n  .Controller)")
   })
 
-  it("LP14g: reads a call through them, arguments included", async () => {
+  it("reads a call through them, arguments included", async () => {
     expect(await errorsOf("@(Controller('/x'))")).toBe(0)
     const [decorator] = await decoratorsOf("@(Controller('/x'))")
     expect(decorator?.name).toBe("Controller")
@@ -48,7 +48,7 @@ describe("a decorator written in parentheses", () => {
     expect(decorator?.raw).toBe("(Controller('/x'))")
   })
 
-  it("LP14g: keeps the name when only an argument is broken, as the unparenthesized form does", async () => {
+  it("keeps the name when only an argument is broken, as the unparenthesized form does", async () => {
     for (const written of ["@(Controller(a b))", "@Controller(a b)"]) {
       expect(await errorsOf(written)).toBeGreaterThan(0)
       const [decorator] = await decoratorsOf(written)
@@ -60,7 +60,7 @@ describe("a decorator written in parentheses", () => {
     expect(qualified?.qualifier).toBe("nest")
   })
 
-  it("LP14g: skips a comment inside the parentheses", async () => {
+  it("skips a comment inside the parentheses", async () => {
     expect((await decoratorsOf("@(/* why */ Controller)"))[0]?.name).toBe("Controller")
   })
 
@@ -74,7 +74,7 @@ describe("a decorator written in parentheses", () => {
     ["a member of a call", "@(pick().C)"],
     ["an optional chain", "@(a?.C)"],
     ["a path missing its property", "@(nest.)"],
-  ])("LP14h: gives %s, which the grammar had to repair, no name", async (_label, written) => {
+  ])("gives %s, which the grammar had to repair, no name", async (_label, written) => {
     expect(await errorsOf(written)).toBeGreaterThan(0)
     expect(await decoratorsOf(written)).toStrictEqual([
       {

@@ -15,7 +15,7 @@ import { mockServerFactory } from "./fixtures/mock-server"
 const HOVER_METHOD = "textDocument/hover"
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
 
-describe("LSP hint accounting (lsp-enrichment.md)", () => {
+describe("LSP hint accounting", () => {
   it("counts a hint the pass wrote, and nothing else", async () => {
     const enrichment = await enrichThisFoo(() => ({
       contents: { kind: "markdown", value: "(method) C.foo(): void" },

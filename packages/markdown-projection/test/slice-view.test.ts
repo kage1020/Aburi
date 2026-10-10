@@ -41,7 +41,7 @@ const slice = (id: string, members: string[]): SliceRecord => ({
 })
 
 describe("Slice View Markdown projection", () => {
-  it("SV19: an empty slices[] omits the entire section from diff.md", () => {
+  it("an empty slices[] omits the entire section from diff.md", () => {
     const md = projectDiff(makeDiff({ slices: [] }))
     expect(md).not.toContain("Slice View")
     expect(md).not.toContain("🧵")
@@ -151,7 +151,7 @@ describe("Slice View Markdown projection", () => {
     expect(md.indexOf(`slice:${A}`)).toBeLessThan(md.indexOf(`slice:${C}`))
   })
 
-  it("SV20: singleton slices collapse into one <details> block after multi-member slices", () => {
+  it("singleton slices collapse into one <details> block after multi-member slices", () => {
     const ctlId = "ts:src/ctl.ts#Ctl.route"
     const svcId = "ts:src/svc.ts#Svc.op"
     const solo1 = "ts:src/util.ts#formatMoney"

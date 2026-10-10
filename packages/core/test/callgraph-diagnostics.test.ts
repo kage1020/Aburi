@@ -32,7 +32,7 @@ function sig(...names: string[]): Signature {
 }
 
 describe("resolveCallGraph — unresolved-call diagnostics", () => {
-  it("CR27: an expression receiver is bucketed `dynamic`", () => {
+  it("an expression receiver is bucketed `dynamic`", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "factory.save", line: 9 }])
     const result = resolveCallGraph({
       symbols: [caller],
@@ -51,13 +51,13 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
     ])
   })
 
-  it("CR28: a callee that exists nowhere is bucketed `no-match`", () => {
+  it("a callee that exists nowhere is bucketed `no-match`", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "typoed", line: 3 }])
     const result = resolveCallGraph({ symbols: [caller], importsByFile: new Map() })
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
   })
 
-  it("CR29: competing candidates are bucketed `ambiguous` and recorded lex-sorted", () => {
+  it("competing candidates are bucketed `ambiguous` and recorded lex-sorted", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "User.save", line: 4 }], {
       component: "billing",
     })
@@ -159,7 +159,7 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
   })
 
-  it("CR2b: a `.` import that misses is bucketed `no-match`, not `external`", () => {
+  it("a `.` import that misses is bucketed `no-match`, not `external`", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 2 }])
     const result = resolveCallGraph({
       symbols: [caller],
@@ -168,7 +168,7 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
   })
 
-  it("CR2b: a `..` above the workspace root is a relative miss, not a clamp to the root index", () => {
+  it("a `..` above the workspace root is a relative miss, not a clamp to the root index", () => {
     const caller = withCalls("ts:a.ts#caller", [{ target: "helper", line: 2 }])
     const rootIndex = makeSymbol("ts:index.ts#helper")
     const result = resolveCallGraph({

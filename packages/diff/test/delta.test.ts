@@ -67,7 +67,7 @@ describe("a Symbol whose confidence moved under it", () => {
   })
 })
 
-describe("dropped-toggled status (C2)", () => {
+describe("dropped-toggled status", () => {
   it("classifies dropped=false → dropped=true as dropped-toggled regardless of fingerprint", () => {
     const b = makeSymbol({ id: "ts:src/a.ts#Dto", name: "Dto", kind: "class" })
     const h = makeSymbol({
@@ -136,7 +136,7 @@ describe("dropped-toggled status (C2)", () => {
   })
 })
 
-describe("Decorator delta (I1)", () => {
+describe("Decorator delta", () => {
   it("emits modified when the same name gets a different argument list", () => {
     const b = makeSymbol({
       id: "ts:src/a.ts#Foo",
@@ -189,7 +189,7 @@ describe("Decorator delta (I1)", () => {
   })
 })
 
-describe("Effects delta (I2)", () => {
+describe("Effects delta", () => {
   const shared = fp("v1")
   const propagatedEffect = (source: string) =>
     effect({
@@ -388,7 +388,7 @@ describe("Decorator delta — qualifier", () => {
   })
 })
 
-describe("Calls delta (I2)", () => {
+describe("Calls delta", () => {
   const shared = fp("v1")
   const baseSym = makeSymbol({
     id: "ts:src/a.ts#Foo",

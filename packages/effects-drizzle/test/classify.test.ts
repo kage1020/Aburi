@@ -48,7 +48,7 @@ describe("classifyDrizzleCall — write terminals", () => {
     expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
   })
 
-  it("still records form.delete(row) at medium — EP11, not the floor", () => {
+  it("still records form.delete(row) at medium, not the floor", () => {
     const result = classifyDrizzleCall(makeCall({ target: "form.delete", argumentCount: 1 }), ctx)
     expect(result).toMatchObject({ effectId: "db.write", confidence: "medium" })
   })
@@ -93,7 +93,7 @@ describe("classifyDrizzleCall — transaction terminals", () => {
     expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
   })
 
-  it("still records sequelize.transaction(cb) at medium — EP11, not the floor", () => {
+  it("still records sequelize.transaction(cb) at medium, not the floor", () => {
     const result = classifyDrizzleCall(
       makeCall({ target: "sequelize.transaction", argumentCount: 1 }),
       ctx,

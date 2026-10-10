@@ -8,7 +8,7 @@ vi.mock("../src/import-type-reparse", async (importActual) => ({
   },
 }))
 
-describe("LP27b — an import() type reparse that throws", () => {
+describe("an import() type reparse that throws", () => {
   it("keeps the first parse and names the failed pass beside its errors", async () => {
     const result = await parseSource('export const b = g<typeof import("./m")>()\n')
     expect(result.tree).not.toBeNull()

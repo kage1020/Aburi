@@ -18,7 +18,7 @@ const EFFECT = effect({
 })
 const CALL = call({ target: "svc.save", line: 20 })
 
-describe("MP14 — each list section is followed by a blank line", () => {
+describe("each list section is followed by a blank line", () => {
   it("separates Rules, Effects, Calls and the fingerprint line", () => {
     const block = renderSymbolBlock(
       handle({

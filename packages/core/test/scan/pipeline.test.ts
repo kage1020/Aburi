@@ -422,7 +422,7 @@ describe("runFilePipeline — effect classify dispatch", () => {
   })
 })
 
-describe("runFilePipeline — array line ordering (IR integrity invariant #11)", () => {
+describe("runFilePipeline — array line ordering", () => {
   it("sorts calls[] by line even when the language plugin visits body children out of source order", async () => {
     const result = await runPipelineWithStubs({
       effects: [],
@@ -482,8 +482,8 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
   })
 })
 
-describe("runFilePipeline — rule strings at the plugin boundary (ir-schema.md §8.2)", () => {
-  it("writes a plugin's long, multi-line rule strings in the §8.2 form", async () => {
+describe("runFilePipeline — rule strings at the plugin boundary", () => {
+  it("writes a plugin's long, multi-line rule strings in their normalized, truncated form", async () => {
     const long = "x".repeat(200)
     const result = await runPipelineWithStubs({
       body: {
@@ -534,7 +534,7 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
     expect([...composed].map((c) => c.codePointAt(0))).toEqual([0x63, 0x61, 0x66, 0xe9])
   })
 
-  it("normalizes source.file, which invariant #19 checks and the call resolver matches", async () => {
+  it("normalizes source.file, which the integrity check and the call resolver both read", async () => {
     const candidate = {
       ...baseCandidate(),
       source: { ...baseCandidate().source, file: `${decomposed}.stub` },

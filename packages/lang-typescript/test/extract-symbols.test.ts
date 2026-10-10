@@ -3,35 +3,35 @@ import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { BACKSLASH, byId, symbolsOf } from "./fixtures/ctx"
 
-describe("extractSymbols — structure (LP1-LP8)", () => {
-  it("LP3: class method uses '.' separator", async () => {
+describe("extractSymbols — structure", () => {
+  it("class method uses '.' separator", async () => {
     const symbols = await symbolsOf("export class InvoiceService { createInvoice() {} }")
     const sym = byId(symbols, "#InvoiceService.createInvoice")
     expect(sym.kind).toBe("method")
   })
 
-  it("LP4: static method uses '::' separator", async () => {
+  it("static method uses '::' separator", async () => {
     const symbols = await symbolsOf("export class InvoiceService { static fromJson() {} }")
     const sym = byId(symbols, "#InvoiceService::fromJson")
     expect(sym.kind).toBe("method")
     expect(sym.derivedBy).toContain("static-method")
   })
 
-  it("LP6: default export of an anonymous function has qname <default>", async () => {
+  it("default export of an anonymous function has qname <default>", async () => {
     const symbols = await symbolsOf("export default function () {}")
     const sym = byId(symbols, "#<default>")
     expect(sym.name).toBe("<default>")
     expect(sym.derivedBy).toContain("export-default")
   })
 
-  it("LP7: `const f = () => ...` becomes a function with variable-assigned qname", async () => {
+  it("`const f = () => ...` becomes a function with variable-assigned qname", async () => {
     const symbols = await symbolsOf("export const handler = () => 1")
     const sym = byId(symbols, "#handler")
     expect(sym.kind).toBe("function")
     expect(sym.derivedBy).toContain("variable-assigned-function")
   })
 
-  it("LP8: nested namespace declaration nests the qname", async () => {
+  it("nested namespace declaration nests the qname", async () => {
     const symbols = await symbolsOf(
       "export namespace Billing { export namespace Invoice { export function create() {} } }",
     )
@@ -40,7 +40,7 @@ describe("extractSymbols — structure (LP1-LP8)", () => {
   })
 })
 
-describe("extractSymbols — the export keyword is evidence on every kind (LP6b)", () => {
+describe("extractSymbols — the export keyword is evidence on every kind", () => {
   it.each([
     ["function", "export function f() {}", "#f", "function"],
     ["class", "export class C {}", "#C", "class"],
@@ -128,20 +128,20 @@ describe("extractSymbols — the export keyword is evidence on every kind (LP6b)
   })
 })
 
-describe("extractSymbols — Signature (LP9-LP13)", () => {
-  it("LP9: async function sets signature.async = true", async () => {
+describe("extractSymbols — Signature", () => {
+  it("async function sets signature.async = true", async () => {
     const symbols = await symbolsOf("export async function f() {}")
     const sym = byId(symbols, "#f")
     expect(sym.signature?.async).toBe(true)
   })
 
-  it("LP10: generator function sets signature.generator = true", async () => {
+  it("generator function sets signature.generator = true", async () => {
     const symbols = await symbolsOf("export function* g() {}")
     const sym = byId(symbols, "#g")
     expect(sym.signature?.generator).toBe(true)
   })
 
-  it("LP11: parameters and return type populate inputs and outputs", async () => {
+  it("parameters and return type populate inputs and outputs", async () => {
     const symbols = await symbolsOf(
       "export function f(a: number, b: string): boolean { return true }",
     )
@@ -153,50 +153,50 @@ describe("extractSymbols — Signature (LP9-LP13)", () => {
     expect(sym.signature?.outputs).toEqual(["boolean"])
   })
 
-  it("LP11a: a parenthesis-free arrow reports its single parameter", async () => {
+  it("a parenthesis-free arrow reports its single parameter", async () => {
     const symbols = await symbolsOf("export const f = x => x + 1")
     const sym = byId(symbols, "#f")
     expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
   })
 
-  it("LP11a: the parenthesised spelling of that parameter reads the same", async () => {
+  it("the parenthesised spelling of that parameter reads the same", async () => {
     const bare = await symbolsOf("export const f = x => x + 1")
     const parenthesised = await symbolsOf("export const f = (x) => x + 1")
     expect(byId(bare, "#f").signature?.inputs).toEqual(byId(parenthesised, "#f").signature?.inputs)
   })
 
-  it("LP11a: an async parenthesis-free arrow reports its parameter too", async () => {
+  it("an async parenthesis-free arrow reports its parameter too", async () => {
     const symbols = await symbolsOf("export const f = async x => x + 1")
     const sym = byId(symbols, "#f")
     expect(sym.signature?.async).toBe(true)
     expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
   })
 
-  it("LP11a: a zero-arity arrow still reports no inputs", async () => {
+  it("a zero-arity arrow still reports no inputs", async () => {
     const symbols = await symbolsOf("export const f = () => 1")
     const sym = byId(symbols, "#f")
     expect(sym.signature?.inputs).toEqual([])
   })
 
-  it("LP11a: a class field holding that arrow reports its parameter too", async () => {
+  it("a class field holding that arrow reports its parameter too", async () => {
     const symbols = await symbolsOf("export class C { m = x => x }")
     const sym = byId(symbols, "#C.m")
     expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
   })
 
-  it("LP12: typeParameters carry raw text", async () => {
+  it("typeParameters carry raw text", async () => {
     const symbols = await symbolsOf("export function f<T>() {}")
     const sym = byId(symbols, "#f")
     expect(sym.signature?.typeParameters).toEqual(["T"])
   })
 
-  it("LP13: explicit throw new X() feeds throws[]", async () => {
+  it("explicit throw new X() feeds throws[]", async () => {
     const symbols = await symbolsOf("export function f() { throw new MyError() }")
     const sym = byId(symbols, "#f")
     expect(sym.signature?.throws).toEqual(["MyError"])
   })
 
-  it("LP13a: JSDoc @throws {ErrorType} feeds throws[]", async () => {
+  it("JSDoc @throws {ErrorType} feeds throws[]", async () => {
     const symbols = await symbolsOf(
       "/**\n * @throws {ValidationError}\n */\nexport function f() {}",
     )
@@ -205,8 +205,8 @@ describe("extractSymbols — Signature (LP9-LP13)", () => {
   })
 })
 
-describe("extractSymbols — Decorators (LP14-LP15)", () => {
-  it("LP14: single decorator with arguments", async () => {
+describe("extractSymbols — Decorators", () => {
+  it("single decorator with arguments", async () => {
     const symbols = await symbolsOf("export class C { @Post('/x') doThing() {} }")
     const sym = byId(symbols, "#C.doThing")
     expect(sym.decorators).toHaveLength(1)
@@ -218,7 +218,7 @@ describe("extractSymbols — Decorators (LP14-LP15)", () => {
     expect(decorator.boundary).toBe(false)
   })
 
-  it("LP15: multiple decorators surface in line order", async () => {
+  it("multiple decorators surface in line order", async () => {
     const symbols = await symbolsOf("export class C {\n  @A()\n  @B()\n  m() {}\n}")
     const sym = byId(symbols, "#C.m")
     expect(sym.decorators.map((d) => d.name)).toEqual(["A", "B"])
@@ -230,7 +230,7 @@ describe("extractSymbols — Decorators (LP14-LP15)", () => {
 })
 
 describe("extractSymbols — Call promotion (module-level chained calls)", () => {
-  it("CS1: promotes app.get with a path literal into a kind=call symbol", async () => {
+  it("promotes app.get with a path literal into a kind=call symbol", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.get('/users', (req, res) => { res.send('ok') })\n`,
     )
@@ -244,14 +244,14 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(sym.derivedBy).toContain("inline-handler")
   })
 
-  it("CS2: slugifies dynamic route parameters", async () => {
+  it("slugifies dynamic route parameters", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.get('/users/:id', h)\n`,
     )
     byId(symbols, "#app__get__$users$Zid__d0")
   })
 
-  it("CS3: no path literal ⇒ the names the arguments carry stand in for it", async () => {
+  it("no path literal ⇒ the names the arguments carry stand in for it", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.use(logger)\n`,
     )
@@ -262,7 +262,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(sym.derivedBy).toContain("argument-names:logger")
   })
 
-  it("CS4: registrations agreeing on (receiver, method, discriminator) get document-order suffixes", async () => {
+  it("registrations agreeing on (receiver, method, discriminator) get document-order suffixes", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.get('/x', a)\napp.get('/x', b)\napp.get('/x', c)\n`,
     )
@@ -271,7 +271,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     byId(symbols, "#app__get__$x__d2")
   })
 
-  it("CS5: chained receiver (app.route('/x').get(h)) records chained-call, roots on app and is named by the path up the chain", async () => {
+  it("chained receiver (app.route('/x').get(h)) records chained-call, roots on app and is named by the path up the chain", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.route('/thing').get(handler)\n`,
     )
@@ -281,7 +281,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(sym.derivedBy).toContain("path-literal:/thing")
   })
 
-  it("CS5a: routes mounted through app.route with one handler name keep their ids when one is inserted", async () => {
+  it("routes mounted through app.route with one handler name keep their ids when one is inserted", async () => {
     const ids = async (lines: string[]) =>
       (await symbolsOf(`${lines.join("\n")}\n`))
         .filter((s) => s.kind === "call")
@@ -311,25 +311,25 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
       "#require__get__h__d0",
       null,
     ],
-  ])("CS5b: reads %s", async (_label, source, id, path) => {
+  ])("reads %s", async (_label, source, id, path) => {
     const sym = byId(await symbolsOf(`${source}\n`), id)
 
     const tags = sym.derivedBy.filter((tag) => tag.startsWith("path-literal:"))
     expect(tags).toEqual(path === null ? [] : [`path-literal:${path}`])
   })
 
-  it("CS6: non-whitelisted method names (e.g. Sentry.captureException) are not promoted", async () => {
+  it("non-whitelisted method names (e.g. Sentry.captureException) are not promoted", async () => {
     const symbols = await symbolsOf(`Sentry.captureException(new Error('boom'))\nconst x = 1\n`)
     expect(symbols.some((s) => s.kind === "call")).toBe(false)
     byId(symbols, "#x")
   })
 
-  it("CS7: bare-identifier calls (setup()) are not promoted — only member chains", async () => {
+  it("bare-identifier calls (setup()) are not promoted — only member chains", async () => {
     const symbols = await symbolsOf(`setup()\nconst y = 2\n`)
     expect(symbols.some((s) => s.kind === "call")).toBe(false)
   })
 
-  it("CS8: path literal ending in `__d1` does NOT collide with a duplicated `/x` (C2 regression)", async () => {
+  it("path literal ending in `__d1` does NOT collide with a duplicated `/x`", async () => {
     const symbols = await symbolsOf(
       [
         `import express from "express"`,
@@ -351,14 +351,14 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     ["a tab", `/tab${BACKSLASH}tinside`, "$tab_inside", "/tab\tinside"],
     ["an escaped backslash", `/back${BACKSLASH}${BACKSLASH}slash`, "$back_slash", "/back\\slash"],
     ["a unicode escape", `/us${BACKSLASH}u0065rs`, "$users", "/users"],
-  ])("CS9: reads %s in the path as the character it names", async (_label, path, slug, literal) => {
+  ])("reads %s in the path as the character it names", async (_label, path, slug, literal) => {
     const symbols = await symbolsOf(`app.get("${path}", h)`)
     const sym = byId(symbols, `#app__get__${slug}__d0`)
 
     expect(sym.derivedBy).toContain(`path-literal:${literal}`)
   })
 
-  it("CS10: keeps two routes apart when neither path could be read at all", async () => {
+  it("keeps two routes apart when neither path could be read at all", async () => {
     const symbols = await symbolsOf(
       [`app.get("${BACKSLASH}u12b/a", h)`, `app.get("${BACKSLASH}u12b/b", h)`].join("\n"),
     )
@@ -367,7 +367,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(ids).toEqual(["ts:src/a.ts#app__get___u12b$a__d0", "ts:src/a.ts#app__get___u12b$b__d0"])
   })
 
-  it("CS11: reads a path written in backticks as the same path in quotes", async () => {
+  it("reads a path written in backticks as the same path in quotes", async () => {
     const backtick = await symbolsOf("app.get(`/users`, h)\n")
     const quoted = await symbolsOf('app.get("/users", h)\n')
 
@@ -378,7 +378,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(byId(backtick, "#app__get__$users__d0").derivedBy).toContain("path-literal:/users")
   })
 
-  it("CS12: a backtick path with a substitution is not a path", async () => {
+  it("a backtick path with a substitution is not a path", async () => {
     // Its value is decided when it runs; the names the arguments carry stand in.
     const symbols = await symbolsOf(`app.get(\`/users/\${id}\`, h)\n`)
 
@@ -387,7 +387,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(sym.derivedBy.some((tag) => tag.startsWith("path-literal:"))).toBe(false)
   })
 
-  it("CS13: inserting a registration with no path leaves the later ones their ids", async () => {
+  it("inserting a registration with no path leaves the later ones their ids", async () => {
     const inline =
       "app.use((req, res, next) => {\n  if (!req.headers.authorization) return\n  next()\n})"
     const ids = async (lines: string[]) =>
@@ -414,7 +414,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(after).toEqual(["ts:src/a.ts#app__use__compression__d0", ...before].sort())
   })
 
-  it("CS14: names a dotted reference and a call's callee by their whole path", async () => {
+  it("names a dotted reference and a call's callee by their whole path", async () => {
     const symbols = await symbolsOf(
       'app.use(express.json())\napp.use(express.static("public"))\napp.use(rateLimit({ max: 5 }), audit.log)\n',
     )
@@ -431,13 +431,13 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     ["parentheses", 'app.get(("/users"), h)'],
     ["an assertion", 'app.get("/users" as string, h)'],
     ["a satisfies", 'app.get("/users" satisfies string, h)'],
-  ])("CS15: reads the path past %s written in front of it", async (_label, source) => {
+  ])("reads the path past %s written in front of it", async (_label, source) => {
     const sym = byId(await symbolsOf(`${source}\n`), "#app__get__$users__d0")
 
     expect(sym.derivedBy).toContain("path-literal:/users")
   })
 
-  it("CS16: an empty path says nothing, so the names the arguments carry stand in", async () => {
+  it("an empty path says nothing, so the names the arguments carry stand in", async () => {
     // A slug of nothing left the bare `app__get` stem and tagged a path the id does not hold.
     const sym = byId(await symbolsOf('app.get("", h)\n'), "#app__get__h__d0")
 
@@ -451,13 +451,13 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     ["a three-level member", "app.use(a.b.c)", "a_b_c"],
     ["a call inside a dotted path", "app.use(a.b().c)", "a_b_c"],
     ["a wrapped argument", "app.use((authMw as Handler))", "authMw"],
-  ])("CS17: names %s by the name it carries", async (_label, source, names) => {
+  ])("names %s by the name it carries", async (_label, source, names) => {
     const sym = byId(await symbolsOf(`${source}\n`), `#app__use__${names}__d0`)
 
     expect(sym.derivedBy).toContain(`argument-names:${names}`)
   })
 
-  it("CS18: registrations whose names agree are told apart by order alone, and stay unique", async () => {
+  it("registrations whose names agree are told apart by order alone, and stay unique", async () => {
     const symbols = await symbolsOf(
       [
         'app.use(express.static("a"))',
@@ -477,7 +477,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it("CS19: keeps a name outside ASCII, as the qualified-name grammar does", async () => {
+  it("keeps a name outside ASCII, as the qualified-name grammar does", async () => {
     const symbols = await symbolsOf(
       ["app.use(認証)", "app.use(圧縮)", 'app.get("/ユーザー", h)', "アプリ.use(café)"].join("\n"),
     )
@@ -490,7 +490,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     ])
   })
 
-  it("CS20: names a registration in Unicode NFC, whichever spelling the file was saved in", async () => {
+  it("names a registration in Unicode NFC, whichever spelling the file was saved in", async () => {
     const decomposed = "cafe\u0301"
     const symbols = await symbolsOf(
       [`app.use(${decomposed})`, "app.use(caf\u00e9)", 'app.get("/a:\u0301", h)'].join("\n"),
@@ -506,7 +506,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 })
 
-describe("extractSymbols — SourceRange key presence (ir-schema.md Class A)", () => {
+describe("extractSymbols — SourceRange key presence", () => {
   function expectColumnKeys(symbols: SymbolCandidate<Node>[]): void {
     expect(symbols.length).toBeGreaterThan(0)
     for (const symbol of symbols) {
@@ -546,7 +546,7 @@ describe("extractSymbols — SourceRange key presence (ir-schema.md Class A)", (
   })
 })
 
-describe("extractSymbols — Call promotion position independence (T2)", () => {
+describe("extractSymbols — Call promotion position independence", () => {
   const registration = `import express from "express"\nconst app = express()\napp.get('/users', h)\n`
 
   it("Symbol.id is unchanged when a leading import is added above the registration", async () => {

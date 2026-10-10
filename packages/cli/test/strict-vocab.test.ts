@@ -46,7 +46,7 @@ async function readRecord(): Promise<unknown> {
 }
 
 describe("aburi scan, strict by default", () => {
-  it("CL8: exits 3 and names the plugin and the value", async () => {
+  it("exits 3 and names the plugin and the value", async () => {
     await populate(scratch, ["odd.stub", "ok.stub"])
     const { code, stderr } = await scanWith([])
     expect(code).toBe(EXIT.GATE)
@@ -67,7 +67,7 @@ describe("aburi scan, strict by default", () => {
 })
 
 describe("a strict scan after one with strict off", () => {
-  it("CL8c: removes the record the earlier run left, which names only values declared now", async () => {
+  it("removes the record the earlier run left, which names only values declared now", async () => {
     await populate(scratch, ["ok.stub"])
     await scanWith(["--discover", "--no-timestamp"])
     expect(await readRecord()).toEqual({ items: [] })
@@ -93,7 +93,7 @@ describe("aburi scan with strict off", () => {
     ],
   }
 
-  it("CL7 / V12: keeps the Symbols, records each value once and says so (--discover)", async () => {
+  it("keeps the Symbols, records each value once and says so (--discover)", async () => {
     await populate(scratch, ["odd-a.stub", "odd-b.stub", "ok.stub"])
     const { code, stderr } = await scanWith(["--discover", "--no-timestamp"])
     expect(code).toBe(EXIT.SUCCESS)
@@ -126,14 +126,14 @@ describe("aburi scan with strict off", () => {
     expect(await readRecord()).toMatchObject({ discoveredAt: expect.any(String) })
   })
 
-  it("CL8a: refuses --strict with --discover", async () => {
+  it("refuses --strict with --discover", async () => {
     await populate(scratch, ["ok.stub"])
     const { code, stderr } = await scanWith(["--strict", "--discover"])
     expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain("--strict and --discover contradict each other")
   })
 
-  it("CL8b: reports but writes no record for a diff's scan, which shares its directory with another", async () => {
+  it("reports but writes no record for a diff's scan, which shares its directory with another", async () => {
     await populate(scratch, ["odd.stub"])
     await setStrictInConfig(false)
     const report = await runScan({

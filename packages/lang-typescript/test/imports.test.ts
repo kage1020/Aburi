@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest"
 import { importsOf } from "./fixtures/ctx"
 
 describe("import extraction", () => {
-  it("LP24: named import", async () => {
+  it("named import", async () => {
     const { imports } = await importsOf("import { X } from './y'")
     expect(imports).toEqual([{ source: "./y", symbols: ["X"], line: 1, dynamic: false }])
   })
 
-  it("LP25: namespace import", async () => {
+  it("namespace import", async () => {
     const { imports } = await importsOf("import * as Y from 'z'")
     expect(imports).toEqual([
       { source: "z", symbols: "*", line: 1, dynamic: false, namespaceBinding: "Y" },
@@ -19,12 +19,12 @@ describe("import extraction", () => {
     expect(imports).toEqual([{ source: "./x", symbols: ["A as B"], line: 1, dynamic: false }])
   })
 
-  it("LP26: dynamic import()", async () => {
+  it("dynamic import()", async () => {
     const { imports } = await importsOf("async function f(){ return await import('./x') }")
     expect(imports).toEqual([{ source: "./x", symbols: "*", line: 1, dynamic: true }])
   })
 
-  it("LP24a: captures a default binding as the module's `default` under its local name", async () => {
+  it("captures a default binding as the module's `default` under its local name", async () => {
     const { imports } = await importsOf("import Foo from './foo'")
     expect(imports).toEqual([
       { source: "./foo", symbols: ["default as Foo"], line: 1, dynamic: false },

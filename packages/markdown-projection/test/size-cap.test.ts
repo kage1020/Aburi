@@ -238,7 +238,7 @@ describe("projectDiff — maxBytes", () => {
     expect(md).not.toContain("could not be brought")
   })
 
-  it("is deterministic under a budget (MP1)", () => {
+  it("is deterministic under a budget", () => {
     const diff = crowdedDiff(300)
     expect(projectDiff(diff, { maxBytes: GITHUB_LIMIT })).toBe(
       projectDiff(diff, { maxBytes: GITHUB_LIMIT }),

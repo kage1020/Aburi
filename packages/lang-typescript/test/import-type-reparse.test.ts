@@ -39,7 +39,7 @@ const VI_MOCK = [
   "",
 ].join("\n")
 
-describe("LP27b — an import() type the grammar cannot place", () => {
+describe("an import() type the grammar cannot place", () => {
   it.each([
     ["first in a call's type arguments", 'export const b = g<typeof import("./m")>()'],
     ["qualified, in a call's type arguments", 'export const f2 = g<import("./m").T>()'],

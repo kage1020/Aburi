@@ -68,7 +68,7 @@ function headIR(): IR {
   })
 }
 
-describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
+describe("aburi.diff.v1.json — runtime schema validation", () => {
   it("validates a `buildDiff` output containing a non-empty slices[]", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
@@ -226,7 +226,7 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
   })
 })
 
-describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
+describe("aburi.diff.v1.json — anchor derivation invariant", () => {
   function diffWithSlices(slices: Array<{ id: string; members: string[] }>): unknown {
     const diff = buildDiff({
       baseIR: baseIR(),

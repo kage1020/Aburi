@@ -6,7 +6,7 @@ async function throwsOf(doc: string): Promise<readonly string[] | undefined> {
   return byId(symbols, "#f").signature?.throws
 }
 
-describe("LP13a: JSDoc @throws", () => {
+describe("JSDoc @throws", () => {
   it("records nothing for a free-text description", async () => {
     expect(await throwsOf("/** @throws If the id is unknown. */")).toEqual([])
     expect(await throwsOf("/** @throws Will throw an error if the argument is null. */")).toEqual(

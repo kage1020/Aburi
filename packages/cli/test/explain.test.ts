@@ -126,7 +126,7 @@ describe("runExplain — id lookup", () => {
   })
 })
 
-describe("CL11 — ambiguous substring returns candidates + EXIT.INPUT_ERROR", () => {
+describe("ambiguous substring returns candidates + EXIT.INPUT_ERROR", () => {
   it("emits ambiguous outcome for a pattern that matches multiple symbols", async () => {
     const outcome = await runExplain({
       cwd: scratch,
@@ -165,7 +165,7 @@ describe("runExplain — not-found", () => {
   })
 })
 
-describe("runExplain — --debug-resolution (call-resolution.md)", () => {
+describe("runExplain — --debug-resolution", () => {
   it("rejects --no-rescan because the buckets only exist in a live scan", async () => {
     await expect(
       runExplain({
@@ -198,7 +198,7 @@ describe("runExplain — --debug-resolution (call-resolution.md)", () => {
   })
 })
 
-describe("CL26 — --output under directories that do not exist", () => {
+describe("--output under directories that do not exist", () => {
   it("creates them for an id lookup", async () => {
     const outcome = await runExplain({
       cwd: scratch,
@@ -248,7 +248,7 @@ describe("CL26 — --output under directories that do not exist", () => {
   })
 })
 
-describe("CL27 — an --output that cannot hold a file", () => {
+describe("an --output that cannot hold a file", () => {
   it("names the path and the remedy instead of surfacing the errno", async () => {
     await writeFile(resolve(scratch, "generated"), "not a directory\n", "utf8")
 

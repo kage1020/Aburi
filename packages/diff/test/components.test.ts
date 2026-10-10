@@ -23,7 +23,7 @@ const NO_LOSSES: {
   renames: renameDirections(null),
 }
 
-describe("diffComponents (I5)", () => {
+describe("diffComponents", () => {
   it("classifies unchanged components as no-op (not in added/removed/changed)", () => {
     const c = component({ id: "billing", name: "billing" })
     const result = diffComponents([c], [c])
@@ -195,7 +195,7 @@ describe("diffComponents (I5)", () => {
   })
 })
 
-describe("diffDependencies (I5)", () => {
+describe("diffDependencies", () => {
   it("emits added + removed as a pair when direction changes on the same triple", () => {
     const before = dependency({
       from: "billing",

@@ -44,7 +44,7 @@ describe("assignSymbolFilenames — collision handling", () => {
     expect(map.get("ts:src/b.ts#Bar")).toBe("ts-src-b-ts-Bar")
   })
 
-  it("MP9: adds a hash suffix when two ids sanitise to the same base", () => {
+  it("adds a hash suffix when two ids sanitise to the same base", () => {
     // Both ids sanitise to "a-b" so both entries must switch to the -<hash> form.
     const map = assignSymbolFilenames(["a:b", "a.b"])
     const a = map.get("a:b")

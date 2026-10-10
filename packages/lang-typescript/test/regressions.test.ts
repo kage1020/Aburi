@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { importsOf, symbolsOf, walkFirstSymbol, walkOf } from "./fixtures/ctx"
 
-describe("C2: nested calls inside call-only return", () => {
+describe("nested calls inside call-only return", () => {
   it("records the inner call of `return foo(bar())`", async () => {
     const { calls } = await walkFirstSymbol("export function f() { return foo(bar()) }")
     const targets = calls.map((c) => c.target)
@@ -10,7 +10,7 @@ describe("C2: nested calls inside call-only return", () => {
   })
 })
 
-describe("C7: default + namespace binding preservation", () => {
+describe("default + namespace binding preservation", () => {
   it("emits both a default-binding edge and a namespace edge", async () => {
     const { imports } = await importsOf("import Foo, * as Bar from './x'")
     expect(imports.find((e) => e.symbols === "*")).toBeDefined()
@@ -20,7 +20,7 @@ describe("C7: default + namespace binding preservation", () => {
   })
 })
 
-describe("C8: dynamic import specifier shapes", () => {
+describe("dynamic import specifier shapes", () => {
   it("emits a dynamic edge for a string-literal argument", async () => {
     const { imports } = await importsOf("export async function f() { await import('./x') }")
     const edge = imports.find((e) => e.dynamic)
@@ -42,7 +42,7 @@ describe("C8: dynamic import specifier shapes", () => {
   })
 })
 
-describe("I2: containsEarlyExit coverage", () => {
+describe("containsEarlyExit coverage", () => {
   it.each([
     [
       "continue",
@@ -190,7 +190,7 @@ describe("I2: containsEarlyExit coverage", () => {
   })
 })
 
-describe("I3: try/catch/finally walk contract", () => {
+describe("try/catch/finally walk contract", () => {
   it.each([
     ["catch (e) { … }", "catch (e) { if (!e) return; errorHandler(e); throw e }"],
     ["catch { … }", "catch { if (!ok) return; errorHandler(); throw failure }"],
@@ -240,7 +240,7 @@ describe("I3: try/catch/finally walk contract", () => {
   })
 })
 
-describe("I10: import dedupe is order-insensitive on symbols", () => {
+describe("import dedupe is order-insensitive on symbols", () => {
   it("collapses `import { A, B }` and `import { B, A }` to the same edge", async () => {
     const [a] = (await importsOf("import { A, B } from './x'")).imports
     const [b] = (await importsOf("import { B, A } from './x'")).imports
@@ -250,7 +250,7 @@ describe("I10: import dedupe is order-insensitive on symbols", () => {
   })
 })
 
-describe("I12: throw factory / identifier feeds throws[]", () => {
+describe("throw factory / identifier feeds throws[]", () => {
   it.each([
     ["`throw err` records the identifier", "export function f(err: Error) { throw err }", "err"],
     [

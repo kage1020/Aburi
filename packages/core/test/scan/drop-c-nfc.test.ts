@@ -6,7 +6,7 @@ function call(target: string): CallCandidate {
   return { target, line: 1, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
 }
 
-describe("buildDropCFilter — Unicode normalization (ir-schema.md)", () => {
+describe("buildDropCFilter — Unicode normalization", () => {
   const decomposed = "café".normalize("NFD")
   const composed = decomposed.normalize("NFC")
 

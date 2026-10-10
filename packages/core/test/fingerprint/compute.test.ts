@@ -28,7 +28,7 @@ describe("computeSymbolFingerprint", () => {
     }
   })
 
-  it("D1: a dropped Symbol receives ZERO on every axis without needing an AST string", () => {
+  it("a dropped Symbol receives ZERO on every axis without needing an AST string", () => {
     const dropped = makeSymbol(symbol.id, {
       ...symbol,
       dropped: true,
@@ -42,7 +42,7 @@ describe("computeSymbolFingerprint", () => {
     })
   })
 
-  it("D2: dropped=true and dropped=false produce different fingerprints for the same shape", () => {
+  it("dropped=true and dropped=false produce different fingerprints for the same shape", () => {
     const dropped = makeSymbol(symbol.id, {
       ...symbol,
       dropped: true,

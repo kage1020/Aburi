@@ -43,7 +43,7 @@ describe("VocabRegistry.register (AC1 idempotent re-registration)", () => {
 })
 
 describe("VocabRegistry.register (AC2 reserved namespace)", () => {
-  it("rejects extKind under reserved core:* namespace (V4)", () => {
+  it("rejects extKind under reserved core:* namespace", () => {
     const reg = new VocabRegistry()
     const m = frameworkManifest()
     m.provides.extKinds.push({ id: "core:foo", baseKind: "class", description: "x" })
@@ -109,7 +109,7 @@ describe("VocabRegistry.register (AC2 reserved namespace)", () => {
     expect(() => reg.registerHint(b)).toThrow(RegistryError)
   })
 
-  it("rejects derivedBy prefix under reserved _:* namespace (T1)", () => {
+  it("rejects derivedBy prefix under reserved _:* namespace", () => {
     const reg = new VocabRegistry()
     const m = langManifest()
     m.provides.derivedByPrefixes.push("_:scratch")
@@ -124,7 +124,7 @@ describe("VocabRegistry.register (AC2 reserved namespace)", () => {
   })
 })
 
-describe("VocabRegistry.register (AC3 xPrefix consistency, V8)", () => {
+describe("VocabRegistry.register (xPrefix consistency)", () => {
   it("rejects effects manifest whose effect ids do not match its xPrefix", () => {
     const reg = new VocabRegistry()
     const m = effectsManifest({ name: "effects-stripe", xPrefix: "stripe" })
@@ -148,7 +148,7 @@ describe("VocabRegistry.register (AC3 xPrefix consistency, V8)", () => {
   })
 })
 
-describe("VocabRegistry.register (AC4 namespace-type mismatch, V5)", () => {
+describe("VocabRegistry.register (namespace-type mismatch)", () => {
   it("rejects effects plugin that declares framework:* extKinds (schema-then-registry)", () => {
     const reg = new VocabRegistry()
     const m = effectsManifest({ name: "effects-foo", xPrefix: "foo" })
@@ -171,7 +171,7 @@ describe("VocabRegistry.register (AC4 namespace-type mismatch, V5)", () => {
   })
 })
 
-describe("VocabRegistry.register (AC5 exact duplicate id / prefix, V2/V3)", () => {
+describe("VocabRegistry.register (exact duplicate id / prefix)", () => {
   it("rejects duplicate effect id across two plugins", () => {
     const reg = new VocabRegistry()
     const a = effectsManifest({ name: "effects-a", xPrefix: "a" })
@@ -214,7 +214,7 @@ describe("VocabRegistry.register (AC5 exact duplicate id / prefix, V2/V3)", () =
   })
 })
 
-describe("VocabRegistry.register (V3a one manifest declaring an id twice)", () => {
+describe("VocabRegistry.register (one manifest declaring an id twice)", () => {
   it("rejects an effect id declared twice with different descriptions", () => {
     const reg = new VocabRegistry()
     const m = effectsManifest({ name: "effects-demo", xPrefix: "demo" })
@@ -254,7 +254,7 @@ describe("VocabRegistry.register (V3a one manifest declaring an id twice)", () =
   })
 })
 
-describe("VocabRegistry.register (V11a one manifest declaring prefixes that nest)", () => {
+describe("VocabRegistry.register (one manifest declaring prefixes that nest)", () => {
   it.each([
     ["the shorter first", ["fp:pipe", "fp:pipe:async"], "fp:pipe:async", "fp:pipe"],
     ["the longer first", ["fp:pipe:async", "fp:pipe"], "fp:pipe", "fp:pipe:async"],
@@ -340,7 +340,7 @@ describe("VocabRegistry.register (AC6 prefix vs existing id shadow)", () => {
   })
 })
 
-describe("VocabRegistry.register (AC7 prefix-prefix containment both directions, V11)", () => {
+describe("VocabRegistry.register (prefix-prefix containment both directions)", () => {
   it("rejects new prefix that contains an existing prefix (framework:acme then framework:acme:jobs)", () => {
     const reg = new VocabRegistry()
     const a = frameworkManifest({ name: "framework-a" })
@@ -391,7 +391,7 @@ describe("VocabRegistry.register (atomicity)", () => {
   })
 })
 
-describe("VocabRegistry queries (V10 prefix-owned lookup, V1 listing)", () => {
+describe("VocabRegistry queries (prefix-owned lookup, listing)", () => {
   it("findEffect returns prefix-owned ids with description=null", () => {
     const reg = new VocabRegistry()
     const m = effectsManifest({ name: "effects-acme", xPrefix: "acme" })
@@ -427,7 +427,7 @@ describe("VocabRegistry queries (V10 prefix-owned lookup, V1 listing)", () => {
     expect(v?.owner.name).toBe("framework-acme")
   })
 
-  it("list* returns every registered vocab entry (V1)", () => {
+  it("list* returns every registered vocab entry", () => {
     const reg = new VocabRegistry()
     const lang = langManifest({ name: "lang-ts" })
     lang.provides.extKinds.push({ id: "fp:lens", baseKind: "function", description: "x" })
@@ -446,7 +446,7 @@ describe("VocabRegistry queries (V10 prefix-owned lookup, V1 listing)", () => {
   })
 })
 
-describe("VocabRegistry.assert* (AC8 + V6 / V7)", () => {
+describe("VocabRegistry.assert*", () => {
   it("assertEffectDeclared honours prefix ownership", () => {
     const reg = new VocabRegistry()
     const m = effectsManifest({ name: "effects-acme", xPrefix: "acme" })
@@ -455,7 +455,7 @@ describe("VocabRegistry.assert* (AC8 + V6 / V7)", () => {
     expect(() => reg.assertEffectDeclared("x-acme:custom", "effects-acme")).not.toThrow()
   })
 
-  it("assertEffectDeclared throws for unknown effect (V6)", () => {
+  it("assertEffectDeclared throws for unknown effect", () => {
     const reg = new VocabRegistry()
     expectRegistryError(
       () => reg.assertEffectDeclared("x-nope:anything", "effects-acme"),
@@ -474,7 +474,7 @@ describe("VocabRegistry.assert* (AC8 + V6 / V7)", () => {
     )
   })
 
-  it("assertExtKindDeclared honours prefix ownership (V7 happy path)", () => {
+  it("assertExtKindDeclared honours prefix ownership", () => {
     const reg = new VocabRegistry()
     const m = frameworkManifest({ name: "framework-acme" })
     m.provides.extKindPrefixes.push("framework:acme")
@@ -482,7 +482,7 @@ describe("VocabRegistry.assert* (AC8 + V6 / V7)", () => {
     expect(() => reg.assertExtKindDeclared("framework:acme:job", "framework-acme")).not.toThrow()
   })
 
-  it("assertExtKindDeclared throws for undeclared id (V7)", () => {
+  it("assertExtKindDeclared throws for undeclared id", () => {
     const reg = new VocabRegistry()
     expectRegistryError(
       () => reg.assertExtKindDeclared("framework:nope:foo", "framework-x"),
@@ -490,7 +490,7 @@ describe("VocabRegistry.assert* (AC8 + V6 / V7)", () => {
     )
   })
 
-  it("assertExtKindDeclared throws when caller is not the owner (T3)", () => {
+  it("assertExtKindDeclared throws when caller is not the owner", () => {
     const reg = new VocabRegistry()
     const owner = frameworkManifest({ name: "framework-acme" })
     owner.provides.extKinds.push({
@@ -506,7 +506,7 @@ describe("VocabRegistry.assert* (AC8 + V6 / V7)", () => {
   })
 })
 
-describe("VocabRegistry.isEffectOwnedBy / isExtKindOwnedBy (T4)", () => {
+describe("VocabRegistry.isEffectOwnedBy / isExtKindOwnedBy", () => {
   it("isEffectOwnedBy true when caller owns the id (directly or via prefix)", () => {
     const reg = new VocabRegistry()
     const m = effectsManifest({ name: "effects-acme", xPrefix: "acme" })
@@ -530,7 +530,7 @@ describe("VocabRegistry.isEffectOwnedBy / isExtKindOwnedBy (T4)", () => {
   })
 })
 
-describe("VocabRegistry.derivedBy (T2: duplicate + overlap detection)", () => {
+describe("VocabRegistry.derivedBy (duplicate + overlap detection)", () => {
   it("findDerivedByOwner resolves a prefix-owned value to its owning plugin", () => {
     const reg = new VocabRegistry()
     const m = frameworkManifest({ name: "framework-nest" })
@@ -569,7 +569,7 @@ describe("VocabRegistry.derivedBy (T2: duplicate + overlap detection)", () => {
   })
 })
 
-describe("VocabRegistry.register (stableStringify hardening — C1)", () => {
+describe("VocabRegistry.register (stableStringify hardening)", () => {
   it("rejects non-JSON values (Date) in the manifest so equality cannot lie", () => {
     const reg = new VocabRegistry()
     const m = langManifest()
@@ -607,7 +607,7 @@ describe("VocabRegistry.register (plugin type lookup)", () => {
   })
 })
 
-describe("VocabRegistry.register (provides shape — I4)", () => {
+describe("VocabRegistry.register (provides shape)", () => {
   it("rejects missing provides.effects array with a coded error", () => {
     const reg = new VocabRegistry()
     const m = langManifest()

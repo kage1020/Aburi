@@ -28,7 +28,7 @@ function base(): IRSymbol {
 }
 
 describe("apiFingerprint — invariance", () => {
-  it("A1: renaming signature.inputs[].name does not change the hash", () => {
+  it("renaming signature.inputs[].name does not change the hash", () => {
     const sym = base()
     const before = apiFingerprint(sym)
     const renamed = makeSymbol(sym.id, {
@@ -41,7 +41,7 @@ describe("apiFingerprint — invariance", () => {
     expect(apiFingerprint(renamed)).toBe(before)
   })
 
-  it("A2: mutating rules and effects does not change the hash", () => {
+  it("mutating rules and effects does not change the hash", () => {
     const sym = base()
     const before = apiFingerprint(sym)
     const mutated = makeSymbol(sym.id, {
@@ -63,7 +63,7 @@ describe("apiFingerprint — invariance", () => {
     expect(apiFingerprint(mutated)).toBe(before)
   })
 
-  it("A3: swapping decorator declaration order does not change the hash", () => {
+  it("swapping decorator declaration order does not change the hash", () => {
     const decoratorA = {
       name: "Post",
       raw: "Post('/invoices')",
@@ -83,7 +83,7 @@ describe("apiFingerprint — invariance", () => {
     expect(apiFingerprint(ab)).toBe(apiFingerprint(ba))
   })
 
-  it("A12: changing the class scope but keeping the leaf does not change the hash", () => {
+  it("changing the class scope but keeping the leaf does not change the hash", () => {
     const oldClass = makeSymbol("ts:src/a.ts#Old.createInvoice", {
       ...base(),
       name: "Old.createInvoice",
@@ -95,13 +95,13 @@ describe("apiFingerprint — invariance", () => {
     expect(apiFingerprint(oldClass)).toBe(apiFingerprint(newClass))
   })
 
-  it("A13: changing language does not change the api hash (language is not part of the input)", () => {
+  it("changing language does not change the api hash (language is not part of the input)", () => {
     const asTs = makeSymbol(base().id, { ...base(), language: makeLanguageId("ts") })
     const asTsx = makeSymbol(base().id, { ...base(), language: makeLanguageId("tsx") })
     expect(apiFingerprint(asTs)).toBe(apiFingerprint(asTsx))
   })
 
-  it("A22: spelling a rest marker into signature.inputs[].name does not change the hash", () => {
+  it("spelling a rest marker into signature.inputs[].name does not change the hash", () => {
     const withInputs = (inputs: Signature["inputs"]) =>
       makeSymbol(base().id, { ...base(), signature: { ...sig(base()), inputs } })
     expect(apiFingerprint(withInputs([{ name: "...ids", type: "string[]" }]))).toBe(
@@ -126,12 +126,12 @@ describe("apiFingerprint — invariance", () => {
 describe("apiFingerprint — change conditions", () => {
   const beforeFp = apiFingerprint(base())
 
-  it("A4: visibility change perturbs the hash", () => {
+  it("visibility change perturbs the hash", () => {
     const sym = makeSymbol(base().id, { ...base(), visibility: "private" })
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
 
-  it("A5: adding a signature output perturbs the hash", () => {
+  it("adding a signature output perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       signature: { ...sig(base()), outputs: ["Promise<Invoice>", "Metadata"] },
@@ -139,7 +139,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
 
-  it("A6: adding a throws entry perturbs the hash", () => {
+  it("adding a throws entry perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       signature: { ...sig(base()), throws: ["CreditLimitExceeded", "AuditFailed"] },
@@ -147,7 +147,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
 
-  it("A7: adding a decorator perturbs the hash", () => {
+  it("adding a decorator perturbs the hash", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
       decorators: [
@@ -163,7 +163,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
 
-  it("A8: changing a decorator argument perturbs the hash", () => {
+  it("changing a decorator argument perturbs the hash", () => {
     const a = makeSymbol(base().id, {
       ...base(),
       decorators: [
@@ -191,7 +191,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(a)).not.toBe(apiFingerprint(b))
   })
 
-  it("A9: toggling async perturbs the hash", () => {
+  it("toggling async perturbs the hash", () => {
     const sync = makeSymbol(base().id, {
       ...base(),
       signature: { ...sig(base()), async: false },
@@ -199,22 +199,22 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(sync)).not.toBe(beforeFp)
   })
 
-  it("A10: kind change perturbs the hash", () => {
+  it("kind change perturbs the hash", () => {
     const sym = makeSymbol(base().id, { ...base(), kind: "function" })
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
 
-  it("A11: extKind change perturbs the hash", () => {
+  it("extKind change perturbs the hash", () => {
     const sym = makeSymbol(base().id, { ...base(), extKind: "framework:nestjs:controller" })
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
 
-  it("A14: shortName change perturbs the hash", () => {
+  it("shortName change perturbs the hash", () => {
     const sym = makeSymbol(base().id, { ...base(), name: "InvoiceService.updateInvoice" })
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
 
-  it("A9b: toggling generator perturbs the hash", () => {
+  it("toggling generator perturbs the hash", () => {
     const gen = makeSymbol(base().id, {
       ...base(),
       signature: { ...sig(base()), generator: true },
@@ -222,7 +222,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(gen)).not.toBe(beforeFp)
   })
 
-  it("A15: adding a typeParameter perturbs the hash", () => {
+  it("adding a typeParameter perturbs the hash", () => {
     const withParam = makeSymbol(base().id, {
       ...base(),
       signature: { ...sig(base()), typeParameters: ["T"] },
@@ -230,7 +230,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(withParam)).not.toBe(beforeFp)
   })
 
-  it("A15b: changing a typeParameter constraint perturbs the hash", () => {
+  it("changing a typeParameter constraint perturbs the hash", () => {
     const a = makeSymbol(base().id, {
       ...base(),
       signature: { ...sig(base()), typeParameters: ["T extends string"] },
@@ -242,7 +242,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(a)).not.toBe(apiFingerprint(b))
   })
 
-  it("A16: toggling Decorator.boundary perturbs the hash", () => {
+  it("toggling Decorator.boundary perturbs the hash", () => {
     const asBoundary = makeSymbol(base().id, {
       ...base(),
       decorators: [
@@ -270,7 +270,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(asBoundary)).not.toBe(apiFingerprint(notBoundary))
   })
 
-  it("A20: toggling signature.inputs[].optional perturbs the hash", () => {
+  it("toggling signature.inputs[].optional perturbs the hash", () => {
     const optional = makeSymbol(base().id, {
       ...base(),
       signature: {
@@ -281,7 +281,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(optional)).not.toBe(beforeFp)
   })
 
-  it("A21: toggling signature.inputs[].rest perturbs the hash", () => {
+  it("toggling signature.inputs[].rest perturbs the hash", () => {
     const rest = makeSymbol(base().id, {
       ...base(),
       signature: {
@@ -292,7 +292,7 @@ describe("apiFingerprint — change conditions", () => {
     expect(apiFingerprint(rest)).not.toBe(beforeFp)
   })
 
-  it("A20/A21: optional and rest are two contracts, not one", () => {
+  it("optional and rest are two contracts, not one", () => {
     const withForm = (form: { optional?: true; rest?: true }) =>
       makeSymbol(base().id, {
         ...base(),
@@ -305,7 +305,7 @@ describe("apiFingerprint — change conditions", () => {
 })
 
 describe("apiFingerprint — order preservation", () => {
-  it("A17: swapping signature.inputs order perturbs the hash (positional contract)", () => {
+  it("swapping signature.inputs order perturbs the hash (positional contract)", () => {
     const ab = makeSymbol(base().id, {
       ...base(),
       signature: {
@@ -329,7 +329,7 @@ describe("apiFingerprint — order preservation", () => {
     expect(apiFingerprint(ab)).not.toBe(apiFingerprint(ba))
   })
 
-  it("A18: swapping signature.outputs order perturbs the hash (positional contract)", () => {
+  it("swapping signature.outputs order perturbs the hash (positional contract)", () => {
     const ab = makeSymbol(base().id, {
       ...base(),
       signature: { ...sig(base()), outputs: ["A", "B"] },
@@ -341,7 +341,7 @@ describe("apiFingerprint — order preservation", () => {
     expect(apiFingerprint(ab)).not.toBe(apiFingerprint(ba))
   })
 
-  it("A19: same-name decorators tie-break on line so their source order is preserved", () => {
+  it("same-name decorators tie-break on line so their source order is preserved", () => {
     const inSourceOrder = makeSymbol(base().id, {
       ...base(),
       decorators: [

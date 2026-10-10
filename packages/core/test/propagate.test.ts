@@ -16,8 +16,8 @@ function bySymbolId(symbols: IRSymbol[], id: string): IRSymbol {
   return sym
 }
 
-describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
-  it("PR1: direct A→B propagation — B's db.write reaches A", () => {
+describe("propagateEffects", () => {
+  it("direct A→B propagation — B's db.write reaches A", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A", { effects: [] }),
       makeSymbol("ts:b.ts#B", {
@@ -35,7 +35,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(propagated[0]?.line).toBeUndefined()
   })
 
-  it("PR2: two-hop A→B→C — A.derivedFrom is [B], B.derivedFrom is [C]", () => {
+  it("two-hop A→B→C — A.derivedFrom is [B], B.derivedFrom is [C]", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B"),
@@ -53,7 +53,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(bySymbolId(out, "ts:c.ts#C").effects.every((e) => e.propagated !== true)).toBe(true)
   })
 
-  it("PR3: diamond A→B→D, A→C→D — A.derivedFrom is sorted union [B,C], single entry", () => {
+  it("diamond A→B→D, A→C→D — A.derivedFrom is sorted union [B,C], single entry", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B"),
@@ -72,7 +72,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(a[0]?.derivedFrom).toEqual(["ts:b.ts#B", "ts:c.ts#C"])
   })
 
-  it("PR4: min-along-path — edge high + effect medium collapses to medium", () => {
+  it("min-along-path — edge high + effect medium collapses to medium", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", {
@@ -85,7 +85,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(prop?.confidence).toBe("medium")
   })
 
-  it("PR4b: min-along-path — edge medium + effect high collapses to medium", () => {
+  it("min-along-path — edge medium + effect high collapses to medium", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", {
@@ -98,7 +98,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(prop?.confidence).toBe("medium")
   })
 
-  it("PR5: max-across-paths — two paths medium + high merge to high", () => {
+  it("max-across-paths — two paths medium + high merge to high", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B"),
@@ -118,7 +118,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(prop?.confidence).toBe("high")
   })
 
-  it("PR6: SCC {A,B,C} all internal, only C has local — every member ends with same aggregated set", () => {
+  it("SCC {A,B,C} all internal, only C has local — every member ends with same aggregated set", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B"),
@@ -140,7 +140,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(c.some((e) => e.propagated !== true && e.id === "db.write")).toBe(true)
   })
 
-  it("PR7: self-loop A→A on locally-effecting A — no duplicate propagated entry", () => {
+  it("self-loop A→A on locally-effecting A — no duplicate propagated entry", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A", { effects: [local({ id: "db.write", target: "x" })] }),
     ]
@@ -151,7 +151,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(a.effects[0]?.propagated).not.toBe(true)
   })
 
-  it("PR8: local shadows propagated on same (id,target)", () => {
+  it("local shadows propagated on same (id,target)", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A", {
         effects: [local({ id: "db.write", target: "x", line: 42, confidence: "medium" })],
@@ -169,7 +169,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(a.effects[0]?.confidence).toBe("medium")
   })
 
-  it("PR9: boundary decorator is NOT a propagation stop", () => {
+  it("boundary decorator is NOT a propagation stop", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:ctl.ts#Ctl", {
         decorators: [{ name: "Post", raw: "Post()", arguments: [], boundary: true, line: 1 }],
@@ -188,7 +188,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(ctl.effects.some((e) => e.propagated === true && e.id === "db.write")).toBe(true)
   })
 
-  it("PR10: unresolved edges do not propagate — a symbol with no outgoing edges receives no propagated effects", () => {
+  it("unresolved edges do not propagate — a symbol with no outgoing edges receives no propagated effects", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x" })] }),
@@ -197,7 +197,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(bySymbolId(out, "ts:a.ts#A").effects).toHaveLength(0)
   })
 
-  it("PR11: cross-language guard — edges only connect within one language universe", () => {
+  it("cross-language guard — edges only connect within one language universe", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x" })] }),
@@ -207,7 +207,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(bySymbolId(out, "ts:a.ts#A").effects.some((e) => e.propagated === true)).toBe(true)
   })
 
-  it("PR13: idempotence — running propagation twice reproduces the same effects[] byte-for-byte", () => {
+  it("idempotence — running propagation twice reproduces the same effects[] byte-for-byte", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x" })] }),
@@ -218,7 +218,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(pass2.symbols).toEqual(pass1.symbols)
   })
 
-  it("PR14: input CallEdge[] shuffle produces byte-identical output", () => {
+  it("input CallEdge[] shuffle produces byte-identical output", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B"),
@@ -242,7 +242,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
     expect(b.symbols).toEqual(a.symbols)
   })
 
-  it("PR15: propagated entries omit line", () => {
+  it("propagated entries omit line", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
       makeSymbol("ts:b.ts#B", { effects: [local({ id: "db.write", target: "x", line: 99 })] }),
@@ -254,7 +254,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
   })
 })
 
-describe("propagateEffects — additional invariants (effect-propagation.md)", () => {
+describe("propagateEffects — additional invariants", () => {
   it("derivedBy lex tie-break — two paths, smaller derivedBy wins", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),

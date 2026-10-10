@@ -7,12 +7,12 @@ function makeStreams(): { stdout: MemStream; stderr: MemStream } {
 }
 
 describe("exit code table", () => {
-  it("keeps the numbers cli-spec.md gives each class", () => {
+  it("keeps the documented number of each exit class", () => {
     expect(EXIT).toEqual({ SUCCESS: 0, RUNTIME: 1, INPUT_ERROR: 2, GATE: 3 })
   })
 })
 
-describe("CL1 — --version", () => {
+describe("--version", () => {
   it("prints a version string and returns EXIT.SUCCESS", async () => {
     const { stdout, stderr } = makeStreams()
     const code = await runCli({ argv: ["--version"], stdout, stderr, env: {} })
@@ -21,7 +21,7 @@ describe("CL1 — --version", () => {
   })
 })
 
-describe("CL2 — --help", () => {
+describe("--help", () => {
   it("returns EXIT.SUCCESS and prints usage text", async () => {
     const { stdout, stderr } = makeStreams()
     const code = await runCli({ argv: ["--help"], stdout, stderr, env: {} })
@@ -30,7 +30,7 @@ describe("CL2 — --help", () => {
   })
 })
 
-describe("CL3 — unknown command", () => {
+describe("unknown command", () => {
   it("returns EXIT.INPUT_ERROR", async () => {
     const { stdout, stderr } = makeStreams()
     const code = await runCli({ argv: ["nope"], stdout, stderr, env: {} })
@@ -38,7 +38,7 @@ describe("CL3 — unknown command", () => {
   })
 })
 
-describe("CL10 — diff arguments missing", () => {
+describe("diff arguments missing", () => {
   it("errors when neither refspec nor --base/--head is given", async () => {
     const { stdout, stderr } = makeStreams()
     const code = await runCli({ argv: ["diff"], stdout, stderr, env: {} })

@@ -153,7 +153,7 @@ describe("a registration call's inline handler is its body", () => {
   })
 })
 
-describe("a function a const hands to a call is the const's body (LP7c)", () => {
+describe("a function a const hands to a call is the const's body", () => {
   const POST = [
     "export const POST = withAuth(async (id: number) => {",
     '  if (!id) throw new Error("missing id")',
@@ -278,7 +278,7 @@ describe("a function a const hands to a call is the const's body (LP7c)", () => 
   })
 })
 
-describe("what LP7c does not read", () => {
+describe("what the reading leaves alone", () => {
   it.each([
     [
       "a function handed to `new`",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { importsOf } from "./fixtures/ctx"
 
-describe("LP26f: import-equals-require binds the module object", () => {
+describe("import-equals-require binds the module object", () => {
   it("produces a namespace edge carrying the local binding", async () => {
     const { imports, errors } = await importsOf("import x = require('./mod')")
 
@@ -17,7 +17,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
     expect(imports[0]?.dynamic).toBe(false)
   })
 
-  it("LP26g: reads a type-only require-equals on the same terms", async () => {
+  it("reads a type-only require-equals on the same terms", async () => {
     const { imports } = await importsOf("import type x = require('./mod')")
 
     expect(imports).toEqual([
@@ -33,7 +33,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
     ])
   })
 
-  it("LP26h: says nothing about an alias that renames a local namespace", async () => {
+  it("says nothing about an alias that renames a local namespace", async () => {
     const { imports, errors } = await importsOf("import x = A.B.C")
 
     expect(imports).toEqual([])
@@ -62,7 +62,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
   })
 })
 
-describe("LP26i: a comment among the arguments of import()", () => {
+describe("a comment among the arguments of import()", () => {
   it("reads the specifier past a webpack magic comment", async () => {
     const { imports, errors } = await importsOf(
       'const m = import(/* webpackChunkName: "x" */ "./mod")',
@@ -86,7 +86,7 @@ describe("LP26i: a comment among the arguments of import()", () => {
   })
 })
 
-describe("LP26j: a template specifier with nothing substituted into it", () => {
+describe("a template specifier with nothing substituted into it", () => {
   it("is read as the static specifier it is", async () => {
     const { imports, errors } = await importsOf("const m = import(`./mod`)")
 
@@ -95,7 +95,7 @@ describe("LP26j: a template specifier with nothing substituted into it", () => {
   })
 })
 
-describe("LP26e: a template the author computes stays computed", () => {
+describe("a template the author computes stays computed", () => {
   it.each([
     ["a trailing substitution", `const m = import(\`./\${p}\`)`],
     ["a substitution in the middle", `const m = import(\`./a\${p}/b\`)`],

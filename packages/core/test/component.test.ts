@@ -60,7 +60,7 @@ describe("detectComponents", () => {
     expect(components[0]?.roots).toEqual(["."])
   })
 
-  it("writes description as an explicit null on both detection paths (ir-schema.md)", async () => {
+  it("writes description as an explicit null on both detection paths", async () => {
     await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8")
     const pkg = await makeDir(tmp, "packages", "alpha")
     await writeJson(join(pkg, "package.json"), { name: "alpha" })

@@ -214,7 +214,7 @@ describe("resolveCallGraph", () => {
     expect(result.edges[0]?.to).toBe("ts:src/util/index.ts#helper")
   })
 
-  describe("import scope: relative specifier spellings (CR2a, CR2b)", () => {
+  describe("import scope: relative specifier spellings", () => {
     /** The caller's one call, after checking that its edge agrees with it. */
     function resolveFrom(
       callerFile: string,
@@ -556,7 +556,7 @@ describe("resolveCallGraph", () => {
     expect(result.edges).toEqual([])
   })
 
-  describe("CR9a: a destructuring parameter shadows the names it binds", () => {
+  describe("a destructuring parameter shadows the names it binds", () => {
     it.each<[string, Signature["inputs"][number]]>([
       ["{ save }", { name: "{ save }", type: "Deps", bindings: ["save"] }],
       ["[save]", { name: "[save]", type: "Deps", bindings: ["save"] }],
@@ -753,7 +753,7 @@ describe("resolveCallGraph", () => {
     ])
   })
 
-  it("component scope (CR11): qualified name unique within the caller's component resolves with medium confidence", () => {
+  it("component scope: qualified name unique within the caller's component resolves with medium confidence", () => {
     const caller = withCalls(
       "ts:src/checkout.ts#caller",
       [{ target: "PricingService.calc", line: 5 }],
@@ -815,7 +815,7 @@ describe("resolveCallGraph", () => {
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
   })
 
-  it("component scope (CR13): ambiguous qualified name within a component stays unresolved", () => {
+  it("component scope: ambiguous qualified name within a component stays unresolved", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "PricingService.calc", line: 5 }], {
       component: "billing",
     })
@@ -858,7 +858,7 @@ describe("resolveCallGraph", () => {
     expect(result.edges).toEqual([])
   })
 
-  it("workspace scope (CR12): globally-unique qualified name resolves with low confidence", () => {
+  it("workspace scope: globally-unique qualified name resolves with low confidence", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "Uniq.method", line: 9 }], {
       component: "billing",
     })
@@ -982,7 +982,7 @@ describe("resolveCallGraph", () => {
     expect(result.edges).toEqual([])
   })
 
-  it("CR14: `this.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
+  it("`this.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "this.method", line: 5 }], {
       component: "billing",
     })
@@ -1049,7 +1049,7 @@ describe("resolveCallGraph", () => {
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
   })
 
-  it("CR15: `new ClassName()` resolves the class Symbol via imports (confidence high)", () => {
+  it("`new ClassName()` resolves the class Symbol via imports (confidence high)", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls", line: 6 }])
     const cls = makeSymbol("ts:src/x.ts#Cls", { kind: "class" })
     const imports = new Map<string, readonly ImportEdge[]>([
@@ -1080,7 +1080,7 @@ describe("resolveCallGraph", () => {
       }
     }
 
-    it("CR5: reaches an anonymous default export", () => {
+    it("reaches an anonymous default export", () => {
       const anon = makeSymbol("ts:src/x.ts#<default>", { derivedBy: ["export-default"] })
       expect(resolvedOf("inc", ["default as inc"], [anon])).toEqual({
         edges: [["ts:src/x.ts#<default>", "high"]],
@@ -1088,7 +1088,7 @@ describe("resolveCallGraph", () => {
       })
     })
 
-    it("reaches a `<default>` Symbol that carries no `export-default`, as LP6 alone describes it", () => {
+    it("reaches a `<default>` Symbol that carries no `export-default`, as a plugin reading only the declaration emits it", () => {
       const anon = makeSymbol("ts:src/x.ts#<default>")
       expect(resolvedOf("inc", ["default as inc"], [anon])).toEqual({
         edges: [["ts:src/x.ts#<default>", "high"]],
@@ -1096,7 +1096,7 @@ describe("resolveCallGraph", () => {
       })
     })
 
-    it("CR5a: reaches a named default export imported under another name", () => {
+    it("reaches a named default export imported under another name", () => {
       const makeApp = makeSymbol("ts:src/x.ts#makeApp", { derivedBy: ["export-default"] })
       expect(resolvedOf("createApp", ["default as createApp"], [makeApp])).toEqual({
         edges: [["ts:src/x.ts#makeApp", "high"]],
@@ -1104,7 +1104,7 @@ describe("resolveCallGraph", () => {
       })
     })
 
-    it("CR5b: composes a dotted tail past the default export's own name, not the local one", () => {
+    it("composes a dotted tail past the default export's own name, not the local one", () => {
       const svc = makeSymbol("ts:src/x.ts#Svc", { kind: "class", derivedBy: ["export-default"] })
       const run = makeSymbol("ts:src/x.ts#Svc::run", { kind: "method" })
       expect(resolvedOf("S.run", ["default as S"], [svc, run])).toEqual({
@@ -1113,7 +1113,7 @@ describe("resolveCallGraph", () => {
       })
     })
 
-    it("CR5c: does not take a named export that happens to share the local name", () => {
+    it("does not take a named export that happens to share the local name", () => {
       const createClient = makeSymbol("ts:src/x.ts#createClient", { derivedBy: ["export-default"] })
       const connect = makeSymbol("ts:src/x.ts#connect")
       const callees = [createClient, connect]
@@ -1128,7 +1128,7 @@ describe("resolveCallGraph", () => {
       })
     })
 
-    it("CR5c: leaves a module without a default export unresolved, bucketed `no-match`", () => {
+    it("leaves a module without a default export unresolved, bucketed `no-match`", () => {
       const connect = makeSymbol("ts:src/x.ts#connect")
       expect(resolvedOf("connect", ["default as connect"], [connect])).toEqual({
         edges: [],
@@ -1136,7 +1136,7 @@ describe("resolveCallGraph", () => {
       })
     })
 
-    it("CR5d: leaves two default exports unresolved, bucketed `ambiguous`, rather than taking one", () => {
+    it("leaves two default exports unresolved, bucketed `ambiguous`, rather than taking one", () => {
       const a = makeSymbol("ts:src/x.ts#a", { derivedBy: ["export-default"] })
       const b = makeSymbol("ts:src/x.ts#b", { derivedBy: ["export-default"] })
       expect(resolvedOf("x", ["default as x"], [b, a])).toEqual({
@@ -1202,7 +1202,7 @@ describe("resolveCallGraph", () => {
       ])
     })
 
-    it("determinism (CR23): running the same input twice yields byte-identical edges", () => {
+    it("determinism: running the same input twice yields byte-identical edges", () => {
       const caller = withCalls(
         "ts:src/a.ts#caller",
         [

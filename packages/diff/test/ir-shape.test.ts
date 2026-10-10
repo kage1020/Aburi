@@ -218,7 +218,7 @@ describe("a Symbol with no id is the caller's fault, and says so", () => {
   })
 })
 
-describe("the gate is invariant #20, not the whole checker", () => {
+describe("the gate is the shape check, not the whole checker", () => {
   it("diffs an IR whose symbols[] is out of sort order", () => {
     const z = makeSymbol({ id: "ts:src/z.ts#f", name: "z" })
     const a = makeSymbol({ id: "ts:src/a.ts#f", name: "a" })

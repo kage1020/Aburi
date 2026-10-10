@@ -284,7 +284,7 @@ describe("runDiff — --base/--head (file mode)", () => {
   })
 })
 
-describe("runDiff — call-resolution census on stdout (call-resolution.md)", () => {
+describe("runDiff — call-resolution census on stdout", () => {
   async function writePair(head: IR): Promise<{ basePath: string; headPath: string }> {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
@@ -444,7 +444,7 @@ describe("argv routing for --max-bytes", () => {
   })
 })
 
-describe("CL9 — argv routing for --fail-on", () => {
+describe("argv routing for --fail-on", () => {
   it("returns EXIT.GATE from runCli end-to-end", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
@@ -474,7 +474,7 @@ describe("CL9 — argv routing for --fail-on", () => {
   })
 })
 
-describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md)", () => {
+describe("classifyDiffError — DiffError to exit-code mapping", () => {
   it("maps diff failures the caller's input can fix to config-error", () => {
     const codes = [
       "schema-mismatch",
