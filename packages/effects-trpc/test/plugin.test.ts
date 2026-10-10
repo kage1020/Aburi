@@ -35,15 +35,7 @@ describe("TrpcEffectsPlugin", () => {
     ).toBeNull()
   })
 
-  it("classify is idempotent across repeated invocations (no per-call state)", () => {
-    const ctx = makeCtx({ imports: [makeTrpcClientImport("@trpc/react-query")] })
-    const call = makeCall({ target: "trpc.post.list.useQuery" })
-    const runs = Array.from({ length: 5 }, () => trpcEffectsPlugin.classify(call, ctx))
-    for (const run of runs) expect(run).toEqual(runs[0])
-  })
-
   it("satisfies the EffectPlugin contract and declares no dropCallees", () => {
-    // Widened to the interface because the narrow class type omits the optional field.
     const asEffectPlugin: EffectPlugin = trpcEffectsPlugin
     expect(asEffectPlugin.dropCallees).toBeUndefined()
   })

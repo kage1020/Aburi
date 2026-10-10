@@ -1,83 +1,39 @@
+import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { hasPrismaImport } from "../src/index"
 
 const PATH = "src/service.ts"
 
+function edge(source: string, line = 1): ImportEdge {
+  return { source, symbols: ["PrismaClient"], line, dynamic: false }
+}
+
 describe("hasPrismaImport", () => {
-  it("returns true when the file imports @prisma/client", () => {
-    expect(
-      hasPrismaImport(
-        [{ source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false }],
-        PATH,
-      ),
-    ).toBe(true)
+  it.each([
+    ["@prisma/client", [edge("@prisma/client")]],
+    ["the Edge runtime entry @prisma/client/edge", [edge("@prisma/client/edge")]],
+    ["@prisma/client beside other imports", [edge("react", 1), edge("@prisma/client", 2)]],
+  ])("returns true when the file imports %s", (_label, imports) => {
+    expect(hasPrismaImport(imports, PATH)).toBe(true)
   })
 
-  it("returns true when the file imports @prisma/client/edge (Vercel Edge / Cloudflare Workers)", () => {
-    expect(
-      hasPrismaImport(
-        [{ source: "@prisma/client/edge", symbols: ["PrismaClient"], line: 1, dynamic: false }],
-        PATH,
-      ),
-    ).toBe(true)
-  })
-
-  it("returns false when the import list is empty", () => {
-    expect(hasPrismaImport([], PATH)).toBe(false)
-  })
-
-  it("returns false when the file imports an unrelated ORM", () => {
-    expect(
-      hasPrismaImport(
-        [
-          { source: "drizzle-orm", symbols: ["*"], line: 1, dynamic: false },
-          { source: "typeorm", symbols: ["DataSource"], line: 2, dynamic: false },
-        ],
-        PATH,
-      ),
-    ).toBe(false)
-  })
-
-  it("returns false for lookalike specifiers that are not real Prisma modules", () => {
-    expect(
-      hasPrismaImport(
-        [
-          { source: "@prisma/client-edge", symbols: ["*"], line: 1, dynamic: false },
-          { source: "@my-org/prisma-client", symbols: ["*"], line: 2, dynamic: false },
-        ],
-        PATH,
-      ),
-    ).toBe(false)
-  })
-
-  it("returns true when @prisma/client sits alongside other imports", () => {
-    expect(
-      hasPrismaImport(
-        [
-          { source: "react", symbols: ["useState"], line: 1, dynamic: false },
-          { source: "@prisma/client", symbols: ["PrismaClient"], line: 2, dynamic: false },
-          { source: "zod", symbols: ["z"], line: 3, dynamic: false },
-        ],
-        PATH,
-      ),
-    ).toBe(true)
+  it.each([
+    ["nothing", []],
+    ["unrelated ORMs", [edge("drizzle-orm", 1), edge("typeorm", 2)]],
+    ["lookalike specifiers", [edge("@prisma/client-edge", 1), edge("@my-org/prisma-client", 2)]],
+  ])("returns false when the file imports %s", (_label, imports) => {
+    expect(hasPrismaImport(imports, PATH)).toBe(false)
   })
 
   it("throws on an empty ImportEdge.source, naming the plugin, the file, and the line", () => {
-    expect(() =>
-      hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 9, dynamic: false }], PATH),
-    ).toThrow(`effects-prisma (${PATH}, line 9): ImportEdge.source is empty`)
+    expect(() => hasPrismaImport([edge("", 9)], PATH)).toThrow(
+      `effects-prisma (${PATH}, line 9): ImportEdge.source is empty`,
+    )
   })
 
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
-    expect(() =>
-      hasPrismaImport(
-        [
-          { source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false },
-          { source: "", symbols: ["x"], line: 2, dynamic: false },
-        ],
-        PATH,
-      ),
-    ).toThrow(/ImportEdge\.source is empty/)
+    expect(() => hasPrismaImport([edge("@prisma/client", 1), edge("", 2)], PATH)).toThrow(
+      /ImportEdge\.source is empty/,
+    )
   })
 })

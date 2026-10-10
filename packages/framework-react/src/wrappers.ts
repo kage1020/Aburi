@@ -6,9 +6,7 @@ export const REACT_FORWARD_REF_FACTORIES: ReadonlySet<string> = new Set(["forwar
 export const REACT_MEMO_FACTORIES: ReadonlySet<string> = new Set(["memo"])
 
 export interface WrapperCall {
-  /** Callee text verbatim, e.g. `"createContext"` or `"React.forwardRef"`. */
   readonly callee: string
-  /** Callee leaf (e.g. `"forwardRef"` from `"React.forwardRef"`). */
   readonly leaf: string
 }
 
@@ -22,17 +20,14 @@ export function extractWrapperCall(fullNode: unknown): WrapperCall | null {
   return { callee, leaf: calleeLeaf(callee) }
 }
 
-/** `true` when `call` is `createContext(...)` or `React.createContext(...)`. */
 export function isContextCall(call: WrapperCall | null): boolean {
   return call !== null && REACT_CONTEXT_FACTORIES.has(call.leaf)
 }
 
-/** `true` when `call` is `forwardRef(...)` or `React.forwardRef(...)`. */
 export function isForwardRefCall(call: WrapperCall | null): boolean {
   return call !== null && REACT_FORWARD_REF_FACTORIES.has(call.leaf)
 }
 
-/** `true` when `call` is `memo(...)` or `React.memo(...)`. */
 export function isMemoCall(call: WrapperCall | null): boolean {
   return call !== null && REACT_MEMO_FACTORIES.has(call.leaf)
 }

@@ -9,7 +9,6 @@ import { type AppRouterFile, recognizeAppRouterFile } from "./app-router"
 import { detectModuleDirective, type ModuleDirective } from "./directives"
 import { NEXT_DERIVED_BY_PREFIX } from "./manifest"
 
-/** HTTP verbs the App Router accepts as named exports of `route.{ts,js}`. */
 export type NextHttpVerb = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD"
 
 export const NEXT_ROUTE_HTTP_VERBS: ReadonlySet<NextHttpVerb> = new Set<NextHttpVerb>([
@@ -36,7 +35,6 @@ export function classifyNextSymbol(
   return classifyComponentSymbol(symbol, file, ctx)
 }
 
-/** `app/**\/route.ts`: each named HTTP verb export is a route; anything else is `null`. */
 function classifyRouteSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: ExtractionContext,

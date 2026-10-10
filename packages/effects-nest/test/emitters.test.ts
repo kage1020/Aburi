@@ -1,3 +1,4 @@
+import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   hasNestEmitterImport,
@@ -9,134 +10,71 @@ import {
 
 const PATH = "src/orders/service.ts"
 
+function edge(source: string, line = 1): ImportEdge {
+  return { source, symbols: ["EventEmitter2"], line, dynamic: false }
+}
+
 describe("hasNestEmitterImport", () => {
-  it("returns true when the file imports @nestjs/event-emitter", () => {
-    expect(
-      hasNestEmitterImport(
-        [{ source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
-        PATH,
-      ),
-    ).toBe(true)
+  it.each([
+    ["@nestjs/event-emitter", [edge("@nestjs/event-emitter")]],
+    ["eventemitter2", [edge("eventemitter2")]],
+    [
+      "an emitter module beside other imports",
+      [edge("@nestjs/common", 1), edge("@nestjs/event-emitter", 2)],
+    ],
+  ])("returns true when the file imports %s", (_label, imports) => {
+    expect(hasNestEmitterImport(imports, PATH)).toBe(true)
   })
 
-  it("returns true when the file imports eventemitter2 directly", () => {
-    expect(
-      hasNestEmitterImport(
-        [{ source: "eventemitter2", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
-        PATH,
-      ),
-    ).toBe(true)
+  it.each([
+    ["nothing", []],
+    ["Node's events module", [edge("events")]],
+    ["@nestjs/websockets, whose emit is another API", [edge("@nestjs/websockets")]],
+  ])("returns false when the file imports %s", (_label, imports) => {
+    expect(hasNestEmitterImport(imports, PATH)).toBe(false)
   })
 
-  it("returns false when the import list is empty", () => {
-    expect(hasNestEmitterImport([], PATH)).toBe(false)
-  })
-
-  it("returns false for Node's built-in `events` module (intentional exclusion)", () => {
-    expect(
-      hasNestEmitterImport(
-        [{ source: "events", symbols: ["EventEmitter"], line: 1, dynamic: false }],
-        PATH,
-      ),
-    ).toBe(false)
-  })
-
-  it("returns false for the @nestjs/websockets `.emit` — different API surface", () => {
-    expect(
-      hasNestEmitterImport(
-        [{ source: "@nestjs/websockets", symbols: ["WebSocketGateway"], line: 1, dynamic: false }],
-        PATH,
-      ),
-    ).toBe(false)
-  })
-
-  it("returns true when a recognized module sits alongside other imports", () => {
-    expect(
-      hasNestEmitterImport(
-        [
-          { source: "@nestjs/common", symbols: ["Injectable"], line: 1, dynamic: false },
-          { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 2, dynamic: false },
-        ],
-        PATH,
-      ),
-    ).toBe(true)
-  })
-
-  it("throws when the language plugin emits an empty ImportEdge.source", () => {
-    expect(() =>
-      hasNestEmitterImport(
-        [{ source: "", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
-        PATH,
-      ),
-    ).toThrow(/ImportEdge\.source is empty/)
-  })
-
-  it("names the plugin, the file, and the offending line in the thrown message", () => {
-    expect(() =>
-      hasNestEmitterImport(
-        [{ source: "", symbols: ["EventEmitter2"], line: 9, dynamic: false }],
-        PATH,
-      ),
-    ).toThrow(`effects-nest (${PATH}, line 9): ImportEdge.source is empty`)
+  it("throws on an empty ImportEdge.source, naming the plugin, the file, and the line", () => {
+    expect(() => hasNestEmitterImport([edge("", 9)], PATH)).toThrow(
+      `effects-nest (${PATH}, line 9): ImportEdge.source is empty`,
+    )
   })
 
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
     expect(() =>
-      hasNestEmitterImport(
-        [
-          { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false },
-          { source: "", symbols: ["x"], line: 2, dynamic: false },
-        ],
-        PATH,
-      ),
+      hasNestEmitterImport([edge("@nestjs/event-emitter", 1), edge("", 2)], PATH),
     ).toThrow(/ImportEdge\.source is empty/)
   })
 })
 
 describe("event-emitter identifier vocabulary", () => {
-  it("recognizes the two documented identifiers", () => {
-    expect(NEST_EVENT_EMITTER_IDENTIFIERS.has("eventBus")).toBe(true)
-    expect(NEST_EVENT_EMITTER_IDENTIFIERS.has("EventEmitter2")).toBe(true)
+  it("lists exactly eventBus and EventEmitter2", () => {
+    expect([...NEST_EVENT_EMITTER_IDENTIFIERS]).toEqual(["eventBus", "EventEmitter2"])
     expect(isNestEventEmitterIdentifier("eventBus")).toBe(true)
     expect(isNestEventEmitterIdentifier("EventEmitter2")).toBe(true)
   })
 
-  it("rejects generic emitter names to prevent over-classification", () => {
-    const untyped = NEST_EVENT_EMITTER_IDENTIFIERS as ReadonlySet<string>
-    for (const name of [
-      "bus",
-      "emitter",
-      "dispatcher",
-      "notifier",
-      "publisher",
-      "socket",
-      "stream",
-    ]) {
-      expect(untyped.has(name)).toBe(false)
-      expect(isNestEventEmitterIdentifier(name)).toBe(false)
-    }
-  })
-
-  it("rejects case variants — recognition is case-sensitive", () => {
-    expect(isNestEventEmitterIdentifier("EVENTBUS")).toBe(false)
-    expect(isNestEventEmitterIdentifier("eventemitter2")).toBe(false)
-    expect(isNestEventEmitterIdentifier("EventBus")).toBe(false)
+  it.each([
+    "bus",
+    "emitter",
+    "dispatcher",
+    "socket",
+    "stream",
+    "EVENTBUS",
+    "EventBus",
+    "eventemitter2",
+  ])("rejects %s — generic names and case variants are not recognized", (name) => {
+    expect(isNestEventEmitterIdentifier(name)).toBe(false)
   })
 })
 
 describe("emit method sentinel", () => {
-  it("recognizes the `emit` literal", () => {
+  it("is exactly `emit`", () => {
     expect(NEST_EMIT_METHOD).toBe("emit")
     expect(isNestEmitMethod("emit")).toBe(true)
   })
 
-  it("rejects `.emitAsync` — a real EventEmitter2 API that is not classified yet", () => {
-    expect(isNestEmitMethod("emitAsync")).toBe(false)
-    expect(isNestEmitMethod("emitAsyncSerial")).toBe(false)
-  })
-
-  it("rejects unrelated near-miss names (`.emits`, `.emitEvent`)", () => {
-    expect(isNestEmitMethod("emits")).toBe(false)
-    expect(isNestEmitMethod("emitEvent")).toBe(false)
+  it.each(["emitAsync", "emitAsyncSerial", "emits", "emitEvent"])("rejects %s", (name) => {
+    expect(isNestEmitMethod(name)).toBe(false)
   })
 })

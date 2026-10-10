@@ -25,7 +25,6 @@ export function classifyPrismaCall(
 ): EffectClassification | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_PRISMA_PLUGIN_NAME, filePath: ctx.file.path }
 
-  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why.
   const { segments, last: method } = assertNonEmptySegments(call.target, origin)
 
   if (!hasPrismaImport(ctx.file.imports, ctx.file.path)) return null
@@ -50,6 +49,7 @@ export function classifyPrismaCall(
   // The client sits immediately before the model, whatever precedes it.
   const clientSegment = segments.at(-3)
 
+  // A computed model says nothing about the shape, so the receiver alone must name a client.
   if (clientSegment !== undefined && segments.at(-2) === COMPUTED_TARGET_SEGMENT) {
     if (!namesPrismaClient(clientSegment)) return null
   }

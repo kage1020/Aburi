@@ -1,99 +1,35 @@
 import { CoreError } from "@aburi/core"
+import { errorFrom } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { classifyNestjsSymbol } from "../src/index"
-import { makeCandidate, makeCtx, makeDecorator } from "./fixtures/symbol"
+import { classifyDecorated } from "./fixtures/symbol"
 
 describe("classifyNestjsSymbol — class decorators", () => {
-  it("@Module → framework:nestjs:module", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "class",
-        name: "AppModule",
-        decorators: [makeDecorator("Module", ["{}"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:module")
-    expect(result?.decoratorBoundaries).toEqual({ Module: true })
-    expect(result?.derivedBy).toBe("framework:nestjs:module")
-  })
-
-  it("@Controller → framework:nestjs:controller with Controller flagged boundary", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "class",
-        name: "InvoiceController",
-        decorators: [makeDecorator("Controller", ["'/invoices'"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:controller")
-    expect(result?.decoratorBoundaries).toEqual({ Controller: true })
-    expect(result?.derivedBy).toBe("framework:nestjs:controller")
-  })
-
-  it("@Injectable → framework:nestjs:provider", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "class",
-        name: "InvoiceService",
-        decorators: [makeDecorator("Injectable")],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:provider")
-    expect(result?.decoratorBoundaries).toEqual({ Injectable: true })
-    expect(result?.derivedBy).toBe("framework:nestjs:provider")
-  })
-
-  it("@Catch → framework:nestjs:filter", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "class",
-        name: "HttpExceptionFilter",
-        decorators: [makeDecorator("Catch", ["HttpException"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:filter")
-  })
-
-  it("returns null for a class with no NestJS decorators", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({ kind: "class", name: "Plain", decorators: [] }),
-      makeCtx(),
-    )
-    expect(result).toBeNull()
-  })
-
-  it("ignores unrelated decorators without misclassifying the class", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "class",
-        name: "Utility",
-        decorators: [makeDecorator("SomeOtherThing")],
-      }),
-      makeCtx(),
-    )
-    expect(result).toBeNull()
-  })
-
-  it("first-in-source-order wins when multiple class-level decorators appear", () => {
-    // Decorators are read in the order the language plugin emits them (line-sorted).
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "class",
-        name: "Hybrid",
-        decorators: [makeDecorator("Injectable", [], 1), makeDecorator("Controller", ["'/x'"], 2)],
-      }),
-      makeCtx(),
-    )
-    // Injectable came first on line 1 so provider wins even though Controller is present.
-    expect(result?.extKind).toBe("framework:nestjs:provider")
-    expect(result?.decoratorBoundaries).toEqual({
-      Injectable: true,
-      Controller: true,
+  it.each([
+    ["Module", "module"],
+    ["Controller", "controller"],
+    ["Injectable", "provider"],
+    ["Catch", "filter"],
+  ])("makes a class decorated @%s a %s, and flags the decorator", (name, role) => {
+    expect(classifyDecorated("class", [name])).toEqual({
+      extKind: `framework:nestjs:${role}`,
+      decoratorBoundaries: { [name]: true },
+      derivedBy: `framework:nestjs:${role}`,
     })
+  })
+
+  it("gives a class the role of its first decorator, and flags every one it recognized", () => {
+    expect(classifyDecorated("class", ["Injectable", "Deprecated", "Controller"])).toEqual({
+      extKind: "framework:nestjs:provider",
+      decoratorBoundaries: { Injectable: true, Controller: true },
+      derivedBy: "framework:nestjs:provider",
+    })
+  })
+
+  it.each([
+    ["no decorators", []],
+    ["only decorators NestJS does not define", ["SomeOtherThing"]],
+  ])("returns null for a class with %s", (_label, decorators) => {
+    expect(classifyDecorated("class", decorators)).toBeNull()
   })
 })
 
@@ -107,18 +43,15 @@ describe("classifyNestjsSymbol — method decorators", () => {
     "Options",
     "Head",
     "All",
-  ])("@%s → framework:nestjs:route + boundary on the method", (name) => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: `C.method_${name}`,
-        decorators: [makeDecorator(name, ["'/x'"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:route")
-    expect(result?.decoratorBoundaries).toEqual({ [name]: true })
-    expect(result?.derivedBy).toBe(`framework:nestjs:route:${name}`)
+    "MessagePattern",
+    "EventPattern",
+    "SubscribeMessage",
+  ])("makes a method decorated @%s a route, and flags the decorator", (name) => {
+    expect(classifyDecorated("method", [name])).toEqual({
+      extKind: "framework:nestjs:route",
+      decoratorBoundaries: { [name]: true },
+      derivedBy: `framework:nestjs:route:${name}`,
+    })
   })
 
   it.each([
@@ -126,69 +59,27 @@ describe("classifyNestjsSymbol — method decorators", () => {
     "UseInterceptors",
     "UsePipes",
     "UseFilters",
-  ])("@%s marks a boundary but does NOT claim the route extKind", (name) => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: `S.method_${name}`,
-        decorators: [makeDecorator(name, ["Something"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBeUndefined()
-    expect(result?.decoratorBoundaries).toEqual({ [name]: true })
-    expect(result?.derivedBy).toBe(`framework:nestjs:handler:${name}`)
+  ])("flags @%s as a boundary without making the method a route", (name) => {
+    expect(classifyDecorated("method", [name])).toEqual({
+      decoratorBoundaries: { [name]: true },
+      derivedBy: `framework:nestjs:handler:${name}`,
+    })
   })
 
-  it("mixing HTTP method + Guard produces route extKind AND both boundaries", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: "C.protected",
-        decorators: [
-          makeDecorator("UseGuards", ["AuthGuard"], 1),
-          makeDecorator("Post", ["'/x'"], 2),
-        ],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:route")
-    expect(result?.decoratorBoundaries).toEqual({ UseGuards: true, Post: true })
-    expect(result?.derivedBy).toBe("framework:nestjs:route:Post")
+  it("makes a guarded method a route by its verb, and flags both decorators", () => {
+    expect(classifyDecorated("method", ["UseGuards", "Post"])).toEqual({
+      extKind: "framework:nestjs:route",
+      decoratorBoundaries: { UseGuards: true, Post: true },
+      derivedBy: "framework:nestjs:route:Post",
+    })
   })
 
-  it.each([
-    "MessagePattern",
-    "EventPattern",
-    "SubscribeMessage",
-  ])("pattern decorator @%s is a route-equivalent boundary", (name) => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: `H.method_${name}`,
-        decorators: [makeDecorator(name, ["'x'"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:route")
-    expect(result?.decoratorBoundaries).toEqual({ [name]: true })
-    expect(result?.derivedBy).toBe(`framework:nestjs:route:${name}`)
-  })
-
-  it("returns null for a method without any recognized decorator", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: "S.internal",
-        decorators: [makeDecorator("Deprecated")],
-      }),
-      makeCtx(),
-    )
-    expect(result).toBeNull()
+  it("returns null for a method with no decorator NestJS defines", () => {
+    expect(classifyDecorated("method", ["Deprecated"])).toBeNull()
   })
 })
 
-describe("classifyNestjsSymbol — non-classifiable Symbol kinds", () => {
+describe("classifyNestjsSymbol — other Symbol kinds", () => {
   it.each([
     "function",
     "interface",
@@ -196,40 +87,18 @@ describe("classifyNestjsSymbol — non-classifiable Symbol kinds", () => {
     "const",
     "namespace",
     "enum",
-  ] as const)("returns null for kind=%s so other classifiers can fire", (kind) => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind,
-        name: "X",
-        decorators: [makeDecorator("Controller")],
-      }),
-      makeCtx(),
-    )
-    expect(result).toBeNull()
+  ] as const)("returns null for a %s, even one decorated @Controller", (kind) => {
+    expect(classifyDecorated(kind, ["Controller"])).toBeNull()
   })
 })
 
-describe("classifyNestjsSymbol — empty decorator name fail-fast", () => {
-  it.each([
-    "class",
-    "method",
-  ] as const)("throws CoreError when a %s Symbol has a decorator with an empty name", (kind) => {
-    let caught: unknown
-    try {
-      classifyNestjsSymbol(
-        makeCandidate({
-          kind,
-          id: "ts:src/a.ts#Broken",
-          name: "Broken",
-          decorators: [makeDecorator("")],
-        }),
-        makeCtx(),
-      )
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(CoreError)
-    expect((caught as CoreError).code).toBe("anonymous-symbol-id-attempted")
-    expect((caught as CoreError).value).toBe("ts:src/a.ts#Broken")
+describe("classifyNestjsSymbol — a decorator with an empty name", () => {
+  it.each(["class", "method"] as const)("throws a CoreError naming the %s", async (kind) => {
+    const error = await errorFrom(CoreError, () => classifyDecorated(kind, [""]))
+
+    expect(error).toMatchObject({
+      code: "anonymous-symbol-id-attempted",
+      value: kind === "method" ? "ts:src/a.ts#C.m" : "ts:src/a.ts#C",
+    })
   })
 })

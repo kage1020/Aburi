@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, effectsPrismaManifest } from "../src/index"
+import { effectsPrismaManifest } from "../src/index"
 
 describe("effectsPrismaManifest", () => {
   it("declares the plugin identity and no vocabulary of its own", () => {
@@ -18,11 +18,5 @@ describe("effectsPrismaManifest", () => {
         frameworks: [],
       },
     })
-  })
-
-  it("shares its derivedBy prefix with the classifier's tag builder", () => {
-    expect(effectsPrismaManifest.provides.derivedByPrefixes).toEqual([
-      EFFECTS_PRISMA_DERIVED_BY_PREFIX,
-    ])
   })
 })

@@ -23,7 +23,6 @@ export function classifyDrizzleCall(
 ): EffectClassification | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_DRIZZLE_PLUGIN_NAME, filePath: ctx.file.path }
 
-  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why.
   const { segments, last: method } = assertNonEmptySegments(call.target, origin)
 
   if (!hasDrizzleImport(ctx.file.imports, ctx.file.path)) return null
@@ -37,6 +36,7 @@ export function classifyDrizzleCall(
     if (fluentRoots.has(segment)) return null
   }
 
+  // Every Drizzle write and transaction takes an argument, so a bare call is another API's.
   if (call.argumentCount < minArgumentsFor(method)) return null
 
   if (segments.length >= 4 && segments.at(-3) === "query" && isDrizzleQueryMethod(method)) {

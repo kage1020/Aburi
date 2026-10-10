@@ -55,7 +55,6 @@ describe("scan — a React app written in plain JavaScript", () => {
     expect(byName.get("RootLayout")?.extKind).toBe("framework:react:component")
     expect(byName.get("Home")?.extKind).toBe("framework:react:component")
     expect(byName.get("OldButton")?.extKind).toBe("framework:react:component")
-    // A hook is classified by its name, so this one passed before the routing changed too.
     expect(byName.get("useCounter")?.extKind).toBe("framework:react:hook")
   })
 

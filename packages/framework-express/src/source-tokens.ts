@@ -175,7 +175,6 @@ const REGEX_AFTER_KEYWORDS: ReadonlySet<string> = new Set([
 /** Statement heads whose `(…)` is followed by a statement rather than a value. */
 const CONTROL_KEYWORDS: ReadonlySet<string> = new Set(["for", "if", "while", "with"])
 
-/** Whether the `(` about to be pushed follows `if`, `for`, `while` or `with` as a keyword. */
 function isControlKeyword(tokens: readonly SourceToken[]): boolean {
   const before = tokens.at(-1)
   return (

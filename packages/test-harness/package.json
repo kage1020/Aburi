@@ -2,7 +2,7 @@
   "name": "@aburi/test-harness",
   "version": "0.0.0",
   "private": true,
-  "description": "Runs the real scan and diff for plugin and CLI suites: the core pipeline over a plugin lineup the suite chooses. It sits above @aburi/core, @aburi/diff and @aburi/plugin-registry, so their own suites use @aburi/test-support instead. Not published; consumed from source.",
+  "description": "Runs the real scan and diff for plugin and CLI suites: the core pipeline over a plugin lineup the suite chooses, or one file through a language plugin's parse and extraction. It sits above @aburi/core, @aburi/diff and @aburi/plugin-registry, so their own suites use @aburi/test-support instead. Not published; consumed from source.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

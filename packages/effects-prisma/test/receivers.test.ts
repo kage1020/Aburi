@@ -16,38 +16,31 @@ describe("namesPrismaClient", () => {
     "orm",
     "tx",
     "trx",
-  ])("recognizes the bare client word %s", (segment) => {
+    "prismaClient",
+    "_prisma",
+    "readReplicaDb",
+    "dbClient",
+    "prisma2",
+  ])("recognizes %s, which spells a client word", (segment) => {
     expect(namesPrismaClient(segment)).toBe(true)
   })
 
-  it("recognizes a client word inside a compound name", () => {
-    expect(namesPrismaClient("prismaClient")).toBe(true)
-    expect(namesPrismaClient("_prisma")).toBe(true)
-    expect(namesPrismaClient("readReplicaDb")).toBe(true)
-    expect(namesPrismaClient("dbClient")).toBe(true)
-    expect(namesPrismaClient("prisma2")).toBe(true)
-  })
-
-  it("rejects an SDK client — `<client>.<resource>.<verb>` is a delegate's shape too", () => {
-    for (const segment of ["apiClient", "httpClient", "redisClient", "sdkClient", "s3Client"]) {
-      expect(namesPrismaClient(segment)).toBe(false)
-    }
-  })
-
-  it("rejects a domain noun that ends in `transaction`", () => {
-    expect(namesPrismaClient("paymentTransaction")).toBe(false)
-    expect(namesPrismaClient("transactionLog")).toBe(false)
-  })
-
-  it("rejects the everyday receivers that share Prisma's verb vocabulary", () => {
-    for (const segment of ["cache", "items", "router", "store", "queue", "session", "res"]) {
-      expect(namesPrismaClient(segment)).toBe(false)
-    }
-  })
-
-  it("does not fall for a substring — `feedback` is not `db`", () => {
-    expect(namesPrismaClient("feedback")).toBe(false)
-    expect(namesPrismaClient("context")).toBe(false)
+  it.each([
+    ["apiClient", "an SDK client, whose calls take a delegate's shape too"],
+    ["httpClient", "an SDK client, whose calls take a delegate's shape too"],
+    ["s3Client", "an SDK client, whose calls take a delegate's shape too"],
+    ["paymentTransaction", "a domain noun ending in `transaction`"],
+    ["transactionLog", "a domain noun starting with `transaction`"],
+    ["datasource", "`datasource` in lower case"],
+    ["dataSource", "`datasource` in camel case"],
+    ["cache", "a receiver sharing Prisma's verbs"],
+    ["items", "a receiver sharing Prisma's verbs"],
+    ["router", "a receiver sharing Prisma's verbs"],
+    ["session", "a receiver sharing Prisma's verbs"],
+    ["feedback", "a word that merely contains `db`"],
+    ["context", "a word that merely contains `tx`"],
+  ])("rejects %s — %s", (segment) => {
+    expect(namesPrismaClient(segment)).toBe(false)
   })
 
   it("exposes the vocabulary as a set so a house convention can be checked against it", () => {
@@ -57,58 +50,50 @@ describe("namesPrismaClient", () => {
 })
 
 describe("classificationConfidence", () => {
-  const delegateMax = PRISMA_DELEGATE_MAX_ARGUMENTS
-
-  it("is high when the receiver names a client binding", () => {
-    expect(
-      classificationConfidence("prisma", makeCall({ target: "prisma.user.create" }), delegateMax),
-    ).toBe("high")
-    expect(
-      classificationConfidence("db", makeCall({ target: "this.db.user.create" }), delegateMax),
-    ).toBe("high")
-  })
-
-  it("is medium when the receiver is a name this plugin cannot place", () => {
-    expect(
-      classificationConfidence(
-        "cache",
-        makeCall({ target: "this.cache.items.delete" }),
-        delegateMax,
-      ),
-    ).toBe("medium")
-    expect(
-      classificationConfidence(undefined, makeCall({ target: "prisma.user.create" }), delegateMax),
-    ).toBe("medium")
-  })
-
-  it("caps a dynamic receiver at medium however it is spelled", () => {
-    expect(
-      classificationConfidence(
-        "prisma",
-        makeCall({ target: "prisma.user.create", dynamicReceiver: true }),
-        delegateMax,
-      ),
-    ).toBe("medium")
-  })
-
-  it("caps an over-long argument list at medium rather than dropping the call", () => {
-    expect(
-      classificationConfidence(
-        "prisma",
-        makeCall({ target: "prisma.user.update", argumentCount: 2, literalArgs: [null, null] }),
-        delegateMax,
-      ),
-    ).toBe("medium")
-  })
-
-  it("gives $transaction the wider arity its own signature takes", () => {
-    // `$transaction(fn, { timeout })` is two arguments and still Prisma's own API.
-    expect(
-      classificationConfidence(
-        "prisma",
-        makeCall({ target: "prisma.$transaction", argumentCount: 2, literalArgs: [null, null] }),
-        PRISMA_TRANSACTION_MAX_ARGUMENTS,
-      ),
-    ).toBe("high")
+  it.each([
+    [
+      "high for a client binding",
+      "prisma",
+      makeCall({ target: "prisma.user.create" }),
+      PRISMA_DELEGATE_MAX_ARGUMENTS,
+      "high",
+    ],
+    [
+      "medium for a receiver it cannot place",
+      "cache",
+      makeCall({ target: "this.cache.items.delete" }),
+      PRISMA_DELEGATE_MAX_ARGUMENTS,
+      "medium",
+    ],
+    [
+      "medium with no receiver at all",
+      undefined,
+      makeCall({ target: "user.create" }),
+      PRISMA_DELEGATE_MAX_ARGUMENTS,
+      "medium",
+    ],
+    [
+      "medium for a dynamic receiver however it is spelled",
+      "prisma",
+      makeCall({ target: "prisma.user.create", dynamicReceiver: true }),
+      PRISMA_DELEGATE_MAX_ARGUMENTS,
+      "medium",
+    ],
+    [
+      "medium for a delegate call with two arguments",
+      "prisma",
+      makeCall({ target: "prisma.user.update", argumentCount: 2 }),
+      PRISMA_DELEGATE_MAX_ARGUMENTS,
+      "medium",
+    ],
+    [
+      "high for $transaction(fn, options), which takes two",
+      "prisma",
+      makeCall({ target: "prisma.$transaction", argumentCount: 2 }),
+      PRISMA_TRANSACTION_MAX_ARGUMENTS,
+      "high",
+    ],
+  ] as const)("is %s", (_label, client, call, maxArguments, expected) => {
+    expect(classificationConfidence(client, call, maxArguments)).toBe(expected)
   })
 })

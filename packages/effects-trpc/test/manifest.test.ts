@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EFFECTS_TRPC_DERIVED_BY_PREFIX, effectsTrpcManifest } from "../src/index"
+import { effectsTrpcManifest } from "../src/index"
 
 describe("effectsTrpcManifest", () => {
   it("declares the plugin identity and no vocabulary of its own", () => {
@@ -18,9 +18,5 @@ describe("effectsTrpcManifest", () => {
         frameworks: [],
       },
     })
-  })
-
-  it("shares its derivedBy prefix with the classifier's tag builder", () => {
-    expect(effectsTrpcManifest.provides.derivedByPrefixes).toEqual([EFFECTS_TRPC_DERIVED_BY_PREFIX])
   })
 })

@@ -14,7 +14,6 @@ function isPrismaClientModule(source: string): boolean {
   return (PRISMA_CLIENT_MODULES as ReadonlySet<string>).has(source)
 }
 
-/** True when the file imports a Prisma Client module; see `hasMatchingImport`. */
 export function hasPrismaImport(imports: readonly ImportEdge[], filePath: string): boolean {
   return hasMatchingImport(
     imports,

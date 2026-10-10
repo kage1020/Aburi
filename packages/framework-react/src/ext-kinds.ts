@@ -1,4 +1,3 @@
-/** The `framework:react:*` extKinds this plugin owns; `REACT_EXT_KIND_SET` is the same list as a runtime set. */
 export const REACT_EXT_KINDS = [
   "framework:react:component",
   "framework:react:hook",

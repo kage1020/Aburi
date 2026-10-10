@@ -14,7 +14,6 @@ function isNestEmitterModule(source: string): boolean {
   return (NEST_EMITTER_MODULES as ReadonlySet<string>).has(source)
 }
 
-/** True when the file imports a recognized event-emitter module; see `hasMatchingImport`. */
 export function hasNestEmitterImport(imports: readonly ImportEdge[], filePath: string): boolean {
   return hasMatchingImport(
     imports,

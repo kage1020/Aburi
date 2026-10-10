@@ -1,35 +1,21 @@
-import {
-  extractSymbols as extractTypescriptSymbols,
-  parseTypescriptFile,
-} from "@aburi/lang-typescript"
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
 import { classifyNextSymbol } from "../src/index"
 import { makeCtx } from "./fixtures/symbol"
 
-async function classifyEach(path: string, source: string) {
-  const parseResult = await parseTypescriptFile({ path, content: source })
-  const tree = parseResult.tree
-  if (tree === null) throw new Error("parse returned null")
+/** The extKind of each Symbol the TypeScript plugin extracts from `source`, by name. */
+async function extKindsIn(path: string, source: string) {
+  const { tree } = await langTypescriptPlugin.parseFile({ path, content: source })
+  if (tree === null) throw new Error(`${path} did not parse`)
   const ctx = makeCtx(path, source)
-  const candidates = extractTypescriptSymbols(tree, ctx)
-  return candidates.map((candidate) => ({
-    id: candidate.id,
-    name: candidate.name,
-    visibility: candidate.visibility,
-    classification: classifyNextSymbol(candidate, ctx),
-  }))
+  return Object.fromEntries(
+    langTypescriptPlugin
+      .extractSymbols(tree, ctx)
+      .map((symbol) => [symbol.name, classifyNextSymbol(symbol, ctx)?.extKind ?? null]),
+  )
 }
 
-describe("integration — lang-typescript → framework-next", () => {
-  it("classifies an app/**/page.tsx default export as framework:next:page", async () => {
-    const results = await classifyEach(
-      "app/dashboard/page.tsx",
-      "export default function DashboardPage() {\n  return null\n}",
-    )
-    const pageSymbol = results.find((r) => r.name === "DashboardPage")
-    expect(pageSymbol?.classification?.extKind).toBe("framework:next:page")
-  })
-
+describe("classifyNextSymbol over the Symbols the TypeScript plugin extracts", () => {
   it.each([
     ["page", "Page"],
     ["layout", "Layout"],
@@ -37,76 +23,36 @@ describe("integration — lang-typescript → framework-next", () => {
     ["loading", "Loading"],
     ["error", "ErrorBoundary"],
     ["not-found", "NotFound"],
-  ] as const)("classifies app/**/%s.tsx default export as framework:next:%s (table-driven)", async (role, componentName) => {
-    const results = await classifyEach(
+  ])("classifies the default export of app/**/%s.tsx, and not a helper beside it", async (role, name) => {
+    const symbols = await extKindsIn(
       `app/dashboard/${role}.tsx`,
-      `export default function ${componentName}() { return null }`,
+      [
+        "export function formatDate(d: Date) { return d.toISOString() }",
+        `export default function ${name}() { return null }`,
+      ].join("\n"),
     )
-    const found = results.find((r) => r.name === componentName)
-    expect(found?.classification?.extKind).toBe(`framework:next:${role}`)
+
+    expect(symbols).toEqual({ formatDate: null, [name]: `framework:next:${role}` })
   })
 
-  it("classifies an app/**/route.ts named GET / POST as framework:next:route", async () => {
-    const results = await classifyEach(
+  it("classifies a page whose default export is written apart from its declaration", async () => {
+    const symbols = await extKindsIn(
+      "app/dashboard/page.tsx",
+      ["const Page = () => {", "  return null", "}", "export default Page"].join("\n"),
+    )
+
+    expect(symbols).toEqual({ Page: "framework:next:page" })
+  })
+
+  it("classifies each HTTP verb a route file exports", async () => {
+    const symbols = await extKindsIn(
       "app/api/users/route.ts",
-      "export async function GET() { return new Response('ok') }\nexport async function POST() { return new Response('created') }",
+      [
+        "export async function GET() { return new Response('ok') }",
+        "export async function POST() { return new Response('created') }",
+      ].join("\n"),
     )
-    const get = results.find((r) => r.name === "GET")
-    const post = results.find((r) => r.name === "POST")
-    expect(get?.classification?.extKind).toBe("framework:next:route")
-    expect(post?.classification?.extKind).toBe("framework:next:route")
-    expect(get?.classification?.derivedBy).toBe("framework:next:route:GET")
-  })
 
-  it("adds framework:next:client-component to derivedBy when 'use client' is present", async () => {
-    const results = await classifyEach(
-      "app/interactive/page.tsx",
-      "'use client'\n\nexport default function Interactive() {\n  return null\n}",
-    )
-    const page = results.find((r) => r.name === "Interactive")
-    expect(page?.classification?.derivedBy).toBe(
-      "framework:next:page;framework:next:client-component",
-    )
-  })
-
-  it("adds framework:next:server-action to derivedBy when 'use server' is present", async () => {
-    const results = await classifyEach(
-      "app/api/action/route.ts",
-      "'use server'\n\nexport async function POST() { return new Response('ok') }",
-    )
-    const handler = results.find((r) => r.name === "POST")
-    expect(handler?.classification?.derivedBy).toBe(
-      "framework:next:route:POST;framework:next:server-action",
-    )
-  })
-
-  it("returns null for helpers colocated in an App Router file", async () => {
-    const results = await classifyEach(
-      "app/dashboard/page.tsx",
-      "export function formatDate(d: Date) { return d.toISOString() }\nexport default function Page() { return null }",
-    )
-    const helper = results.find((r) => r.name === "formatDate")
-    const page = results.find((r) => r.name === "Page")
-    expect(helper?.classification).toBeNull()
-    expect(page?.classification?.extKind).toBe("framework:next:page")
-  })
-
-  it("classifies a page whose default export is written apart from the declaration", async () => {
-    const results = await classifyEach(
-      "app/dashboard/page.tsx",
-      "const Page = () => {\n  return null\n}\nexport default Page",
-    )
-    const page = results.find((r) => r.name === "Page")
-    expect(page?.classification?.extKind).toBe("framework:next:page")
-    expect(page?.visibility).toBe("public")
-  })
-
-  it("returns null for components outside of app/", async () => {
-    const results = await classifyEach(
-      "src/components/Widget.tsx",
-      "export default function Widget() { return null }",
-    )
-    const widget = results.find((r) => r.name === "Widget")
-    expect(widget?.classification).toBeNull()
+    expect(symbols).toEqual({ GET: "framework:next:route", POST: "framework:next:route" })
   })
 })

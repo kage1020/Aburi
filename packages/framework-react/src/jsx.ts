@@ -1,6 +1,5 @@
 import { asSyntaxNode, findNamedChildOfType, type SyntaxNode } from "@aburi/core"
 
-/** Tree-sitter node types the tsx grammar uses for JSX. */
 const JSX_NODE_TYPES: ReadonlySet<string> = new Set([
   "jsx_element",
   "jsx_self_closing_element",
@@ -8,7 +7,6 @@ const JSX_NODE_TYPES: ReadonlySet<string> = new Set([
   "jsx_opening_element",
 ])
 
-/** JSX element forms that carry a `name` field (fragments do not). */
 const JSX_ELEMENT_TYPES: ReadonlySet<string> = new Set([
   "jsx_element",
   "jsx_self_closing_element",
@@ -89,7 +87,6 @@ function findFirstJsxElementOnly(node: SyntaxNode): SyntaxNode | null {
   return null
 }
 
-/** Opening-element name; `null` for fragments (no name) and for a missing `name` field. */
 function jsxElementName(node: SyntaxNode): string | null {
   if (node.type === "jsx_fragment") return null
   if (node.type === "jsx_self_closing_element") {

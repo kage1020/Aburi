@@ -81,7 +81,6 @@ describe("scan — a bracket on something that is not a client", () => {
     const drain = symbolById(result, "ts:src/queue.ts#drain")
 
     expect(drain.effects.map((e) => e.target)).toEqual(["prisma.job.findMany"])
-    // They are still calls, with the segment saying what the source computed.
     expect(drain.calls.map((c) => c.target)).toEqual([
       "queues.<computed>.upsert",
       "sets.<computed>.delete",

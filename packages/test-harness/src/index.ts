@@ -1,7 +1,15 @@
 import { type ScanInput, type ScanResult, scan } from "@aburi/core"
 import { buildDiff } from "@aburi/diff"
 import { VocabRegistry } from "@aburi/plugin-registry"
-import type { Config, EffectPlugin, FrameworkPlugin, IR, LanguagePlugin } from "@aburi/types"
+import type {
+  Config,
+  EffectPlugin,
+  FrameworkClassifyContext,
+  FrameworkPlugin,
+  IR,
+  LanguagePlugin,
+  SymbolCandidate,
+} from "@aburi/types"
 
 export const IR_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
 
@@ -39,4 +47,25 @@ export function diffIRs(baseIR: IR, headIR: IR): ReturnType<typeof buildDiff> {
     base: { ref: "base", irSchema: IR_SCHEMA_URL },
     head: { ref: "head", irSchema: IR_SCHEMA_URL },
   })
+}
+
+export interface ExtractedFile<TNode> {
+  /** The context a framework plugin classifies these candidates in. */
+  readonly ctx: FrameworkClassifyContext
+  readonly candidates: SymbolCandidate<TNode>[]
+}
+
+/** One in-memory file through `language`'s parse and extraction, as the scan runs them. */
+export async function extractFile<TTree, TNode>(
+  language: LanguagePlugin<TTree, TNode>,
+  path: string,
+  content: string,
+): Promise<ExtractedFile<TNode>> {
+  const file = { path, content }
+  const { tree, imports } = await language.parseFile(file)
+  if (tree === null) throw new Error(`${language.manifest.name} could not parse ${path}`)
+  const registry = new VocabRegistry()
+  registry.register(language.manifest)
+  const ctx: FrameworkClassifyContext = { file, registry, config: {}, imports }
+  return { ctx, candidates: language.extractSymbols(tree, ctx) }
 }

@@ -24,7 +24,6 @@ const PRISMA_WRITE_METHODS_LIST = [
 export type PrismaReadMethod = (typeof PRISMA_READ_METHODS_LIST)[number]
 export type PrismaWriteMethod = (typeof PRISMA_WRITE_METHODS_LIST)[number]
 
-/** Top-level client method: `prisma.$transaction(...)`. Not nested under a model. */
 export type PrismaTransactionMethod = "$transaction"
 
 export const PRISMA_READ_METHODS: ReadonlySet<PrismaReadMethod> = new Set(PRISMA_READ_METHODS_LIST)

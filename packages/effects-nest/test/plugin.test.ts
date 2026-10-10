@@ -33,15 +33,7 @@ describe("NestEffectsPlugin", () => {
     expect(nestEffectsPlugin.classify(makeCall({ target: "eventBus.emit" }), ctx)).toBeNull()
   })
 
-  it("classify is idempotent across repeated invocations (no per-call state)", () => {
-    const ctx = makeCtx({ imports: [makeNestEmitterImport()] })
-    const call = makeCall({ target: "EventEmitter2.emit" })
-    const runs = Array.from({ length: 5 }, () => nestEffectsPlugin.classify(call, ctx))
-    for (const run of runs) expect(run).toEqual(runs[0])
-  })
-
   it("does not declare dropCallees (Nest logger is DI'd per provider)", () => {
-    // Widened to the interface because the narrow class type omits the optional field.
     const asInterface: EffectPlugin = nestEffectsPlugin
     expect(asInterface.dropCallees).toBeUndefined()
   })

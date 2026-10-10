@@ -1,12 +1,6 @@
-import { parseTypescriptFile } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
 import { bodyCallsAnotherHook, matchesHookNaming } from "../src/index"
-
-async function parseRoot(source: string): Promise<unknown> {
-  const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
-  if (result.tree === null) throw new Error("parse returned null")
-  return result.tree.rootNode
-}
+import { candidateNamed } from "./fixtures/symbol"
 
 describe("matchesHookNaming", () => {
   it.each([
@@ -25,23 +19,20 @@ describe("matchesHookNaming", () => {
 })
 
 describe("bodyCallsAnotherHook", () => {
-  it("returns false for null (no body)", () => {
+  it.each([
+    ["a hook called directly", true, "function useThing() { const [x] = useState(0); return x }"],
+    [
+      "a hook called through a member, matched on its leaf",
+      true,
+      "function useThing() { React.useEffect(() => {}, []); return null }",
+    ],
+    ["only other functions", false, "function useThing() { return doWork() }"],
+  ])("reads a body calling %s as calling a hook: %s", async (_label, expected, source) => {
+    const { bodyNode } = await candidateNamed(source, "useThing")
+    expect(bodyCallsAnotherHook(bodyNode)).toBe(expected)
+  })
+
+  it("returns false when there is no body", () => {
     expect(bodyCallsAnotherHook(null)).toBe(false)
-  })
-
-  it("returns true when the body calls useState directly", async () => {
-    const root = await parseRoot("function useThing() { const [x] = useState(0); return x }")
-    expect(bodyCallsAnotherHook(root)).toBe(true)
-  })
-
-  it("returns true when the body calls a hook via member expression", async () => {
-    // Leaf-only match: React.useEffect counts as a hook-call because the leaf is useEffect.
-    const root = await parseRoot("function useX() { React.useEffect(() => {}, []); return null }")
-    expect(bodyCallsAnotherHook(root)).toBe(true)
-  })
-
-  it("returns false when the body only calls non-hooks", async () => {
-    const root = await parseRoot("function useNothing() { return doWork() }")
-    expect(bodyCallsAnotherHook(root)).toBe(false)
   })
 })

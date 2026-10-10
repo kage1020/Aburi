@@ -9,7 +9,6 @@ import {
 export const EXPRESS_ROUTER_FACTORIES: ReadonlySet<string> = new Set(["Router"])
 
 export interface RouterCall {
-  /** Full callee text as written in source: "Router" or "express.Router". */
   readonly callee: string
 }
 

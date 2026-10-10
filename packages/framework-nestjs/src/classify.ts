@@ -113,7 +113,6 @@ function classifyMethod(
   return null
 }
 
-/** The decorator a branch settled on, paired with how far its provenance is trusted. */
 interface ResolvedWinner {
   canonical: string
   confidence: Confidence

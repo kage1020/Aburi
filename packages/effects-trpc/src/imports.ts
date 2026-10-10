@@ -6,7 +6,6 @@ const isTrpcClientModule = matchesModuleOrSubpath("@trpc/client", "@trpc/react-q
 
 const isTrpcServerModule = matchesModuleOrSubpath("@trpc/server")
 
-/** True when the file imports a tRPC client module; see `hasMatchingImport`. */
 export function hasTrpcClientImport(imports: readonly ImportEdge[], filePath: string): boolean {
   return hasMatchingImport(
     imports,

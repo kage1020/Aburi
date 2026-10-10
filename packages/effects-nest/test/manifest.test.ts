@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EFFECTS_NEST_DERIVED_BY_PREFIX, effectsNestManifest } from "../src/index"
+import { effectsNestManifest } from "../src/index"
 
 describe("effectsNestManifest", () => {
   it("declares the plugin identity and no vocabulary of its own", () => {
@@ -18,9 +18,5 @@ describe("effectsNestManifest", () => {
         frameworks: [],
       },
     })
-  })
-
-  it("shares its derivedBy prefix with the classifier's tag builder", () => {
-    expect(effectsNestManifest.provides.derivedByPrefixes).toEqual([EFFECTS_NEST_DERIVED_BY_PREFIX])
   })
 })

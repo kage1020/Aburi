@@ -18,7 +18,7 @@ class DrizzleEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Ready-to-register instance; left unannotated so the manifest literals stay visible. */
+/** Left unannotated so the manifest literals stay visible. */
 export const drizzleEffectsPlugin = new DrizzleEffectsPlugin()
 
 export { DrizzleEffectsPlugin }

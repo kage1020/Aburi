@@ -1,4 +1,3 @@
-/** Class-level decorators → extKind plus the semantic role `classifyClass` puts in `derivedBy`. */
 export const NESTJS_CLASS_DECORATORS: ReadonlyMap<string, { extKind: string; role: string }> =
   new Map([
     ["Module", { extKind: "framework:nestjs:module", role: "module" }],
@@ -7,7 +6,6 @@ export const NESTJS_CLASS_DECORATORS: ReadonlyMap<string, { extKind: string; rol
     ["Catch", { extKind: "framework:nestjs:filter", role: "filter" }],
   ])
 
-/** Each marks the method as a boundary and a `framework:nestjs:route`. */
 export const NESTJS_HTTP_METHOD_DECORATORS: ReadonlySet<string> = new Set([
   "Get",
   "Post",
@@ -19,7 +17,6 @@ export const NESTJS_HTTP_METHOD_DECORATORS: ReadonlySet<string> = new Set([
   "All",
 ])
 
-/** Cross-cutting decorators: a boundary on their own, even on an unrouted service method. */
 export const NESTJS_HANDLER_DECORATORS: ReadonlySet<string> = new Set([
   "UseGuards",
   "UseInterceptors",
@@ -27,14 +24,12 @@ export const NESTJS_HANDLER_DECORATORS: ReadonlySet<string> = new Set([
   "UseFilters",
 ])
 
-/** `@nestjs/microservices` and `@nestjs/websockets` entry points, route-equivalent boundaries. */
 export const NESTJS_PATTERN_DECORATORS: ReadonlySet<string> = new Set([
   "MessagePattern",
   "EventPattern",
   "SubscribeMessage",
 ])
 
-/** True when `name` flips `Decorator.boundary` on a method: any of the three sets above. */
 export function isMethodBoundaryDecorator(name: string): boolean {
   return (
     NESTJS_HTTP_METHOD_DECORATORS.has(name) ||
@@ -43,7 +38,7 @@ export function isMethodBoundaryDecorator(name: string): boolean {
   )
 }
 
-/** `NESTJS_CLASS_DECORATORS.get`, exported for symmetry with `isMethodBoundaryDecorator`. */
+/** Exported for symmetry with `isMethodBoundaryDecorator`. */
 export function classifyClassDecorator(
   name: string,
 ): { extKind: string; role: string } | undefined {

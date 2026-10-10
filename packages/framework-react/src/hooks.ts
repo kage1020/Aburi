@@ -1,6 +1,6 @@
 import { anyCallCalleeMatches, asSyntaxNode } from "@aburi/core"
 
-/** `use` followed by a capital (`useState`), the same rule `eslint-plugin-react-hooks` enforces; `useful` does not match. */
+/** The rule `eslint-plugin-react-hooks` enforces. */
 export function matchesHookNaming(leaf: string): boolean {
   return /^use[A-Z]/.test(leaf)
 }

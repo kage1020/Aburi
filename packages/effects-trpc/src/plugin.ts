@@ -18,7 +18,7 @@ class TrpcEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Ready-to-register instance; left unannotated so the manifest literals stay visible. */
+/** Left unannotated so the manifest literals stay visible. */
 export const trpcEffectsPlugin = new TrpcEffectsPlugin()
 
 export { TrpcEffectsPlugin }

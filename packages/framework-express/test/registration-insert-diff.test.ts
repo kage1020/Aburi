@@ -17,7 +17,6 @@ async function scanSource(): Promise<IR> {
   return ir
 }
 
-/** Scan `before`, rewrite the one source file to `after`, scan again, diff the two. */
 async function diffOfEdit(before: string, after: string) {
   await workspace.writeSource(SOURCE, before)
   const baseIR = await scanSource()
@@ -37,7 +36,6 @@ const AUTH = [
   "})",
 ]
 
-/** The ids the diff reports `added`, or `removed`: the two statuses that carry one `symbol`. */
 function idsWith(diff: ReturnType<typeof diffIRs>, status: "added" | "removed"): string[] {
   const ids: string[] = []
   for (const change of diff.symbols) {
@@ -77,7 +75,6 @@ describe("diff — a registration inserted above others", () => {
   })
 
   it("is one addition for routes mounted through app.route with one handler name", async () => {
-    // Named by the leaf call alone, the three were `app__get__h`, told apart by order.
     const a = "app.route('/a').get(async (req, res) => { res.json(await listA()) })"
     const b =
       "app.route('/b').get(async (req, res) => { await audit(req); res.json(await listB()) })"

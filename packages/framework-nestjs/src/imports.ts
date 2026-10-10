@@ -10,12 +10,10 @@ import { FRAMEWORK_NESTJS_PLUGIN_NAME } from "./manifest"
 
 const NESTJS_SCOPE = "@nestjs/"
 
-/** True when `source` names a package inside the NestJS npm scope. */
 export function isNestjsModule(source: string): boolean {
   return source.startsWith(NESTJS_SCOPE)
 }
 
-/** What the file's imports say about one written identifier. */
 interface NameOrigin {
   readonly imported: string
   /** The module specifier the name came from, kept so a downgrade can say which module caused it. */
@@ -29,9 +27,8 @@ interface NamespaceOrigin {
 }
 
 export interface ImportedBindings {
-  /** Written identifier → origin. A name the edges never mention is absent, unlike one attributed to a foreign module. */
+  /** A name the edges never mention is absent, unlike one attributed to a foreign module. */
   readonly names: ReadonlyMap<string, NameOrigin>
-  /** Local name a namespace edge bound → what module it names. */
   readonly namespaces: ReadonlyMap<string, NamespaceOrigin>
 }
 
@@ -66,7 +63,6 @@ export function readImportedNames(
 }
 
 export interface ResolvedDecoratorName {
-  /** What the decorator tables are matched against. */
   canonical: string
   confidence: Confidence
 }
@@ -94,7 +90,7 @@ export function resolveDecoratorName(
   return { canonical, confidence: origin.fromNestjs ? "high" : "medium" }
 }
 
-/** `a.b` → `a`; `nest` → `nest`. The only segment of a receiver that can name a binding. */
+/** The only segment of a receiver that can name a binding. */
 function headSegment(qualifier: string): string {
   const dot = qualifier.indexOf(".")
   return dot === -1 ? qualifier : qualifier.slice(0, dot)

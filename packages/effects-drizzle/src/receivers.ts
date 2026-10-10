@@ -18,12 +18,10 @@ export const DRIZZLE_CLIENT_WORDS: ReadonlySet<DrizzleClientWord> = new Set(
   DRIZZLE_CLIENT_WORDS_LIST,
 )
 
-/** True when `segment` spells a word this package recognizes as a Drizzle client binding. */
 export function namesDrizzleClient(segment: string): boolean {
   return identifierMentions(segment, DRIZZLE_CLIENT_WORDS as ReadonlySet<string>)
 }
 
-/** `receiverConfidence` under this package's client vocabulary. */
 export function classificationConfidence(
   clientSegment: string | undefined,
   call: CallCandidate,

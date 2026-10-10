@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, effectsDrizzleManifest } from "../src/index"
+import { effectsDrizzleManifest } from "../src/index"
 
 describe("effectsDrizzleManifest", () => {
   it("declares the plugin identity and no vocabulary of its own", () => {
@@ -18,11 +18,5 @@ describe("effectsDrizzleManifest", () => {
         frameworks: [],
       },
     })
-  })
-
-  it("shares its derivedBy prefix with the classifier's tag builder", () => {
-    expect(effectsDrizzleManifest.provides.derivedByPrefixes).toEqual([
-      EFFECTS_DRIZZLE_DERIVED_BY_PREFIX,
-    ])
   })
 })

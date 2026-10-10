@@ -18,7 +18,7 @@ class NestEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Ready-to-register instance; left unannotated so the manifest literals stay visible. */
+/** Left unannotated so the manifest literals stay visible. */
 export const nestEffectsPlugin = new NestEffectsPlugin()
 
 export { NestEffectsPlugin }

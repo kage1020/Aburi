@@ -20,7 +20,6 @@ function stripUtf8Bom(source: string): string {
   return source.startsWith(UTF8_BOM) ? source.slice(UTF8_BOM.length) : source
 }
 
-/** The input from its first non-comment, non-whitespace character, or `null` if there is none. */
 function skipLeadingCommentsAndWhitespace(source: string): string | null {
   let index = 0
   while (index < source.length) {
@@ -45,9 +44,7 @@ function skipLeadingCommentsAndWhitespace(source: string): string | null {
 }
 
 interface StringLiteralStatement {
-  /** The unquoted body of the string literal (`"use client"` → `use client`). */
   body: string
-  /** Everything left in the source after the statement's terminator. */
   rest: string
 }
 

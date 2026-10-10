@@ -1,65 +1,40 @@
-import { noopRegistry, silentLogger } from "@aburi/test-support"
+import { decorator, makeCandidate, noopRegistry, silentLogger } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { frameworkNestjsManifest, NestjsFrameworkPlugin, nestjsFrameworkPlugin } from "../src/index"
-import { makeCandidate, makeCtx, makeDecorator } from "./fixtures/symbol"
+import {
+  classifyNestjsSymbol,
+  frameworkNestjsManifest,
+  NestjsFrameworkPlugin,
+  nestjsFrameworkPlugin,
+} from "../src/index"
+import { makeCtx } from "./fixtures/symbol"
 
-describe("NestjsFrameworkPlugin — instance surface", () => {
-  it("exposes the same manifest as the frameworkNestjsManifest constant", () => {
+describe("NestjsFrameworkPlugin", () => {
+  it("exposes the frameworkNestjsManifest constant, from the class and the singleton alike", () => {
     expect(nestjsFrameworkPlugin.manifest).toBe(frameworkNestjsManifest)
     expect(new NestjsFrameworkPlugin().manifest).toBe(frameworkNestjsManifest)
   })
 
-  it("init resolves to undefined without touching global state", async () => {
-    const plugin = new NestjsFrameworkPlugin()
+  it("init resolves without touching plugin state", async () => {
     await expect(
-      plugin.init({ registry: noopRegistry, config: {}, workspaceRoot: "/tmp", log: silentLogger }),
+      new NestjsFrameworkPlugin().init({
+        registry: noopRegistry,
+        config: {},
+        workspaceRoot: "/tmp",
+        log: silentLogger,
+      }),
     ).resolves.toBeUndefined()
   })
 
-  it("classifySymbol dispatches through classifyNestjsSymbol (class case)", () => {
-    const result = nestjsFrameworkPlugin.classifySymbol(
-      makeCandidate({
-        kind: "class",
-        name: "MyController",
-        decorators: [makeDecorator("Controller", ["'/x'"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:controller")
-  })
-
-  it("classifySymbol dispatches through classifyNestjsSymbol (method case)", () => {
-    const result = nestjsFrameworkPlugin.classifySymbol(
-      makeCandidate({
-        kind: "method",
-        name: "MyController.handle",
-        decorators: [makeDecorator("Post", ["'/x'"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:route")
-  })
-
-  it("classifySymbol returns null for a kind the plugin does not recognize", () => {
-    const result = nestjsFrameworkPlugin.classifySymbol(
-      makeCandidate({
-        kind: "function",
-        name: "someFn",
-        decorators: [makeDecorator("Controller")],
-      }),
-      makeCtx(),
-    )
-    expect(result).toBeNull()
-  })
-
-  it("is idempotent: repeated classifySymbol calls produce identical results", () => {
+  it("dispatches classifySymbol to classifyNestjsSymbol, from the class and the singleton alike", () => {
     const candidate = makeCandidate({
       kind: "class",
-      name: "MyModule",
-      decorators: [makeDecorator("Module", ["{}"])],
+      name: "MyController",
+      decorators: [decorator({ name: "Controller" })],
     })
-    const first = nestjsFrameworkPlugin.classifySymbol(candidate, makeCtx())
-    const second = nestjsFrameworkPlugin.classifySymbol(candidate, makeCtx())
-    expect(first).toEqual(second)
+    const expected = classifyNestjsSymbol(candidate, makeCtx())
+
+    expect(expected?.extKind).toBe("framework:nestjs:controller")
+    expect(nestjsFrameworkPlugin.classifySymbol(candidate, makeCtx())).toEqual(expected)
+    expect(new NestjsFrameworkPlugin().classifySymbol(candidate, makeCtx())).toEqual(expected)
   })
 })

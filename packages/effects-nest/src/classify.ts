@@ -9,7 +9,6 @@ export function classifyNestCall(
 ): EffectClassification | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_NEST_PLUGIN_NAME, filePath: ctx.file.path }
 
-  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why.
   const { segments, last: method } = assertNonEmptySegments(call.target, origin)
 
   if (!hasNestEmitterImport(ctx.file.imports, ctx.file.path)) return null

@@ -27,7 +27,6 @@ const NEXT_APP_ROUTER_COMPONENT_EXTENSIONS: ReadonlySet<string> = new Set([
 /** The runtime does not recognize `route.tsx` / `route.jsx`: route files never render JSX. */
 const NEXT_APP_ROUTER_ROUTE_EXTENSIONS: ReadonlySet<string> = new Set([".ts", ".js"])
 
-/** Result of `recognizeAppRouterFile`; callers branch on `role`. */
 export type AppRouterFile = { readonly role: AppRouterRole }
 
 export function recognizeAppRouterFile(path: string): AppRouterFile | null {

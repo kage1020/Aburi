@@ -4,7 +4,7 @@ const DRIZZLE_WRITE_METHODS_LIST = ["insert", "update", "delete"] as const
 
 const DRIZZLE_TRANSACTION_METHODS_LIST = ["transaction", "batch"] as const
 
-/** Relational query API terminals (`db.query.<table>.findMany`). No `findUnique` — that is Prisma. */
+/** `findUnique` is Prisma's, not Drizzle's. */
 const DRIZZLE_QUERY_METHODS_LIST = ["findMany", "findFirst"] as const
 
 export type DrizzleReadMethod = (typeof DRIZZLE_READ_METHODS_LIST)[number]
@@ -51,7 +51,6 @@ const DRIZZLE_MULTI_ARGUMENT_TERMINALS: ReadonlyMap<
 
 const DEFAULT_MAX_ARGUMENTS = 1
 
-/** The most arguments `method` takes before the call stops looking like Drizzle's own API. */
 export function maxArgumentsFor(method: string): number {
   return (
     (DRIZZLE_MULTI_ARGUMENT_TERMINALS as ReadonlyMap<string, number>).get(method) ??
@@ -66,7 +65,6 @@ const DRIZZLE_REQUIRED_ARGUMENT_TERMINALS: ReadonlySet<
   ...DRIZZLE_TRANSACTION_METHODS_LIST,
 ])
 
-/** The fewest arguments `method` takes as Drizzle's own API: one for those terminals, else 0. */
 export function minArgumentsFor(method: string): number {
   return (DRIZZLE_REQUIRED_ARGUMENT_TERMINALS as ReadonlySet<string>).has(method) ? 1 : 0
 }

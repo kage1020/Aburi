@@ -70,18 +70,13 @@ describe("scan + diff — writes in catch and finally", () => {
       "db.write prisma.account.deleteMany",
       "db.write prisma.lock.delete",
     ])
-    // The catch clause's `throw e` is withheld: the one rule is the `try`.
     expect(symbol.rules.map((r) => r.type)).toEqual(["try"])
     expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
     expect(head.ir.stats.effectPropagation.symbolsWithPropagatedEffects).toBe(0)
 
-    const changes = diffIRs(base.ir, head.ir).symbols
-    expect(changes).toHaveLength(1)
-    const [change] = changes
-    expect(change?.status).toBe("changed")
-    if (change?.status !== "changed") return
-    expect(change.after.id).toBe(TRANSFER)
-    expect(change.delta.logicChanged).toBe(true)
+    expect(diffIRs(base.ir, head.ir).symbols).toMatchObject([
+      { status: "changed", after: { id: TRANSFER }, delta: { logicChanged: true } },
+    ])
   })
 
   it("reports a rewritten catch clause that adds no effect as syntax-only", async () => {
@@ -90,14 +85,13 @@ describe("scan + diff — writes in catch and finally", () => {
 
     expect(symbolById(head, TRANSFER).rules.map((r) => r.type)).toEqual(["try"])
 
-    const changes = diffIRs(base.ir, head.ir).symbols
-    expect(changes).toHaveLength(1)
-    const [change] = changes
-    expect(change?.status).toBe("changed")
-    if (change?.status !== "changed") return
-    expect(change.after.id).toBe(TRANSFER)
-    expect(change.delta.logicChanged).toBe(false)
-    expect(change.delta.syntaxChanged).toBe(true)
+    expect(diffIRs(base.ir, head.ir).symbols).toMatchObject([
+      {
+        status: "changed",
+        after: { id: TRANSFER },
+        delta: { logicChanged: false, syntaxChanged: true },
+      },
+    ])
   })
 })
 
@@ -123,12 +117,8 @@ describe("scan + diff — a call in catch or finally to a helper that writes", (
     expect(head.ir.stats.effectPropagation.propagatedEffectCount).toBeGreaterThanOrEqual(1)
     expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
 
-    const changes = diffIRs(base.ir, head.ir).symbols
-    expect(changes).toHaveLength(1)
-    const [change] = changes
-    expect(change?.status).toBe("changed")
-    if (change?.status !== "changed") return
-    expect(change.after.id).toBe(TRANSFER)
-    expect(change.delta.logicChanged).toBe(true)
+    expect(diffIRs(base.ir, head.ir).symbols).toMatchObject([
+      { status: "changed", after: { id: TRANSFER }, delta: { logicChanged: true } },
+    ])
   })
 })

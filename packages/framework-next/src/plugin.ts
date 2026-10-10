@@ -9,7 +9,6 @@ import type {
 import { classifyNextSymbol } from "./classify"
 import { frameworkNextManifest } from "./manifest"
 
-/** Pure classifier over `SymbolCandidate.source.file` and the module directive; no lazy resources. */
 class NextFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkNextManifest
 

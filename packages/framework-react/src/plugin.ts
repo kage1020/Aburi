@@ -9,7 +9,6 @@ import type {
 import { classifyReactSymbol } from "./classify"
 import { frameworkReactManifest } from "./manifest"
 
-/** Pure classifier over `SymbolCandidate` name / kind / body / fullNode; no lazy resources. */
 class ReactFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkReactManifest
 

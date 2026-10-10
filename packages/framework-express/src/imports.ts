@@ -11,9 +11,7 @@ export function importListMentionsExpress(imports: readonly ImportEdge[]): boole
   return imports.some((edge) => isExpressSpecifier(edge.source))
 }
 
-/** What a file's source text says about `express`, read by `readExpressFromText`. */
 export interface ExpressInText {
-  /** A `require("express")` call: `require`, `(`, the specifier, `)`. */
   requires: boolean
   imports: boolean
 }
@@ -22,13 +20,12 @@ export function readExpressFromText(content: string): ExpressInText {
   const tokens = tokenize(content)
   let requires = false
   let imports = false
-  // The `import` / `export` keyword whose specifier has not been reached yet.
-  let statement = -1
+  let keywordAwaitingSpecifier = -1
   for (let i = 0; i < tokens.length && !(requires && imports); i++) {
     const token = tokens[i] as SourceToken
     if (token.kind === "word") {
       if ((token.text === "import" || token.text === "export") && !isOther(tokens[i - 1], ".")) {
-        statement = i
+        keywordAwaitingSpecifier = i
       } else if (
         token.text === "require" &&
         isOther(tokens[i + 1], "(") &&
@@ -42,14 +39,14 @@ export function readExpressFromText(content: string): ExpressInText {
     if (token.kind === "string") {
       const before = tokens[i - 1]
       const isSpecifier =
-        i === statement + 1 ||
-        (i === statement + 2 && isOther(before, "(")) ||
+        i === keywordAwaitingSpecifier + 1 ||
+        (i === keywordAwaitingSpecifier + 2 && isOther(before, "(")) ||
         (before?.kind === "word" && before.text === "from")
-      if (statement !== -1 && isSpecifier && isExpressString(token)) imports = true
-      statement = -1
+      if (keywordAwaitingSpecifier !== -1 && isSpecifier && isExpressString(token)) imports = true
+      keywordAwaitingSpecifier = -1
       continue
     }
-    if (token.text === ";") statement = -1
+    if (token.text === ";") keywordAwaitingSpecifier = -1
   }
   return { requires, imports }
 }
