@@ -1,10 +1,11 @@
-import { defineConfig } from "vitest/config"
+import { defineConfig, mergeConfig } from "vitest/config"
+import shared from "../../vitest.shared"
 
-export default defineConfig({
-  test: {
-    include: ["test/**/*.test.ts"],
-    environment: "node",
-    testTimeout: 30_000,
-    globalSetup: ["./scripts/copy-grammars.mjs"],
-  },
-})
+export default mergeConfig(
+  shared,
+  defineConfig({
+    test: {
+      globalSetup: ["./scripts/copy-grammars.mjs"],
+    },
+  }),
+)

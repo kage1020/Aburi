@@ -5,17 +5,20 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "outputLogs": "errors-only"
     },
     "@aburi/lang-typescript#build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
-      "outputs": ["dist/**", "wasm/**"]
+      "outputs": ["dist/**", "wasm/**"],
+      "outputLogs": "errors-only"
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**"],
-      "outputs": []
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**", "$TURBO_ROOT$/vitest.shared.ts"],
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
     "@aburi/github-action#test": {
       "dependsOn": ["^build"],
@@ -26,17 +29,20 @@
         "$TURBO_ROOT$/docs/**/*.md",
         "$TURBO_ROOT$/.github/workflows/*.yml"
       ],
-      "outputs": []
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
     "@aburi/lang-typescript#test": {
       "dependsOn": ["^build", "@aburi/lang-typescript#build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**"],
-      "outputs": []
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**", "$TURBO_ROOT$/vitest.shared.ts"],
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
     "typecheck": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
-      "outputs": []
+      "outputs": [],
+      "outputLogs": "errors-only"
     }
   }
 }
