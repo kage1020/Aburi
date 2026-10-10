@@ -7,6 +7,13 @@ const signatureOf = async (source: string, id = "ts:src/a.ts#f") =>
 describe("what a function's signature records", () => {
   it.each([
     ["an async function", "export async function f() {}", { async: true, generator: false }],
+    ["an async arrow", "export const f = async (x) => x + 1", { async: true, generator: false }],
+    [
+      "a parenthesis-free async arrow",
+      "export const f = async x => x + 1",
+      { async: true, generator: false },
+    ],
+    ["an arrow that is not async", "export const f = (x) => x + 1", { async: false }],
     ["a generator", "export function* f() {}", { async: false, generator: true }],
     [
       "parameters and a return type",

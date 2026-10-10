@@ -1,8 +1,8 @@
-import { mkdir } from "node:fs/promises"
+import { chmod, mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { useScratchWorkspace } from "@aburi/test-support"
+import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { findConfig } from "../src/index"
+import { ConfigError, findConfig } from "../src/index"
 
 describe("findConfig", () => {
   const scratch = useScratchWorkspace("discovery")
@@ -47,4 +47,31 @@ describe("findConfig", () => {
       process.chdir(prev)
     }
   })
+
+  it("refuses a candidate it cannot probe rather than answering that there is none", async () => {
+    const cwd = join(scratch.root, "nul\0byte")
+
+    const error = await errorFrom(ConfigError, () => findConfig({ cwd }))
+
+    expect(error.code).toBe("config-read-failed")
+    expect(error.message).toContain(join(cwd, "aburi.jsonc"))
+  })
+
+  // Windows has no search bit to take away, and root searches a directory whatever its mode.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses a candidate in a directory it may not search",
+    async () => {
+      const locked = join(scratch.root, "locked")
+      await mkdir(locked)
+      await chmod(locked, 0o000)
+      try {
+        const error = await errorFrom(ConfigError, () => findConfig({ cwd: locked }))
+
+        expect(error.code).toBe("config-read-failed")
+        expect(error.message).toContain("EACCES")
+      } finally {
+        await chmod(locked, 0o755)
+      }
+    },
+  )
 })

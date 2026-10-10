@@ -58,6 +58,16 @@ describe("projectDiff — maxBytes", () => {
     ).toBe(uncapped)
   })
 
+  it.each([
+    GITHUB_LIMIT,
+    2000,
+  ])("renders the same bytes on every run when a %i-byte cap trims the document", (maxBytes) => {
+    const capped = projectDiff(crowdedDiff(400), { maxBytes })
+
+    expect(bytes(capped)).toBeLessThan(bytes(projectDiff(crowdedDiff(400))))
+    expect(projectDiff(crowdedDiff(400), { maxBytes })).toBe(capped)
+  })
+
   it("keeps what fits below a section too large to fit even as names", () => {
     const md = projectDiff(crowdedDiff(400), { maxBytes: 2000 })
     expect(headings(md)).toEqual([

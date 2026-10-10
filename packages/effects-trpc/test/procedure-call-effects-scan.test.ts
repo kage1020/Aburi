@@ -116,6 +116,7 @@ describe("scan — tRPC procedure calls", () => {
         "}",
         "",
       ],
+      "publicProcedure.input.query",
     ],
     [
       "a file that imports no tRPC module",
@@ -127,13 +128,14 @@ describe("scan — tRPC procedure calls", () => {
         "}",
         "",
       ],
+      "prisma.user.byId.query",
     ],
-  ])("records nothing in %s", async (_label, lines) => {
+  ])("records nothing in %s", async (_label, lines, procedureCall) => {
     await workspace.writeSource("src/server.ts", lines.join("\n"))
 
     const result = await scanWorkspace()
 
-    expect(result.ir.symbols.length).toBeGreaterThan(0)
+    expect(result.ir.symbols.flatMap((s) => s.calls.map((c) => c.target))).toContain(procedureCall)
     expect(result.ir.symbols.flatMap((s) => s.effects)).toEqual([])
   })
 })

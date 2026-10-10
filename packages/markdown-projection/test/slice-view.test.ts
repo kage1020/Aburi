@@ -1,7 +1,7 @@
-import { changed, makeDiff, makeSymbol, sliceId } from "@aburi/test-support"
+import { changed, errorFrom, makeDiff, makeSymbol, sliceId } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { projectDiff } from "../src"
+import { ProjectionInvariantError, projectDiff } from "../src"
 import { sectionOf } from "./markdown"
 
 const HEADING = "## 🧵 Slice View"
@@ -140,16 +140,24 @@ describe("projectDiff — the Slice View", () => {
     expect(lines.slice(0, 4)).toEqual([HEADING, "", "### Standalone changes", ""])
   })
 
-  it("refuses a Slice member that has no change in the diff", () => {
-    expect(() => sliceView([logicChange(ctl)], [slice(ctl, svc)])).toThrow(
-      /slice slice:ts:src\/ctl\.ts#Ctl\.route lists member ts:src\/svc\.ts#Svc\.op that is not present in diff\.symbols\[\]/,
+  it.each<[string, SliceRecord, string, string]>([
+    [
+      "a member that has no change in the diff",
+      slice(ctl, svc),
+      `a diff.symbols[] entry for member ${svc.id}`,
+      `Slice(id=slice:${ctl.id})`,
+    ],
+    [
+      "no members",
+      { id: sliceId("slice:empty"), members: [] },
+      "members[0]",
+      "Slice(id=slice:empty)",
+    ],
+  ])("refuses a Slice with %s, naming what it lacks and the Slice", async (_label, invalid, field, subject) => {
+    const error = await errorFrom(ProjectionInvariantError, () =>
+      sliceView([logicChange(ctl)], [invalid]),
     )
-  })
-
-  it("refuses a Slice with no members", () => {
-    expect(() =>
-      sliceView([logicChange(ctl)], [{ id: sliceId("slice:empty"), members: [] }]),
-    ).toThrow(/slice slice:empty has an empty members\[\]/)
+    expect(error).toMatchObject({ field, subject })
   })
 })
 

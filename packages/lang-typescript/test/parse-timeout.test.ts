@@ -1,5 +1,5 @@
 import { scanWith } from "@aburi/test-harness"
-import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import { recordingLogger, spend, useScratchWorkspace } from "@aburi/test-support"
 import { beforeAll, describe, expect, it } from "vitest"
 import { langTypescriptPlugin } from "../src/index"
 import { pluginOverriding } from "./fixtures/scan"
@@ -17,13 +17,6 @@ beforeAll(async () => {
   // Whoever calls `parseFile` directly owns the tree it hands back.
   if (warm.tree !== null) langTypescriptPlugin.releaseTree(warm.tree)
 })
-
-function spend(ms: number): void {
-  const until = performance.now() + ms
-  let spins = 0
-  while (performance.now() < until) spins++
-  if (spins < 0) throw new Error("unreachable")
-}
 
 /** A scan in which extracting `slow` runs past the parse budget. */
 async function scanOverrunning(slow: string) {

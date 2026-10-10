@@ -1,6 +1,6 @@
-import { delta, useScratchWorkspace } from "@aburi/test-support"
+import { delta, symbolNamed, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { changedSymbols, diffOfEdit } from "./fixtures/scan"
+import { changedSymbols, diffOfEdit, editOf } from "./fixtures/scan"
 
 const workspace = useScratchWorkspace("edit-axis")
 
@@ -115,6 +115,21 @@ describe("an edit to what a caller passes is an api change", () => {
     expect(changedSymbols(diff)).toMatchObject([
       { name: "f", apiChanged: true, logicChanged: false },
     ])
+  })
+})
+
+describe("an edit to a parameter's default value is no api change", () => {
+  it("keeps the api fingerprint, and the diff reports no change", async () => {
+    const { base, head, diff } = await editOf(
+      workspace,
+      FILE,
+      withParams("limit = 20"),
+      withParams("limit = 10"),
+    )
+
+    expect(symbolNamed(head, "f").fingerprint.api).toBe(symbolNamed(base, "f").fingerprint.api)
+    expect(diff.symbols).toEqual([])
+    expect(diff.summary).toMatchObject({ changed: 0, unchanged: 1 })
   })
 })
 

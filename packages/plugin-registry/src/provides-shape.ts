@@ -39,7 +39,7 @@ export function assertProvidesShape(m: PluginManifest): void {
     )
   const provides = m.provides as unknown as Record<string, unknown>
   for (const [key, fields] of Object.entries(PROVIDES_ENTRIES)) {
-    // Own keys only, as for `type`: an inherited array would walk past this gate.
+    // Own keys only: an inherited array would walk past this gate.
     const value = Object.hasOwn(provides, key) ? provides[key] : undefined
     if (!Array.isArray(value)) refuse(key, "an array", value)
     for (const [i, entry] of (value as unknown[]).entries()) {

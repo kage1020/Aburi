@@ -6,7 +6,7 @@ import type {
   SymbolDelta,
   SymbolId,
 } from "@aburi/types"
-import { appendAll, inlineCode } from "../format"
+import { appendAll, inlineCode, ProjectionInvariantError } from "../format"
 import { fileLine, moveRoute, skippedFile } from "./entries"
 import { assertNeverChange } from "./partition"
 
@@ -39,10 +39,7 @@ export function renderSliceView(
     for (const slice of singleton) {
       const memberId = slice.members[0]
       if (memberId === undefined) {
-        throw new Error(
-          `projectDiff: slice ${slice.id} has an empty members[]; every Slice has at least one ` +
-            "member and members[0] is its anchor.",
-        )
+        throw new ProjectionInvariantError("members[0]", `Slice(id=${slice.id})`)
       }
       const label = renderSingletonLabel(memberId, slice.id, changeById)
       rows.push(`- ${inlineCode(slice.id)} — ${label}`)
@@ -125,9 +122,9 @@ function requireChangeForMember(
 ): SymbolChange {
   const change = changeById.get(memberId)
   if (change === undefined) {
-    throw new Error(
-      `projectDiff: slice ${sliceId} lists member ${memberId} that is not present in diff.symbols[]; ` +
-        "every Slice member must have a corresponding SymbolChange.",
+    throw new ProjectionInvariantError(
+      `a diff.symbols[] entry for member ${memberId}`,
+      `Slice(id=${sliceId})`,
     )
   }
   return change

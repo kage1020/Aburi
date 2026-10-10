@@ -58,6 +58,52 @@ describe("scan — calls through a default import", () => {
     })
   })
 
+  it("reaches a static member through a default-imported class", async () => {
+    const result = await callsFromMain(
+      { "src/svc.ts": "export default class Svc {\n  static run() { return 5 }\n}\n" },
+      ['import S from "./svc"'],
+      ["S.run()"],
+    )
+    expect(result).toEqual({ resolved: [["S.run", "ts:src/svc.ts#Svc::run"]], unresolved: [] })
+  })
+
+  it("never takes the named export that shares the local name", async () => {
+    const result = await callsFromMain(
+      {
+        "src/client.ts":
+          "export default function createClient() { return 1 }\nexport function connect() { return 2 }\n",
+        "src/plain.ts": "export function open() { return 3 }\n",
+      },
+      ['import connect from "./client"', 'import open from "./plain"'],
+      ["connect()", "open()"],
+    )
+    expect(result).toEqual({
+      resolved: [
+        ["connect", "ts:src/client.ts#createClient"],
+        ["open", null],
+      ],
+      unresolved: [["open", "no-match"]],
+    })
+  })
+
+  it("resolves both bindings of `import Foo, * as Bar`", async () => {
+    const result = await callsFromMain(
+      {
+        "src/mixed.ts":
+          "export default function make() { return 1 }\nexport function helper() { return 2 }\n",
+      },
+      ['import build, * as m from "./mixed"'],
+      ["build()", "m.helper()"],
+    )
+    expect(result).toEqual({
+      resolved: [
+        ["build", "ts:src/mixed.ts#make"],
+        ["m.helper", "ts:src/mixed.ts#helper"],
+      ],
+      unresolved: [],
+    })
+  })
+
   it("leaves the default exports import scope does not reach unresolved, as known limits", async () => {
     const result = await callsFromMain(
       {

@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
-import { dirname, join } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const require = createRequire(import.meta.url)
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const destinationDir = join(packageRoot, "wasm")
+const packageWasmDir = join(dirname(dirname(fileURLToPath(import.meta.url))), "wasm")
 
 const GRAMMARS = ["tree-sitter-typescript.wasm", "tree-sitter-tsx.wasm"]
 
@@ -18,8 +17,7 @@ async function readIfPresent(path) {
   } catch (error) {
     if (error.code === "ENOENT") return null
     throw new Error(
-      `copy-grammars: cannot read ${path} (${error.code}). Remove ` +
-        `packages/lang-typescript/wasm/ and re-run the build.`,
+      `copy-grammars: cannot read ${path} (${error.code}). Remove ${dirname(path)} and re-run the build.`,
       { cause: error },
     )
   }
@@ -72,27 +70,34 @@ async function buildNotice() {
   ].join("\n")}\n`
 }
 
-/** Provision `wasm/`, reporting how many files this run actually had to write. */
-export default async function vendorGrammars() {
-  await mkdir(destinationDir, { recursive: true })
+/** Provision `destination`, reporting how many files this run actually had to write. */
+async function vendorGrammarsInto(destination) {
+  await mkdir(destination, { recursive: true })
 
   const written = await Promise.all(
     GRAMMARS.map(async (name) => {
       const source = await readFile(require.resolve(`@vscode/tree-sitter-wasm/wasm/${name}`))
-      return writeIfChanged(join(destinationDir, name), source)
+      return writeIfChanged(join(destination, name), source)
     }),
   )
-  const noticeWritten = await writeIfChanged(join(destinationDir, "NOTICE"), await buildNotice())
+  const noticeWritten = await writeIfChanged(join(destination, "NOTICE"), await buildNotice())
 
   const count = written.filter(Boolean).length
+  const shown = relative(process.cwd(), destination) || "."
   console.log(
     count === 0 && !noticeWritten
-      ? `wasm/ already holds the ${GRAMMARS.length} tree-sitter grammars`
-      : `vendored ${count} tree-sitter grammar(s)${noticeWritten ? " and NOTICE" : ""} into wasm/`,
+      ? `${shown} already holds the ${GRAMMARS.length} tree-sitter grammars`
+      : `vendored ${count} tree-sitter grammar(s)${noticeWritten ? " and NOTICE" : ""} into ${shown}`,
   )
+}
+
+// Vitest's globalSetup calls the default export with its own context, so it takes no destination.
+export default function vendorGrammars() {
+  return vendorGrammarsInto(packageWasmDir)
 }
 
 // Also runnable as a plain script, which is how the `build` script invokes it.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await vendorGrammars()
+  const [destination] = process.argv.slice(2)
+  await vendorGrammarsInto(destination === undefined ? packageWasmDir : resolve(destination))
 }

@@ -1,15 +1,21 @@
 import { describe, expectTypeOf, it } from "vitest"
 import type {
   ComponentId,
+  Decorator,
   Dependency,
   DependencyEndpoint,
+  DiffSkippedFile,
   LangManifest,
+  OwnerDecorator,
+  SkippedFile,
+  SkipReason,
   SliceId,
   SliceRecord,
   SourceRange,
   Symbol,
   SymbolCandidate,
   SymbolId,
+  SymbolUnknown,
   WrittenSourceRange,
 } from "../src/index"
 
@@ -65,10 +71,24 @@ describe("plugin-facing shapes", () => {
     expectTypeOf<Assignable<WrittenSourceRange, SourceRange>>().toEqualTypeOf<true>()
   })
 
+  it("hands an effect plugin every Decorator field but the source text, arguments and line", () => {
+    expectTypeOf<Exclude<keyof Decorator, keyof OwnerDecorator>>().toEqualTypeOf<
+      "raw" | "arguments" | "line"
+    >()
+  })
+
   it("narrows a manifest by its type discriminator", () => {
     expectTypeOf<LangManifest["type"]>().toEqualTypeOf<"lang">()
     expectTypeOf<
       Assignable<{ type: "effects" }, Pick<LangManifest, "type">>
     >().toEqualTypeOf<false>()
+  })
+})
+
+describe("skip reasons", () => {
+  it("are one union in the IR and the diff", () => {
+    expectTypeOf<SkippedFile["reason"]>().toEqualTypeOf<SkipReason>()
+    expectTypeOf<DiffSkippedFile["reason"]>().toEqualTypeOf<SkipReason>()
+    expectTypeOf<SymbolUnknown["reason"]>().toEqualTypeOf<SkipReason>()
   })
 })

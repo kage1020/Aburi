@@ -31,16 +31,26 @@ export async function scanWithoutWarnings(workspaceRoot: string): Promise<IR> {
 }
 
 /** `diffOfEditWith` this plugin alone, where neither scan may warn. */
+export async function editOf(
+  workspace: ScratchWorkspace,
+  file: string,
+  before: string,
+  after: string,
+): Promise<EditDiff> {
+  const logger = recordingLogger()
+  const edit = await diffOfEditWith(workspace, TYPESCRIPT_ONLY, file, before, after, { logger })
+  expect(logger.warnings).toEqual([])
+  return edit
+}
+
+/** The diff of `editOf`. */
 export async function diffOfEdit(
   workspace: ScratchWorkspace,
   file: string,
   before: string,
   after: string,
 ): Promise<EditDiff["diff"]> {
-  const logger = recordingLogger()
-  const { diff } = await diffOfEditWith(workspace, TYPESCRIPT_ONLY, file, before, after, { logger })
-  expect(logger.warnings).toEqual([])
-  return diff
+  return (await editOf(workspace, file, before, after)).diff
 }
 
 /** Each Symbol the diff reports `changed`, by name, with its delta. */

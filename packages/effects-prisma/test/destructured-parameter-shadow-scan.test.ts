@@ -7,11 +7,7 @@ import { prismaEffectsPlugin } from "../src/index"
 const workspace = useScratchWorkspace("destructured-parameter-shadow")
 
 const scanWorkspace = () =>
-  scanWith(
-    workspace.root,
-    { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] },
-    { classifyTimeoutMs: 5000 },
-  )
+  scanWith(workspace.root, { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] })
 
 const SHADOWED = [
   "plain",

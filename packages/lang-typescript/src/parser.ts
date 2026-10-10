@@ -12,6 +12,8 @@ const nodeRequire = createRequire(import.meta.url)
 
 const RUNTIME_WASM_PATH = nodeRequire.resolve("web-tree-sitter/web-tree-sitter.wasm")
 
+// Kept literal: bundlers rewrite only `new URL("<literal>", import.meta.url)` into an emitted asset,
+// and a consumer's re-bundle of any other form looks for `wasm/` beside their own bundle.
 const TYPESCRIPT_WASM_PATH = fileURLToPath(
   new URL("../wasm/tree-sitter-typescript.wasm", import.meta.url),
 )

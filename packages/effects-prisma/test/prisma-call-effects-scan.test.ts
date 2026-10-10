@@ -1,6 +1,8 @@
+import { DEFAULT_CLASSIFY_TIMEOUT_MS } from "@aburi/core"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { scanWith } from "@aburi/test-harness"
-import { symbolNamed, useScratchWorkspace } from "@aburi/test-support"
+import { spend, symbolNamed, useScratchWorkspace } from "@aburi/test-support"
+import type { EffectPlugin } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { prismaEffectsPlugin } from "../src/index"
 
@@ -36,6 +38,7 @@ describe("scan — Prisma calls in a service file", () => {
 
     const result = await scanWorkspace()
 
+    expect(result.ir.stats.effectClassifyTimeouts).toBeUndefined()
     const listUsers = symbolNamed(result, "listUsers")
     expect(listUsers.effects).toMatchObject([
       {
@@ -46,9 +49,11 @@ describe("scan — Prisma calls in a service file", () => {
       },
     ])
     expect(listUsers.calls.map((c) => c.target)).toEqual(["report"])
-    expect(symbolNamed(result, "createInvoice").effects).toMatchObject([
+    const createInvoice = symbolNamed(result, "createInvoice")
+    expect(createInvoice.effects).toMatchObject([
       { id: "db.write", target: "prisma.invoice.create", derivedBy: "effects-plugin:prisma:write" },
     ])
+    expect(createInvoice.calls).toEqual([])
     expect(symbolNamed(result, "moveUser").effects).toMatchObject([
       {
         id: "db.transaction",
@@ -163,6 +168,42 @@ describe("scan — a Map beside the client that shares the delegate verbs", () =
     ])
     expect(evictSession.effects).toMatchObject([
       { id: "db.write", target: "this.cache.items.delete", line: 9, confidence: "medium" },
+    ])
+  })
+})
+
+describe("scanWith — a classifier slower than the scan's default budget", () => {
+  const overrunMs = DEFAULT_CLASSIFY_TIMEOUT_MS + 30
+  const slowPrisma: EffectPlugin = {
+    manifest: prismaEffectsPlugin.manifest,
+    init: async () => {},
+    classify(call, ctx) {
+      spend(overrunMs)
+      return prismaEffectsPlugin.classify(call, ctx)
+    },
+  }
+
+  it("keeps its effect when the suite sets no budget of its own", async () => {
+    await workspace.writeSource(
+      "src/invoices.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "",
+        "export async function createInvoice(prisma: PrismaClient, data: unknown) {",
+        "  return prisma.invoice.create({ data })",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWith(workspace.root, {
+      languages: [langTypescriptPlugin],
+      effects: [slowPrisma],
+    })
+
+    expect(result.ir.stats.effectClassifyTimeouts).toBeUndefined()
+    expect(symbolNamed(result, "createInvoice").effects).toMatchObject([
+      { id: "db.write", target: "prisma.invoice.create" },
     ])
   })
 })
