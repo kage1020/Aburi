@@ -1,7 +1,7 @@
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { diffIRs, scanWith } from "@aburi/test-harness"
-import { useScratchWorkspace } from "@aburi/test-support"
-import type { IR } from "@aburi/types"
+import { diffOfEditWith } from "@aburi/test-harness"
+import { symbolById, useScratchWorkspace } from "@aburi/test-support"
+import type { DiffResult } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { expressFrameworkPlugin } from "../src/index"
 
@@ -9,21 +9,10 @@ const workspace = useScratchWorkspace("registration-insert")
 
 const SOURCE = "src/server.ts"
 
-async function scanSource(): Promise<IR> {
-  const { ir } = await scanWith(workspace.root, {
-    languages: [langTypescriptPlugin],
-    frameworks: [expressFrameworkPlugin],
-  })
-  return ir
-}
+const lineup = { languages: [langTypescriptPlugin], frameworks: [expressFrameworkPlugin] }
 
-async function diffOfEdit(before: string, after: string) {
-  await workspace.writeSource(SOURCE, before)
-  const baseIR = await scanSource()
-  await workspace.writeSource(SOURCE, after)
-  const headIR = await scanSource()
-  return { baseIR, headIR, diff: diffIRs(baseIR, headIR) }
-}
+const diffOfEdit = (before: string, after: string) =>
+  diffOfEditWith(workspace, lineup, SOURCE, before, after)
 
 const lines = (...rows: string[]) => [...rows, ""].join("\n")
 
@@ -36,7 +25,7 @@ const AUTH = [
   "})",
 ]
 
-function idsWith(diff: ReturnType<typeof diffIRs>, status: "added" | "removed"): string[] {
+function idsWith(diff: DiffResult, status: "added" | "removed"): string[] {
   const ids: string[] = []
   for (const change of diff.symbols) {
     if (change.status !== status) continue
@@ -61,7 +50,7 @@ describe("diff — a registration inserted above others", () => {
     const admin =
       "app.get(`/admin`, async (req, res) => { await requireAdmin(req); res.json(await stats()) })"
     const mount = "app.use(`/api`, apiRouter)"
-    const { headIR, diff } = await diffOfEdit(
+    const { head, diff } = await diffOfEdit(
       lines(...HEAD, users, admin, mount),
       lines(...HEAD, 'app.get(`/health`, (req, res) => { res.send("ok") })', users, admin, mount),
     )
@@ -69,9 +58,12 @@ describe("diff — a registration inserted above others", () => {
     expect(diff.summary).toMatchObject({ added: 1, removed: 0, changed: 0, moved: 0 })
     expect(idsWith(diff, "added")).toEqual(["ts:src/server.ts#app__get__$health__d0"])
 
-    const extKindOf = (id: string) => headIR.symbols.find((s) => s.id === id)?.extKind
-    expect(extKindOf("ts:src/server.ts#app__get__$users__d0")).toBe("framework:express:route")
-    expect(extKindOf("ts:src/server.ts#app__use__$api__d0")).toBe("framework:express:mount")
+    expect(symbolById(head, "ts:src/server.ts#app__get__$users__d0").extKind).toBe(
+      "framework:express:route",
+    )
+    expect(symbolById(head, "ts:src/server.ts#app__use__$api__d0").extKind).toBe(
+      "framework:express:mount",
+    )
   })
 
   it("is one addition for routes mounted through app.route with one handler name", async () => {

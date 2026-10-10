@@ -1,6 +1,5 @@
-import type { ScanResult } from "@aburi/core"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { diffIRs, scanWith } from "@aburi/test-harness"
+import { diffOfEditWith, type EditDiff } from "@aburi/test-harness"
 import { symbolById, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { prismaEffectsPlugin } from "../src/index"
@@ -21,14 +20,16 @@ const AUDIT_TS = [
   "",
 ].join("\n")
 
-async function scanOf(transferSource: string): Promise<ScanResult> {
+async function diffOfTransferEdit(edited: string): Promise<EditDiff> {
   await workspace.writeSource("package.json", '{"name":"demo","private":true}\n')
   await workspace.writeSource("src/audit.ts", AUDIT_TS)
-  await workspace.writeSource("src/transfer.ts", transferSource)
-  return scanWith(workspace.root, {
-    languages: [langTypescriptPlugin],
-    effects: [prismaEffectsPlugin],
-  })
+  return diffOfEditWith(
+    workspace,
+    { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] },
+    "src/transfer.ts",
+    transfer("", ""),
+    edited,
+  )
 }
 
 /** `report` and `release` are declared nowhere: they stand for calls no plugin classifies. */
@@ -56,8 +57,7 @@ function transfer(inCatch: string, inFinally: string): string {
 
 describe("scan + diff — writes in catch and finally", () => {
   it("records them as effects and reports the edit as a logic change", async () => {
-    const base = await scanOf(transfer("", ""))
-    const head = await scanOf(
+    const { head, diff } = await diffOfTransferEdit(
       transfer(
         "    await prisma.account.deleteMany({ where: { id } })",
         "    await prisma.lock.delete({ where: { id } })",
@@ -74,18 +74,19 @@ describe("scan + diff — writes in catch and finally", () => {
     expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
     expect(head.ir.stats.effectPropagation.symbolsWithPropagatedEffects).toBe(0)
 
-    expect(diffIRs(base.ir, head.ir).symbols).toMatchObject([
+    expect(diff.symbols).toMatchObject([
       { status: "changed", after: { id: TRANSFER }, delta: { logicChanged: true } },
     ])
   })
 
   it("reports a rewritten catch clause that adds no effect as syntax-only", async () => {
-    const base = await scanOf(transfer("", ""))
-    const head = await scanOf(transfer("    if (e instanceof TypeError) return", ""))
+    const { head, diff } = await diffOfTransferEdit(
+      transfer("    if (e instanceof TypeError) return", ""),
+    )
 
     expect(symbolById(head, TRANSFER).rules.map((r) => r.type)).toEqual(["try"])
 
-    expect(diffIRs(base.ir, head.ir).symbols).toMatchObject([
+    expect(diff.symbols).toMatchObject([
       {
         status: "changed",
         after: { id: TRANSFER },
@@ -100,8 +101,7 @@ describe("scan + diff — a call in catch or finally to a helper that writes", (
     ["catch", "    await audit(id)", ""],
     ["finally", "", "    await audit(id)"],
   ])("resolves the call in %s and inherits the helper's write", async (_label, inCatch, inFinally) => {
-    const base = await scanOf(transfer("", ""))
-    const head = await scanOf(transfer(inCatch, inFinally))
+    const { head, diff } = await diffOfTransferEdit(transfer(inCatch, inFinally))
 
     const symbol = symbolById(head, TRANSFER)
     expect(symbol.calls.filter((c) => c.target === "audit")).toEqual([
@@ -117,7 +117,7 @@ describe("scan + diff — a call in catch or finally to a helper that writes", (
     expect(head.ir.stats.effectPropagation.propagatedEffectCount).toBeGreaterThanOrEqual(1)
     expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
 
-    expect(diffIRs(base.ir, head.ir).symbols).toMatchObject([
+    expect(diff.symbols).toMatchObject([
       { status: "changed", after: { id: TRANSFER }, delta: { logicChanged: true } },
     ])
   })

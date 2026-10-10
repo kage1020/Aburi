@@ -1,5 +1,12 @@
-import { makeSymbol, useScratchWorkspace } from "@aburi/test-support"
-import type { DiffResult, SymbolChange, SymbolDelta, SymbolUnknown } from "@aburi/types"
+import {
+  changed,
+  emptySummary,
+  makeDiff,
+  makeSymbol,
+  movedChanged,
+  useScratchWorkspace,
+} from "@aburi/test-support"
+import type { DiffResult, SymbolChange, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   EXIT,
@@ -15,49 +22,11 @@ const workspace = useScratchWorkspace("fail-on")
 
 const SYMBOL = makeSymbol({ id: "ts:src/a.ts#A", name: "A" })
 
-const NO_DELTA: SymbolDelta = {
-  apiChanged: false,
-  logicChanged: false,
-  syntaxChanged: false,
-  componentChanged: false,
-  visibilityChanged: false,
-}
-
 function diffWith(
   symbols: SymbolChange[],
   summary: Partial<DiffResult["summary"]> = {},
 ): DiffResult {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.diff.v1.json",
-    generator: { name: "aburi", version: "0.0.0" },
-    base: { ref: "main", irSchema: "aburi.ir.v1.json" },
-    head: { ref: "HEAD", irSchema: "aburi.ir.v1.json" },
-    summary: {
-      added: 0,
-      removed: 0,
-      moved: 0,
-      movedChanged: 0,
-      changed: 0,
-      droppedToggled: 0,
-      unchanged: 0,
-      droppedAdded: 0,
-      droppedRemoved: 0,
-      componentsAdded: 0,
-      componentsRemoved: 0,
-      componentsChanged: 0,
-      depsAdded: 0,
-      depsRemoved: 0,
-      ...summary,
-    },
-    symbols,
-    components: { added: [], removed: [], changed: [] },
-    dependencies: { added: [], removed: [] },
-    slices: [],
-  }
-}
-
-function changed(delta: Partial<SymbolDelta>): SymbolChange {
-  return { status: "changed", before: SYMBOL, after: SYMBOL, delta: { ...NO_DELTA, ...delta } }
+  return makeDiff({ symbols, summary: { ...emptySummary(), ...summary } })
 }
 
 function evaluation(spec: string, diff: DiffResult) {
@@ -165,9 +134,10 @@ describe("evaluateClause — what a clause counts", () => {
   })
 
   it("counts the changes whose delta moved the axis, and only those", () => {
-    const diff = diffWith([changed({ apiChanged: true }), changed({ logicChanged: true })], {
-      changed: 2,
-    })
+    const diff = diffWith(
+      [changed(SYMBOL, { apiChanged: true }), changed(SYMBOL, { logicChanged: true })],
+      { changed: 2 },
+    )
     expect(observed("api-changed", diff)).toBe(1)
     expect(observed("logic-changed", diff)).toBe(1)
     expect(observed("syntax-changed", diff)).toBe(0)
@@ -175,15 +145,9 @@ describe("evaluateClause — what a clause counts", () => {
 
   it("counts a confidence move on changed and moved+changed entries, and on nothing older", () => {
     const diff = diffWith([
-      changed({ confidenceChanged: true }),
-      {
-        status: "moved+changed",
-        before: SYMBOL,
-        after: SYMBOL,
-        rationale: "git-rename",
-        delta: { ...NO_DELTA, confidenceChanged: true },
-      },
-      changed({ syntaxChanged: true }),
+      changed(SYMBOL, { confidenceChanged: true }),
+      movedChanged(SYMBOL, SYMBOL, { confidenceChanged: true }),
+      changed(SYMBOL, { syntaxChanged: true }),
     ])
     expect(observed("confidence-changed", diff)).toBe(2)
     expect(evaluateFailOn(parseFailOn("api-changed,logic-changed"), diff).firstTriggered).toBeNull()

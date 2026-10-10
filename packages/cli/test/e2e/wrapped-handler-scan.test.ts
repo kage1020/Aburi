@@ -1,7 +1,7 @@
 import { prismaEffectsPlugin } from "@aburi/effects-prisma"
 import { reactFrameworkPlugin } from "@aburi/framework-react"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { diffIRs, scanWith } from "@aburi/test-harness"
+import { diffOfEditWith, scanWith } from "@aburi/test-harness"
 import { symbolById, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 
@@ -43,14 +43,16 @@ describe("scan — a function a const hands to a wrapping call", () => {
   })
 
   it("reports an edit to the handler as a logic change", async () => {
-    await workspace.writeSource("src/users.ts", users(READ))
-    const baseIR = (await scanWith(workspace.root, lineup)).ir
-    await workspace.writeSource("src/users.ts", users(DELETE))
-    const headIR = (await scanWith(workspace.root, lineup)).ir
-    const changes = diffIRs(baseIR, headIR).symbols
+    const { diff } = await diffOfEditWith(
+      workspace,
+      lineup,
+      "src/users.ts",
+      users(READ),
+      users(DELETE),
+    )
 
-    expect(changes).toHaveLength(1)
-    const [change] = changes
+    expect(diff.symbols).toHaveLength(1)
+    const [change] = diff.symbols
     expect(change?.status).toBe("changed")
     if (change?.status !== "changed") return
     expect(change.after.name).toBe("POST")

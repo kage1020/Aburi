@@ -177,9 +177,9 @@ export function component(
     id: componentId(overrides.id),
     name: overrides.name,
     roots: overrides.roots ?? [`apps/${overrides.id}`],
-    publicApi: overrides.publicApi ?? [],
+    ...(overrides.publicApi === undefined ? {} : { publicApi: overrides.publicApi }),
     languages: overrides.languages ?? [languageId("ts")],
-    frameworks: overrides.frameworks ?? [],
+    ...(overrides.frameworks === undefined ? {} : { frameworks: overrides.frameworks }),
     description: overrides.description ?? null,
   }
 }

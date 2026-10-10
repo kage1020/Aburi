@@ -1,10 +1,10 @@
-import { symbolId } from "@aburi/test-support"
+import { importEdge, symbolId } from "@aburi/test-support"
 import type { Confidence, ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../src/call-site"
 import { resolveCallGraph } from "../src/callgraph"
 import { makeLanguageId } from "../src/id"
-import { importEdge, importsOf, withCalls } from "./fixtures/callgraph"
+import { importsOf, withCalls } from "./fixtures/callgraph"
 import { makeSymbol } from "./fixtures/ir"
 
 const NO_IMPORTS: ReadonlyMap<string, readonly ImportEdge[]> = new Map()

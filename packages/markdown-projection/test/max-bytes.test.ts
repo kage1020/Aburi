@@ -1,7 +1,8 @@
+import { changed, emptySummary, makeDiff, moved } from "@aburi/test-support"
 import type { SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { changed, emptySummary, makeDiff, moved, relocated, symbolWithBody } from "./fixtures"
+import { relocated, symbolWithBody } from "./fixtures"
 import { bytes, headings, noteOf } from "./markdown"
 
 const GITHUB_LIMIT = 65536

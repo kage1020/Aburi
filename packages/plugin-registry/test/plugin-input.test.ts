@@ -1,3 +1,4 @@
+import { importEdge } from "@aburi/test-support"
 import type { EffectsManifest, ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -17,7 +18,7 @@ import {
 const ORIGIN: PluginInputOrigin = { plugin: "effects-example", filePath: "src/service.ts" }
 
 function edge(source: string, line: number): ImportEdge {
-  return { source, symbols: ["Thing"], line, dynamic: false }
+  return importEdge({ source, symbols: ["Thing"], line })
 }
 
 describe("assertNonEmptySegments", () => {
@@ -99,12 +100,8 @@ describe("hasMatchingImport", () => {
 })
 
 describe("assertImportBinding", () => {
-  const named = (symbols: string[], line = 1): ImportEdge => ({
-    source: "example-orm",
-    symbols,
-    line,
-    dynamic: false,
-  })
+  const named = (symbols: string[], line = 1): ImportEdge =>
+    importEdge({ source: "example-orm", symbols, line })
 
   it.each([
     ["an unaliased entry", { imported: "Thing", local: "Thing" }, "Thing"],
@@ -125,12 +122,7 @@ describe("assertImportBinding", () => {
 })
 
 describe("assertNamespaceBinding", () => {
-  const namespaceEdge: ImportEdge = {
-    source: "example-orm",
-    symbols: "*",
-    line: 3,
-    dynamic: false,
-  }
+  const namespaceEdge = importEdge({ source: "example-orm", symbols: "*", line: 3 })
 
   it("accepts a binding that names something", () => {
     expect(() => assertNamespaceBinding("orm", namespaceEdge, ORIGIN)).not.toThrow()

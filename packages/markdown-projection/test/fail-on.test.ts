@@ -1,3 +1,4 @@
+import { emptySummary } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   evaluateFailOn,
@@ -8,7 +9,6 @@ import {
   formatFailOnClause,
   formatFailOnTriggered,
 } from "../src"
-import { emptySummary } from "./fixtures"
 
 describe("formatFailOnClause", () => {
   it.each<FailOnStatus>([

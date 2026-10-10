@@ -13,7 +13,7 @@ import type {
   WorkspaceManager,
 } from "@aburi/types"
 import { resolveCallGraph } from "../callgraph"
-import { serializeCanonical } from "../canonical"
+import { type SerializeOptions, serializeCanonical } from "../canonical"
 import { CoreError } from "../errors"
 import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
@@ -183,16 +183,14 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   }
 }
 
-export interface WriteCanonicalIROptions {
-  format?: "pretty" | "compact"
-}
+export type WriteCanonicalIROptions = SerializeOptions
 
 export async function writeCanonicalIR(
   ir: IR,
   outputPath: string,
   options: WriteCanonicalIROptions = {},
 ): Promise<string> {
-  const serialized = serializeCanonical(ir, { format: options.format ?? "pretty" })
+  const serialized = serializeCanonical(ir, options)
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, serialized, "utf8")
   return serialized

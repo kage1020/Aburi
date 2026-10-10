@@ -1,3 +1,4 @@
+import { importEdge } from "@aburi/test-support"
 import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { hasTrpcServerImport } from "../src/imports"
@@ -6,7 +7,7 @@ import { hasTrpcClientImport } from "../src/index"
 const PATH = "src/client.ts"
 
 function edge(source: string, line = 1): ImportEdge {
-  return { source, symbols: ["x"], line, dynamic: false }
+  return importEdge({ source, symbols: ["x"], line })
 }
 
 describe("hasTrpcClientImport", () => {

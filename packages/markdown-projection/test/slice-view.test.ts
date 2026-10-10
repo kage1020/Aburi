@@ -1,8 +1,7 @@
-import { makeSymbol, sliceId } from "@aburi/test-support"
+import { changed, makeDiff, makeSymbol, sliceId } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { changed, makeDiff } from "./fixtures"
 import { sectionOf } from "./markdown"
 
 const HEADING = "## 🧵 Slice View"

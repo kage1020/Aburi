@@ -1,6 +1,7 @@
+import { changed } from "@aburi/test-support"
 import type { ArrayDelta, SignatureDelta, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { changed, LONG_CONDITION, namedSymbol, projectChanges } from "./fixtures"
+import { LONG_CONDITION, namedSymbol, projectChanges } from "./fixtures"
 
 function none(): ArrayDelta {
   return { added: [], removed: [], modified: [] }

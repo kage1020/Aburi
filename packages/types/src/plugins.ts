@@ -42,6 +42,12 @@ export interface ImportEdge {
   namespaceBinding?: string
 }
 
+/** An `ImportEdge.symbols` entry split into the name the module exports and the local it binds. */
+export interface ImportBinding {
+  readonly imported: string
+  readonly local: string
+}
+
 export interface ParseResult<TTree = ParsedTree> {
   tree: TTree | null
   errors: ParseError[]

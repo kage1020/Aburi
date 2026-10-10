@@ -93,6 +93,7 @@ export type {
   FrameworkManifest,
   FrameworkPlugin,
   FrameworkVocab,
+  ImportBinding,
   ImportEdge,
   LangManifest,
   LanguageCapabilities,

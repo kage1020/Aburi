@@ -1,9 +1,8 @@
-export const DEFAULT_EXPORT_NAME = "default"
+import type { ImportBinding } from "@aburi/types"
 
-export interface ImportBinding {
-  imported: string
-  local: string
-}
+export type { ImportBinding }
+
+export const DEFAULT_EXPORT_NAME = "default"
 
 export function splitAliasedImportName(raw: string): ImportBinding {
   const marker = " as "

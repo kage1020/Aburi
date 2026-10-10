@@ -15,6 +15,13 @@ export function makeCall(
   }
 }
 
+/** A static import from `source`, binding nothing unless `overrides` say so. */
+export function importEdge(
+  overrides: Partial<ImportEdge> & Pick<ImportEdge, "source">,
+): ImportEdge {
+  return { symbols: [], line: 1, dynamic: false, ...overrides }
+}
+
 export function makeOwner(overrides: Partial<OwnerSummary> = {}): OwnerSummary {
   return {
     id: symbolId("ts:test.ts#Owner"),

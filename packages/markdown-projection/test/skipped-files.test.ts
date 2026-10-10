@@ -1,8 +1,8 @@
-import { makeIR, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
+import { makeDiff, makeIR, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
 import type { IR, NotComparedFile, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectWorkspace } from "../src"
-import { makeDiff, projectChanges } from "./fixtures"
+import { projectChanges } from "./fixtures"
 import { sectionOf } from "./markdown"
 
 function unknown(overrides: Partial<SymbolUnknown> = {}): SymbolUnknown {

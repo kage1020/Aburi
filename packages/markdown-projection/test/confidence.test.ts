@@ -1,8 +1,8 @@
-import { component, effect, makeSymbol } from "@aburi/test-support"
+import { changed, component, effect, makeSymbol, movedChanged } from "@aburi/test-support"
 import type { Confidence, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { effectRow, projectComponent, projectSymbolExplain } from "../src"
-import { changed, movedChanged, projectChanges, relocated } from "./fixtures"
+import { projectChanges, relocated } from "./fixtures"
 import { bytes } from "./markdown"
 
 const controller = (confidence: Confidence, i = 0): IRSymbol =>

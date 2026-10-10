@@ -1,6 +1,7 @@
 import { type ScanInput, type ScanResult, scan } from "@aburi/core"
 import { buildDiff } from "@aburi/diff"
 import { VocabRegistry } from "@aburi/plugin-registry"
+import type { ScratchWorkspace } from "@aburi/test-support"
 import type {
   CallCandidate,
   ClassifyContext,
@@ -49,6 +50,28 @@ export function diffIRs(baseIR: IR, headIR: IR): ReturnType<typeof buildDiff> {
     base: { ref: "base", irSchema: IR_SCHEMA_URL },
     head: { ref: "head", irSchema: IR_SCHEMA_URL },
   })
+}
+
+export interface EditDiff {
+  readonly base: ScanResult
+  readonly head: ScanResult
+  readonly diff: ReturnType<typeof buildDiff>
+}
+
+/** Scan with `before` at `file`, rewrite it to `after`, scan again, and diff the two scans. */
+export async function diffOfEditWith(
+  workspace: ScratchWorkspace,
+  lineup: PluginLineup,
+  file: string,
+  before: string,
+  after: string,
+  extras: ScanExtras = {},
+): Promise<EditDiff> {
+  await workspace.writeSource(file, before)
+  const base = await scanWith(workspace.root, lineup, {}, extras)
+  await workspace.writeSource(file, after)
+  const head = await scanWith(workspace.root, lineup, {}, extras)
+  return { base, head, diff: diffIRs(base.ir, head.ir) }
 }
 
 export interface ExtractedFile<TNode> {

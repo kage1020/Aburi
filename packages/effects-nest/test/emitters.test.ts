@@ -1,3 +1,4 @@
+import { importEdge } from "@aburi/test-support"
 import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -11,7 +12,7 @@ import {
 const PATH = "src/orders/service.ts"
 
 function edge(source: string, line = 1): ImportEdge {
-  return { source, symbols: ["EventEmitter2"], line, dynamic: false }
+  return importEdge({ source, symbols: ["EventEmitter2"], line })
 }
 
 describe("hasNestEmitterImport", () => {

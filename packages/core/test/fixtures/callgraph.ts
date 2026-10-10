@@ -1,4 +1,4 @@
-import { sig } from "@aburi/test-support"
+import { importEdge, sig } from "@aburi/test-support"
 import type { ImportEdge, Symbol as IRSymbol, Signature } from "@aburi/types"
 import { makeSymbol, type SymbolOverrides } from "./ir"
 
@@ -13,11 +13,7 @@ export function withCalls(
   })
 }
 
-export type ImportClause = Partial<ImportEdge> & Pick<ImportEdge, "source">
-
-export function importEdge(clause: ImportClause): ImportEdge {
-  return { symbols: [], line: 1, dynamic: false, ...clause }
-}
+export type ImportClause = Parameters<typeof importEdge>[0]
 
 export function importsOf(
   file: string,

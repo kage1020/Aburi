@@ -1,7 +1,17 @@
-import { call, component, dependency, effect, makeIR, makeSymbol, rule } from "@aburi/test-support"
+import {
+  call,
+  changed,
+  component,
+  dependency,
+  effect,
+  makeDiff,
+  makeIR,
+  makeSymbol,
+  rule,
+} from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { projectComponent, projectDiff, projectSymbolExplain, projectWorkspace } from "../src"
-import { changed, LONG_CONDITION, makeDiff, namedSymbol } from "./fixtures"
+import { LONG_CONDITION, namedSymbol } from "./fixtures"
 
 const symbol = makeSymbol({
   id: "ts:apps/billing/a.ts#handle",

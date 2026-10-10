@@ -1,4 +1,4 @@
-import { decorator, makeCandidate, makeExtractionCtx } from "@aburi/test-support"
+import { decorator, importEdge, makeCandidate, makeExtractionCtx } from "@aburi/test-support"
 import type {
   Decorator,
   FrameworkClassifyContext,
@@ -11,7 +11,7 @@ import { classifyNestjsSymbol } from "../../src/index"
 export const NEST = "@nestjs/common"
 
 export function makeImport(source: string, symbols: string[] | "*", line = 1): ImportEdge {
-  return { source, symbols, line, dynamic: false }
+  return importEdge({ source, symbols, line })
 }
 
 export function makeNamespaceImport(source: string, binding: string, line = 1): ImportEdge {

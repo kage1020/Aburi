@@ -1,16 +1,10 @@
 import type { CallEdge } from "@aburi/core"
-import { fp, makeSymbol, symbolId, zeroFp } from "@aburi/test-support"
-import type { SymbolChange, SymbolDelta } from "@aburi/types"
+import { delta, fp, makeSymbol, symbolId, zeroFp } from "@aburi/test-support"
+import type { SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { computeSlices } from "../src"
 
-const LOGIC_ONLY: SymbolDelta = {
-  apiChanged: false,
-  logicChanged: true,
-  syntaxChanged: false,
-  componentChanged: false,
-  visibilityChanged: false,
-}
+const LOGIC_ONLY = delta({ logicChanged: true })
 
 const changed = (id: string): SymbolChange => ({
   status: "changed",

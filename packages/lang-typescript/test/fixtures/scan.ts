@@ -1,9 +1,17 @@
 import type { ScanResult } from "@aburi/core"
-import { diffIRs, type ScanExtras, scanWith } from "@aburi/test-harness"
+import {
+  diffOfEditWith,
+  type EditDiff,
+  type PluginLineup,
+  type ScanExtras,
+  scanWith,
+} from "@aburi/test-harness"
 import { recordingLogger, type ScratchWorkspace } from "@aburi/test-support"
-import type { Config, IR, LanguagePlugin, SymbolDelta } from "@aburi/types"
+import type { Config, DiffResult, IR, LanguagePlugin, SymbolDelta } from "@aburi/types"
 import { expect } from "vitest"
 import { langTypescriptPlugin } from "../../src/index"
+
+const TYPESCRIPT_ONLY: PluginLineup = { languages: [langTypescriptPlugin] }
 
 /** A real scan of `workspaceRoot` with this plugin as the only one. */
 export function scanTypeScript(
@@ -11,7 +19,7 @@ export function scanTypeScript(
   config: Config = {},
   extras: ScanExtras = {},
 ): Promise<ScanResult> {
-  return scanWith(workspaceRoot, { languages: [langTypescriptPlugin] }, config, extras)
+  return scanWith(workspaceRoot, TYPESCRIPT_ONLY, config, extras)
 }
 
 /** The IR of a scan that warned about nothing, so a case cannot pass on a file it half read. */
@@ -22,24 +30,21 @@ export async function scanWithoutWarnings(workspaceRoot: string): Promise<IR> {
   return ir
 }
 
-/** Scan with `before` at `file`, rewrite it to `after`, scan again, and diff the two. */
+/** `diffOfEditWith` this plugin alone, where neither scan may warn. */
 export async function diffOfEdit(
   workspace: ScratchWorkspace,
   file: string,
   before: string,
   after: string,
-): Promise<ReturnType<typeof diffIRs>> {
-  await workspace.writeSource(file, before)
-  const baseIR = await scanWithoutWarnings(workspace.root)
-  await workspace.writeSource(file, after)
-  const headIR = await scanWithoutWarnings(workspace.root)
-  return diffIRs(baseIR, headIR)
+): Promise<EditDiff["diff"]> {
+  const logger = recordingLogger()
+  const { diff } = await diffOfEditWith(workspace, TYPESCRIPT_ONLY, file, before, after, { logger })
+  expect(logger.warnings).toEqual([])
+  return diff
 }
 
 /** Each Symbol the diff reports `changed`, by name, with its delta. */
-export function changedSymbols(
-  diff: ReturnType<typeof diffIRs>,
-): ({ name: string } & SymbolDelta)[] {
+export function changedSymbols(diff: DiffResult): ({ name: string } & SymbolDelta)[] {
   return diff.symbols.flatMap((c) =>
     c.status === "changed" ? [{ name: c.after.name, ...c.delta }] : [],
   )

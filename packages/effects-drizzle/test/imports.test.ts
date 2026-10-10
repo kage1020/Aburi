@@ -1,3 +1,4 @@
+import { importEdge } from "@aburi/test-support"
 import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { hasDrizzleImport } from "../src/index"
@@ -5,7 +6,7 @@ import { hasDrizzleImport } from "../src/index"
 const PATH = "src/service.ts"
 
 function edge(source: string, line = 1, symbols: string[] = ["drizzle"]): ImportEdge {
-  return { source, symbols, line, dynamic: false }
+  return importEdge({ source, symbols, line })
 }
 
 describe("hasDrizzleImport", () => {

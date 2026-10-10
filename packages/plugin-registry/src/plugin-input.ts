@@ -1,4 +1,4 @@
-import type { CallCandidate, Confidence, ImportEdge } from "@aburi/types"
+import type { CallCandidate, Confidence, ImportBinding, ImportEdge } from "@aburi/types"
 
 export type NonEmptySegments = readonly [string, ...string[]]
 
@@ -46,10 +46,7 @@ export function assertImportEdgeSource(edge: ImportEdge, origin: PluginInputOrig
   )
 }
 
-export interface ImportBindingHalves {
-  readonly imported: string
-  readonly local: string
-}
+export type ImportBindingHalves = ImportBinding
 
 export function assertImportBinding(
   binding: ImportBindingHalves,

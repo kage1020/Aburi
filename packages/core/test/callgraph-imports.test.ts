@@ -1,8 +1,9 @@
+import { importEdge } from "@aburi/test-support"
 import type { ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { resolveCallGraph } from "../src/callgraph"
 import { makeLanguageId } from "../src/id"
-import { type ImportClause, importEdge, importsOf, withCalls } from "./fixtures/callgraph"
+import { type ImportClause, importsOf, withCalls } from "./fixtures/callgraph"
 import { makeSymbol } from "./fixtures/ir"
 
 describe("import scope", () => {

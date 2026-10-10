@@ -2,6 +2,7 @@ import {
   component,
   dependency,
   effect,
+  makeDiff,
   makeIR,
   makeSymbol,
   sliceId,
@@ -11,7 +12,6 @@ import {
 import type { IR, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectComponent, projectDiff, projectWorkspace } from "../src"
-import { makeDiff } from "./fixtures"
 import { sectionOf } from "./markdown"
 
 const LARGE = 200_000

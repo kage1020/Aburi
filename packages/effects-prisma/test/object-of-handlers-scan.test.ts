@@ -1,5 +1,5 @@
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { diffIRs, scanWith } from "@aburi/test-harness"
+import { diffOfEditWith, scanWith } from "@aburi/test-harness"
 import { symbolById, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { prismaEffectsPlugin } from "../src/index"
@@ -108,14 +108,16 @@ describe("scan — a handler map", () => {
   })
 
   it("reports an edit to one handler as its logic change, and the map's as syntax only", async () => {
-    await workspace.writeSource("src/users.ts", api(DELETE))
-    const baseIR = (await scanWith(workspace.root, lineup)).ir
-    await workspace.writeSource("src/users.ts", api(SOFT_DELETE))
-    const headIR = (await scanWith(workspace.root, lineup)).ir
-    const changes = diffIRs(baseIR, headIR).symbols
+    const { diff } = await diffOfEditWith(
+      workspace,
+      lineup,
+      "src/users.ts",
+      api(DELETE),
+      api(SOFT_DELETE),
+    )
 
     expect(
-      changes.map((change) =>
+      diff.symbols.map((change) =>
         change.status === "changed"
           ? [change.after.name, change.delta.logicChanged, change.delta.syntaxChanged]
           : [change.status],

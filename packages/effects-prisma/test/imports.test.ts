@@ -1,3 +1,4 @@
+import { importEdge } from "@aburi/test-support"
 import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { hasPrismaImport } from "../src/index"
@@ -5,7 +6,7 @@ import { hasPrismaImport } from "../src/index"
 const PATH = "src/service.ts"
 
 function edge(source: string, line = 1): ImportEdge {
-  return { source, symbols: ["PrismaClient"], line, dynamic: false }
+  return importEdge({ source, symbols: ["PrismaClient"], line })
 }
 
 describe("hasPrismaImport", () => {

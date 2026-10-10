@@ -1,4 +1,4 @@
-import { useScratchWorkspace } from "@aburi/test-support"
+import { delta, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { changedSymbols, diffOfEdit } from "./fixtures/scan"
 
@@ -88,14 +88,7 @@ const check = (...condition: string[]) =>
     "",
   ].join("\n")
 
-/** Only the syntax axis moved. */
-const SYNTAX_ONLY = {
-  apiChanged: false,
-  logicChanged: false,
-  syntaxChanged: true,
-  visibilityChanged: false,
-  componentChanged: false,
-}
+const SYNTAX_ONLY = delta({ syntaxChanged: true })
 
 describe("an edit to what a caller passes is an api change", () => {
   it.each([

@@ -1,4 +1,4 @@
-import { recordingLogger, silentLogger } from "@aburi/test-support"
+import { recordingLogger } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../../src/call-site"
 import { makeLanguageId } from "../../src/id"
@@ -66,17 +66,11 @@ describe("a throw inside one language is a per-language fallback", () => {
   })
 
   it("carries the class and the stack on the debug channel, where the warning cannot", async () => {
-    const debugs: { message: string; meta: Record<string, unknown> | undefined }[] = []
-    const logger = {
-      ...silentLogger,
-      debug: (message: string, meta?: Record<string, unknown>) => {
-        debugs.push({ message, meta })
-      },
-    }
+    const logger = recordingLogger()
 
     await enrich({ ...ONE_CLASS, serverFactory: throwingServer(), logger })
 
-    const threw = debugs.filter((d) => d.message.includes("threw"))
+    const threw = logger.debugs.filter((d) => d.message.includes("threw"))
     expect(threw).toHaveLength(1)
     expect(threw[0]?.meta?.error).toBe("Error")
     expect(String(threw[0]?.meta?.stack)).toContain("server handler exploded")

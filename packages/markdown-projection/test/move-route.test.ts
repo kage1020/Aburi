@@ -1,8 +1,8 @@
-import { makeSymbol, sliceId } from "@aburi/test-support"
+import { changed, makeDiff, makeSymbol, moved, movedChanged, sliceId } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { changed, makeDiff, moved, movedChanged, projectChanges } from "./fixtures"
+import { projectChanges } from "./fixtures"
 
 function at(id: string, name: string, startLine: number): IRSymbol {
   const symbol = makeSymbol({ id, name })

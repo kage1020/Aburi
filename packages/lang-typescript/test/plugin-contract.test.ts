@@ -1,3 +1,4 @@
+import { extractFile } from "@aburi/test-harness"
 import { describe, expect, it } from "vitest"
 import {
   langTypescriptManifest,
@@ -5,7 +6,7 @@ import {
   TYPESCRIPT_FILE_DROP_PATTERNS,
   TYPESCRIPT_FILE_EXTENSIONS,
 } from "../src/index"
-import { idsOf, symbolsOf } from "./fixtures/ctx"
+import { idsOf } from "./fixtures/ctx"
 
 describe("langTypescriptPlugin.languageId", () => {
   it("is the prefix the plugin writes onto every Symbol id, not the manifest name", async () => {
@@ -18,12 +19,6 @@ describe("langTypescriptPlugin.languageId", () => {
 })
 
 describe("every rationale extraction emits is one the manifest declares", () => {
-  /** Whether a manifest prefix owns `token`: the prefix itself, or the prefix and a `:` part. */
-  const declares = (token: string) =>
-    langTypescriptManifest.provides.derivedByPrefixes.some(
-      (prefix) => token === prefix || token.startsWith(`${prefix}:`),
-    )
-
   it.each([
     ["export const { a } = m", ["destructured-binding"]],
     ["export const x = 1", ["export-keyword"]],
@@ -57,10 +52,14 @@ describe("every rationale extraction emits is one the manifest declares", () => 
     ],
     ["app.use(logger)", ["call-statement:app.use", "argument-names:logger"]],
   ])("declares the rationales %s produces", async (source, expected) => {
-    const emitted = (await symbolsOf(source)).flatMap((s) => s.derivedBy)
+    const { ctx, candidates } = await extractFile(langTypescriptPlugin, "src/a.ts", source)
+    const emitted = candidates.flatMap((s) => s.derivedBy)
+    const undeclared = emitted.filter(
+      (token) => ctx.registry.findDerivedByOwner(token)?.name !== langTypescriptManifest.name,
+    )
 
     expect(emitted).toEqual(expect.arrayContaining(expected))
-    expect(emitted.filter((token) => !declares(token))).toEqual([])
+    expect(undeclared).toEqual([])
   })
 })
 

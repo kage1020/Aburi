@@ -1,9 +1,10 @@
+import { importEdge } from "@aburi/test-support"
 import type { ImportEdge } from "@aburi/types"
 
 export function makeTrpcClientImport(): ImportEdge {
-  return { source: "@trpc/client", symbols: ["createTRPCClient"], line: 1, dynamic: false }
+  return importEdge({ source: "@trpc/client", symbols: ["createTRPCClient"] })
 }
 
 export function makeTrpcServerImport(): ImportEdge {
-  return { source: "@trpc/server", symbols: ["initTRPC"], line: 1, dynamic: false }
+  return importEdge({ source: "@trpc/server", symbols: ["initTRPC"] })
 }

@@ -1,18 +1,19 @@
-import { call, fp, makeSymbol, rule, symbolId } from "@aburi/test-support"
+import {
+  call,
+  changed,
+  emptySummary,
+  fp,
+  makeDiff,
+  makeSymbol,
+  moved,
+  movedChanged,
+  rule,
+  symbolId,
+} from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import {
-  changed,
-  emptySummary,
-  makeDiff,
-  moved,
-  movedChanged,
-  namedSymbol,
-  projectChanges,
-  relocated,
-  symbolWithBody,
-} from "./fixtures"
+import { namedSymbol, projectChanges, relocated, symbolWithBody } from "./fixtures"
 import { bytes, headings, noteOf, sectionOf } from "./markdown"
 
 const pad = (i: number, width = 4) => String(i).padStart(width, "0")

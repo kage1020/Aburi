@@ -215,8 +215,7 @@ describe("per-file fallback", () => {
   })
 
   it("warns about a failed didOpen and only debug-logs a failed didClose", async () => {
-    const debugs: string[] = []
-    const logger = { ...recordingLogger(), debug: (message: string) => debugs.push(message) }
+    const logger = recordingLogger()
 
     await enrich({
       ...filesOfClassWithMethod(["src/a.ts", "src/b.ts"]),
@@ -228,7 +227,9 @@ describe("per-file fallback", () => {
     })
 
     expect(logger.warnings).toEqual([expect.stringContaining("didOpen failed for src/a.ts")])
-    expect(debugs).toEqual([expect.stringContaining("didClose failed for src/b.ts")])
+    expect(logger.debugs.map((d) => d.message)).toEqual([
+      expect.stringContaining("didClose failed for src/b.ts"),
+    ])
   })
 })
 

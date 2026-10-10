@@ -1,17 +1,19 @@
-import { component, dependency, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
+import {
+  changed,
+  component,
+  dependency,
+  emptySummary,
+  makeDiff,
+  makeSymbol,
+  moved,
+  movedChanged,
+  sliceId,
+  symbolId,
+} from "@aburi/test-support"
 import type { SymbolChange, SymbolDelta, SymbolDroppedToggled } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectDiffSummaryLine } from "../src"
-import {
-  changed,
-  emptySummary,
-  makeDiff,
-  moved,
-  movedChanged,
-  namedSymbol,
-  projectChanges,
-  relocated,
-} from "./fixtures"
+import { namedSymbol, projectChanges, relocated } from "./fixtures"
 import { headings, sectionOf } from "./markdown"
 
 describe("projectDiff — section order", () => {

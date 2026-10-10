@@ -1,7 +1,7 @@
-import { makeSymbol } from "@aburi/test-support"
+import { changed, makeSymbol, movedChanged } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { changed, movedChanged, projectChanges } from "./fixtures"
+import { projectChanges } from "./fixtures"
 
 const f = makeSymbol({ id: "ts:src/a.ts#f", name: "f" })
 const note = (side: string) => `- ${side} fingerprint changed; no field-level detail was recorded`
