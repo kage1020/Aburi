@@ -1,7 +1,7 @@
 import type { IntegrityViolation } from "@aburi/core"
 
 export type DiffErrorCode =
-  /** `base.$schema` and `head.$schema` disagree (diff-algorithm.md). */
+  /** `base.$schema` and `head.$schema` disagree. */
   | "schema-mismatch"
   | "invalid-line-fuzz"
   | "ir-shape-invalid"

@@ -76,34 +76,6 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
   return promoteDefaultExports(out.list(), defaultExportedNames(root))
 }
 
-/**
- * Collects candidates under the rule that one entity gets one Symbol.
- *
- * Declarations of an id accumulate in source order and fold at the end. The **leading**
- * declaration gives the Symbol every scalar — kind, visibility, range, signature — and the
- * rest contribute what is list-shaped; here the leader is the first declaration that is not an
- * overload signature (`leadOf`), so an overload set is led by its implementation and anything
- * else by what source order already says. TypeScript requires the class or function to precede
- * a namespace merged into it once that namespace holds a value (TS2434), and requires a merge's
- * declarations to agree on whether they are exported, so the choice is between declarations
- * legal source keeps in agreement. A namespace holding only types may come first, and then it
- * leads.
- *
- * A value and a type share one qualified name, so they fold too: `const X` beside `type X`, or
- * a static `m` beside a merged namespace's `export type m`, is one Symbol led by whichever is
- * written first.
- *
- * The rule is total rather than a list of the constructs known to need it. A collision this
- * absorbs is not a silent loss: the surviving Symbol carries every declaration's `derivedBy`
- * plus `declaration-merged`, so the merge is readable in the IR — where the alternative was
- * a run that ended with one violation and no document at all.
- *
- * One group is dropped, and silently: overload signatures with nothing beside them that can
- * lead, which `tsc` rejects as TS2391. No declaration in it carries a body or the parameter
- * types the function is called with, so there is no Symbol to give it, and no drop reason says
- * so — the answer each such signature got while it was skipped on its own. An overload written
- * beside some other declaration of its name, a namespace say, folds into that one's Symbol.
- */
 interface CandidateSink {
   add(candidate: SymbolCandidate<Node>): void
   list(): SymbolCandidate<Node>[]
@@ -131,36 +103,10 @@ function makeCandidateSink(): CandidateSink {
   }
 }
 
-/**
- * The declaration that leads a group: the first one that is not an overload signature, or null
- * when every one is.
- *
- * An overload signature (`function parse(input: string): Config;` outside a `declare`, or a
- * `method_signature` in an ordinary class body) is written ahead of its implementation, but the
- * implementation carries the body and the parameter types the function is actually called with,
- * so it leads (LP8f). The overloads still fold in, as declarations with no body, so the syntax
- * axis sees them (LP8q). Dropped, they reached no fingerprint of the Symbol they belong to: an
- * edit to a method's overload moved only its class's `syntax`, whose body serializes every
- * member, and one to a module-level overload moved nothing. A group of overloads and nothing
- * else is TS2391, and stays without a Symbol, as before.
- *
- * The rule runs at **two levels**: `foldMemberGroup` applies it to one class member's
- * declarations, and the sink applies it again to everything with that member's id — which by
- * then is the member Symbol already folded. The sink cannot tell an already-decided Symbol from
- * a raw declaration, since it reads the lead's `fullNode` either way, so a member Symbol led by
- * an overload reads as a group of overloads and is dropped, body and all. That is why
- * `foldMemberGroup` never lets an overload lead, whatever else would.
- */
 function leadOf(group: readonly SymbolCandidate<Node>[]): SymbolCandidate<Node> | null {
   return group.find((declaration) => !isOverloadSignature(declaration.fullNode)) ?? null
 }
 
-/**
- * A bodyless function or method declaration an implementation can be written beside. Under a
- * `declare` nothing can be, so the signature is the declaration (LP36); an
- * `abstract_method_signature` is not one either, since the language forbids an implementation
- * beside it (LP35).
- */
 function isOverloadSignature(node: Node): boolean {
   return (
     (node.type === "function_signature" || node.type === "method_signature") &&
@@ -171,28 +117,6 @@ function isOverloadSignature(node: Node): boolean {
 /** Rationale recorded on a Symbol more than one declaration wrote. */
 const MERGED_DECLARATION = "declaration-merged"
 
-/**
- * Fold every declaration of one entity into the Symbol `lead` heads: scalars are the lead's,
- * lists are joined **in source order**, and each other declaration's nodes are carried so the
- * body walk and the fingerprint can see the whole entity.
- *
- * Both nodes are carried, not just the body. A declaration with no body — an enum, a type
- * alias, a namespace whose statements are their own Symbols — is described by its `fullNode`,
- * which is where `normalizeAst` already looks when a Symbol has no body. Carrying only bodies
- * made a reopened `enum E {}` fingerprint identically to the first declaration alone, so
- * adding, editing or deleting the second changed nothing. Only the bodies reach `walkBody`,
- * which is what keeps a merged namespace from being walked twice — once here and once through
- * the member Symbols its statements already produce.
- *
- * Decorators are joined rather than kept from the lead, because dropping one changes what the
- * Symbol *is*: `interface P {}` beside `@Controller() class P {}` is legal with the interface
- * written first, so the lead is the declaration carrying no decorators, and a lost `boundary`
- * decorator turns a controller into an `interface (data model)` drop.
- *
- * `declaration-merged` is said once, like every other token. A declaration can be a fold
- * already — a class member whose accessor pair or overloads `foldMemberGroup` joined, meeting
- * a merged namespace's export of the same id here — and it then brings the token with it.
- */
 function foldDeclarations(
   declarations: readonly SymbolCandidate<Node>[],
   lead: SymbolCandidate<Node>,
@@ -250,11 +174,6 @@ function visitStatement(
     case "function_declaration":
     case "generator_function_declaration":
     case "function_signature":
-      // A bodyless `function_signature` is added like any function, and the sink decides what
-      // it is. Under a `declare` there are no implementations, so the signature is the whole
-      // declaration and leads (skipping it left `declare function f(): void` extracting
-      // nothing). Outside one it is an overload, which folds into the implementation's Symbol as
-      // a declaration with no body and never leads it (`leadOf`, LP8q).
       out.add(makeFunctionCandidate(node, ctx, namespacePath))
       return
     case "function_expression":
@@ -379,21 +298,6 @@ function addClassAndMembers(
   addClassMembers(node, body, ctx, [...namespacePath, className], out)
 }
 
-/**
- * One candidate per member, not per member declaration. Which class-body nodes declare a
- * member at all, an overload `method_signature` among them, is `memberSymbolSegment`'s answer;
- * which of a member's declarations leads it is `foldMemberGroup`'s.
- *
- * So one member can be written more than once: `get v()` beside `set v(n)` is one property,
- * and two `method_definition` nodes, and `find(id: string): User;` beside `find(id: any) { … }`
- * is one method (LP8q). Those fold into one candidate. Of an accessor pair the getter is the
- * one that claims it — a property's type is what reading it answers, so taking the setter's
- * signature would report the member as `(n) => void` — and of an overload set, the
- * implementation.
- *
- * A field holding a function is a member here too, and folds by id with the rest: a field
- * and a method of the same name are one id, which is what `tsc` calls TS2300 anyway.
- */
 function addClassMembers(
   classNode: Node,
   body: Node,
@@ -439,16 +343,6 @@ function groupMemberDeclaration(
   else group.push({ candidate, isGetter })
 }
 
-/**
- * One member's declarations as one candidate, or null when none of them can lead.
- *
- * An overload never leads, and that is decided before the getter rule rather than after it.
- * `get x(): number;` outside a `declare` is an overload signature that is also a getter, and
- * the sink runs `leadOf` again on what this returns: a member led by that signature would read
- * there as a group of overloads and lose its Symbol, while the walk still skipped the body of
- * the `set x(v) { … }` beside it, expecting the member's Symbol to carry it. So the getter rule
- * picks among the declarations that can lead, and a member of overloads alone has none.
- */
 function foldMemberGroup(group: MemberGroup): SymbolCandidate<Node> | null {
   const leads = group.filter((member) => !isOverloadSignature(member.candidate.fullNode))
   const lead = leads.find((member) => member.isGetter) ?? leads[0]
@@ -478,17 +372,6 @@ function makeFunctionCandidate(
   }
 }
 
-/**
- * One class-member declaration `memberSymbolSegment` has already admitted — an overload
- * signature included, which becomes a candidate here and folds into its implementation's — and
- * the segment it admitted it by: a member whose name has no qualified-name segment — computed,
- * quoted into something that is not an identifier, numeric — never reaches here, and the name
- * is not read a second time.
- *
- * Taking the segment as an argument is what leaves no way for this to refuse a name. Reading
- * the name here instead would mean handing its text to the id builder, which throws on
- * anything that is not an identifier and costs the file at the per-file boundary.
- */
 function makeMethodCandidate(
   node: Node,
   segment: string,
@@ -882,21 +765,6 @@ function isBindingPattern(node: Node): boolean {
   return node.type === "object_pattern" || node.type === "array_pattern"
 }
 
-/**
- * One binding out of a destructuring declaration.
- *
- * `const` and not `function`, even when the initializer is an object of arrows: pairing a
- * pattern key with an object-literal property is analysis this plugin does nowhere else, and
- * claiming a kind on a guess would make the two paths disagree about what evidence a kind
- * needs. The `source` range is the whole declaration, as it is for a plain `const` — several
- * Symbols therefore share one range, and `destructured-binding` is what tells a reader why.
- *
- * `fullNode` is the declaration too, so every binding out of one statement normalizes to the
- * same AST string and carries the same syntax fingerprint. Intended, and not new: `const a =
- * 1, b = 2` has done it since before this walk existed. What it costs is precision in the
- * diff's rename similarity, which compares that fingerprint — two bindings from one
- * declaration look alike to it, which for a destructuring is closer to true than not.
- */
 function makeDestructuredCandidate(
   binding: Node,
   statement: Node,
@@ -984,22 +852,6 @@ function promoteDefaultExports(
   })
 }
 
-/**
- * The JSDoc blocks written above a declaration, joined in source order, or `null` when there
- * are none. Only `/**`-opening comments count. Any other comment is a note about the code rather
- * than its documentation, and the space between a decorator and its member is where
- * `// biome-ignore` notes and commented-out decorators are written. Once the text is joined,
- * `readThrows` cannot tell which kind of comment a `@throws` came from, and its rule against
- * reading a description as a type does not stand in for that: `// @throws Legacy` is a type name
- * by that rule, and would be recorded.
- *
- * The scan starts at the outermost wrapper (`export`, `declare`), since that is where the
- * JSDoc sits, and walks backwards from the anchor rather than searching the parent's child
- * list — at module level that list is every statement in the file, and materializing it once
- * per declaration made a large single file quadratic (`lang-plugin.md`). A decorator and
- * a non-doc comment are stepped over; anything else ends the run, including an anonymous
- * token such as a stray `;`, which separates a comment from the member below it.
- */
 function readLeadingJsDoc(node: Node): string | null {
   const anchor = outerStatementWrapper(node)
   const collected: string[] = []

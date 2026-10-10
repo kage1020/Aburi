@@ -2,22 +2,6 @@ import { describe, expect, it } from "vitest"
 import { classifySymbolDropHint, normalizeAst } from "../src/index"
 import { idsOf, makeExtractionCtx, symbolOf, symbolsOf, walkOf } from "./fixtures/ctx"
 
-/**
- * Three ordinary TypeScript constructs declare one entity twice — an accessor pair, an
- * overload beside its implementation, and a merged declaration. Extraction answered one
- * SymbolCandidate per *declaration*, so each produced two Symbols with one id, and integrity
- * invariant #1 refused the document. That check ran once over the whole scan, so a single
- * `get`/`set` pair ended the run rather than costing its own file. The scan decides invariant
- * #1 per file now, so the same bug would cost one file — but the file it costs is still one
- * this plugin could have extracted, which is what these tests are about.
- *
- * TypeScript models all three the same way: one entity, several declarations. So does this
- * now. One declaration leads and claims every scalar on the Symbol — the first written, unless
- * it is an overload signature, which gives way to its implementation, or a setter, which gives
- * way to its getter — and the rest contribute their rationale, their body, and their text to
- * the syntax axis.
- */
-
 const SETTER_FIRST_DECORATED = [
   "export class A {",
   "  @Validate() set v(n) {}",
@@ -79,8 +63,6 @@ describe("an overload declaration folds into its implementation's Symbol", () =>
   })
 
   it("emits no member for a declaration with no implementation", async () => {
-    // The same answer a top-level `function f(a: string): void` with no implementation gets:
-    // the signature is a candidate, and nothing in its group can lead it (TS2391).
     expect(await idsOf("export class D { f(a: string): void }")).toEqual(["ts:src/a.ts#D"])
   })
 

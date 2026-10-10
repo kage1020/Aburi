@@ -2,11 +2,6 @@ import type { Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { formatInput, signatureLine } from "../src/format"
 
-/**
- * A parameter's `optional` and `rest` fields (ir-schema.md §7) print where TypeScript writes
- * them. Printed as `name: type` alone, `a?: string` and `...ids: string[]` would both read as
- * a required parameter.
- */
 describe("formatInput", () => {
   it.each([
     [{ name: "a", type: "string" }, "a: string"],

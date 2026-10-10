@@ -19,21 +19,8 @@ export type OpaqueAstNode = unknown
 
 // --- Source input / parse output ---
 
-/**
- * One source file as a language plugin is handed it. `scan` builds it from disk; a caller that
- * builds one itself to drive `runFilePipeline` must keep both invariants below.
- */
 export interface SourceFile {
-  /**
-   * Workspace-relative POSIX path, in Unicode NFC (ir-schema.md §1.2): the spelling Symbol ids
-   * are built from, which can differ from the one the filesystem stores.
-   */
   path: string
-  /**
-   * The UTF-8 source, with LF line endings only. It holds no CR: `scan` turns CRLF and a lone
-   * CR into LF before a plugin sees it, since a CR left in would make the `syntax` fingerprint
-   * depend on the checkout (fingerprint.md §5.3).
-   */
   content: string
 }
 
@@ -49,21 +36,6 @@ export interface ParseError {
 export interface ImportEdge {
   /** Module specifier verbatim (e.g. "@billing/domain", "./util"). */
   source: string
-  /**
-   * The bindings the import makes (`"X"`, `"X as Y"`, `"default as Y"`), or
-   * "*" for namespace / wildcard.
-   *
-   * For aliased named imports (`import { X as Y }`) the entry is the string
-   * `"X as Y"` — the exported name paired with the local rebind separated by
-   * ` as `. Callers that only care about the exported name split on the
-   * separator; callers that need the local binding (call resolution) do the
-   * same split and pick the right half. Un-aliased imports emit the plain
-   * exported name (`"X"`). A default import (`import Y from './x'`) binds the
-   * module's `default` export and is written as `{ default as Y }` would be,
-   * `"default as Y"`. That spelling is what lets a consumer tell it from a
-   * named import of `Y`; nothing enforces it, and a plugin that emits a bare
-   * `"Y"` is read as `import { Y }`.
-   */
   symbols: string[] | "*"
   line: number
   /** True for `import()` and equivalent dynamic forms. */
@@ -120,7 +92,6 @@ export interface CallCandidate {
 }
 
 export interface BodyExtraction {
-  /** Rules per ir-schema.md. */
   rules: import("./generated/ir").Rule[]
   /** Pre-classification call list. */
   calls: CallCandidate[]
@@ -129,7 +100,6 @@ export interface BodyExtraction {
 export interface DropHint {
   /** Goes into Symbol.dropReason verbatim. */
   reason: string
-  /** drop-list.md category. */
   category: "B" | "C"
 }
 
@@ -168,7 +138,7 @@ export interface OwnerSummary {
   id: SymbolId
   kind: SymbolKind
   name: string
-  /** Already populated by framework plugin (lang-plugin.md). */
+  /** Already populated by framework plugin. */
   extKind: ExtKind
   decorators: OwnerDecorator[]
   component: ComponentId | null

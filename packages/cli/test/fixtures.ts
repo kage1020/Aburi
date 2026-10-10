@@ -131,11 +131,6 @@ export interface FakeGitOptions {
   unmodelled?: "succeed" | "throw"
 }
 
-/**
- * A `git` far enough for `runDiff`'s ref mode: the commands `resolveViaGit` issues, and the two
- * more it asks when a ref does not resolve, are modelled with the answers of a healthy,
- * non-shallow, non-sparse repository with commits and no submodules, and every call is recorded.
- */
 export function fakeGit(options: FakeGitOptions = {}): {
   runner: GitRunner
   calls: RecordedGitCall[]

@@ -1,28 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { walkFirstSymbol } from "./fixtures/ctx"
 
-/**
- * A returned bracket access is trivial only when its object and its index both are
- * (`drop-list.md` §5.5; T13–T19 in §8.5). Only the object used to be checked, and a trivial
- * return is never walked — `handleReturnStatement` returns before the walk that collects calls —
- * so a call in a trivially read index was in no Symbol at all. `return cache[computeKey(key)]`
- * recorded no `computeKey`, and `return LABELS[await prisma.user.count()]` put the database read
- * in neither `calls[]` nor `effects[]`, so an edit to it was reported as a syntax-only change. The
- * index is therefore part of the determination. A concise arrow body is walked whole and always
- * recorded the call; the block spelling now agrees with it.
- *
- * The symptom as a user met it is the last test here: the call was missing while it was written
- * in the index and appeared once it was hoisted into a local. Each rule is asserted with its
- * `type` and its exact `expr`, not merely counted, because the `expr` is what moves the Symbol's
- * `logic` fingerprint.
- *
- * What stays trivial is pinned on both operands — `this` or a member chain as the object, `?.`
- * before the bracket, an index that is a type wrapper around a name — and so is what does not: a
- * call in the object, and an index that is a conditional, awaits a value without calling
- * anything, or is a template literal, which is never trivial, so `` a[`k`] `` is a rule where
- * `a["k"]` is not. A type wrapper is read through in an index only; `return x as T` is a rule.
- */
-
 async function walked(body: string) {
   const { rules, calls } = await walkFirstSymbol(`export async function f(x: any) { ${body} }`)
   return { rules: rules.map((r) => [r.type, r.expr]), calls: calls.map((c) => c.target) }

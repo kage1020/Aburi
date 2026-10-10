@@ -300,9 +300,6 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     ).toEqual(["{ a: 1 }"])
   })
 
-  // The one place the concise spelling answers differently from the block one, pinned as it
-  // stands. The block spelling is the less exact: parentheses decide whether its `return` is
-  // call-only.
   it("is call-only for a parenthesized call, where the block spelling takes a rule", async () => {
     const concise = await walkFirstSymbol("export const f = () => (g())")
     const block = await walkFirstSymbol("export function f() { return (g()) }")
@@ -314,8 +311,6 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     ])
   })
 
-  // A computed index is not trivial (`drop-list.md` §5.5), so both spellings take the rule and
-  // record the call. `subscript-index.test.ts` pins the block spelling.
   it("reads a subscript with a computed index as a return, and records the call", async () => {
     const { rules, calls } = await walkFirstSymbol("export const f = (a: any) => a[g()]")
 

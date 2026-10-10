@@ -162,9 +162,6 @@ describe("logicFingerprint — invariance", () => {
   })
 
   it("L12a: an id change that reorders two propagated effects leaves the caller's logic alone", () => {
-    // The IR sorts the propagated segment by (id, target), so db.write → x-acme:create moves
-    // prisma.invoice.create from before bus.emit to after it. The callee, whose local effects
-    // keep call order, keeps its hash; the caller has to as well (fingerprint.md §4.5).
     const before = caller([
       propagatedEffect("db.write", "prisma.invoice.create"),
       propagatedEffect("event.publish", "bus.emit"),
@@ -178,9 +175,6 @@ describe("logicFingerprint — invariance", () => {
   })
 
   it("L12a: the same reorder leaves the caller's logic alone beside a local effect of its own", () => {
-    // The realistic shape: a controller with an effect of its own that reaches a write and a
-    // publish through its callees. Both segments are populated, so the split between them is
-    // exercised; before the fix this pair hashed apart as well.
     const readsClock = localEffect("time.now", "Date.now", 4)
     const before = caller([
       readsClock,
@@ -197,10 +191,6 @@ describe("logicFingerprint — invariance", () => {
   })
 
   it("L12b: one target reaching a caller under two ids hashes as it does once the ids agree", () => {
-    // Two callees classify prisma.invoice.create differently (one file imports the client the
-    // plugin gates on, the other does not), so propagation, which merges on (id, target), hands
-    // the caller two entries for it. A plugin upgrade that unifies the ids leaves one; the
-    // callees' logic does not move, and the caller's must not either.
     const split = caller([
       propagatedEffect("db.write", "prisma.invoice.create"),
       propagatedEffect("x-acme:create", "prisma.invoice.create"),
@@ -211,10 +201,6 @@ describe("logicFingerprint — invariance", () => {
   })
 
   it("L12c: a propagated target the caller already calls locally adds nothing, whatever its id", () => {
-    // Propagation drops a propagated entry only when the caller has a local effect with the
-    // same (id, target). With the callee classifying the target as x-acme:create and the caller
-    // as db.write, the entry stays; once the ids agree, propagation drops it. The caller's
-    // logic must be the same either way.
     const own = localEffect("db.write", "prisma.invoice.create", 6)
     const split = caller([own, propagatedEffect("x-acme:create", "prisma.invoice.create")])
     const unified = caller([own])
@@ -223,9 +209,6 @@ describe("logicFingerprint — invariance", () => {
   })
 
   it("keeps local effects in call order ahead of the propagated ones", () => {
-    // The input pinned in full. Both local entries keep call order, the one written with an
-    // explicit `propagated: false` among them, since only `true` moves an entry to the second
-    // segment. The propagated entry comes after them although its target sorts first.
     const sym = caller([
       localEffect("db.write", "z.local", 3),
       { ...localEffect("db.write", "m.local", 5), propagated: false },
@@ -342,8 +325,6 @@ describe("logicFingerprint — change conditions", () => {
   })
 
   it("L10: a propagated effect enters the hash, so a caller whose only effect is one moves", () => {
-    // What propagation is for (effect-propagation.md §12.4): a callee gaining a db.write has to
-    // reach the caller's logic even when the caller's own body has no effect at all.
     const reachesWrite = caller([propagatedEffect("db.write", "prisma.invoice.create")])
     expect(logicFingerprint(reachesWrite)).not.toBe(logicFingerprint(caller([])))
   })
@@ -447,10 +428,6 @@ describe("logicFingerprint — change conditions", () => {
   })
 })
 
-/**
- * Whether the logic axis is evidence of identity. A rule's `type` and `loopKind` are the shape of
- * a body, which unrelated bodies share; anything else it carries, and any effect, names something.
- */
 describe("logicNamesNothing", () => {
   const shaped = (over: Partial<Rule> & Pick<Rule, "type">): Rule => ({
     line: 3,

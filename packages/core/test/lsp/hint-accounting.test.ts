@@ -43,7 +43,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(statsOf(enrichment).hintsRejected).toEqual(noRejections())
   })
 
-  // LE25
   it("counts a hover that answers nothing as an unparseable hover, not as a healthy request", async () => {
     const enrichment = await enrichThisFoo(() => null)
     const stats = statsOf(enrichment)
@@ -56,7 +55,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.filesFellBack).toBe(0)
   })
 
-  // LE25 — a payload arrived, but not one `extractHoverPayload` can read.
   it("counts a hover whose contents carry no text as an unparseable hover", async () => {
     const enrichment = await enrichThisFoo(() => ({ contents: { kind: "markdown" } }))
     const stats = statsOf(enrichment)
@@ -64,7 +62,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ unparseableHover: 1 }))
   })
 
-  // LE26
   it("counts hover text with no owner class in it as ownerClassNotFound", async () => {
     const enrichment = await enrichThisFoo(() => ({ contents: "function foo(): void" }))
     const stats = statsOf(enrichment)
@@ -72,7 +69,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ ownerClassNotFound: 1 }))
   })
 
-  // LE26
   it("counts hover text naming a class the Symbol table lacks as ownerClassNotFound", async () => {
     const enrichment = await enrichThisFoo(() => ({
       contents: "(method) Elsewhere.foo(): void",
@@ -82,10 +78,7 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ ownerClassNotFound: 1 }))
   })
 
-  // LE26
   it("counts a known class whose member is missing as memberNotFound", async () => {
-    // `C` is in the table; `C.foo` is not — the shape of a method inherited from a
-    // dependency the scan never read.
     const cls = makeClassSymbol("src/a.ts", "C", 1)
     const bar = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
     const enrichment = await enrichWithLsp(
@@ -100,7 +93,6 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ memberNotFound: 1 }))
   })
 
-  // LE27
   it("counts a hint carrying the other receiver kind as kindMismatch and leaves the call unresolved", () => {
     const caller = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
     const callee = makeMethodSymbol("src/a.ts", "Base", "foo", 2)
@@ -117,12 +109,9 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(result.lspHintUsage).toEqual({ consumed: 0, kindMismatch: 1, targetDropped: 0 })
     expect(result.edges).toEqual([])
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
-    // A declined hint is reported like a call site that never had one — call-resolution.md
-    // leaves them in one bucket on purpose, and says the counters are where they part.
     expect(result.stats.unresolved.dynamic).toBe(1)
   })
 
-  // LE27
   it("counts a hint naming a dropped Symbol as targetDropped and leaves the call unresolved", () => {
     const caller = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
     const callee = makeSymbol("ts:src/a.ts#C.foo", { kind: "method", dropped: true })

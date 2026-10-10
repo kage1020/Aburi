@@ -381,8 +381,6 @@ function describeIdFault(symbols: readonly IRSymbol[], path: string): string | n
     }
     const twin = here.get(symbol.id)
     if (twin !== undefined) {
-      // The lines, because the id names the qualified name the two share and nothing else
-      // tells them apart — the reader has two declarations to find, not one.
       return (
         `two Symbols share the id "${symbol.id}" (lines ${twin.source.startLine} and ` +
         `${symbol.source.startLine}); the language plugin gave two declarations one qualified ` +
@@ -439,23 +437,6 @@ export function languageFileDropPatterns(languages: readonly LanguagePlugin[]): 
   return patterns
 }
 
-/**
- * `fsPath` opens it, `path` names it.
- *
- * The two differ whenever the filesystem stores a name that is not already in NFC, and reading
- * by the Document's spelling misses on every filesystem that keeps what it was given. What the
- * plugin then sees is `path`, because that is what its Symbol ids are built from and what the
- * Document records — the filesystem spelling stops here.
- *
- * The content's line terminators stop here too: CRLF and a lone CR become LF, so the Document
- * does not depend on the checkout (`core.autocrlf`, an editor's setting). Without it a line
- * break inside a template literal reached the `syntax` fingerprint as `\r\n` on one checkout
- * and `\n` on another, and every field copied from source text carried the `\r`
- * (fingerprint.md §5.3). The program is unchanged — ECMAScript reads CRLF and a lone CR in a
- * template literal as LF. Line numbers and columns are unchanged for a CRLF file, whose CR sat
- * at the end of its line; a file that breaks lines with CR alone, which read as one line, gains
- * the lines it was written with.
- */
 async function loadSourceFile(
   workspaceRoot: string,
   discovered: DiscoveredFile,
@@ -465,10 +446,6 @@ async function loadSourceFile(
   return { path: discovered.path, content: normalizeLineTerminators(content) }
 }
 
-/**
- * CRLF and a lone CR to LF, for `loadSourceFile`. Exported for its tests; it is not part of the
- * package's API.
- */
 export function normalizeLineTerminators(content: string): string {
   return content.includes("\r") ? content.replace(/\r\n?/g, "\n") : content
 }

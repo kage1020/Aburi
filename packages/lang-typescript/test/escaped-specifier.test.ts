@@ -39,9 +39,6 @@ describe("an escaped specifier names the module the author wrote", () => {
   ])("carries %s through instead of deleting it", async (_label, written, expected) => {
     const { imports, errors } = await importsOf(`import x from "${written}"`)
 
-    // The whole edge list, not the first source: decoding changes how many edges there are as
-    // well as what they say, because `dedupeEdges` keys on the decoded specifier — two
-    // writings on one line that differed only by an escape now collapse into one.
     expect(imports).toEqual([
       { source: expected, symbols: ["default as x"], line: 1, dynamic: false },
     ])
@@ -119,9 +116,6 @@ describe("an escape the grammar admits but ECMAScript has no value for", () => {
   it("keeps a digit escape, which is a SyntaxError inside a module", async () => {
     const { imports, errors } = await importsOf(`import x from "./a${BACKSLASH}1b"`)
 
-    // Neither the sloppy-mode U+0001 nor a refusal: the characters the author typed. Nothing
-    // downstream learns the specifier had no legal value, which is a gap this change does not
-    // close — it is the same silence for `\1`, `\8` and `\u{110000}` alike.
     expect(imports).toEqual([
       { source: "./a1b", symbols: ["default as x"], line: 1, dynamic: false },
     ])

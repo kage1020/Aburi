@@ -96,9 +96,6 @@ describe("a registration call's inline handler is its body", () => {
       "ts:src/a.ts#app__use__d0",
       ["first", "second"],
     ],
-    // The Symbol stands for the whole statement, and both handlers are written in it. Naming
-    // it after the leaf method is the existing convention and is not what this changes; the
-    // path written up the chain is what discriminates it (LP20i1).
     [
       "both handlers of a chained registration",
       'app.route("/x").get(() => { read() }).post(() => { write() })',
@@ -171,7 +168,6 @@ describe("a function a const hands to a call is the const's body (LP7c)", () => 
     expect(symbol.kind).toBe("const")
     expect(symbol.signature).toBeNull()
     expect(symbol.derivedBy).toEqual(["call-argument-function", "export-keyword"])
-    // One function, so one body and no further ones: `plugins.ts` and LP8i, absent never empty.
     expect("mergedDeclarations" in symbol).toBe(false)
     expect(rules.map((r) => r.type)).toEqual(["guard", "throw"])
     // The wrapping call is not a body, so `withAuth` is not one of the const's calls.
@@ -242,7 +238,6 @@ describe("a function a const hands to a call is the const's body (LP7c)", () => 
       ["Error"],
     ],
   ])("reads %s the same way, because it asks nothing about the call", async (_label, source, name, further, targets) => {
-    // The breadth LP7c names: the reading is LP20g's, and that has never asked what the call is.
     const symbol = await symbolOf(source, `ts:src/a.ts#${name}`)
 
     expect(symbol.bodyNode).not.toBeNull()
@@ -367,7 +362,6 @@ describe("what the registration scan refuses", () => {
   })
 
   it("leaves the merged key absent unless a second handler is written", async () => {
-    // `plugins.ts` and LP8i: absent, never empty.
     const one = await symbolOf('app.get("/x", () => { a() })', "ts:src/a.ts#app__get__$x__d0")
     const none = await symbolOf("app.listen(3000)", "ts:src/a.ts#app__listen__d0")
     const two = await symbolOf("app.use(() => { a() }, () => { b() })", "ts:src/a.ts#app__use__d0")

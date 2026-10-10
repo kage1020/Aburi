@@ -17,11 +17,6 @@ export function isNestjsModule(source: string): boolean {
 
 /** What the file's imports say about one written identifier. */
 interface NameOrigin {
-  /**
-   * The name the source module exports it under. That is the key the decorator tables use,
-   * except for a default import: there it is `"default"`, which no table lists, and
-   * `resolveDecoratorName` matches the written name instead.
-   */
   readonly imported: string
   /** The module specifier the name came from, kept so a downgrade can say which module caused it. */
   readonly source: string
@@ -40,28 +35,6 @@ export interface ImportedBindings {
   readonly namespaces: ReadonlyMap<string, NamespaceOrigin>
 }
 
-/**
- * Index the file's import edges by what each binds. The whole list is validated up front, so
- * whether this throws never depends on which entries a lookup reaches.
- *
- * A namespace edge (`symbols: "*"`) binds no individual name, so it contributes nothing to
- * `names`; what it does bind is the module object, under `namespaceBinding`, and that is
- * what ties `@nest.Controller()` back to `@nestjs/common` through `Decorator.qualifier`.
- * An edge with no `namespaceBinding` — a bare side-effect import, a wildcard re-export —
- * binds nothing in scope and contributes to neither map, while one whose binding is present
- * but empty is an upstream fault rather than a shape to skip, and throws.
- *
- * A **default** import binds the module object too, and lands in `names` instead: the
- * language plugin reports `import nest from "m"` as `symbols: ["default as nest"]` with no
- * `namespaceBinding`, which is why a receiver is looked up in both maps (`resolveDecoratorName`).
- *
- * Re-export edges count as evidence too; their aliased form arrives as the source-side name
- * only, and nothing on `ImportEdge` tells the two kinds apart.
- *
- * Duplicate bindings (reachable only through re-exports, since a double local binding is a
- * `TS2300`): a NestJS edge beats a non-NestJS one in either order; anything else is settled
- * by write order, an arbitrary tiebreak. Namespaces are settled the same way.
- */
 export function readImportedNames(
   imports: readonly ImportEdge[],
   filePath: string,
@@ -117,8 +90,6 @@ export function resolveDecoratorName(
   }
   const origin = bindings.names.get(name)
   if (origin === undefined) return { canonical: name, confidence: "high" }
-  // A default import (`import Controller from "./decorators"`) names the module's `default`,
-  // which no table lists; the name the file chose for it is the only evidence of what it is.
   const canonical = origin.imported === DEFAULT_EXPORT_NAME ? name : origin.imported
   return { canonical, confidence: origin.fromNestjs ? "high" : "medium" }
 }

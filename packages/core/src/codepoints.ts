@@ -5,7 +5,7 @@ export function describeCodePoints(value: string): string {
   return `${JSON.stringify(value)} (${points})`
 }
 
-/** Unicode NFC, the one form every string in a Document is held in (ir-schema.md). */
+/** Unicode NFC, the one form every string in a Document is held in. */
 export function toNfc(value: string): string {
   return value.normalize("NFC")
 }

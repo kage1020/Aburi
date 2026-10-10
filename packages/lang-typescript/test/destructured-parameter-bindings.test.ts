@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { symbolOf, symbolsOf } from "./fixtures/ctx"
 
-/**
- * A destructuring parameter's `name` is the pattern's text, which no call can name. The
- * identifiers the pattern binds go beside it in `bindings`, read the way a destructuring
- * declaration is (ir-schema.md §3.2): a rename binds its value, a default binds its left
- * side, and a rest element binds what it holds (lang-plugin.md LP11d).
- */
-
 async function inputsOf(source: string, id = "ts:src/a.ts#f") {
   return (await symbolOf(source, id)).signature?.inputs
 }
@@ -43,8 +36,6 @@ describe("a destructuring parameter lists the names it binds", () => {
   })
 
   it("leaves the key out for a pattern that binds no name", async () => {
-    // A normal parse with nothing repaired, and a shape React code writes. The key is absent
-    // rather than `[]` (Class B).
     const inputs = await inputsOf("function f({}: Props, []: T) {}")
 
     expect(inputs).toStrictEqual([
@@ -72,13 +63,6 @@ describe("a destructuring parameter lists the names it binds", () => {
   })
 })
 
-/**
- * A rest parameter's `name` is its binding without the `...`, and `rest` says it collects the
- * remaining arguments (LP11b). When that binding is itself a pattern, `name` is the pattern's
- * text and `bindings` lists what it binds, so the three fields together still name every
- * identifier the call resolver must treat as local. A single-name rest parameter is named by
- * its binding and needs no list.
- */
 describe("a rest parameter whose binding destructures", () => {
   it.each([
     ["function f(...[x]: T) {}", { name: "[x]", type: "T", rest: true, bindings: ["x"] }],
@@ -101,10 +85,6 @@ describe("a rest parameter whose binding destructures", () => {
 /** The grammars a parameter list is read with: `.ts` loads one, `.js` and `.tsx` the other. */
 const GRAMMARS = ["src/a.ts", "src/a.js", "src/a.tsx"]
 
-/**
- * `f`'s inputs, after checking that `g` beside it survived: a parameter the walk could not
- * fully read must not cost the file its other Symbols.
- */
 async function survivingInputsOf(params: string, path: string) {
   const symbols = await symbolsOf(`function f(${params}) {}\nfunction g(c) {}`, path)
 
@@ -112,14 +92,6 @@ async function survivingInputsOf(params: string, path: string) {
   return symbols[0]?.signature?.inputs
 }
 
-/**
- * A recovered parse can leave a zero-width MISSING identifier where a pattern's binding would
- * be (`{ a: }`), or wrap text it could not place in an ERROR node (`{ a b }`). Neither is a
- * name the source wrote into a binding position, so neither is listed: the empty string would
- * be a binding the schema refuses, and an ERROR's text was never placed as one (LP11c's rule,
- * one level down; LP11d). The parameter keeps its written text as `name`, and the file keeps
- * every Symbol, as it did when the parameter was read by its text alone.
- */
 describe("a destructuring parameter the parser repaired", () => {
   it("lists no binding the source did not write", async () => {
     const inputs = await inputsOf("function f({ a: }: T, { b, c: }: U) {}")
@@ -144,9 +116,6 @@ describe("a destructuring parameter the parser repaired", () => {
       expect(await survivingInputsOf(params, path)).toStrictEqual([expected])
     })
 
-    // The parser keeps these only as an array (or object) expression behind a `!` it inserts,
-    // so no `array_pattern` reaches the reader. The names inside were written in binding
-    // position, and `[a, ?, b]` lists `b` as `{ a, ?, b }` does.
     it.each([
       ["[a, ?, b]", { name: "[a, ?, b]", type: "", bindings: ["a", "b"] }],
       ["[a, ?]", { name: "[a, ?]", type: "", bindings: ["a"] }],
@@ -178,9 +147,6 @@ describe("a destructuring parameter the parser repaired", () => {
   })
 
   it("leaves a destructuring declaration refusing the same text", async () => {
-    // Only the parameter path passes over what the walk does not model. A declaration's
-    // bindings become Symbols, and one it could not read is refused rather than passed over
-    // (pattern-bindings.ts).
     await expect(symbolsOf("export const { a, ? } = m")).rejects.toThrow(/Unmodelled node "ERROR"/)
     await expect(symbolsOf("export const { q, k: [a, ?] } = m")).rejects.toThrow(
       /Unmodelled node "non_null_expression"/,
@@ -188,12 +154,6 @@ describe("a destructuring parameter the parser repaired", () => {
   })
 })
 
-/**
- * An expression the grammar places where a binding belongs is no binding, and no compiler
- * accepts one in a parameter. The source is still read as written — mid-edit, generated, or
- * plain `.js` — so such a pattern drops only that binding and the file keeps every Symbol
- * (LP11d). None of these parses with an ERROR node.
- */
 describe("a destructuring parameter holding an expression the grammar placed", () => {
   describe.each(GRAMMARS)("in %s", (path) => {
     it.each([

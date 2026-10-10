@@ -43,8 +43,6 @@ export async function packPublishedPackages(): Promise<PackedPackage[]> {
       return {
         name: packed.name,
         directory,
-        // npm reports posix separators; normalise anyway so assertions read the same on
-        // every platform.
         paths: packed.files.map((file) => file.path.replaceAll("\\", "/")),
       }
     }),

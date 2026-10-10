@@ -123,10 +123,6 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
   })
 
   it("serialises notCompared byte-identically across renames, however anything is ordered", () => {
-    // The rename map translates base paths into head paths, so the order the base list walks in
-    // is not the order the entries sort in: `src/y.ts` becomes `src/b.ts`, ahead of the entry
-    // `src/a.ts` becomes. `src/z.ts` is skipped under its own name too, and shares the head
-    // path `src/a.ts` translates to — the case only the second sort key decides.
     const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
     const baseLosses = [
       { path: "src/a.ts", reason: "over-size" as const },

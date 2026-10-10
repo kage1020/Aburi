@@ -1,6 +1,6 @@
 import type { UndeclaredVocabOccurrence } from "@aburi/core"
 
-/** Written beside the IR by a scan with strict off (`extension-vocab.md`, `config.md`). */
+/** Written beside the IR by a scan with strict off. */
 export const VOCAB_DISCOVERED_FILENAME = "aburi-vocab-discovered.json"
 
 /** How many occurrences of one value the record quotes; the rest are counted. */

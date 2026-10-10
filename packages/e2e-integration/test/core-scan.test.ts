@@ -190,7 +190,7 @@ describe("scan — integration through real plugins", () => {
     const caller = result.ir.symbols.find((symbol) => symbol.name === "caller")
     const resolvedCalls = (caller?.calls ?? []).filter((c) => c.resolved !== null)
     expect(resolvedCalls.length).toBe(3)
-    // ...but the Dependency projection collapses them into one triple (invariant #13).
+    // ...but the Dependency projection collapses them into one triple.
     const edges = result.ir.dependencies.filter(
       (d) => d.via === "call" && d.from.endsWith("#caller") && d.to.endsWith("#helper"),
     )

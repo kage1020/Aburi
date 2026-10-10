@@ -165,8 +165,6 @@ export async function work(db: ReturnType<typeof drizzle>) {
   })
 
   it("leaves a class's own zero-argument update() and a form's delete() unclassified", async () => {
-    // Every Drizzle write terminal takes a table, so the zero-argument calls are not Drizzle's,
-    // whatever the receiver; `db.update(users)` beside them still classifies.
     const results = await classifyCalls(
       "src/services/profile-form.ts",
       `import { drizzle } from "drizzle-orm/postgres-js"
@@ -217,8 +215,6 @@ export async function bulk(db: ReturnType<typeof drizzle>) {
     )
     const batchCall = results.find((r) => r.target === "db.batch")
     expect(batchCall?.effectId).toBe("db.transaction")
-    // The two inner db.insert(...) roots each classify independently as db.write.
-    // Chain-collapse still applies: db.insert.values links are dropped.
     const writes = results.filter((r) => r.effectId === "db.write")
     expect(writes).toHaveLength(2)
     for (const w of writes) expect(w.target).toBe("db.insert")
@@ -247,9 +243,6 @@ export function mountUserRoutes(router: Router, db: ReturnType<typeof drizzle>) 
   })
 
   it("does not classify a route registration whose path is written in backticks", async () => {
-    // The same path in other quotes. A template with no substitution reaches
-    // `calls[].literalArgs` as the string it spells, so the literal-first-argument veto reads
-    // it; before, it was no literal at all and the route was a medium-confidence db.write.
     const results = await classifyCalls(
       "src/routes/users.ts",
       `import { drizzle } from "drizzle-orm/postgres-js"

@@ -18,11 +18,6 @@ describe("normalizeLineTerminators", () => {
   })
 })
 
-/**
- * The promise the Document depends on is what a plugin is handed, not what the function above
- * returns: a scan that read the file and skipped the conversion would leave that function's
- * tests green. So this reads the content back from `parseFile`, the first place a plugin sees it.
- */
 describe("scan hands a language plugin LF-only content", () => {
   const workspace = useStubWorkspace("line-terminators")
 

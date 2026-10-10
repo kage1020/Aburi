@@ -245,7 +245,7 @@ function flatten(sections: readonly Section[]): string[] {
   return sections.flatMap((section) => [...section.lines])
 }
 
-/** markdown-projection.md — one-line CLI stdout summary. */
+/** One-line CLI stdout summary. */
 export function projectDiffSummaryLine(diff: DiffResult): string {
   const summary = diff.summary
   return withUnknown(
@@ -634,12 +634,6 @@ function describeCallLike(value: unknown): string | null {
   return `${inlineCode(call.target)} (L${call.line})`
 }
 
-/**
- * `Signature.inputs` entries as `formatInput` spells them: `name: type`, with an optional or
- * rest parameter's marker where TypeScript writes it. If every entry fails the shape, the
- * count is emitted instead — unlike `appendBucket` — because "1 item(s)" at least says a
- * parameter moved, where silence would claim none did.
- */
 function describeInputs(items: readonly unknown[]): string {
   const rendered = items
     .map((value) => {
@@ -703,11 +697,6 @@ function unknownExplanation(item: SymbolUnknown): string {
   return `the ${side} scan skipped ${skippedFile(item)} (${item.reason}), so this Symbol ${fate}`
 }
 
-/**
- * The path the absent scan's own skip record is under. That is the Symbol's file unless git
- * renamed it between the revisions, and then the File line shows the other revision's name, so
- * the phrase says how the two relate rather than naming a path the reader cannot place.
- */
 function skippedFile(item: SymbolUnknown): string {
   if (item.lostPath === undefined) return inlineCode(item.symbol.source.file)
   return `this file under its ${item.absentFrom} name, ${inlineCode(item.lostPath)}`

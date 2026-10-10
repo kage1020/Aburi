@@ -6,33 +6,9 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-/**
- * Interrupting `aburi diff` must not leave its base worktree behind.
- *
- * Node's default action for SIGINT / SIGTERM / SIGHUP ends the process without running the
- * `finally` that removes the worktree, so every Ctrl-C or cancelled CI job left a registered
- * `(detached HEAD)` worktree in the user's repository and a full base checkout under the temp
- * directory. Only a real process and a real signal show this: the CLI is spawned from its built
- * bin, held in the base scan by a plugin whose module never finishes loading, and signalled once that
- * plugin says it is waiting.
- *
- * Skipped on Windows because this harness cannot send a signal there: `child.kill()` is
- * `TerminateProcess`, which no listener can observe. Windows itself does deliver a catchable
- * `SIGINT` for an interactive Ctrl-C and a `SIGHUP` when the console window closes, so the
- * listener does run there; it is this test that cannot reach it.
- */
-
 const require = createRequire(import.meta.url)
 const CLI_BIN = resolve(dirname(require.resolve("@aburi/cli/package.json")), "dist/bin/aburi.mjs")
 
-/**
- * An effects plugin whose module never finishes loading: it announces itself through a file,
- * then awaits forever at the top level, with a timer keeping the event loop alive (an unsettled
- * promise alone would let the process exit 0). Asynchronously, so the loop stays free to deliver
- * the signal, which a synchronous stall inside `classify` would not. It exports nothing:
- * evaluation never gets past the await, and the loader only `import()`s the module, so no plugin
- * shape would ever be read.
- */
 const STALLING_PLUGIN = `
 import { writeFileSync } from "node:fs"
 writeFileSync(process.env.ABURI_TEST_READY_FILE, "waiting")
@@ -45,10 +21,6 @@ let child: ChildProcess | null = null
 /** The `aburi-worktree-*` temp directories that existed before the test started. */
 let tempDirsBefore = new Set<string>()
 
-/**
- * Pinned so a developer's own config (`commit.gpgsign`, `core.hooksPath`) cannot change what the
- * test's git calls or the CLI's do, and with the identity a commit needs. Applied to both.
- */
 function pinnedGitEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -123,10 +95,6 @@ beforeEach(async () => {
 afterEach(async () => {
   child?.kill("SIGKILL")
   child = null
-  // A failing case leaves the run's temp directory behind. Only one this test can attribute to
-  // itself is removed: new since it started, and holding a checkout named after this repository
-  // (the base worktree's leaf is the head workspace's directory name). Other test files may be
-  // running `aburi diff` at the same time.
   for (const dir of await worktreeTempDirs()) {
     if (tempDirsBefore.has(dir) || !existsSync(join(dir, "base", basename(repo)))) continue
     await rm(dir, { recursive: true, force: true })
@@ -136,12 +104,6 @@ afterEach(async () => {
 })
 
 describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the base scan", () => {
-  // The decoy case: a commit hook's `GIT_INDEX_FILE` / `GIT_PREFIX` pointing into another
-  // repository must neither stop the interrupted run from cleaning up nor touch that repository's
-  // index. It catches an unscrubbed `worktree add`, which checks the base out through the index
-  // it is given. It does not pin the scrub on the signal path's own `worktree remove --force`,
-  // which reads no index: that call cleans up with or without it. (`GIT_DIR` is not decoyed: the
-  // run passes it on deliberately, as the repository it is about.)
   it.each([
     { signal: "SIGINT", decoyEnv: false },
     { signal: "SIGTERM", decoyEnv: false },

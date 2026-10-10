@@ -29,10 +29,6 @@ async function writeReports(dir: string, names: readonly string[]): Promise<void
   for (const name of names) await writeFile(join(dir, name), "{}")
 }
 
-/**
- * Run as a process from `cwd`, with the environment spelled out, and read stdout back the way
- * the runner reads `$GITHUB_OUTPUT`.
- */
 async function run(cwd: string, env: Record<string, string>): Promise<Record<string, string>> {
   const { stdout } = await execFileAsync(process.execPath, [SCRIPT], {
     cwd,
@@ -70,8 +66,6 @@ describe("report-paths.mjs", () => {
   })
 
   it("gives empty paths when the CLI stopped before writing, as a plugin error does", async () => {
-    // The directory is there and nothing is in it: the CLI created it and stopped. Both paths come
-    // back empty, which is what the comment step's `diff-md-path != ''` reads.
     const cwd = await workingDirectory()
     await mkdir(join(cwd, "out"))
     const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "both" })

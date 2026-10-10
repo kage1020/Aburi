@@ -105,7 +105,7 @@ export interface ScanReport {
   workspaceMdPath: string | null
   componentMdPaths: string[]
   totalFiles: number
-  /** Read off the Document rather than derived, so the CLI cannot disagree with it (integrity #21). */
+  /** Read off the Document rather than derived, so the CLI cannot disagree with it. */
   parsedFiles: number
   keptSymbols: number
   droppedSymbols: number
@@ -120,9 +120,9 @@ export interface ScanReport {
   treeReleaseFailures: readonly TreeReleaseFailure[]
   /** Present when the LSP enrichment pass ran; absent when LSP was skipped entirely. */
   lspEnrichment: LspEnrichmentStats | undefined
-  /** Head-side call-resolution census rendered for stdout (call-resolution.md). */
+  /** Head-side call-resolution census rendered for stdout. */
   callResolutionLine: string
-  /** Per-call diagnostics behind that census, kept out of the IR (`call-resolution.md`). */
+  /** Per-call diagnostics behind that census, kept out of the IR. */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
   /** Absolute path of the config that was read, or `null` when the run fell through to autodetect. */
   configSource: string | null
@@ -319,8 +319,7 @@ function reportIncidents(report: ScanReport, incidents: ScanOptions["incidents"]
   if (incidents === undefined) return
   try {
     reportScanIncidents(report, incidents.warn, incidents.label ?? null)
-  } catch {
-  }
+  } catch {}
 }
 
 const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: string }> = {
@@ -541,8 +540,6 @@ function reportSkipped(
     sayIncident(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
     writeListing(
       files.map((file) => {
-        // Empty as well as absent: a caller-assembled report may say nothing, and `src/x.ts: `
-        // is a path, a colon, and silence.
         const detail = file.detail ?? ""
         return detail.length === 0 ? file.path : `${file.path}: ${detail}`
       }),

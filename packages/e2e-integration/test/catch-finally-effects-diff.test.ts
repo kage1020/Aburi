@@ -5,14 +5,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A database write added in a `catch` or a `finally` block is a logic change, because adding an
- * effect moves `logic` (fingerprint.md §4.4). Neither block was walked, so the write reached no
- * `effects[]`, and the diff filed the edit under syntax-only changes (markdown-projection.md
- * §6.2). A call to a helper that writes reaches `logic` the long way round: the call resolves to
- * the helper, and the helper's effect propagates to the caller.
- */
-
 const workspace = useScratchWorkspace("catch-finally-effects")
 
 const TRANSFER = "ts:src/transfer.ts#transfer"
@@ -78,7 +70,7 @@ describe("scan + diff — writes in catch and finally", () => {
       "db.write prisma.account.deleteMany",
       "db.write prisma.lock.delete",
     ])
-    // The catch clause's `throw e` is withheld (ir-schema.md §8.2): the one rule is the `try`.
+    // The catch clause's `throw e` is withheld: the one rule is the `try`.
     expect(symbol.rules.map((r) => r.type)).toEqual(["try"])
     expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
     expect(head.ir.stats.effectPropagation.symbolsWithPropagatedEffects).toBe(0)
@@ -93,9 +85,6 @@ describe("scan + diff — writes in catch and finally", () => {
   })
 
   it("reports a rewritten catch clause that adds no effect as syntax-only", async () => {
-    // The guard is the catch clause's control flow, which ir-schema.md §8.2 keeps out of the
-    // Symbol's rules. Were it let in, every edit to an error handler would trip
-    // `--fail-on logic-changed`.
     const base = await scanOf(transfer("", ""))
     const head = await scanOf(transfer("    if (e instanceof TypeError) return", ""))
 
@@ -113,8 +102,6 @@ describe("scan + diff — writes in catch and finally", () => {
 })
 
 describe("scan + diff — a call in catch or finally to a helper that writes", () => {
-  // The two clauses go through different code in the walk (`handleTryStatement`), so each gets
-  // its own case.
   it.each([
     ["catch", "    await audit(id)", ""],
     ["finally", "", "    await audit(id)"],

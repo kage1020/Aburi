@@ -145,12 +145,6 @@ export function renderDecoratorList(decorators: readonly Decorator[]): string {
   return decorators.map((d) => inlineCode(`@${d.raw}`)).join(" ")
 }
 
-/**
- * markdown-projection.md §5.5 — `(name: type) → output`, each input as `formatInput` spells
- * it (`a?: string`, `...ids: string[]`), + optional `throws A, B` + `⚡async` /
- * `*generator*` / `<T,U>` badges; multiple outputs are `|`-separated. `null` when there is
- * no signature, so the section-omit logic can branch on presence.
- */
 export function signatureLine(signature: Signature | null | undefined): string | null {
   if (signature === null || signature === undefined) return null
   const inputs = signature.inputs.map(formatInput).join(", ")
@@ -266,14 +260,14 @@ export function symbolTitle(symbol: IRSymbol): string {
   return `${inlineCode(symbol.name)} *(${symbol.kind})*${confidenceBadge(symbol.confidence)}`
 }
 
-/** markdown-projection.md — canonical Symbol order within a file: `startLine`, then `id`. */
+/** Canonical Symbol order within a file: `startLine`, then `id`. */
 export function orderSymbolsWithinFile(symbols: readonly IRSymbol[]): IRSymbol[] {
   return [...symbols].sort(
     (a, b) => a.source.startLine - b.source.startLine || compareStrings(a.id, b.id),
   )
 }
 
-/** markdown-projection.md — file grouping preserves the POSIX path ordering. */
+/** File grouping preserves the POSIX path ordering. */
 export function orderFilesAscending(files: readonly string[]): string[] {
   return [...files].sort(compareStrings)
 }
@@ -282,7 +276,7 @@ export function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** Dependencies in `(from, to, via)` order — their identity (diff-algorithm.md). */
+/** Dependencies in `(from, to, via)` order — their identity. */
 export function sortDependencies(deps: readonly Dependency[]): Dependency[] {
   return [...deps].sort(
     (a, b) =>
@@ -316,14 +310,6 @@ export function isSymbolEdge(dependency: Dependency): boolean {
   return isSymbolIdEndpoint(dependency.from) || isSymbolIdEndpoint(dependency.to)
 }
 
-/**
- * One `Signature.inputs` entry as TypeScript writes it — deliberately, whichever language the
- * IR came from, so a Python `*args` prints as `...args` too. The `rest` and `optional` fields
- * (ir-schema.md §7) go where TypeScript puts them, `...ids: string[]` and `a?: string`, and a
- * defaulted parameter prints as the optional one it is to a caller, `limit?`. An untyped
- * parameter prints its name alone, as it is written: an unannotated `(x)` and LP11a's
- * parenthesis-free `x => …` both carry `type: ""`.
- */
 export function formatInput(input: {
   name: string
   type: string

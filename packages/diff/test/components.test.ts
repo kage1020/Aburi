@@ -13,12 +13,6 @@ import {
 
 type ComponentDelta = ComponentDiff["changed"][number]["delta"]
 
-/**
- * Side views for two documents that skipped nothing, with no rename map between them. Every
- * one of these tests is about identity comparison, not about loss, so the honest input is a
- * pair that has no skip list or rename to offer — which `diffDependencies` requires a caller to
- * spell rather than default into.
- */
 const NO_LOSSES: {
   base: DependencySideView
   head: DependencySideView

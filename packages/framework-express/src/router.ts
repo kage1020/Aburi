@@ -13,16 +13,6 @@ export interface RouterCall {
   readonly callee: string
 }
 
-/**
- * The declarator's `value` must BE the `Router()` / `express.Router()` call (parentheses
- * transparent); `[Router()]` or `withLogging(Router())` is rejected so `high` confidence
- * never goes to a merely adjacent Router mention.
- *
- * `fullNode` is the whole declaration statement, which can declare several names
- * (`const router = Router(), API_PREFIX = "/api"`). `name` is the Symbol's qualified name, so
- * the declarator read is the one binding its last segment — inside a namespace the Symbol is
- * `api.router` and the declarator binds `router`.
- */
 export function extractRouterCall(fullNode: unknown, name: string): RouterCall | null {
   const node = asSyntaxNode(fullNode)
   if (node === null) return null
@@ -37,11 +27,6 @@ export function extractRouterCall(fullNode: unknown, name: string): RouterCall |
   return { callee }
 }
 
-/**
- * The `variable_declarator` of `statement` binding the plain identifier `binding`. A
- * destructuring pattern is not one, so a name pulled out of a `Router()` call is not bound to
- * the call.
- */
 function declaratorOf(statement: SyntaxNode, binding: string): SyntaxNode | null {
   for (const child of statement.namedChildren) {
     if (child === null || child.type !== "variable_declarator") continue

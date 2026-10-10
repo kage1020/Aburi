@@ -5,16 +5,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * Inserting one registration above others is one addition. A registration with no quoted path
- * used to be named by its source-order ordinal alone, so the insertion renamed every later one
- * and the diff paired each with the body its id used to hold: adding `compression()` reported
- * the authorization guard as removed (lang-plugin.md LP20i1).
- *
- * This runs the real pipeline over each edit: write the one source file, scan, rewrite that
- * file, scan again, diff.
- */
-
 const workspace = useScratchWorkspace("registration-insert")
 
 const SOURCE = "src/server.ts"
@@ -81,8 +71,6 @@ describe("diff — a registration inserted above others", () => {
     expect(diff.summary).toMatchObject({ added: 1, removed: 0, changed: 0, moved: 0 })
     expect(idsWith(diff, "added")).toEqual(["ts:src/server.ts#app__get__$health__d0"])
 
-    // The id is named by the path, and the Express plugin has to read the same path: a
-    // backtick it declined made the mount below a `middleware` whose id says `$api`.
     const extKindOf = (id: string) => headIR.symbols.find((s) => s.id === id)?.extKind
     expect(extKindOf("ts:src/server.ts#app__get__$users__d0")).toBe("framework:express:route")
     expect(extKindOf("ts:src/server.ts#app__use__$api__d0")).toBe("framework:express:mount")
@@ -105,9 +93,6 @@ describe("diff — a registration inserted above others", () => {
 
 describe("diff — a registration with no path gains an argument", () => {
   it("reports it removed and added, and leaves the inline middleware below it alone", async () => {
-    // The names its arguments carry are the registration's name, so `authMw` gaining `audit`
-    // renames it (LP20i1 records the trade). What must not happen is the pairing this naming
-    // removed: the inline guard below keeps its id and its body, and is not reported at all.
     const { diff } = await diffOfEdit(
       lines(...HEAD, "app.use(authMw)", ...AUTH),
       lines(...HEAD, "app.use(authMw, audit)", ...AUTH),

@@ -137,9 +137,6 @@ describe("a declaration whose body is a function written inside it is described 
 })
 
 describe("a Symbol several declarations wrote describes each of them once", () => {
-  // Positionless, so a declaration serializes the same alone and beside another: the merged
-  // string is the parts, joined in source order. A class's head stays with its own class, so
-  // that holds whether the class leads or follows.
   async function alone(source: string, name: string): Promise<string> {
     return normalizeAst(await symbolOf(source, `ts:src/a.ts#${name}`))
   }

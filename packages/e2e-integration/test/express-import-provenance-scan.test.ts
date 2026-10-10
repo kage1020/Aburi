@@ -4,13 +4,6 @@ import { describe, expect, it } from "vitest"
 import { scanWith } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * framework-express rates a Symbol `high` when its file imports `express` and `medium`
- * otherwise. The question is read off the file's parsed imports, and off its text with comments
- * skipped where those name no `express`, so the line breaks an import is written with do not
- * move it, an import that is only a comment does not count, and a `require` does.
- */
-
 const workspace = useScratchWorkspace("express-import-provenance")
 
 const scanWorkspace = () =>

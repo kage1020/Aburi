@@ -196,9 +196,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
       baseCallEdges: [edge(C, oldS)],
       headCallEdges: [edge(C, newS)],
     })
-    expect(slices).toEqual([
-      { id: `slice:${C}`, members: [C, newS, oldS].sort() },
-    ])
+    expect(slices).toEqual([{ id: `slice:${C}`, members: [C, newS, oldS].sort() }])
   })
 
   it("SV6a: SV6 with the controller relocated to another file reads its base edge under the head id", () => {
@@ -218,9 +216,6 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     const oldC = "ts:src/checkout.ts#submitCheckoutOrder"
     const C = "ts:src/orders/checkout.ts#submitCheckoutOrder"
     const S = "ts:src/helpers.ts#legacyNormalizeAmount"
-    // A different Symbol sits at the controller's old id. `buildDiff` cannot produce this:
-    // stage 1 would pair the old id with it, leaving no `moved+changed` from that id. This pins
-    // `computeSlices` as public API: the base edge names the controller, not the newcomer.
     const slices = computeSlices({
       changes: [movedChanged(oldC, C), removed(S), added(oldC)],
       baseCallEdges: [edge(oldC, S)],
@@ -427,7 +422,7 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
 
 describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + robustness)", () => {
   it("SV19 (JSON side): a Node-less change set yields slices: []", () => {
-    // Only pure `moved` — not a Node per slice-view.md.
+    // Only pure `moved` — not a Node.
     const slices = computeSlices({
       changes: [moved("ts:src/a.ts#a", "ts:src/b.ts#a")],
       baseCallEdges: [],

@@ -81,7 +81,7 @@ function buildHintPlugin(hint: FrameworkHint): FrameworkPlugin {
     async init() {},
     classifySymbol: (symbol) => classify(hits(symbol)),
     symbolDropHint(symbol): DropHint | null {
-      // A boundary decorator overrides every Category-B rule (`drop-list.md`), a hint's too.
+      // A boundary decorator overrides every Category-B rule, a hint's too.
       if (symbol.decorators.some((d) => d.boundary)) return null
       const hit = hits(symbol).find(({ rule }) => rule.drop)
       if (hit === undefined) return null

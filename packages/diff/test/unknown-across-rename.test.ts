@@ -5,14 +5,6 @@ import { buildDiff, renameDirections } from "../src"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
-/**
- * A file git renamed between the revisions is one file under two names, and the document that
- * skipped it recorded the name it had on its own side. A leftover from it names the file the
- * other way, so §3.5.1's lookup has to go through the rename map, or the Symbols of a renamed
- * file the other side skipped come out as confident `removed` / `added` (diff-algorithm.md
- * DF19j–DF19l).
- */
-
 function call(from: string, to: string) {
   return dependency({ from, to, via: "call" })
 }
@@ -47,8 +39,6 @@ describe("buildDiff — a renamed file one side skipped", () => {
 
     expect(diff.summary.removed).toBe(0)
     expect(diff.summary.unknown).toBe(1)
-    // `lostPath` is the head's own name for the file, which is where its skip record is: the
-    // Symbol's `source.file` is a path the head does not have at all.
     expect(diff.symbols).toStrictEqual([
       {
         status: "unknown",
@@ -80,8 +70,6 @@ describe("buildDiff — a renamed file one side skipped", () => {
   })
 
   it("carries no lostPath when the other side skipped the file under the Symbol's own name", () => {
-    // The rename map is present, but this file is not in it: the skip record is under
-    // `source.file`, and the key is left out rather than repeating it.
     const diff = diffOf(
       makeIR({ symbols: [kept, atOld] }),
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/big.ts", reason: "parse-failed" }]),
@@ -111,8 +99,6 @@ describe("buildDiff — a renamed file one side skipped", () => {
   })
 
   it("answers from the lowest base path when a hand-built map renames two onto one head path", () => {
-    // git never writes this map — it renames no two files onto one path — but `buildDiff`
-    // accepts any map, and which claimant explains the absence must not follow its order.
     const baseIR = withSkipped(makeIR({ symbols: [kept] }), [
       { path: "src/b.ts", reason: "over-size" },
       { path: "src/a.ts", reason: "parse-timeout" },
@@ -205,8 +191,6 @@ describe("buildDiff — an edge into a renamed file one side skipped", () => {
   })
 
   it("sorts lostFiles by the absent side's names, not the holder's", () => {
-    // `src/a.ts` sorts before `src/m.ts` in the base, but the head calls it `src/z.ts`; the list
-    // names what the head recorded, so it is sorted the way the head's names sort.
     const fromRenamed = makeSymbol({ id: "ts:src/a.ts#A", name: "A" })
     const toStaying = makeSymbol({ id: "ts:src/m.ts#M", name: "M" })
     const diff = diffOf(
@@ -260,9 +244,6 @@ describe("buildDiff — a renamed file both sides skipped", () => {
   })
 
   it("keeps every base skip record a hand-built map leads to one head path, in either order", () => {
-    // The base skipped the rename's target as well as its source, which git cannot produce —
-    // a rename target is a file the base does not have — and both records reach the head's
-    // one. Keeping only one would drop the other on the strength of the skip list's order.
     const head = withSkipped(makeIR({ symbols: [kept] }), [
       { path: "src/billing.ts", reason: "over-size" },
     ])

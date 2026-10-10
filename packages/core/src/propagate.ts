@@ -37,7 +37,6 @@ function maxConfidence(a: Confidence, b: Confidence): Confidence {
   return CONFIDENCE_RANK[a] >= CONFIDENCE_RANK[b] ? a : b
 }
 
-/** The `(effectId, target)` identity effect-propagation.md merges on. */
 function effectKey(effectId: string, target: string): string {
   return `${effectId}\t${target}`
 }

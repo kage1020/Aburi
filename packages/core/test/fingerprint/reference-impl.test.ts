@@ -38,9 +38,6 @@ describe("reference implementation — pinned hex", () => {
   })
 
   it("apiFingerprint of a parameter with neither marker is pinned, `false` included", () => {
-    // `optional` and `rest` enter the input only when true, so a parameter carrying neither
-    // hashes exactly as a Document without the fields does. A shift here re-hashes every
-    // function in every stored IR, not only those with an optional or rest parameter.
     const withInputs = (inputs: Array<{ name: string; type: string }>) =>
       makeSymbol("ts:src/a.ts#find", {
         kind: "function",

@@ -14,7 +14,7 @@ export interface UndeclaredVocabOccurrence {
   symbol: string
 }
 
-/** Whether a run with this config refuses undeclared vocabulary: `strict` defaults to true (`config.md`). */
+/** Whether a run with this config refuses undeclared vocabulary: `strict` defaults to true. */
 export function isStrict(config: Pick<Config, "strict">): boolean {
   return config.strict !== false
 }

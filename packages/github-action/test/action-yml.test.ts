@@ -262,8 +262,6 @@ describe("action.yml", () => {
   })
 
   it("names the report paths with the committed script", async () => {
-    // What the script answers, filenames included, is asserted by running it in
-    // `report-paths.test.ts`; this pins only that the diff step is what runs it.
     await expect(stat(REPORT_PATHS_PATH)).resolves.toBeDefined()
     const action = await loadAction()
     const diffStep = action.runs.steps.find((s) => s.id === "diff")
@@ -293,18 +291,12 @@ describe("action.yml", () => {
   })
 
   it("hands the comment step the report path as the diff step resolved it", async () => {
-    // The path is absolute already. Prefixing `working-directory` turned an absolute
-    // `output-dir` into `.//home/...`, a relative path under the repository root that was not
-    // there, and the upsert failed on a diff that had succeeded.
     const action = await loadAction()
     const env = action.runs.steps.find((s) => s.id === "post-comment")?.env ?? {}
     expect(env.MARKDOWN_PATH).toBe(`${EXPRESSION_OPEN} steps.diff.outputs.diff-md-path }}`)
   })
 
   it("defaults output-dir to the directory the CLI defaults to", async () => {
-    // The action forwards this to `--output-dir`, so the two defaults have to be the same
-    // string: a rename on the CLI side would leave the action writing somewhere the comment
-    // step does not read.
     const action = await loadAction()
     expect(action.inputs?.["output-dir"]?.default).toBe(DEFAULT_OUTPUT_DIRNAME)
   })

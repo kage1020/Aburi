@@ -13,7 +13,6 @@ export type CoreErrorCode =
   | "canonical-key-collision"
   /** An id part was not in Unicode NFC; ids are normalized at construction so both forms match. */
   | "invalid-symbol-id"
-  /** One or more of the IR invariants in ir-schema.md were violated; `details` carries each violation. */
   | "integrity-violation"
   /** Workspace root detection failed (no marker found between cwd and filesystem root). */
   | "workspace-root-not-found"
@@ -36,7 +35,6 @@ export type CoreErrorCode =
   | "vocab-undeclared"
 
 export interface IntegrityViolation {
-  /** Stable invariant id corresponding to the ir-schema.md numbering, which is the single source of the list. */
   invariant: number
   /** Identifier (Symbol id, Component id, file path, etc.) the violation is attributed to. */
   subject: string

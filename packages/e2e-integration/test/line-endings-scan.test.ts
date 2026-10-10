@@ -4,13 +4,6 @@ import { describe, expect, it } from "vitest"
 import { scanWith, symbolNamed } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * The same source saved with LF, CRLF or a lone CR is the same program, and its Document must
- * not say otherwise: a template literal's line break reached the `syntax` fingerprint as the
- * characters `\r\n`, a guard's `condition` and a decorator's `raw` kept the `\r`, and a CR-only
- * file read as one line (fingerprint.md §5.3).
- */
-
 const workspace = useScratchWorkspace("line-endings-scan")
 
 const SOURCE = [
@@ -37,10 +30,6 @@ const SOURCE = [
   "",
 ].join("\n")
 
-/**
- * What the fixture is written for: `userQuery` holds the template literal and the guard, and
- * the class and its route hold the decorators.
- */
 const COVERED = ["userQuery", "UsersController", "UsersController.list"]
 
 async function symbolsSavedWith(terminator: string) {
@@ -61,8 +50,6 @@ describe("scan — line terminators", () => {
     const lf = await symbolsSavedWith("\n")
     const other = await symbolsSavedWith(terminator)
 
-    // Two empty lists are equal and hold no `\r`, so the Symbols are pinned before either
-    // comparison; the equality then carries them to the other side.
     for (const name of COVERED) symbolNamed(lf.result, name)
     expect(lf.json).not.toContain("\\r")
     expect(other.json).toBe(lf.json)

@@ -131,12 +131,6 @@ describe("LSP enrichment", () => {
   })
 
   it("asks for no hint on a `this.a.b` target, whose callee is not where it would look", async () => {
-    // `findMethodColumn` hovers a `<head>.<member>` pair, and no pair names
-    // this call's callee: `this.emitter` hovers the property, and `this.emit`
-    // is on a line only where another call put it, which it would then hover.
-    // Either way the hint would be well-formed, correctly keyed and
-    // `kind`-consistent, and name a callee the call site never reaches.
-    // Neither guard in the resolver can see that, so the request is not made.
     const cls = makeClassSymbol("src/a.ts", "C", 1)
     const emit = makeMethodSymbol("src/a.ts", "C", "emit", 2)
     const run = makeMethodSymbol("src/a.ts", "C", "run", 3, [
@@ -283,8 +277,6 @@ describe("LSP enrichment", () => {
   })
 
   it("reads a hover's @throws by the rule Signature.throws follows", async () => {
-    // `inferredThrows` is no api input, but the two fields must not disagree about what one tag
-    // declares: a description's first word is not a type, and a link records its target.
     expect(await inferredThrowsFrom("@throws If the id is unknown.")).toBeUndefined()
     expect(await inferredThrowsFrom("@throws error")).toBeUndefined()
     expect(await inferredThrowsFrom("@throws NotFoundError when missing")).toBeUndefined()

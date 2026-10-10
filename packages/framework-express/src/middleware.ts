@@ -13,10 +13,6 @@ export interface UseArgumentShape {
   readonly hasErrorHandler: boolean
   /** True when at least one argument is a function expression / arrow with arity 3. */
   readonly hasRegularHandler: boolean
-  /**
-   * True when the first argument is a literal string (path): quoted, or a backtick with no
-   * substitution, read through the wrappers a value is read through (`isPathLiteral`).
-   */
   readonly firstArgIsPathLiteral: boolean
   /** True when the second argument is a plain identifier (router / imported handler). */
   readonly secondArgIsIdentifier: boolean
@@ -35,8 +31,6 @@ export function analyzeUseArguments(callExpression: unknown): UseArgumentShape |
 
   const argChildren: SyntaxNode[] = []
   for (const child of argsNode.namedChildren) {
-    // A comment is a named node the grammar hangs wherever it was written, not an argument:
-    // counted, `app.use(/* v1 */ "/api", router)` was a three-argument call and no mount.
     if (child !== null && child.type !== "comment") argChildren.push(child)
   }
 
@@ -109,17 +103,6 @@ function isIdentifier(node: SyntaxNode): boolean {
   return node.type === "identifier"
 }
 
-/**
- * A literal string, read as `@aburi/lang-typescript` reads the path it names a registration
- * by: quoted, or a backtick with no substitution, which is the same value (`readStaticString`
- * there), and through the wrappers a value is read through (`unwrapValue` there).
- *
- * The two readers have to agree, because one Symbol carries both answers. When this accepted
- * only `"…"`, `` app.use(`/api`, usersRouter) `` was named `app__use__$api__d0` with
- * `path-literal:/api` and classified `middleware` rather than `mount`: a registration mounted
- * at a path by its id and at none by its kind. This package depends on `@aburi/core`'s
- * `SyntaxNode` alone, so the check is restated here rather than imported.
- */
 function isPathLiteral(node: SyntaxNode): boolean {
   const value = unwrapValue(node)
   if (value.type === "string") return true

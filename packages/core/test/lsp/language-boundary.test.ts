@@ -377,8 +377,6 @@ describe("applying a documentSymbol tree", () => {
     const clients = new Map<LanguageId, MockLspClient>()
     const factory = mockServerFactory((language, client) => {
       clients.set(language, client)
-      // Cast because the type cannot hold it, which is the point: the pass casts the same
-      // way over the server's JSON and gets whatever the server actually sent.
       const entry = { ...docSymbol("C", 1, 6), children: null } as unknown as DocumentSymbol
       client.installHandler(DOC_SYMBOL_METHOD, () => [entry])
     })

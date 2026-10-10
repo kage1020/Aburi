@@ -2,13 +2,6 @@ import type { Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { symbolOf } from "./fixtures/ctx"
 
-/**
- * What a caller sees of a parameter's form is recorded in fields of its own: `optional` for an
- * optional or defaulted parameter, `rest` for a rest one, each written only when true. `name`
- * is the bare binding and `type` the annotation alone (LP11b). A binding that destructures
- * also lists the names it binds, in `bindings` (LP11d).
- */
-
 type Input = Signature["inputs"][number]
 
 /** A declaration whose parameter list is `params`, and the id of the Symbol it declares. */
@@ -103,12 +96,6 @@ describe("readParameters — the form of a parameter", () => {
   })
 })
 
-/**
- * A recovered parse can leave a parameter with no binding the source wrote: a zero-width
- * MISSING identifier, or an ERROR node where the binding would be. A MISSING node is not
- * written (fingerprint.md §5.1(6)), so the name is the nearest text that was — and never the
- * empty string the schema's `minLength: 1` refuses (LP11c).
- */
 const REPAIRED: Array<[source: string, id: string, expected: Input]> = [
   ["function f(...: string[]) {}", "ts:src/a.ts#f", { name: "...", type: "string[]", rest: true }],
   ["function f(...,) {}", "ts:src/a.ts#f", { name: "...", type: "", rest: true }],

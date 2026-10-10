@@ -3,21 +3,9 @@ import { describe, expect, it } from "vitest"
 import { scanWith } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A default import binds the module's default export, whatever local name the importer gives
- * it (call-resolution.md §4.4, CR5–CR5c). Read as a named import of that local name, a call
- * through it linked to a named export that happened to share the name, and reached nothing
- * when the default export was anonymous or declared under another name.
- */
-
 const workspace = useScratchWorkspace("default-import-resolution")
 const MAIN = "ts:src/use.ts#main"
 
-/**
- * Scan `modules` beside a `src/use.ts` that writes `imports` and makes `calls` from `main`, and
- * answer where each call landed: every call with what it resolved to, and the bucket of each
- * one left unresolved.
- */
 async function callsFromMain(
   modules: Record<string, string>,
   imports: readonly string[],
@@ -74,8 +62,6 @@ describe("scan — calls through a default import", () => {
   })
 
   it("CR5b: reaches a static member through a default-imported class", async () => {
-    // `::` is the static side (ir-schema.md §3.2), composed only by file and import scope, and
-    // `Svc` is a name `use.ts` never writes: the edge can only have come through the import.
     const result = await callsFromMain(
       { "src/svc.ts": "export default class Svc {\n  static run() { return 5 }\n}\n" },
       ['import S from "./svc"'],
@@ -122,11 +108,6 @@ describe("scan — calls through a default import", () => {
   })
 
   it("leaves the default exports §4.4 does not reach unresolved, as known limits", async () => {
-    // Each is `no-match` by design: an export clause the plugin does not read (lang-plugin.md
-    // LP6a), a default export that is a value rather than a declaration, a member of an
-    // anonymous class, which has no member Symbols (ir-schema.md §3.2), and a default
-    // re-exported from another module, which call resolution does not follow (§8.3). A change
-    // that reaches one of them should move its row here and its sentence in §4.4 together.
     const result = await callsFromMain(
       {
         "src/clause.ts": "function connect() { return 1 }\nexport { connect as default }\n",

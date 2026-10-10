@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { byId, symbolsOf } from "./fixtures/ctx"
 
-/**
- * LP13a: what a JSDoc `@throws` tag contributes to `signature.throws`. `throws` is an input of
- * the api fingerprint, so a word of prose recorded as a type turns a reworded comment into an
- * API change. The rule favours recording nothing when a tag's text is not plainly a type.
- */
-
 async function throwsOf(doc: string): Promise<readonly string[] | undefined> {
   const symbols = await symbolsOf(`${doc}\nexport function f() {}\n`)
   return byId(symbols, "#f").signature?.throws
@@ -126,9 +120,6 @@ describe("LP13a: JSDoc @throws", () => {
   })
 
   it("reads a long run of * or of blanks in linear time", async () => {
-    // Asking at every `*` of a run whether a `/` ends it, or splitting a run of blanks between
-    // two `[ \t]*`s, costs the square of the run: seconds at this length, where a linear scan
-    // takes about a millisecond.
     const length = 100_000
     for (const doc of [
       `/** @throws Foo ${"*".repeat(length)}x */`,

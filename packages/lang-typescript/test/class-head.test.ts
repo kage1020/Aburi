@@ -2,11 +2,6 @@ import { describe, expect, it } from "vitest"
 import { normalizeAst } from "../src/index"
 import { symbolOf } from "./fixtures/ctx"
 
-/**
- * A class's head — `abstract`, type parameters, `extends`, `implements` — reaches its normalized
- * string, after its body and only when present. Why, and where that stops, is LP8p.
- */
-
 async function stringOf(source: string, id = "ts:src/a.ts#C"): Promise<string> {
   return normalizeAst(await symbolOf(source, id))
 }
@@ -55,8 +50,6 @@ describe("normalizeAst — a class's head", () => {
   })
 
   it("follows the body with the head, in the order the declaration writes it", async () => {
-    // Pinned in full: the order, the quoted `"abstract"` and the one space between the parts each
-    // move every class's fingerprint if they change.
     const source = `export abstract class C<T> extends Base<T> implements Reader, Writer ${BODY}`
     expect(await stringOf(source)).toBe(
       [

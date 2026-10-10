@@ -6,7 +6,7 @@ import type {
 } from "@aburi/types"
 import { CoreError } from "../errors"
 
-/** Default per-call classify timeout in milliseconds, per effect-plugin.md. */
+/** Default per-call classify timeout in milliseconds. */
 export const DEFAULT_CLASSIFY_TIMEOUT_MS = 50
 
 /** Bounds enforced by the config schema — kept here so callers can validate before invoking. */
@@ -80,7 +80,7 @@ function clampTimeout(ms: number): number {
   return ms
 }
 
-/** Default per-file extraction budget in milliseconds, per lang-plugin.md. */
+/** Default per-file extraction budget in milliseconds. */
 export const DEFAULT_PARSE_TIMEOUT_MS = 5000
 
 export const PARSE_TIMEOUT_MIN_MS = 100

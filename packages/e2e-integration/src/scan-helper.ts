@@ -32,24 +32,6 @@ export interface PluginLineup {
 /** The parts of `ScanInput` a scenario occasionally sets beyond plugins and config. */
 export type ScanExtras = Pick<ScanInput, "components" | "logger" | "lspServerFactory">
 
-/**
- * Drive `@aburi/core`'s `scan` with plugin objects wired straight from disk, registering
- * every manifest in a fresh `VocabRegistry`.
- *
- * The CLI's `runScan` resolves plugin names against `node_modules`, which a tmpdir workspace
- * does not have. Injecting the objects keeps the fixtures free of an install step while
- * exercising the same pipeline (discovery → parse → classify → drop → fingerprint →
- * integrity). Plugin-name resolution is covered by `packages/cli/test/plugin-loader.test.ts`.
- *
- * `classifyTimeoutMs` defaults to the schema's ceiling, `CLASSIFY_TIMEOUT_MAX_MS` (5000 ms),
- * unless `config` sets it. Each effect classification is timed, and one that overruns its budget
- * loses its effect: the call stays in `calls[]`, and the overrun is recorded in
- * `ir.stats.effectClassifyTimeouts`. The conditions under which the 50 ms default was overrun
- * were a macOS CI runner and the first classification in the process, so a test asserting that
- * scan's first effect failed there and passed on a rerun. The budget is checked after the
- * synchronous call returns, so the ceiling makes nothing wait. A test that wants the default
- * passes `classifyTimeoutMs` itself.
- */
 export async function scanWith(
   workspaceRoot: string,
   lineup: PluginLineup,

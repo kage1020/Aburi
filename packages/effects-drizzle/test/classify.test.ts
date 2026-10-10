@@ -45,9 +45,6 @@ describe("classifyDrizzleCall — write terminals", () => {
     "form.delete",
     "user.delete",
   ])("returns null for %s with argCount=0 — every write terminal takes a table", (target) => {
-    // `insert(table)`, `update(table)` and `delete(table)` all require one, so a bare call is a
-    // class's own `update()`, a form's or an Active Record model's `delete()`, or broken source.
-    // The floor is checked before the receiver, so a client word does not save it either.
     expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
   })
 

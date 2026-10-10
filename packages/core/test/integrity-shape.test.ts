@@ -113,8 +113,6 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
   })
 
   it("checks a parameter's optional and rest markers when they are present", () => {
-    // The api fingerprint reads both, so a marker that is not a boolean changes a hash by
-    // accident of whatever the producer wrote there.
     const symbol = makeSymbol("ts:src/a.ts#foo", {
       signature: {
         inputs: [
@@ -146,8 +144,6 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
   })
 
   it("checks a destructuring parameter's bindings when they are present", () => {
-    // The call resolver adds each entry to a set it compares call heads against, so an entry
-    // that is not a string would shadow nothing or fail inside the comparison.
     const symbol = makeSymbol("ts:src/a.ts#foo", {
       signature: {
         inputs: [{ name: "{ save }", type: "Deps", bindings: ["save"] }],

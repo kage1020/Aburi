@@ -45,9 +45,6 @@ describe("e2e: emitted IR validates against schema/aburi.ir.v1.json", () => {
   })
 
   it("accepts an input carrying bindings, and rejects the shapes Class B forbids", () => {
-    // The fixture writes no destructuring parameter, so nothing else in the suite reaches the
-    // schema with `bindings` at all. The key is optional, `minItems: 1`, and each entry
-    // `minLength: 1`, which makes absent, `[]` and `[""]` three different answers.
     const host = ir.symbols.find((symbol) => (symbol.signature?.inputs.length ?? 0) > 0)
     expect(host).toBeDefined()
     const withBindings = (bindings: unknown) => ({

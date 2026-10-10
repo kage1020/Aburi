@@ -5,11 +5,6 @@ describe("LP26f: import-equals-require binds the module object", () => {
   it("produces a namespace edge carrying the local binding", async () => {
     const { imports, errors } = await importsOf("import x = require('./mod')")
 
-    // The whole edge, not its presence. The shape is the point: `symbols: "*"` with a
-    // `namespaceBinding` is what sends `x.foo()` to `foo` in the target file, where a
-    // default binding (`symbols: ["default as x"]`) would send it to a member `foo` of the
-    // target's default export instead. `import x = require(...)` binds the module object, as
-    // `import * as x` does.
     expect(imports).toEqual([
       { source: "./mod", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x" },
     ])

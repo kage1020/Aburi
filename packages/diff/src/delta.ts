@@ -275,17 +275,6 @@ function decoratorsEqual(a: Decorator, b: Decorator): boolean {
 
 type SignatureInput = Signature["inputs"][number]
 
-/**
- * Two inputs at one position read the same when their name, type and form agree. `optional`
- * and `rest` are compared because the api fingerprint hashes them: a parameter that turns
- * optional moves `api`, and the delta has to show which one did. An absent marker reads as
- * `false`, as the fingerprint reads it.
- *
- * `bindings` is not compared. The api fingerprint does not read it, and it is the plugin's
- * reading of the pattern text in `name`, so one plugin cannot give two inputs the same `name`
- * and different `bindings`. Leaving it out also keeps a base scanned before the field existed,
- * set against a head that carries it, from reporting every destructuring parameter as modified.
- */
 function inputsEqual(a: SignatureInput, b: SignatureInput): boolean {
   return (
     a.name === b.name &&
@@ -295,17 +284,9 @@ function inputsEqual(a: SignatureInput, b: SignatureInput): boolean {
   )
 }
 
-/**
- * Signature delta (diff-algorithm.md). Both `null` → `null`; one `null` → the present side
- * emitted verbatim as `added` or `removed`; both present → per-list sub-deltas: `inputs`
- * positional (index in the key, fuzz 0), `outputs` positional without `modified`, `throws`
- * as a set.
- */
 function diffSignature(base: Signature | null, head: Signature | null): SignatureDelta | null {
   if (base === null) return head === null ? null : oneSidedSignatureDelta(head, "added")
   if (head === null) return oneSidedSignatureDelta(base, "removed")
-  // Parameters are positional, so the index is part of the identity and the fuzz is 0. Every
-  // key is then unique within its list, so the pairing never has a choice to make here.
   const inputMapper = (input: SignatureInput, index: number): Identified<SignatureInput> => ({
     item: input,
     key: `${index}:${input.name}`,

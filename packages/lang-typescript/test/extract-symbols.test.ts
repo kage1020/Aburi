@@ -259,8 +259,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     expect(sym.derivedBy).not.toContain(
       sym.derivedBy.find((tag) => tag.startsWith("path-literal:")) ?? "",
     )
-    // The tag says where the discriminator came from: `$` is also a path's `/`, so
-    // `app.use($api)` and `app.use("/api", x)` share a stem and only this tells them apart.
     expect(sym.derivedBy).toContain("argument-names:logger")
   })
 
@@ -284,8 +282,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 
   it("CS5a: routes mounted through app.route with one handler name keep their ids when one is inserted", async () => {
-    // Named by the leaf call alone, all three were `app__get__h`, told apart by order: the
-    // insertion renumbered the two below it, which is the failure CS13 pins for `use`.
     const ids = async (lines: string[]) =>
       (await symbolsOf(`${lines.join("\n")}\n`))
         .filter((s) => s.kind === "call")
@@ -306,7 +302,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   it.each([
     // The earliest path is the one the rest of the chain hangs off.
     ["the earliest of two paths", "app.route('/a').get('/b', h)", "#app__get__$a__d0", "/a"],
-    // A member step between the calls is still the same chain (LP20g).
+    // A member step between the calls is still the same chain.
     ["a path behind a member step", "app.use(h0).router.get('/x', h1)", "#app__get__$x__d0", "/x"],
     // The call that starts the chain makes the receiver: its argument is not a mount path.
     [
@@ -392,9 +388,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 
   it("CS13: inserting a registration with no path leaves the later ones their ids", async () => {
-    // With the bare `app__use` stem the ordinal, which is source order, was all that told
-    // these apart: inserting `compression()` first renamed every later middleware, and the
-    // diff paired each with the body its id used to hold (ir-schema.md §3.3).
     const inline =
       "app.use((req, res, next) => {\n  if (!req.headers.authorization) return\n  next()\n})"
     const ids = async (lines: string[]) =>
@@ -439,8 +432,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     ["an assertion", 'app.get("/users" as string, h)'],
     ["a satisfies", 'app.get("/users" satisfies string, h)'],
   ])("CS15: reads the path past %s written in front of it", async (_label, source) => {
-    // Taken by position, the first child was the comment or the wrapper, so writing one
-    // renamed the route to `app__get__h__d0` — the rename this naming exists to prevent.
     const sym = byId(await symbolsOf(`${source}\n`), "#app__get__$users__d0")
 
     expect(sym.derivedBy).toContain("path-literal:/users")
@@ -467,9 +458,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 
   it("CS18: registrations whose names agree are told apart by order alone, and stay unique", async () => {
-    // The ordinal is the only discriminator here, which is where the position-dependence this
-    // naming removes elsewhere is still reachable. `$` joins argument names, so `(a, b)` and
-    // `(a$b)` share a stem too.
     const symbols = await symbolsOf(
       [
         'app.use(express.static("a"))',
@@ -490,8 +478,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 
   it("CS19: keeps a name outside ASCII, as the qualified-name grammar does", async () => {
-    // Folded through an ASCII class, both middleware were `app__use____` and the path and the
-    // receiver lost every character, leaving source order to tell them apart.
     const symbols = await symbolsOf(
       ["app.use(認証)", "app.use(圧縮)", 'app.get("/ユーザー", h)', "アプリ.use(café)"].join("\n"),
     )
@@ -505,8 +491,6 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 
   it("CS20: names a registration in Unicode NFC, whichever spelling the file was saved in", async () => {
-    // `symbols[].name` is held to NFC (invariant #19). A decomposed `é` is `e` and a combining
-    // acute; the path's `:` folds to `Z`, which the acute after it then composes with.
     const decomposed = "cafe\u0301"
     const symbols = await symbolsOf(
       [`app.use(${decomposed})`, "app.use(caf\u00e9)", 'app.get("/a:\u0301", h)'].join("\n"),

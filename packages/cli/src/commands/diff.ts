@@ -108,12 +108,6 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     options.outputDir === undefined ? await configuredOutputDir(await pinConfigOnce()) : undefined,
   )
   await createOutputDir("diff", outputDir)
-  // Removed before the scans, whatever the format, so the order is always "remove, then write if
-  // needed" and a path that cannot be cleared is refused before two scans are run for it. A run
-  // that stops first — a plugin that fails to load, a strict scan's undeclared value — then leaves
-  // nothing a caller checking for `diff.md` would post as this run's report. `diff.full.md` goes
-  // too: written only when this run's cap shortens `diff.md`, one left here would be the full
-  // report of some other diff even on a run that does write.
   await removeOutputFile({
     command: "diff",
     artefact: "the diff JSON",
@@ -210,7 +204,6 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     )
   }
 
-  // `cli-spec.md` stdout shape
   const summaryLine = projectDiffSummaryLine(diff)
   const { firstTriggered } = evaluateFailOn(failOn, diff)
   const faultedScans =
@@ -319,10 +312,6 @@ function warnOnSymmetricLosses(notCompared: readonly NotComparedFile[], warn: Wa
   )
 }
 
-/**
- * A renamed file by both its names, as `diff.md` prints it: the line drops reasons, not
- * identity, and the base scan's own warning above names the file under the base's name.
- */
 function notComparedName(file: NotComparedFile): string {
   return file.basePath === undefined ? file.path : `${file.basePath} → ${file.path}`
 }
@@ -380,7 +369,6 @@ interface ResolvedIRs {
   scans: ScanPair | null
 }
 
-/** Which of the two forms `cli-spec.md` gives this command was asked for. */
 type DiffInputs = { kind: "refs"; spec: RefSpec } | { kind: "files"; base: string; head: string }
 
 function chooseInputs(options: DiffOptions): DiffInputs {
@@ -441,11 +429,6 @@ async function resolveViaGit(
   const pinnedConfig = await pinConfigOnce()
   const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
   const submoduleIgnore = await submodulePatterns(git, headWorkspaceRoot, warn)
-  // Before the temp directory exists, so that no `await` separates `mkdtemp` resolving from the
-  // signal handler being registered below. Signals reach a listener as event-loop events, so
-  // none can land in between and find the directory unguarded; with this call in between, the
-  // directory sat unguarded for the whole of a slow `git diff --find-renames`, and outside the
-  // `try`, so a throw from it left the directory behind.
   const renames = await collectRenames(git, cwd, spec, warn)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   const worktreeParent = resolve(tempParent, "base")
@@ -456,21 +439,7 @@ async function resolveViaGit(
   let headIR: IR
   let scans: ScanPair
   let worktreeAdded = false
-  // A Ctrl-C or a cancelled CI job ends the process without running the `finally` below, which
-  // left a registered worktree and a full base checkout behind on every interrupted run. The
-  // same cleanup runs synchronously on the signal instead, through the real `git`: an injected
-  // runner is asynchronous, and nothing asynchronous finishes once the signal is re-raised.
-  // The consequence for an embedder that injects a `GitRunner` (a wrapper, or a git outside
-  // `PATH`) is that this path still runs whatever `git` is on `PATH`: it may fail to remove the
-  // worktree, which is then reported on stderr, or remove it through a different git.
-  // The remove is tried even before `worktreeAdded` is set: a signal can land while `worktree
-  // add` is still running, after git has registered the worktree, and a remove of one that is
-  // not there fails harmlessly. That narrows the window rather than closing it: a signal sent to
-  // this process alone, not to its process group, leaves the `worktree add` child running, and
-  // it can finish registering the worktree after this cleanup has run.
   const releaseSignals = cleanUpOnFatalSignal(() => {
-    // Taken first, so a signal that lands after the `finally` below has already removed the
-    // checkout does not report the remove of a worktree that is gone as a failure.
     const hadCheckout = existsSync(worktreeDir)
     const removal = spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
       cwd,
@@ -479,8 +448,6 @@ async function resolveViaGit(
     })
     if (hadCheckout && (removal.error !== undefined || removal.status !== 0)) {
       const why = removal.error?.message ?? `git exited ${removal.status ?? removal.signal}`
-      // No `git worktree prune` here: it acts on the whole repository, and would also remove
-      // prunable worktrees other people or tools made.
       reportFromSignal(
         `⚠ git worktree cleanup failed for "${worktreeDir}"; ${why}. Consider running \`git worktree prune\`.`,
       )
@@ -551,10 +518,6 @@ async function resolveViaGit(
         `⚠ Failed to remove the temporary directory "${tempParent}"; ${errorMessage(error)}. It can be deleted by hand.`,
       )
     }
-    // Last, not first: the asynchronous removal above takes as long as the checkout is large,
-    // and a signal during it would otherwise take the default action and leave both behind.
-    // Running the synchronous cleanup after part of this has finished is harmless: a `worktree
-    // remove --force` of a checkout that is gone exits 0, and `rmSync` is `force`.
     releaseSignals()
   }
 
@@ -579,18 +542,6 @@ function labelFor(target: ScanTarget): string {
   return target.side === "base" ? `base ref "${target.ref}"` : "head (working tree)"
 }
 
-/**
- * One scan of one side, reading the config both sides share. `pinnedConfig` replaces
- * `options.configPath`: the flag is relative to the caller's directory and the base scan runs
- * in the worktree. `pluginRefRoot` is the head's absolute path on both sides, because the plugin
- * set is pinned to the head environment (`cli-spec.md` §6.4.1.5), so the sides differ only in
- * their sources.
- *
- * `submoduleIgnore` reaches both sides for another reason: it holds workspace-root-relative
- * patterns that each scan resolves against its own root, so passing it to both removes the same
- * sources from each. `runScan` appends it to the config's own `ignore` (`mergeCliOverrides`)
- * rather than replacing that, and none of it is the user's: `aburi diff` has no `--ignore`.
- */
 async function runScanInDir(
   cwd: string,
   options: DiffOptions,
@@ -727,12 +678,6 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
   }
 }
 
-/**
- * `cli-spec.md` §6.4.1: a sparse checkout is missing files the diff would read as removed.
- * `--bool` because git also takes `1`, `yes` and `on` for true and, untyped, prints the value as
- * written; `--bool` normalises every spelling to the `true` compared below. `--default false`
- * because `git config` exits 1 for a key that is not set, the usual case.
- */
 async function assertNotSparse(git: GitRunner, cwd: string): Promise<void> {
   const { stdout } = await git.run(
     ["config", "--bool", "--default", "false", "core.sparseCheckout"],
@@ -746,26 +691,6 @@ async function assertNotSparse(git: GitRunner, cwd: string): Promise<void> {
   }
 }
 
-/**
- * Ignore patterns that leave every submodule out of both file scans, after the §6.4.1 warning.
- *
- * `git worktree add` does not populate submodules, so the base side sees each one as an empty
- * directory while the head side, whose submodules are checked out, walks into them as ordinary
- * sources: every Symbol in an unchanged submodule would read as added. Leaving them out of both
- * file scans is what makes the warning describe a limitation rather than excuse a wrong report,
- * and it needs no network access, which `git submodule update --init` in the worktree would.
- * Component detection is not covered, since it looks for manifests without `ignore`: a submodule
- * that is itself a workspace package still yields a Component on the head side only, which the
- * warning says.
- *
- * The submodules are the gitlinks (mode `160000`) in the index, which is the list
- * `git submodule status` prints, one decorated line each. `ls-files -z` is asked instead, and the
- * `-z` is the point: without it git renders a path outside printable ASCII the way
- * `core.quotePath` asks — double-quoted and octal-escaped — while under it each record is
- * NUL-terminated and git's path quoting is bypassed entirely, so a record survives any path, a
- * newline or a tab in it included (`diff-algorithm.md` states the same contract for renames).
- * Run at the head workspace root, so the paths are relative to the root both scans share.
- */
 async function submodulePatterns(
   git: GitRunner,
   workspaceRoot: string,
@@ -780,14 +705,6 @@ async function submodulePatterns(
   return paths.map((path) => `${escapeGlob(path)}/**`)
 }
 
-/**
- * The gitlink paths in `git ls-files -z --stage` output: `<mode> <sha> <stage>\t<path>\0`.
- *
- * Collected in a `Set` because an unmerged gitlink is listed once per stage (1, 2 and 3), and
- * sorted so the warning text and the pattern order are stable. Not normalised to NFC, unlike
- * `parseRenameRecords` below: these become `ignore` globs, which match the spelling on disk,
- * while rename records are looked up against IR paths, which are NFC.
- */
 export function parseSubmodulePaths(stdout: string): string[] {
   const paths = new Set<string>()
   for (const record of stdout.split("\0")) {
@@ -799,32 +716,10 @@ export function parseSubmodulePaths(stdout: string): string[] {
   return [...paths].sort()
 }
 
-/**
- * A path as glob text that matches it literally; the caller appends `/**` to take in the
- * subtree under it. Patterns reach picomatch (through tinyglobby), and the escaped set is the
- * characters its parser gives meaning to: `\` itself, which it spends as an escape, the
- * wildcards `*` and `?`, the class `[ ]`, the braces `{ }`, the group `( | )`, and the extglob
- * prefixes `!`, `+` and `@` (`!` also negates at the start of a pattern). Every other character
- * a path can hold, `.`, `$`, `^`, `,` and `#` among them, picomatch already matches as itself.
- */
 function escapeGlob(path: string): string {
   return path.replace(/[\\()[\]{}*?|!+@]/g, "\\$&")
 }
 
-/**
- * `git diff --find-renames --name-status -z` powers the diff engine's stage-2 rename map
- * (`diff-algorithm.md`, which is where the `-z` contract is stated and why).
- *
- * A failure here is non-fatal — the diff still runs, just without the rename hints — so it warns
- * on stderr instead of aborting, loudly enough that a reviewer noticing "moved -> removed +
- * added" churn can trace the cause.
- *
- * Three ways this comes back useless, and only one of them is an error. git can fail; the record
- * stream can be unreadable; and git can *succeed* having quietly given up on rename detection —
- * over `diff.renameLimit` it exits 0, writes a warning to stderr, and reports every move as a
- * `D` plus an `A`. That last one used to be invisible here, and it fires on exactly the large
- * refactor where stage 2 matters most.
- */
 async function collectRenames(
   git: GitRunner,
   cwd: string,
@@ -862,12 +757,6 @@ async function collectRenames(
   return parsed.renames
 }
 
-/**
- * The other cost of a missing rename hint. The map also decides whether a file one scan skipped
- * is the one the other scan has under another name (`diff-algorithm.md` §3.5.1), so without it
- * that file's Symbols are a lone removal or addition — no matching half — and `--fail-on removed`
- * fires on a file nobody deleted.
- */
 const RENAMED_AND_SKIPPED =
   "and the Symbols of a renamed file one scan skipped as removed or added rather than unknown"
 
@@ -917,18 +806,10 @@ function irRef(refName: string, ir: IR): IRRef {
 
 const UNINHERITED_GIT_ENV: readonly string[] = ["GIT_INDEX_FILE", "GIT_PREFIX"]
 
-/**
- * Write a line to stderr from a signal listener, where `warn` cannot be used: it ends in an
- * asynchronous `stderr.write` on a pipe, which does not flush before the signal is re-raised.
- */
 function reportFromSignal(message: string): void {
   try {
     writeSync(2, `${message}\n`)
-  } catch {
-    // Left empty on purpose: stderr may already be gone (a closed terminal is one of these
-    // signals), there is nowhere else to report to, and a throw out of a signal listener would
-    // end the process with exit 1 instead of the signal.
-  }
+  } catch {}
 }
 
 /** The environment a git command is spawned with: `env` without `UNINHERITED_GIT_ENV`. */

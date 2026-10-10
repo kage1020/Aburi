@@ -2,14 +2,6 @@ import type { Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { walkFirstSymbol } from "./fixtures/ctx"
 
-/**
- * The strings a rule carries — `condition`, `what`, `expr` — are written in the form
- * ir-schema.md §8.2 gives them, not as the source spells them: no comments, whitespace
- * collapsed to one space, and cut to 120 characters plus `...`. A comment, a re-wrap or an
- * indentation change is not a change to the rule, and a long rule still fits the schema's
- * `maxLength: 123`.
- */
-
 async function rulesOf(body: string): Promise<Rule[]> {
   return (await walkFirstSymbol(`export function f(a: any, b: any, c: any) {\n${body}\n}`)).rules
 }
@@ -57,10 +49,6 @@ describe("LP19b: rule text drops comments", () => {
     expect(guard?.condition).toBe('a === "/* not a comment */"')
   })
 
-  // The criterion itself: deleting a comment that has whitespace, or the end of the string, on
-  // at least one side leaves every rule string as it was. Each spelling without the comment
-  // holds no `/`, so it is read without the comment walk, and the pair also holds that
-  // shortcut to the walk's answer.
   it.each([
     ["guard", "if (a /* why */ || b) throw x", "if (a  || b) throw x"],
     ["wrapped guard", "if (\n  a || // why\n  b\n) throw x", "if (\n  a || \n  b\n) throw x"],
@@ -150,9 +138,6 @@ describe("rule text is cut to 120 characters", () => {
 })
 
 describe("a finally block's rules take the same form", () => {
-  // The finally block is walked like the try block (ir-schema.md §8.2), so its rules are the
-  // Symbol's and reach `logic`: a comment or a re-wrap there must not move it any more than
-  // one in the try block does, and a long one must still fit the schema.
   const long = Array.from({ length: 20 }, (_, i) => `a.f${i} > ${i}`).join(" && ")
 
   it("drops comments and collapses whitespace", async () => {

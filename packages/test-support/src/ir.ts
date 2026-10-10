@@ -36,7 +36,7 @@ export function languageId(raw: string): LanguageId {
   return raw as LanguageId
 }
 
-/** Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md). */
+/** Dependency endpoints hold either id kind and are told apart by shape. */
 export function endpoint(raw: string): DependencyEndpoint {
   return raw as DependencyEndpoint
 }

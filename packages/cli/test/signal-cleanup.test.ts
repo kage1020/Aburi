@@ -1,12 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanUpOnFatalSignal, FATAL_SIGNALS } from "../src/signal-cleanup"
 
-/**
- * Driven with `process.emit`, which calls the listeners without delivering a signal, and with
- * the re-raise replaced: a real one would end the test runner. That a real interrupt of
- * `aburi diff` leaves no worktree is asserted end to end in `e2e-integration`.
- */
-
 const releases: (() => void)[] = []
 
 afterEach(() => {
@@ -38,8 +32,6 @@ describe("cleanUpOnFatalSignal", () => {
     process.emit(signal)
 
     expect(events).toEqual(["cleanup", `reraise:${signal}`])
-    // Removed before the re-raise, or the re-raised signal would land on this listener again
-    // instead of taking the default action and ending the process with 128+N.
     expect(atReraise).toEqual(before)
     expect(listenerCounts()).toEqual(before)
   })

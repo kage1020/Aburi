@@ -214,9 +214,6 @@ export class Repo {
   })
 
   it("drops a Map delete keyed by a backtick literal, as by a quoted one", async () => {
-    // A template with no substitution is the same literal (`calls[].literalArgs`), so the veto
-    // reads it. One with a substitution is not a literal — its value is decided when it runs —
-    // and is classified as `delete(key)` is: recorded, at medium.
     const results = await classifyCalls(
       "src/cache-template.ts",
       `import { PrismaClient } from "@prisma/client"

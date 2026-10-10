@@ -5,17 +5,8 @@ import { irValidator } from "../src/ir-schema"
 import { scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A name a destructuring parameter binds is a parameter, so a call to it is local
- * (call-resolution.md §4.2, CR9a) — the same as `function plain(save) { save() }`. Reading
- * the parameter by its pattern text (`{ save }`) left `save` out of the shadow set, and the
- * call went on to the imported `save` and took its database write.
- */
-
 const workspace = useScratchWorkspace("destructured-parameter-shadow")
 
-// The budget is raised so the control's write never depends on how fast the first
-// classification runs on the machine.
 const scanWorkspace = () =>
   scanWith(
     workspace.root,
@@ -91,13 +82,6 @@ describe("scan — a destructuring parameter shadows the import it names", () =>
   })
 })
 
-/**
- * A destructuring parameter the parser could not fully place still leaves its file in the
- * scan (lang-plugin.md LP11d). What the parser placed as a binding shadows, a malformed array
- * pattern it kept only as an expression included; the text it wrapped in an ERROR node, and an
- * expression it placed where a binding belongs, bind nothing, so where that is all the pattern
- * holds, `save()` is the import's again.
- */
 describe("scan — a destructuring parameter with text the parser could not place", () => {
   beforeEach(async () => {
     await workspace.writeSource("src/repo.ts", REPO)
@@ -153,12 +137,6 @@ describe("scan — a destructuring parameter with text the parser could not plac
   })
 })
 
-/**
- * Characterization of a known limit, not a guarantee (call-resolution.md §4.2, CR9a). The
- * shadow reads the caller Symbol's own `signature`, and a `const` whose function is handed to a
- * call has none: the function is its body (lang-plugin.md LP7c), so `save()` in it resolves to
- * the import and carries the write, destructured or not.
- */
 describe("scan — a function a const hands its call is not shadowed", () => {
   beforeEach(async () => {
     await workspace.writeSource("src/repo.ts", REPO)

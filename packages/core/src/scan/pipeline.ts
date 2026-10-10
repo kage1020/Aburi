@@ -341,43 +341,6 @@ interface ClassifyCallsInput {
   classifyTimeoutMs?: number
 }
 
-/**
- * Put the strings a language plugin hands back into Unicode NFC, the form ir-schema.md
- * defines every Document string to be in.
- *
- * A plugin reads identifiers and paths out of source bytes, so whichever spelling a file
- * carries is the spelling it returns. This is the boundary where plugin output becomes IR,
- * and normalization has to be total across it: a value normalized here is then compared
- * against values that arrive from elsewhere, so leaving one side alone turns a match into a
- * miss. What is covered:
- *
- * - `source.file`, which invariant #19 checks and which `resolveCallGraph` matches
- *   against call-site keys built from the already-normalized `SourceFile.path`.
- * - `signature.inputs[].name` and `signature.inputs[].bindings`, which the call resolver
- *   compares against a call's head segment to decide that a parameter shadows a Symbol of
- *   the same name (call-resolution.md). Missing that comparison emits an edge to an unrelated
- *   Symbol, which then carries effects through propagation.
- * - `decorators[].name`, which a framework or effect plugin resolves against
- *   `ImportEdge.symbols` — already normalized by `normalizeImportEdge` below. Leaving this side
- *   alone makes a decorator renamed on import fail to resolve on a file that spells its
- *   identifiers decomposed, which is the silent miss `readImportedNames` exists to prevent.
- * - `decorators[].qualifier`, for the same reason one field over: it is matched against
- *   `ImportEdge.namespaceBinding`, which `normalizeImportEdge` normalizes, and a receiver
- *   left decomposed would miss the namespace edge that names its module and fall back to
- *   the leaf name alone.
- *
- * `decorators[].raw` is left alone for the reason the signature's type strings are: it is a
- * quotation of source text (ir-schema.md), not a value anything matches against. The api
- * fingerprint hashes both, and puts what it hashes into NFC itself (fingerprint.md §2.2).
- *
- * `id` is deliberately not touched: it is constructed rather than read, `makeSymbolId`
- * normalizes it there, and quietly repairing one asserted by hand would hide the plugin bug
- * invariant #17 exists to report. `name` needs nothing either — it is held to the
- * qualified-name grammar, which is ASCII-only, so it normalizes to itself.
- *
- * The candidate is returned unchanged when nothing differs, so the ASCII case — every
- * candidate in an ordinary scan — allocates nothing.
- */
 function normalizeCandidateStrings(
   candidate: SymbolCandidate<OpaqueAstNode>,
 ): SymbolCandidate<OpaqueAstNode> {
@@ -419,13 +382,6 @@ function normalizeDecoratorNames(
   })
 }
 
-/**
- * Only `inputs[].name` and `inputs[].bindings` are normalized. The type strings beside them
- * are quotations of source text (ir-schema.md §7): nothing matches against them, the api
- * fingerprint that hashes them normalizes its own input (fingerprint.md §2.2), and rewriting
- * one would misquote the declaration the Document is reporting. `optional` and `rest` are
- * booleans, carried over as they are.
- */
 function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["signature"]>(
   signature: T,
 ): T {
@@ -615,9 +571,6 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     visibility: input.candidate.visibility,
     decorators: [...input.candidate.decorators].sort((a, b) => a.line - b.line),
     signature: input.candidate.signature,
-    // A plugin's rule strings are brought to the ir-schema.md §8.2 form here, at the boundary,
-    // so a long or multi-line condition never reaches the IR past the schema's `maxLength`
-    // whichever plugin wrote it.
     rules: input.rules.map(normalizeRuleStrings).sort((a, b) => a.line - b.line),
     effects: [...input.effects].sort((a, b) => (a.line ?? 0) - (b.line ?? 0)),
     calls: [...input.calls].sort((a, b) => a.line - b.line),

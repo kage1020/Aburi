@@ -62,14 +62,10 @@ describe("I2: containsEarlyExit coverage", () => {
       "a return beside a callback",
       "export function f(xs: number[]) { if (xs) { xs.forEach((x) => x); return } }",
     ],
-    // The scope starts empty at the consequence, so the `switch` around the `if` reads as
-    // outside it, which is what makes this `break` leave the `if`'s flow.
     [
       "a break of the switch around the if",
       'export function f(k: string, ok: boolean) { switch (k) { case "a": if (!ok) break; run() } }',
     ],
-    // A callback called synchronously throws or exits through the `if`, so a function boundary
-    // stops only `return`, `break` and `continue`.
     [
       "a throw inside a callback",
       "export function f(x: any) { if (!x) { run(() => { throw new Error() }) } }",
@@ -87,10 +83,6 @@ describe("I2: containsEarlyExit coverage", () => {
     expect(rules.filter((r) => r.type === "guard")).toHaveLength(1)
   })
 
-  // Each leaves only something nested inside the `if`, so the `if` guards nothing; the one
-  // guard expected is the inner `if` the exit sits in, where there is one. An empty guard list
-  // also passes when the walk read nothing, so each row pins the rule types the walk of `f` does
-  // record as well, the nested construct's own rule among them.
   it.each([
     [
       "a return inside a callback",
@@ -184,9 +176,6 @@ describe("I2: containsEarlyExit coverage", () => {
     expect(rules.map((r) => r.type)).toEqual(types)
   })
 
-  // Trivial and call-only bodies only: a callback's concise body earns no `return` rule
-  // (`visitConciseBody` reads walk roots only) while its block twin's non-trivial `return` does,
-  // so turning `(i) => ({ id: i.id })` into a block body still adds a rule.
   it.each([
     ["a trivial", "i.id"],
     ["a call-only", "toDto(i)"],
@@ -206,10 +195,6 @@ describe("I3: try/catch/finally walk contract", () => {
     ["catch (e) { … }", "catch (e) { if (!e) return; errorHandler(e); throw e }"],
     ["catch { … }", "catch { if (!ok) return; errorHandler(); throw failure }"],
   ])("records the calls of `%s` and keeps its rules out", async (_label, clause) => {
-    // ir-schema.md §8.2 withholds a catch clause's rules, so a rewritten error handler's
-    // control flow does not move the logic axis. Its calls are another matter: no other Symbol
-    // records them, and a database write added there reached no effect at all. Both spellings
-    // of the clause, with a binding and without one, hand the walk the same `catch_clause`.
     const { calls, rules } = await walkFirstSymbol(
       `export function f() { try { doThing() } ${clause} }`,
     )
@@ -236,8 +221,6 @@ describe("I3: try/catch/finally walk contract", () => {
   })
 
   it("records the calls a catch clause would record as a try block, and withholds its rule", async () => {
-    // `return a[g()]` is a `return` rule that records `g` (drop-list.md §5.5). The catch clause is
-    // walked the same way (LP20m), so its twin records `h` and its rule is withheld.
     const { calls, rules } = await walkFirstSymbol(
       "export function f(a: number[]) { try { return a[g()] } catch (e) { return a[h()] } }",
     )
@@ -249,8 +232,6 @@ describe("I3: try/catch/finally walk contract", () => {
   })
 
   it("withholds the rules of a finally block nested inside a catch clause", async () => {
-    // Running on every path of the inner try does not lift a finally out of the catch clause
-    // it is written in: nothing under a catch clause gives the Symbol a rule.
     const { calls, rules } = await walkFirstSymbol(
       "export function f() { try { a() } catch (e) { try { b() } finally { if (y) return; c() } } }",
     )

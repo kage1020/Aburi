@@ -35,7 +35,6 @@ function addedSymbols(count: number, prefix = "Added"): SymbolChange[] {
   }))
 }
 
-/** One rule and one call — the "minimal symbol" the issue measured at ~210 bytes rendered. */
 function symbolOf(name: string): IRSymbol {
   return makeSymbol({
     id: `ts:src/${name}.ts#${name}`,

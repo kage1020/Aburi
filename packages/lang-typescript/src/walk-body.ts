@@ -20,19 +20,6 @@ import { functionValuedField, isConstructorMember, memberSymbolSegment } from ".
 import { objectEntryOf } from "./object-members"
 import { decodeStringLiteral, readStaticString } from "./string-escape"
 
-/**
- * Walk a Symbol's body and produce control-flow rules + call candidates.
- *
- * Which statements become rules, and which returns are too trivial to, is the drop-list
- * contract (`drop-list.md`); `visitNode` is the switch that applies it. A `try` statement's
- * `try` block and `finally` block feed the Symbol like any other block. Its `catch` clause feeds
- * the Symbol's calls and none of its rules (`ir-schema.md` §8.2, `handleTryStatement`).
- *
- * Calls are every call_expression whose callee we can normalize. `await` and `new`
- * modifiers surface as flags; each argument's literal value (if any) is captured on
- * `literalArgs` for effect plugins that pattern-match on constants (SQL strings, HTTP
- * paths, event names, …).
- */
 export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>): BodyExtraction {
   const rules: Rule[] = []
   const calls: CallCandidate[] = []
@@ -66,29 +53,6 @@ function visitParameterDefaults(parameters: Node, rules: Rule[], calls: CallCand
   }
 }
 
-/**
- * A class Symbol's own body: what **defining and constructing** the class runs, per
- * `lang-plugin.md` LP20a–LP20f. Field initialisers, static blocks and the constructor stay; a
- * member whose body another Symbol records does not — and which members those are is
- * `memberSymbolSegment`'s one answer, shared with extraction.
- *
- * Only what the member's Symbol walks is skipped, never the member: its body and its parameter
- * list (LP20d). The member's decorators stay, and the parameter decorators the skipped list
- * carries are walked back in afterwards (`visitParameterDecorators`), because a decorator's
- * arguments run when the class is defined, not when the member is called. A field holding a
- * function is skipped the same way and for the same reason: constructing the class creates the
- * closure, and only entering it runs the body (LP20f).
- *
- * An overload signature declares its member too, but has no body, so nothing of it is skipped
- * and the class reads it whole, as it did before overloads folded into their implementation's
- * Symbol (LP8q). The member's walk starts from bodies, and an overload's parameter list sits
- * beside none. So what that list holds stays here: a parameter decorator's arguments, which is
- * where an implementation's go too, and a default, which `tsc` rejects in an overload (TS2371)
- * and which never runs.
- *
- * And only for the Symbol's own bodies: a class written inside a function or a method is not
- * extracted, so every call in it belongs to the Symbol whose body encloses it (LP20e).
- */
 function visitOwnClassBody(
   classNode: Node,
   body: Node,
@@ -171,12 +135,6 @@ function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
   return (functionValuedField(member) ?? member).childForFieldName("body")
 }
 
-/**
- * Every loop kind the grammar has, with the `loopKind` its `loop` rule carries. `visitNode` reads
- * it for that rule and `scopeInside` for where a `break` or `continue` ends, so a kind missing
- * here loses both at once: no `loop` rule, and a `continue` inside it read as leaving the `if`
- * around it. `for_in_statement` is `for…in`, `for…of` and `for await…of` alike.
- */
 const LOOP_KINDS: ReadonlyMap<string, NonNullable<Rule["loopKind"]>> = new Map([
   ["for_statement", "for"],
   ["for_in_statement", "for"],
@@ -259,9 +217,6 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
     visitChildren(value, rules, calls)
     return
   }
-  // A trivial return is not walked. That loses nothing only because a trivial expression holds
-  // no call: `isTrivialExpr` checks every operand that could hold one, and a case added there
-  // that leaves such an operand unchecked takes the calls in it out of every Symbol.
   if (isTrivialExpr(value)) return
   rules.push(makeRule("return", node, { expr: ruleText(value) }))
   visitChildren(value, rules, calls)
@@ -287,28 +242,11 @@ function unparenthesized(node: Node): Node {
   return only !== undefined && rest.length === 0 ? only : node
 }
 
-/** A returned value that is one call: recorded in `calls[]`, never a rule (`drop-list.md` §5.4). */
+/** A returned value that is one call: recorded in `calls[]`, never a rule. */
 function isCallOnly(value: Node): boolean {
   return value.type === "call_expression" || value.type === "new_expression"
 }
 
-/**
- * The try block and the `finally` block are walked as any block is: `finally` runs on every path,
- * so what it does is what the Symbol does. The catch clause gives its **calls** and withholds its
- * rules (ir-schema.md §8.2), so an error handler's own control flow leaves `logic` alone, while a
- * call it makes moves `logic` exactly as it would anywhere else once an effect plugin classifies
- * it. Neither block was visited before, so a database write added in either one reached no
- * Symbol's `calls[]` or `effects[]` and the diff filed the edit as a syntax-only change.
- *
- * The clause goes through `visitNode`, as a try block does, so it records exactly the calls the
- * same statements would record there, with the drop list applied the same way. The rules that
- * walk produces — a guard, a `throw`, a loop, a `return`, a nested `try` and whatever that
- * `try`'s own `finally` holds — go into `withheld`, which nothing reads. `visitCallsInside`, which
- * the `throw` arm uses, collects every call under a node whatever the drop list says. Over a
- * catch clause it would record the same calls today, but only because a trivial return holds no
- * call (`handleReturnStatement`); walking the clause as a block keeps the two sides agreeing
- * without leaning on that.
- */
 function handleTryStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   const body = node.childForFieldName("body")
   if (body !== null) visitNode(body, rules, calls)
@@ -345,13 +283,6 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
   })
 }
 
-/**
- * Whether a returned expression is too trivial to be a `return` rule (`drop-list.md` §5.5): a
- * literal, an identifier, `this` or `super`, a member chain on a trivial object, a bracket access
- * whose object and index are both trivial, and a unary operator, an update operator or a
- * parenthesis around a trivial expression. Anything else is a rule unless it is call-only, which
- * each caller tests first (§5.4).
- */
 function isTrivialExpr(node: Node): boolean {
   switch (node.type) {
     case "number":
@@ -370,8 +301,6 @@ function isTrivialExpr(node: Node): boolean {
       return object !== null && isTrivialExpr(object)
     }
     case "subscript_expression": {
-      // A property is a name; an index is an expression, so it is the one place a call can hide in
-      // an otherwise-trivial read — and a trivial return is never walked, so it would be lost.
       const object = node.childForFieldName("object")
       const index = node.childForFieldName("index")
       if (object === null || index === null) return false
@@ -391,13 +320,6 @@ function isTrivialExpr(node: Node): boolean {
   }
 }
 
-/**
- * An index without the type-level wrappers and parentheses around it. A type wrapper asserts
- * something about the index without replacing it (`TYPE_WRAPPER_TYPES`), so `a[i as number]`,
- * `a[i!]`, `a[<number>i]` and `obj[key as keyof T]` read what `a[i]` and `obj[key]` do. Only an
- * index is read through them: `isTrivialExpr` has no case for a wrapper, so `return x as T` is a
- * rule.
- */
 function withoutTypeWrappers(index: Node): Node {
   let cursor = index
   while (TYPE_WRAPPER_TYPES.has(cursor.type) || cursor.type === "parenthesized_expression") {
@@ -408,19 +330,6 @@ function withoutTypeWrappers(index: Node): Node {
   return cursor
 }
 
-/**
- * Whether `node`, an `if`'s consequence, can leave the flow the `if` sits in: a `throw` or
- * `process.exit()` anywhere in it, a `return`, or a `break`/`continue` whose target is outside
- * `node`.
- *
- * Code that only leaves something nested inside `node` does not count. A `return`, `break` or
- * `continue` inside a function written there, a class's methods included, or inside a class
- * static block cannot get past that function or block to the code the `if` guards. A `throw` or
- * `process.exit()` there still counts: a callback called synchronously throws or exits through
- * the `if`, and `readThrows` counts the same `throw` for the Symbol. An unlabeled `break` counts
- * only when no loop or `switch` inside `node` is nearer, an unlabeled `continue` only when no
- * loop is, and a labeled one only when its label is not declared inside `node`.
- */
 function containsEarlyExit(node: Node): boolean {
   return exitsFrom(node, NO_INNER_TARGETS)
 }
@@ -433,13 +342,6 @@ interface ExitScope {
   readonly labels: readonly string[]
 }
 
-/**
- * The scope a consequence is read from. It records only the loops, `switch`es and labels found
- * inside the consequence on the way down, never the ones around the `if`: a `break` or `continue`
- * that meets no target of its own inside the consequence ends something outside it, and that is
- * what makes `switch (k) { case "a": if (!ok) break; … }` a guard. Seeded from the enclosing
- * context instead, that `break` would read as staying inside and the guard would be lost.
- */
 const NO_INNER_TARGETS: ExitScope = {
   inFunction: false,
   inLoop: false,
@@ -447,10 +349,6 @@ const NO_INNER_TARGETS: ExitScope = {
   labels: [],
 }
 
-/**
- * Nodes that no `return`, `break` or `continue` written inside them can leave, so none of those
- * counts there. They are still entered, for a `throw` or `process.exit()`, which do leave them.
- */
 const EXIT_BOUNDARIES: ReadonlySet<string> = new Set([
   "arrow_function",
   "function_expression",
@@ -466,8 +364,6 @@ function exitsFrom(node: Node, scope: ExitScope): boolean {
     case "throw_statement":
       return true
     case "return_statement":
-      // In a function a `return` ends only that function, and its value is still read:
-      // `return process.exit(1)` exits all the same.
       if (!scope.inFunction) return true
       break
     case "break_statement":
@@ -502,32 +398,12 @@ function scopeInside(node: Node, scope: ExitScope): ExitScope {
   return scope
 }
 
-/**
- * What `describeCallee` learned about one callee expression.
- *
- * `target` is the normalized string that lands in `CallCandidate.target` and
- * eventually in `Symbol.calls[].target` and `Symbol.effects[].target`. The
- * two flags beside it are passengers: neither is serialized, and neither
- * changes what `target` says. What the *string* says is wire-visible — a
- * bracket access contributes a segment (`lang-plugin.md`), and the logic
- * fingerprint reads `effects[].target`, so a change here moves IR bytes.
- */
 interface CalleeShape {
   readonly target: string
   readonly dynamic: boolean
   readonly opaque: boolean
 }
 
-/**
- * The wrappers whose source text stands in for the name they wrap. Each asserts something
- * about a value without replacing it, so `svc!` still names `svc`, and `a[i!]` reads what
- * `a[i]` does (`withoutTypeWrappers`).
- *
- * `ast-helpers.ts` keeps a near twin, `VALUE_WRAPPER_TYPES`, for a different question (which
- * value a binding holds), and leaves `<T>x` off it. This set reads `<T>x` (`type_assertion`) as
- * well, through its own branch in `describeTypeWrapper`: a callee in a `.ts` file can be
- * written that way, since `.ts` files are parsed with the TypeScript grammar rather than tsx.
- */
 const TYPE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "non_null_expression",
   "as_expression",
@@ -557,10 +433,6 @@ function describeTypeWrapper(node: Node): CalleeShape | null {
   return { target: node.text, dynamic: false, opaque: true }
 }
 
-/**
- * The expression a wrapper wraps. The old-style `<T>x` puts the type first; the other type
- * wrappers and a parenthesis put the value first.
- */
 function wrappedExpression(node: Node): Node | null {
   return node.type === "type_assertion"
     ? (node.namedChildren.at(-1) ?? null)
@@ -669,26 +541,9 @@ function extractSwitchCondition(node: Node): string | null {
   return cond !== null ? conditionText(cond) : null
 }
 
-/**
- * A rule's `condition`, `what` or `expr` as ir-schema.md §8.2 writes it: the node's source
- * text with every comment inside it taken out, then whitespace-collapsed and cut to length by
- * `normalizeRuleText`.
- *
- * Comments go because fingerprint.md lists them among the edits `logic` does not see, and these
- * strings are `logic`'s input: a guard with a block comment between `qty <= 0` and
- * `|| unit < 0` is the guard `qty <= 0 || unit < 0`. Each one is replaced by a space rather
- * than by nothing, so a comment that was the only thing between two tokens still leaves them
- * apart: with a block comment as all that separates `a-` from `-b`, the guard is `a- -b`, where
- * `a--b` would read as a decrement.
- *
- * `from` / `to` narrow the text to part of the node: `conditionText` uses them to leave out
- * the parentheses, which no comment can sit outside of.
- */
 function ruleText(node: Node, from = node.startIndex, to = node.endIndex): string {
   const source = node.text
   const base = node.startIndex
-  // Every `comment` node opens with `//` or `/*`, so text without a `/` holds none, and the
-  // walk below would only copy it.
   if (!source.includes("/")) return normalizeRuleText(source.slice(from - base, to - base))
   let out = ""
   let at = from
@@ -705,12 +560,6 @@ function nullableRuleText(node: Node | undefined): string | null {
   return node === undefined ? null : ruleText(node)
 }
 
-/**
- * The condition of an `if` or a `switch` without the parentheses the statement requires around
- * it: `if (a && b)` has the condition `a && b`. Only that one pair goes, read off the tree — the
- * grammar wraps the condition in a `parenthesized_expression` whose first and last tokens are
- * they — so `if ((a) || (b))` keeps `(a) || (b)`.
- */
 function conditionText(condition: Node): string {
   const open = condition.child(0)
   const close = condition.child(condition.childCount - 1)

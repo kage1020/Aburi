@@ -54,7 +54,7 @@ const NPM_DEP_TO_FRAMEWORK: ReadonlyArray<readonly [string, string]> = [
   ["@trpc/server", "trpc"],
 ]
 
-/** How far below a component root the language census looks (component-detect.md). */
+/** How far below a component root the language census looks. */
 const LANGUAGE_SCAN_DEPTH = 3
 
 /** Language-frequency filter: skip extensions with fewer than this many files. */

@@ -119,22 +119,6 @@ export function thrownValue(throwNode: Node): ThrownValue | null {
 
 export const AMBIENT_DECLARATION_TYPE = "ambient_declaration"
 
-/**
- * True when the node is written under a `declare`, at any namespace depth inside it.
- *
- * What it decides is whether a **signature is the declaration or an overload of one**. A
- * `function_signature` at module level is an overload: the implementation written beside it
- * carries the body and the parameter types the function is actually called with, so the
- * signature folds into the implementation's Symbol and does not lead it. An ambient context has
- * no implementations at all — `declare function f(): void` is the whole declaration — so there
- * is nothing beside it to defer to. The same split separates an ordinary class body's
- * `method_signature` from a `declare class`'s, which is why one predicate answers for both.
- *
- * It reads the parent chain rather than a flag threaded through the statement walk, because the
- * question is asked when declarations fold, of a candidate's `fullNode`, after the walk that
- * found it has returned (`isOverloadSignature` in `extract-symbols.ts`). The chain climbed is
- * bounded by declaration nesting depth and `program` ends it.
- */
 export function inAmbientContext(node: Node): boolean {
   for (let cursor = node.parent; cursor !== null; cursor = cursor.parent) {
     if (cursor.type === AMBIENT_DECLARATION_TYPE) return true

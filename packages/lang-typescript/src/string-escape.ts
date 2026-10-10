@@ -68,24 +68,6 @@ const NAMED_ESCAPES: ReadonlyMap<string, string> = new Map([
 /** CRLF is one continuation, not two, so the whole body is matched rather than the first char. */
 const LINE_TERMINATOR = /^(\r\n|[\n\r\u2028\u2029])$/
 
-/**
- * A string literal, or a template literal with no substitution, decoded; null for anything else.
- *
- * The two are one value written with different quotes, and every reader that wants the string a
- * literal spells has to answer them alike: an import specifier (LP26j), a registration's path
- * (`app.get(\`/users\`, h)` names the route `/users` does) and a call's literal argument. A
- * template with a substitution is not a literal — its value is decided when it runs.
- *
- * The decode is `decodeStringLiteralOrRaw`'s, partial reads and the source-text fallback
- * included, and each caller judges what it gets back: an import specifier reports an empty one,
- * a registration's path passes it over.
- *
- * The segment readers are the exception, and deliberately so: `subscriptSegment` in
- * `walk-body.ts` and `writtenNameSegment` in `class-members.ts` ask whether a literal *names a
- * qualified-name segment*, which is a different question with its own rule (a whole read that
- * `isQnameSegment` admits). A partial read or the raw text, kept here, would mint a segment the
- * source does not spell there.
- */
 export function readStaticString(node: Node): string | null {
   if (node.type === "template_string") {
     for (const child of node.namedChildren) {

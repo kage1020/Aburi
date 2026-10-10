@@ -4,11 +4,6 @@ import { describe, expect, it } from "vitest"
 import { hasExpressImport, importListMentionsExpress, readExpressFromText } from "../src/imports"
 import { makeCtx } from "./fixtures/symbol"
 
-/**
- * The context the scan hands a framework plugin: the file and its parsed import edges. The
- * scan also puts each edge through NFC first, which leaves an ASCII specifier's edge as it
- * is; the e2e scan in `e2e-integration` goes through that step.
- */
 async function classifyCtx(source: string): Promise<FrameworkClassifyContext> {
   const parsed = await parseTypescriptFile({ path: "src/a.ts", content: source })
   return { ...makeCtx("src/a.ts", source), imports: parsed.imports }
@@ -88,8 +83,6 @@ describe("hasExpressImport", () => {
   })
 
   it("reads an import from its edge where the text reading loses it", async () => {
-    // The quote in the JSX text hides the rest of the line from the tokenizer (see
-    // `tokenize`); the parser still reads the import, and the edge is what answers.
     const source = `const A = () => <p>Don't</p>; import express from "express"\n`
     const parsed = await parseTypescriptFile({ path: "src/a.tsx", content: source })
     const ctx = { ...makeCtx("src/a.tsx", source), imports: parsed.imports }
@@ -98,8 +91,6 @@ describe("hasExpressImport", () => {
   })
 
   it("answers each file from its own text when two contexts share one import list", () => {
-    // The text reading is cached on the import list; a list shared across files must not
-    // hand one file's answer to the other.
     const imports: ImportEdge[] = []
     const app = { ...makeCtx("src/app.js", `const express = require("express")\n`), imports }
     const other = { ...makeCtx("src/other.js", `const x = 1\n`), imports }
@@ -183,8 +174,6 @@ describe("readExpressFromText — the require call", () => {
     expect(readExpressFromText(source).requires).toBe(false)
   })
 
-  // JSX text cannot be told apart from code without a parser (see `tokenize`). These pin the
-  // two ways that reads wrong, so a change to either shows up here.
   it("reads a `require` commented out after JSX text with a quote as code", () => {
     const source = `const A = () => <p>Don't</p> /* old:\nconst e = require("express")\n*/\n`
     expect(readExpressFromText(source).requires).toBe(true)

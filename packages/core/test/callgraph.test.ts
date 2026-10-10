@@ -215,7 +215,7 @@ describe("resolveCallGraph", () => {
   })
 
   describe("import scope: relative specifier spellings (CR2a, CR2b)", () => {
-    /** The caller's one call, after checking that its edge agrees with it (CR2: confidence `high`). */
+    /** The caller's one call, after checking that its edge agrees with it. */
     function resolveFrom(
       callerFile: string,
       specifier: string,
@@ -331,8 +331,6 @@ describe("resolveCallGraph", () => {
   })
 
   it("import scope: answers each caller from its own directory and language when they share a specifier", () => {
-    // Relative specifiers are resolved once per (language, directory, specifier) per run; a key
-    // missing either part would hand the second asker the first one's file.
     const py = { language: makeLanguageId("py") }
     const symbols = [
       withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 4 }]),
@@ -559,8 +557,6 @@ describe("resolveCallGraph", () => {
   })
 
   describe("CR9a: a destructuring parameter shadows the names it binds", () => {
-    // A rest parameter is named by its binding without the `...` and carries `rest`, so
-    // `...save` shadows through `name` alone and `...[save]` through `bindings`.
     it.each<[string, Signature["inputs"][number]]>([
       ["{ save }", { name: "{ save }", type: "Deps", bindings: ["save"] }],
       ["[save]", { name: "[save]", type: "Deps", bindings: ["save"] }],
@@ -1072,10 +1068,6 @@ describe("resolveCallGraph", () => {
   })
 
   describe("import scope: a default import resolves to the module's default export", () => {
-    /**
-     * Where `caller`'s one call at line 6 lands, with `src/a.ts` importing `symbols` from `./x`:
-     * the edge it produced, and the bucket and candidates of the diagnostic it left instead.
-     */
     function resolvedOf(target: string, symbols: string[], callees: IRSymbol[]) {
       const caller = withCalls("ts:src/a.ts#caller", [{ target, line: 6 }])
       const imports = new Map<string, readonly ImportEdge[]>([
@@ -1145,8 +1137,6 @@ describe("resolveCallGraph", () => {
     })
 
     it("CR5d: leaves two default exports unresolved, bucketed `ambiguous`, rather than taking one", () => {
-      // Two `export default`s in one file is TS2528, and an ordinary state in the middle of an
-      // edit: the extractor reports both declarations with the token.
       const a = makeSymbol("ts:src/x.ts#a", { derivedBy: ["export-default"] })
       const b = makeSymbol("ts:src/x.ts#b", { derivedBy: ["export-default"] })
       expect(resolvedOf("x", ["default as x"], [b, a])).toEqual({
@@ -1155,10 +1145,6 @@ describe("resolveCallGraph", () => {
       })
     })
   })
-
-  // ---------------------------------------------------------------------------
-  // Integrated matrix — intra-file / intra-component / workspace / dynamic in one run
-  // ---------------------------------------------------------------------------
 
   describe("resolveCallGraph — integrated resolution matrix", () => {
     it("resolves intra-file / intra-package / cross-package / dynamic in one run", () => {

@@ -59,17 +59,6 @@ export function maxArgumentsFor(method: string): number {
   )
 }
 
-/**
- * Terminals that require an argument: `insert(table)`, `update(table)`, `delete(table)`,
- * `transaction(callback)` and `batch(statements)`. No Drizzle signature reaches a zero-argument
- * call to one, so that call is someone else's (effect-plugin.md §5.4, EP12). Everything else
- * may be called bare.
- *
- * Built from the write and transaction lists, so a terminal added to either takes the floor
- * with it. A hand-written table keyed on the same unions would break the build only when a
- * terminal is dropped; one added later would silently get no floor. A terminal Drizzle lets
- * you call bare would have to be left out here by name.
- */
 const DRIZZLE_REQUIRED_ARGUMENT_TERMINALS: ReadonlySet<
   DrizzleWriteMethod | DrizzleTransactionMethod
 > = new Set<DrizzleWriteMethod | DrizzleTransactionMethod>([
@@ -82,11 +71,6 @@ export function minArgumentsFor(method: string): number {
   return (DRIZZLE_REQUIRED_ARGUMENT_TERMINALS as ReadonlySet<string>).has(method) ? 1 : 0
 }
 
-/**
- * Verbs that anchor a fluent chain at its root. A target carrying one of these in an
- * internal segment is a downstream link (`db.select.from`) whose root already classified.
- * Internal to `classifyDrizzleCall`; not in the public barrel.
- */
 export const DRIZZLE_FLUENT_ROOT_METHODS: ReadonlySet<DrizzleReadMethod | DrizzleWriteMethod> =
   new Set<DrizzleReadMethod | DrizzleWriteMethod>([
     ...DRIZZLE_READ_METHODS_LIST,

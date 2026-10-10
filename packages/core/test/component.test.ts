@@ -387,8 +387,6 @@ describe("detectComponents", () => {
       await seedTypescriptFiles(dir, 12)
     }
     const components = await detectComponents({ workspaceRoot: tmp })
-    // Paired with their roots rather than sorted flat: that the three ids differ says nothing
-    // about *which* id each component got, and that is the property.
     expect(components.map((c) => `${c.roots[0]}=${c.id}`)).toEqual([
       "a/shared/pkg=pkg-shared-a",
       "b/shared/pkg=pkg-shared-b",

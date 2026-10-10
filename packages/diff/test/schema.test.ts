@@ -181,7 +181,7 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
         {
           id: "slice:ts:src/a.ts#A",
           members: ["ts:src/a.ts#A"],
-          confidence: "high", // slice-view.md explicitly forbids extra fields on SliceRecord
+          confidence: "high",
         },
       ],
     }

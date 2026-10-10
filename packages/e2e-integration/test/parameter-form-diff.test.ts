@@ -4,13 +4,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * Making an optional parameter required, dropping a default, or turning an array parameter
- * into a rest one breaks callers, so each is an api change. The diff reads it from the
- * parameter's `optional` and `rest` fields (lang-plugin.md LP11b), and the delta names the
- * parameter that changed form.
- */
-
 const workspace = useScratchWorkspace("parameter-form")
 
 async function scanOf(source: string): Promise<IR> {
@@ -56,10 +49,6 @@ describe("diff — a parameter's form", () => {
   it("does not report a changed default value as an api change", async () => {
     const beforeIR = await scanOf("export function f(limit = 10): void {}\n")
     const afterIR = await scanOf("export function f(limit = 20): void {}\n")
-    // The value is not part of the api contract (fingerprint.md §3.4): omitting the argument
-    // stays legal whatever it is. The body walk does read it (lang-plugin.md LP20d), so a
-    // default that calls something — `limit = g()` → `limit = h()` — moves logic; a literal
-    // names nothing, so this edit moves no axis.
     expect(f(afterIR).signature?.inputs).toEqual([{ name: "limit", type: "", optional: true }])
     expect(f(afterIR).fingerprint.api).toBe(f(beforeIR).fingerprint.api)
     expect(changeOf(beforeIR, afterIR)).toBeNull()
@@ -68,9 +57,6 @@ describe("diff — a parameter's form", () => {
 
 describe("scan — a rest parameter's name", () => {
   it("shadows a module-level Symbol of the same name, as any parameter does", async () => {
-    // `name` is the bare binding, so the call resolver's local-scope step sees `save` and
-    // leaves the call unresolved (call-resolution.md CR9) rather than linking it to the
-    // function the parameter hides.
     const ir = await scanOf(
       "export function save(): void {}\n\nexport function run(...save: Array<() => void>): void {\n  save()\n}\n",
     )

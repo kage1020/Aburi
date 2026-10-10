@@ -127,9 +127,6 @@ describe("minArgumentsFor", () => {
   })
 
   it("returns 0 for a name outside the vocabulary", () => {
-    // The classifier answers `null` for these whatever the floor says, so only a direct case
-    // sees this default. `constructor` is there for a table rewritten as an object literal,
-    // where the lookup would reach `Object.prototype`.
     for (const method of ["from", "commit", "findUnique", "constructor"]) {
       expect(minArgumentsFor(method)).toBe(0)
     }

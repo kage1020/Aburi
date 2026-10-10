@@ -43,7 +43,7 @@ export function isCoreEffectId(id: string): boolean {
   return CORE_EFFECT_VOCAB.has(id)
 }
 
-/** Symbol.kind core enumeration (ir-schema.md). */
+/** Symbol.kind core enumeration. */
 const CORE_KIND_ENUM: ReadonlySet<string> = new Set([
   "function",
   "method",
@@ -59,7 +59,7 @@ const CORE_KIND_ENUM: ReadonlySet<string> = new Set([
   "call",
 ])
 
-/** Symbol.confidence enumeration (ir-schema.md). */
+/** Symbol.confidence enumeration. */
 const CORE_CONFIDENCE_ENUM: ReadonlySet<string> = new Set(["high", "medium", "low"])
 
 /** Plugin-extension effect prefix: `x-<plugin>:<action>`. */
@@ -193,43 +193,6 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
   }
 }
 
-/**
- * Invariant #19 (ir-schema.md, Unicode normalization): every string the Document orders or
- * identifies by
- * is in Unicode NFC.
- *
- * `serializeCanonical` normalizes on write, while every ordering and equality decision in
- * this codebase compares the string held in memory. Where the two forms differ, a Document
- * can satisfy the sort invariant and land on disk violating it, and two spellings of one
- * value can be carried as two distinct entries.
- *
- * Two exclusions, each because the field is already covered:
- *
- * - `components[].id` and `symbols[].id` are left to #17, which refuses a non-NFC value for
- *   each of them — the Component id because its grammar is ASCII kebab-case and NFC leaves
- *   ASCII alone, the Symbol id because `symbolIdViolation` checks NFC in its own right, not
- *   as a side effect of an ASCII grammar. Reporting either here as well would have the
- *   reader chase one string twice.
- * - `symbols[].name` used to sit beside them and no longer can. It is checked by
- *   `isQualifiedName`, which has no NFC clause of its own and relied on the qualified-name
- *   grammar being ASCII — and that grammar is ECMAScript's IdentifierName now, so a
- *   decomposed `café` passes #17 and only this check tells the two spellings apart.
- *   Measured, not assumed.
- * - Strings the Document only quotes — a decorator's raw source text, a signature type — are
- *   matched against nothing, and the api fingerprint, which hashes both, normalizes its own
- *   input (fingerprint.md §2.2), so their composition decides nothing; normalizing a
- *   quotation would misquote it. They still reach disk normalized, because the serializer
- *   normalizes everything.
- *
- * `dependencies[]` endpoints are here rather than with the ids because no id grammar is
- * applied to them: #17 does not look at them, #4 only checks the Symbol-shaped ones, and #11
- * orders on `(from, to, via)` — so a Component-shaped endpoint is ordered on a string
- * nothing else validates.
- *
- * `stats.skippedFiles[].path` is ordered by (#11) and matched against `symbols[].source.file`
- * by `buildDiff`, which is the comparison that decides whether an absent Symbol is a loss or
- * a deletion. Two spellings there put the answer back to "deletion", silently.
- */
 function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
   for (const component of ir.components) {
     for (const root of component.roots) {
@@ -473,7 +436,6 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   }
 }
 
-/** Report the first adjacent pair of `values` that `compare` puts out of order, as #11. */
 function assertSorted<T>(
   values: readonly T[],
   collection: string,
@@ -603,8 +565,6 @@ function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
         })
         continue
       }
-      // `=== true`, matching #5 above. A Document is only here because #20 established
-      // `dropped` is a boolean, but the two readings of one field should not differ.
       if (target.dropped === true) {
         out.push({
           invariant: 12,

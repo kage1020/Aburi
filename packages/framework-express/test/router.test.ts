@@ -20,11 +20,6 @@ async function firstConstSymbol(source: string): Promise<SymbolCandidate<unknown
   return found
 }
 
-/**
- * `"<name> <Router callee>"` per const Symbol, the two space-joined, with `-` when it is not
- * read as a Router. The extractor hands Symbols back in id order rather than source order, so
- * each caller sorts before comparing.
- */
 async function routersOf(source: string, path?: string): Promise<string[]> {
   return (await constSymbols(source, path)).map(
     (s) => `${s.name} ${extractRouterCall(s.fullNode, s.name)?.callee ?? "-"}`,

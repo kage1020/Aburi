@@ -3,7 +3,7 @@ import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
 import { representativeSymbol } from "./status"
 
-/** The three inputs of the Slice View pass — docs/design/slice-view.md. */
+/** The three inputs of the Slice View pass. */
 export interface SliceInput {
   /** SymbolChange records produced by `buildDiff` (pre-sort is not required). */
   changes: readonly SymbolChange[]
@@ -61,7 +61,6 @@ export function sliceAnchor(record: SliceRecord): SymbolId {
   return anchor
 }
 
-/** Which clause of the slice-view.md derivation invariant a `SliceRecord` broke. */
 export type SliceViolationKind =
   /** Not a `SliceRecord` at all: not an object, or `id` / `members` of the wrong type. */
   | "malformed-shape"
@@ -201,14 +200,6 @@ function assertNeverChange(change: never): never {
   )
 }
 
-/**
- * φ of slice-view.md §5.1: the base id of every pair (`changed`, `moved`, `moved+changed`,
- * `dropped-toggled`) mapped to its representative id, the one §4.1 names a Node by. A base
- * edge uses base ids, and a pair matched past stage 1 can have a different head id.
- *
- * `buildDiff` never hands a pair's base id to a second change: stage 1 would have paired it.
- * `computeSlices` is public API, so a direct caller can, and a base edge still names the pair.
- */
 function nodeIdsByBaseId(changes: readonly SymbolChange[]): ReadonlyMap<SymbolId, SymbolId> {
   const out = new Map<SymbolId, SymbolId>()
   for (const change of changes) {
@@ -217,18 +208,6 @@ function nodeIdsByBaseId(changes: readonly SymbolChange[]): ReadonlyMap<SymbolId
   return out
 }
 
-/**
- * Edge selection: union of base and head, restricted to edges whose
- * BOTH endpoints are Nodes, canonicalised to `(u, v)` with `u < v` (self-
- * loops implicitly dropped). Multi-edges collapse naturally inside the WCC
- * primitive — no explicit dedup needed.
- *
- * The union is the load-bearing rule of slice-view.md: a controller that called an
- * old service in base and a new service in head needs both edges to land
- * all three Symbols in a single Slice. Each base-edge endpoint is first translated to the id
- * its Node carries, so that rule holds when the controller's id changed too. Head-edge
- * endpoints are head ids already and are not translated.
- */
 function collectEdges(
   baseEdges: readonly CallEdge[],
   headEdges: readonly CallEdge[],

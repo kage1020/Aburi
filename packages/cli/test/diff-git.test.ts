@@ -143,8 +143,7 @@ describe("CL30–CL32 — why a ref did not resolve", () => {
       git: runner,
       outputDir: resolve(scratch, "out"),
       warn: () => {},
-    }).catch(() => {
-    })
+    }).catch(() => {})
     const asked = calls.map((c) => c.args.slice(0, 2).join(" "))
     expect(asked).toContain("rev-parse --verify")
     expect(asked).not.toContain("rev-parse --is-inside-work-tree")
@@ -183,12 +182,6 @@ describe("runDiff refspec mode — git executable missing", () => {
   })
 })
 
-/**
- * The sparse and submodule checks of `cli-spec.md` §6.4.1, as calls. Every unmodelled command
- * answers empty output, so a refactor that changed either command's first two words would
- * leave its check reading `""`: the sparse check would pass every checkout and the submodule
- * one would find none, with every other test still green.
- */
 describe("runDiff refspec mode — the sparse and submodule questions", () => {
   /** A repository root by its `.git`, and a directory inside it to run from. */
   async function repository(): Promise<{ root: string; cwd: string }> {
@@ -262,9 +255,6 @@ describe("runDiff refspec mode — the sparse and submodule questions", () => {
 
 describe("runDiff refspec mode — collectRenames failure warns", () => {
   it("does not silently return null when git diff fails", async () => {
-    // Base + head verify succeed and the shallow check returns false, but the rename
-    // collection fails — before any worktree is added. runDiff will still fail (the scan needs
-    // a real workspace), so we snapshot the warn call before the raise.
     const warnCalls: string[] = []
     const { runner } = fakeGit({
       handlers: {
@@ -279,8 +269,7 @@ describe("runDiff refspec mode — collectRenames failure warns", () => {
       git: runner,
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnCalls.push(m),
-    }).catch(() => {
-    })
+    }).catch(() => {})
     expect(warnCalls.some((m) => m.includes("Failed to collect git renames"))).toBe(true)
   })
 })
@@ -294,8 +283,7 @@ describe("collectRenames — NUL-separated records", () => {
       git: runner,
       outputDir: resolve(scratch, "out"),
       warn: () => {},
-    }).catch(() => {
-    })
+    }).catch(() => {})
     const renameCall = calls.find((c) => c.args.slice(0, 2).join(" ") === "diff --find-renames")
     expect(renameCall?.args).toContain("-z")
     expect(renameCall?.args).toContain("--name-status")
@@ -380,8 +368,7 @@ describe("collectRenames — NUL-separated records", () => {
       git: runner,
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnCalls.push(m),
-    }).catch(() => {
-    })
+    }).catch(() => {})
     const warning = warnCalls.find((m) => m.includes("could not read"))
     expect(warning).toContain("main..HEAD")
     expect(warning).toContain('"R094"')
@@ -404,8 +391,7 @@ describe("collectRenames — NUL-separated records", () => {
       git: runner,
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnCalls.push(m),
-    }).catch(() => {
-    })
+    }).catch(() => {})
     const warning = warnCalls.find((m) => m.includes("git reported while collecting renames"))
     expect(warning).toContain("exhaustive rename detection was skipped")
     expect(warning).toContain("diff.renameLimit")
@@ -421,8 +407,7 @@ describe("runDiff refspec mode — worktree cleanup runs on failure", () => {
       git: runner,
       outputDir: resolve(scratch, "out"),
       warn: () => {},
-    }).catch(() => {
-    })
+    }).catch(() => {})
     const cleanup = calls.find((c) => c.args.slice(0, 2).join(" ") === "worktree remove")
     expect(cleanup).toBeDefined()
   })

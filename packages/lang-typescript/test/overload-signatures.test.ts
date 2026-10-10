@@ -2,14 +2,6 @@ import { describe, expect, it } from "vitest"
 import { normalizeAst } from "../src/index"
 import { idsOf, symbolOf, walkOf } from "./fixtures/ctx"
 
-/**
- * An overload signature folds into its implementation's Symbol as a declaration with no body,
- * so the syntax axis sees the overload set; the implementation still leads (LP8f, LP8q).
- * Dropped outright, an overload reached no fingerprint of the Symbol it belongs to: an edit to a
- * method's overload moved only its class's `syntax`, and one to a module-level overload moved
- * nothing at all.
- */
-
 const PARSE = [
   "export interface Config { name: string }",
   "export function parse(input: string): Config;",
@@ -33,7 +25,6 @@ async function stringOf(lines: readonly string[], id: string): Promise<string> {
   return normalizeAst(await symbolOf(lines.join("\n"), id))
 }
 
-/** Every id once: two Symbols under one id is what integrity invariant #1 refuses. */
 async function expectDistinctIds(source: string): Promise<void> {
   const ids = await idsOf(source)
   expect(new Set(ids).size).toBe(ids.length)
@@ -154,9 +145,6 @@ describe("an overload signature beside its implementation", () => {
   })
 
   it("does not fold a module-level generator's overloads, which the grammar cannot parse", async () => {
-    // The divergence LP8q records: tree-sitter reads `export function* g(…): T;` as an
-    // expression statement and an ERROR, not a `function_signature`, so there is nothing to
-    // fold, where a class body's `*m(…): T;` folds. Pinned so the answer is a decision.
     const source = [
       "export function* g(a: string): Iterable<string>;",
       "export function* g(a: any) { yield a }",
@@ -195,8 +183,6 @@ describe("a bodyless accessor signature, which tsc rejects outside a declare", (
 
 describe("what an overload's parameter list holds", () => {
   it("stays on the class, which reads the signature whole", async () => {
-    // The member's walk starts from bodies and an overload has none, so a parameter decorator's
-    // arguments go where an implementation's go, and a default (TS2371) goes with them.
     const source =
       "class C { m(@Inject() a: string): void; m(a = compute()): void; m(a: any) { log(a) } }"
 

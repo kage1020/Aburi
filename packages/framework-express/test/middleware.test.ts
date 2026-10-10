@@ -62,9 +62,6 @@ describe("analyzeUseArguments", () => {
     ["in parentheses", 'app.use(("/api"), router)'],
     ["under an assertion", 'app.use("/api" as string, router)'],
   ])("reads the mount path written %s as the path it is", async (_label, line) => {
-    // `@aburi/lang-typescript` names each of these registrations by the path `/api`, so the
-    // classification has to agree that there is one: a Symbol whose id says `$api` and whose
-    // kind says `middleware` contradicts itself.
     const sym = await firstCallSymbol(
       `import express from "express"\nconst app = express()\n${line}\n`,
     )

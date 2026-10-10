@@ -102,8 +102,6 @@ describe("apiFingerprint — invariance", () => {
   })
 
   it("A22: spelling a rest marker into signature.inputs[].name does not change the hash", () => {
-    // Rest-ness is `rest`, not the name: a `...` written into the name reaches no axis, which
-    // is why the marker needs a field the hash reads.
     const withInputs = (inputs: Signature["inputs"]) =>
       makeSymbol(base().id, { ...base(), signature: { ...sig(base()), inputs } })
     expect(apiFingerprint(withInputs([{ name: "...ids", type: "string[]" }]))).toBe(

@@ -318,26 +318,12 @@ export function reconstructCallEdgesFromIR(ir: IR): CallEdge[] {
   return edges
 }
 
-/**
- * Step 1 of call-resolution.md's untyped step order requires the resolver to leave a call
- * unresolved when the callee identifier shadows a caller-local declaration
- * (parameter, local variable, or nested function). The IR only surfaces the
- * parameter list today — `Symbol.signature.inputs[].name`, plus `inputs[].bindings`
- * for a destructuring parameter — so this helper captures the parameter subset of
- * the local-scope domain. Local variables and nested functions inside the body
- * are NOT visible in the IR yet; catching them fully requires the language plugin
- * to expose local declarations via a follow-up seam on `walkBody`. Guarding
- * parameters alone still eliminates the most common false-positive shape (a
- * Symbol name that coincides with a caller's parameter identifier).
- */
 function collectParameterNames(symbol: IRSymbol): ReadonlySet<string> {
   const inputs = symbol.signature?.inputs
   if (inputs === undefined) return EMPTY_NAME_SET
   const out = new Set<string>()
   for (const input of inputs) {
     out.add(input.name)
-    // A destructuring parameter's `name` is the pattern's text (`{ save }`), which no call
-    // head can equal; the names it binds are listed beside it.
     if (input.bindings === undefined) continue
     for (const binding of input.bindings) out.add(binding)
   }
@@ -446,15 +432,6 @@ function memberId(
   return id !== null && ctx.keptSymbolIds.has(id) ? id : null
 }
 
-/**
- * Step 3 of call-resolution.md's untyped step order: consult `importTable[caller.file]`.
- * Named imports and aliased imports resolve the head directly, and a default import resolves
- * it to the module's default export; namespace imports (`import * as ns from './y'`) resolve
- * when the target reads `ns.member`.
- * Import specifier resolution is limited to relative paths in this pass (step 1 of
- * call-resolution.md's import-specifier resolution); path aliases and workspace-package
- * specifiers are the concern of the follow-up implementation.
- */
 function resolveInImportScope(
   ctx: ResolveTargetContext,
   head: string,
@@ -480,9 +457,6 @@ function resolveInImportScope(
     for (const raw of edge.symbols) {
       const { imported, local } = splitAliasedImportName(raw)
       if (local !== head) continue
-      // A default import (`"default as S"`) binds whatever the module exports as `default`,
-      // under a name the importer chose, so the module is searched for its default export and
-      // never for a Symbol called `S` (call-resolution.md §4.4, CR5–CR5d).
       if (imported === DEFAULT_EXPORT_NAME) {
         for (const exportedName of defaultExportsOf(ctx, targetFile)) {
           const candidateId = memberId(ctx, targetFile, exportedName, tail)
@@ -503,15 +477,6 @@ function resolveInImportScope(
   return { id: only, confidence: "high" }
 }
 
-/**
- * The names of the top-level Symbols a file exports as `default`. The evidence is
- * `export-default` in `derivedBy`, which the TypeScript plugin puts on a named declaration
- * (`export default function makeApp`, and `const f = …; export default f`) and on its
- * anonymous `<default>` Symbol alike. The `<default>` name is accepted without the token as a
- * guard, not as a second case: `lang-plugin.md` LP6 asks a plugin for the name only, and one
- * that gives nothing more still reaches its anonymous default export (`call-resolution.md`
- * §4.4). More than one name is left to the caller's ambiguity check.
- */
 function defaultExportsOf(ctx: ResolveTargetContext, file: string): string[] {
   const perName = ctx.topLevelByFile.get(file)
   if (perName === undefined) return []
@@ -526,14 +491,6 @@ function defaultExportsOf(ctx: ResolveTargetContext, file: string): string[] {
   return found
 }
 
-/**
- * `resolveRelativeSpecifier` for the caller's file, answered once per run. Import scope asks
- * it for every import edge of every unresolved call, but the answer depends only on the
- * language, the caller's directory and the specifier (the probe list and the Symbol files are
- * fixed for the run), so a file with C unresolved calls and I imports asks it I times, not
- * C × I. Neither a language id nor a path can hold NUL and the specifier comes last, so the
- * key splits one way only, even for a specifier that decoded a `\0` (lang-plugin.md LP26k).
- */
 function resolveRelativeSpecifierOnce(ctx: ResolveTargetContext, specifier: string): string | null {
   const callerFile = ctx.caller.source.file
   const key = `${ctx.caller.language}\0${dirname(callerFile)}\0${specifier}`

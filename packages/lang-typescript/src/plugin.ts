@@ -38,8 +38,7 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   }
   readonly fileDropPatterns: string[] = [...TYPESCRIPT_FILE_DROP_PATTERNS]
 
-  async init(_ctx: PluginContext): Promise<void> {
-  }
+  async init(_ctx: PluginContext): Promise<void> {}
 
   async parseFile(file: SourceFile): Promise<ParseResult<Tree>> {
     return parseTypescriptFile(file)

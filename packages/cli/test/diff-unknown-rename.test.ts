@@ -7,15 +7,6 @@ import { EXIT, runDiff } from "../src"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../src/artifact-paths"
 import { realGit as git, probeRealGit } from "./fixtures"
 
-/**
- * A file git renamed between the revisions, which one scan skipped, against a real repository.
- *
- * The rename map is what tells the diff that `src/billing.ts`, skipped at head, is the file the
- * base calls `src/big.ts`. Only ref mode has one — `--base` / `--head` IR files carry no git
- * history — so the case the `--fail-on removed` misfire lived in is only reachable here, with a
- * real `git diff --find-renames` producing the map and two real scans producing the skips.
- */
-
 let scratch = ""
 let repository = ""
 let gitProbeError: unknown = null
@@ -48,10 +39,6 @@ async function commitAll(message: string): Promise<void> {
   await git(["commit", "-q", "-m", message], repository)
 }
 
-/**
- * The base commit: `src/big.ts` holding `Billing`, plus `src/ping.ts` so the head scan always
- * has a file it can read. `basePadding` lines push `src/big.ts` past the cap in the base.
- */
 async function commitBase(basePadding: number): Promise<void> {
   await mkdir(resolve(repository, "src"), { recursive: true })
   await writeFile(resolve(repository, "package.json"), '{"name":"demo","private":true}\n', "utf8")

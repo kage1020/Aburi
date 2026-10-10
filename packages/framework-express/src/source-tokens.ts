@@ -1,46 +1,8 @@
-/**
- * One token of JavaScript or TypeScript source, as `tokenize` reads it.
- *
- * - `word`: an identifier, keyword or number.
- * - `string`: a quoted string, or a template literal with no substitution, which is everything
- *   a module specifier can be written as. `text` is what lies between the quotes, escapes
- *   unread.
- * - `other`: one punctuation character (`++` and `--` are one token), a regular-expression
- *   literal, an unterminated string, or a backtick that opens, continues or closes a template
- *   literal with substitutions.
- */
 export interface SourceToken {
   kind: "word" | "string" | "other"
   text: string
 }
 
-/**
- * The tokens of `content`, with comments skipped and every string, template and
- * regular-expression literal read whole, so that nothing written inside one reads as code.
- * Good enough to find an import or a `require` call; not a parser.
- *
- * A `/` that is not a comment is a regular-expression literal where an expression can start
- * and a division after a value, which is decided by the token before it: after a name, a
- * number, a literal, `)` or `]` it divides; after an operator, `(`, `,`, `{`, a block's `}`,
- * a keyword such as `return` or `typeof`, or the `)` of an `if (…)`, `for (…)` or
- * `while (…)` head it starts a literal. `++` and `--` keep the reading they found, and so
- * does TypeScript's non-null `!`. A literal cannot span lines, so a `/` that finds no closing
- * `/` on its line is read as a division and costs nothing. Where the rule guesses, it guesses
- * for the common case: any `}` is taken to close a block, so a division straight after an
- * object literal (`x = {} / 2`) is read as a literal, and so is one after `yield` or `await`
- * used as a plain name. A literal read in error runs to the next `/` on its line at most.
- *
- * A template literal's `${…}` is read as code, braces counted, so a string, comment or
- * nested template inside it is stepped over and the `}` that closes it resumes the template.
- *
- * What it cannot read is JSX text, because telling `<p>Don't</p>` apart from code takes a
- * parser. A quote in JSX text opens a string to the end of its line, a backtick a template to
- * the next backtick in the file, `//` a comment to the end of the line, and `/*` a block
- * comment to wherever one next closes. Both directions follow. What the span covers is lost,
- * so a `require` written inside it is missed: `<p>Don't</p>; const e = require("express")`
- * reads as no `require`. And a comment whose opener the span swallows is read as code, so a
- * `require` commented out on the lines after `<p>Don't</p> /* old:` is found.
- */
 export function tokenize(content: string): SourceToken[] {
   const tokens: SourceToken[] = []
   // Open `(`, `{` and `${`, innermost last, for what a `)` or `}` closes.
@@ -49,8 +11,6 @@ export function tokenize(content: string): SourceToken[] {
   let regexAllowed = true
   let i = 0
 
-  // `start` is just past a template's opening backtick (`head`) or past the `}` that closed
-  // one of its substitutions. Returns where code resumes.
   const readTemplate = (start: number, head: boolean): number => {
     let j = start
     while (j < content.length) {
@@ -223,11 +183,6 @@ function isControlKeyword(tokens: readonly SourceToken[]): boolean {
   )
 }
 
-/**
- * The index just past the regular-expression literal whose opening `/` is at `start`, flags
- * included, or `-1` when its line ends first. A `/` inside a character class does not close
- * it, and a backslash escapes the character after it.
- */
 function regexEnd(content: string, start: number): number {
   let inClass = false
   let i = start + 1

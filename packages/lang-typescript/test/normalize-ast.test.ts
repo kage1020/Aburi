@@ -8,7 +8,6 @@ async function normalizeFirstSymbol(source: string): Promise<string> {
   return normalizeAst(target)
 }
 
-// The harness `fingerprint.md` §7.7.1 requires of every language plugin, case for case.
 describe("normalizeAst — the language plugin contract (fingerprint.md §7.7.1)", () => {
   it("S1: adding a comment inside the body leaves the normalized form unchanged", async () => {
     const withoutComment = await normalizeFirstSymbol("export function f() { return 1 }")

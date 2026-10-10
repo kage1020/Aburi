@@ -103,7 +103,6 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
     expect(result.ir.stats.totalFiles).toBe(2)
     expect(result.ir.stats.parsedFiles).toBe(1)
     expect(result.ir.stats.skippedFiles).toEqual([{ path: "od#d.stub", reason: "unroutable" }])
-    // #10 (path shape), #11 (sort), #19 (NFC) and #21 (census) all read this entry.
     expect(checkIRIntegrity(result.ir)).toEqual([])
     // And the rest of the workspace is in the document, which is the whole point.
     expect(result.ir.symbols).toHaveLength(1)

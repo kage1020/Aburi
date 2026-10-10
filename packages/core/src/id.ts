@@ -146,11 +146,6 @@ const SYMBOL_ID_SEPARATORS = [":", "#"] as const
 export interface BackslashSite {
   /** The first `/`-delimited segment whose own name holds one. */
   segment: string
-  /**
-   * `path` truncated to the end of that segment: the shortest prefix of it that already
-   * cannot be named, and therefore exactly what a rename has to change. Every path under a
-   * directory whose name holds a backslash shares one.
-   */
   prefix: string
 }
 

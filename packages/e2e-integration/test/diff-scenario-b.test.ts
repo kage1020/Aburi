@@ -65,8 +65,6 @@ describe("e2e diff — scenario B: BillingService stubbed → dropped-toggled:>1
 
     const triggered = evaluateFailOn(parseFailOn("dropped-toggled:to-dropped:>10"), diff)
     expect(triggered.firstTriggered).not.toBeNull()
-    // `FailOnClause.token` carries the direction suffix, so a bare "dropped-toggled" match
-    // would be wrong.
     expect(triggered.firstTriggered?.clause.token).toBe("dropped-toggled:to-dropped")
     expect(triggered.firstTriggered?.clause.threshold).toBe(10)
     expect(triggered.firstTriggered?.observed).toBeGreaterThan(10)

@@ -39,8 +39,6 @@ export function classifyTrpcCall(
 
   return {
     effectId: "network.rpc",
-    // The dynamic-receiver arm of `receiverConfidence`; tRPC has no client vocabulary or
-    // arity rule, so the other arms do not apply.
     confidence: call.dynamicReceiver === true ? "medium" : "high",
     derivedBy: `${EFFECTS_TRPC_DERIVED_BY_PREFIX}:${family}:${procedurePath}`,
   }

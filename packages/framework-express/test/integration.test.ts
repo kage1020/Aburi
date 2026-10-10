@@ -109,8 +109,6 @@ describe("framework-express — Router-based app", () => {
   })
 
   it("classifies a mount whose path is written in backticks as the quoted one is", async () => {
-    // One value written with different quotes. The language plugin names this registration by
-    // the path, so a kind that read it as no path would contradict the Symbol's own id.
     const rows = await classifyFixture(
       "src/routes.ts",
       `import express from "express"\nconst app = express()\napp.use(\`/users\`, usersRouter)\n`,

@@ -4,14 +4,6 @@ import { describe, expect, it } from "vitest"
 import { diffIRs, scanWith, warningCollector } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * An overload signature folds into the Symbol its implementation leads, so editing one overload
- * reports that Symbol as changed (lang-plugin.md LP8q). Overloads used to be dropped: an edit to
- * a module-level overload was reported as no change at all, and one to a method's overload only
- * on its class. This runs the real pipeline: scan, edit on disk, scan again, diff. Every scan has
- * to be silent, so a parse failure cannot pass for a fingerprint outcome.
- */
-
 const workspace = useScratchWorkspace("overload-edit")
 
 async function scanSilently(): Promise<IR> {

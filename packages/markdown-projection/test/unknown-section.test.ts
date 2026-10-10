@@ -37,8 +37,6 @@ describe("projectDiff — the Unknown section", () => {
   })
 
   it("names the path the skipping scan recorded when git renamed the file", () => {
-    // The File line shows the base's name, which the head does not have at all: naming it as
-    // the skipped path would send the reader to raise the size cap for the wrong file.
     const md = projectDiff(
       makeDiff({
         symbols: [

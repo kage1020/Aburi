@@ -17,29 +17,6 @@ import {
 } from "./methods"
 import { classificationConfidence } from "./receivers"
 
-/**
- * Classify a CallCandidate against Drizzle ORM conventions.
- *
- * Four decisions this function encodes:
- *
- * 1. **Chain-collapse.** Drizzle is a fluent builder, so `walkBody` emits one candidate per
- *    link of `db.select().from(u).where(w)` (`db.select`, `db.select.from`, ...). Only the
- *    root may classify, or one statement would yield N `db.read` records: any candidate
- *    with a fluent-root verb in an internal segment is dropped.
- * 2. **The import gate is not a receiver check.** Drizzle's normal shape is two segments
- *    (`db.select()`), the same as RxJS `store.select(...)` and Express `router.delete(...)`,
- *    and Express + Drizzle commonly share a file. A literal first argument rejects a route
- *    registration outright — no Drizzle root takes one — and the receiver plus argument
- *    count decide the tier.
- * 3. **Everything short of that downgrades rather than drops** — see `receiverConfidence`.
- * 4. **Arity has a floor for the terminals that require an argument** — `insert`, `update`,
- *    `delete`, `transaction`, `batch`. A zero-argument call to one is dropped whatever the
- *    receiver, where an overflow only costs the tier (effect-plugin.md §5.4).
- *
- * Throws only through the registry's input guards — `assertNonEmptySegments` on the target
- * and `hasMatchingImport` on each `ImportEdge.source` — upstream contract violations rather
- * than classification decisions. Pure with respect to plugin state (effect-plugin.md).
- */
 export function classifyDrizzleCall(
   call: CallCandidate,
   ctx: ClassifyContext,
@@ -60,17 +37,8 @@ export function classifyDrizzleCall(
     if (fluentRoots.has(segment)) return null
   }
 
-  // `insert(table)`, `update(table)`, `delete(table)`, `transaction(cb)` and `batch([...])`
-  // all require an argument, so no Drizzle signature reaches a zero-argument call: a class's
-  // own `this.update()`, an Active Record model's `user.delete()`, a Firestore `batch()`, an
-  // unmanaged Sequelize or Knex `transaction()`. Not separable from broken source here, and a
-  // phantom write or transaction is the costlier of the two mistakes, so it is handed on
-  // unclassified.
   if (call.argumentCount < minArgumentsFor(method)) return null
 
-  // Relational query API: `<client>.query.<table>.findMany|findFirst`. Checked before the
-  // generic dispatch because its terminals are not read methods. `query` sits at -3 and
-  // the client at -4 however many receiver segments precede them.
   if (segments.length >= 4 && segments.at(-3) === "query" && isDrizzleQueryMethod(method)) {
     if (hasLiteralFirstArgument(call)) return null
     return {

@@ -1,5 +1,3 @@
-/** MP14 — a list section in a Symbol block ends at a blank line (markdown-projection.md §5.2). */
-
 import { call, component, effect, fp, makeSymbol, rule, zeroFp } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { projectComponent, projectDiff, renderSymbolBlock } from "../src"

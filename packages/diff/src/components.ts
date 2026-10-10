@@ -59,52 +59,17 @@ export function diffComponents(
   return { added, removed, changed }
 }
 
-/**
- * What one document knows about itself, for deciding whether the *other* document's silence
- * about an edge is evidence.
- *
- * `symbolFiles` is keyed on the endpoint id exactly as `dependencies[]` spells it, and its
- * values come from `symbols[].source.file` — the form `stats.skippedFiles[].path` is written
- * in, and the space `buildDiff` classifies Symbols by. The same form is not always the same
- * name: when git renamed a file between the revisions, each document records it under its own
- * name, and `lostCounterparts` translates between the two. Reading the file out of the id's
- * path segment instead would be a second answer to "which file is this endpoint in" that
- * nothing forces to agree with the first. A Component endpoint is absent from the map, which
- * keeps it out of the reclassification without a special case: an aggregate over roots has no
- * file to lose.
- */
 export interface DependencySideView {
   symbolFiles: ReadonlyMap<DependencyEndpoint, RelativePath>
   /** Files this document never analysed, by path, with the reason it gave. */
   lostFiles: ReadonlyMap<RelativePath, SkipReason>
 }
 
-/**
- * A git rename map read in both directions (`diff-algorithm.md` §3.5.1). A leftover Symbol, or
- * an edge endpoint, names its file the way its own document does, while the document that may
- * have lost it recorded the same file under the name it had there, so each direction is the
- * translation for one side's question.
- *
- * `headToBase` lists every base path renamed onto a head path, sorted. git renames no two base
- * files onto one path, so a list built from `git diff` never holds more than one; a map handed
- * to `buildDiff` directly can, and which of them answers should not be a property of the order
- * that map happens to list them in.
- *
- * Exported because `DependencySideView` is public and `diffDependencies` requires one. Build it
- * with `renameDirections`, which is what keeps the two directions each other's inverse.
- */
 export interface RenameDirections {
   readonly baseToHead: ReadonlyMap<RelativePath, RelativePath>
   readonly headToBase: ReadonlyMap<RelativePath, readonly RelativePath[]>
 }
 
-/**
- * Both directions of `renames`, the base-to-head map `git diff --find-renames` gives. `null` —
- * no rename information, as with `--base` / `--head` IR files — gives two empty directions,
- * which is how a caller with nothing to translate says so. Exported for the reason
- * `RenameDirections` is. Copies `renames`, so a later change to the caller's map cannot reach
- * a diff built from it.
- */
 export function renameDirections(
   renames: ReadonlyMap<RelativePath, RelativePath> | null,
 ): RenameDirections {
@@ -129,18 +94,6 @@ export interface LossSides {
   renames: RenameDirections
 }
 
-/**
- * Every record the `absentFrom` document holds for the file the other document names `path`,
- * each with the path the absent document recorded it under: `path` itself first, then — when
- * git renamed the file between the revisions — each name the rename map gives it on the absent
- * side, in path order. Without the second lookup a renamed file the other side skipped would
- * leave its Symbols as confident additions or deletions, which is the silence `unknown` exists
- * to break.
- *
- * Takes the side by name and picks both the view and the rename direction from it, because each
- * is one of a pair of the same type — `RelativePath` is a plain string — so handing over the
- * wrong one would compile and quietly restore the lookup a rename defeats.
- */
 export function lostCounterparts(
   path: RelativePath,
   absentFrom: AbsentSide,
@@ -158,10 +111,6 @@ export function lostCounterparts(
   return found
 }
 
-/**
- * The first of `lostCounterparts`, for an entry that needs one explanation rather than every
- * record: a Symbol carries one `reason`, and an edge endpoint is one file.
- */
 export function lostCounterpart(
   path: RelativePath,
   absentFrom: AbsentSide,
@@ -181,11 +130,6 @@ function namesOnSide(
   return headPath === undefined ? [] : [headPath]
 }
 
-/**
- * Build a side view from a document. Exported because `DependencySideView` is public and
- * `diffDependencies` requires one; `buildDiff` reads `lostFiles` for its own Symbol
- * classification from this same object.
- */
 export function dependencySideView(ir: IR): DependencySideView {
   const symbolFiles = new Map<DependencyEndpoint, RelativePath>()
   for (const symbol of ir.symbols) symbolFiles.set(symbol.id, symbol.source.file)
@@ -194,23 +138,6 @@ export function dependencySideView(ir: IR): DependencySideView {
   return { symbolFiles, lostFiles }
 }
 
-/**
- * `docs/design/diff-algorithm.md` — Dependency diff. Identity is the composite
- * `(from, to, via)` triple; direction and effect changes surface as an added + removed pair so
- * `modified` is not part of the schema. Uniqueness of the triple is the caller's
- * obligation on the same terms as `diffComponents`.
- *
- * `sides` separates a deletion from a loss and is required rather than optional:
- * omitting it would silently classify every edge into a lost file as a deletion while still
- * writing `unknown: []`, which the schema defines as "nothing was unknown". A caller with no
- * skip list passes a side view whose `lostFiles` is empty. `renames` is required on the same
- * terms: without it an edge into a file git renamed and one side skipped would be a confident
- * deletion or addition beside the same `unknown: []`. A caller with no rename information
- * passes `renameDirections(null)`.
- *
- * The return type declares `unknown` present, where the schema leaves it optional for
- * documents that predate the field.
- */
 export function diffDependencies(
   base: readonly Dependency[],
   head: readonly Dependency[],
@@ -226,8 +153,6 @@ export function diffDependencies(
   for (const [key, dep] of headKeys) {
     const baseDep = baseKeys.get(key)
     if (baseDep === undefined) {
-      // Held by head and not by base, so its endpoints resolve against head — the document
-      // that has the Symbols — and the question is whether base could have seen them.
       const lostFiles = endpointsLostBy(dep, "base", sides)
       if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "base", lostFiles })
       else added.push(dep)
@@ -250,14 +175,6 @@ export function diffDependencies(
   return { added, removed, unknown }
 }
 
-/**
- * The endpoint files the `absentFrom` document never analysed, read through the other one —
- * the holder — because that is the document the edge, and the Symbol behind each endpoint,
- * comes from. Both endpoints are checked: an edge dies when *either* end's file goes. Each path
- * is the one the absent document recorded, which after a git rename is not the holder's.
- * Deduped on that path and sorted by it, so an intra-file edge collapses to the one file it
- * lost, renamed or not.
- */
 function endpointsLostBy(
   dep: Dependency,
   absentFrom: AbsentSide,

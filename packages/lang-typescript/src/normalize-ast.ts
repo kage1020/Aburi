@@ -1,50 +1,6 @@
 import type { MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 
-/**
- * Emit a positionless, comment-free S-expression for a SymbolCandidate's body.
- *
- * The output is the input to `syntaxFingerprint` in `@aburi/core`, so it must satisfy the
- * plugin contract there:
- *   - no comment nodes (we skip `comment` and `hash_bang_line` nodes)
- *   - no position information (byte offsets, rows, columns are all omitted)
- *   - no whitespace tokens, and nothing tree-sitter marks `extra`: comments, and the ERROR
- *     nodes it wraps unparseable text in, so a subtree the parser gave up on is left out whole
- *   - node kinds and child structure, plus every anonymous token, quoted, except the ones
- *     in `FORMATTING_TOKENS` (see `tokenPayload`)
- *   - identifier and literal values ARE included — the syntax axis is sensitive to what
- *     the code says, not just how it is shaped
- *
- * A declaration is described by its own body when it has one — a function's or a method's
- * `statement_block`, a class's `class_body`, an interface's `interface_body` — and by its full
- * node when it has none (a type alias, an enum, a namespace, a bare `const`), so those still get
- * a stable hash (`describedNode`).
- *
- * A Symbol whose declaration is a **call** is the exception, and is always described by its
- * full node. Its body is a function written inside that call, so narrowing to the body would
- * drop the registration itself: `app.get('/x', authenticate, h)` and `app.get('/x', h)` would
- * serialize identically, and adding or removing a route's auth middleware would produce no
- * signal on any axis. The body is what the registration *runs*, which is the walk's question;
- * the whole call is what it *is*, which is this one. A `const` initialised by a call that is
- * handed a function has the same shape and gets the same answer, through `describedNode`
- * rather than its kind, because such a const can also arrive as a merged declaration.
- *
- * A class's description is its body followed by its head (`classHead`), which the body leaves
- * out and nothing else reads.
- *
- * A Symbol several declarations wrote — a getter beside its setter, an interface reopened, a
- * class beside an interface or a namespace — describes the leading declaration and then each
- * further one in source order, a class's head straight after that class's own body. So a class
- * keeps its head whichever declaration leads, and the string is each declaration's string
- * alone, joined. Each declaration is described once: a const that hands its call two functions
- * has two bodies but one declaration, and both bodies name it (`inlineHandlers`).
- *
- * So giving a const a body moved no existing fingerprint, for three reasons that each have to
- * keep holding: a Symbol with one declaration serializes as that declaration's description and
- * nothing else; a const that gained a body is described by the declaration that described it
- * while it had none; and a declaration is described once, so a second function adds no second
- * copy. A class's head moved only the classes that have one, since an empty head adds nothing.
- */
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
   if (symbol.kind === "call") return serialize(symbol.fullNode)
   const described: { node: Node; fullNode: Node }[] = []
@@ -59,18 +15,6 @@ export function normalizeAst(symbol: SymbolCandidate<Node>): string {
     .join(" ")
 }
 
-/**
- * What a class's declaration says outside its body: `abstract`, its type parameters, and its
- * `extends` / `implements`. Empty for a class with none, so that class keeps the string it had.
- * A class has no signature (`fingerprint.md` §3.1), so without this a change to any of them
- * reached no axis, though each moves the class's contract and `fingerprint.md` §5.4 already
- * asks the syntax axis to see a renamed identifier or a changed modifier. The case in full, and
- * where it stops, is `lang-plugin.md` LP8p.
- *
- * `class` is the node type of an anonymous `export default class`. A class expression a `const`
- * holds never arrives as a full node: that Symbol is described by its whole declaration, head
- * included.
- */
 function classHead(fullNode: Node): string {
   if (!CLASS_TYPES.has(fullNode.type)) return ""
   const parts: string[] = []
@@ -84,31 +28,12 @@ function classHead(fullNode: Node): string {
   return parts.join(" ")
 }
 
-/**
- * Every node type a class Symbol's declaration can have. Not `CLASS_DECLARATION_TYPES` in
- * `extract-symbols.ts`, which looks for a *named* class to merge a namespace into and so leaves
- * `class` out.
- */
 const CLASS_TYPES: ReadonlySet<string> = new Set([
   "class_declaration",
   "abstract_class_declaration",
   "class",
 ])
 
-/**
- * What describes one declaration: its body when the body is the declaration's own, and the whole
- * declaration when the body is a function written somewhere inside it.
- *
- * "Its own" is read from the tree — the body is a direct child of the declaration's node — and
- * that rests on how every producer pairs the two. A function, method, accessor, constructor, a
- * field or a `const` holding a function, a class and an interface each pair a body with the node
- * it is written in, so they are described by the body. A call Symbol (LP20i) and a `const`
- * initialised by a call (LP7c) pair the body of a function they hand a call with the whole
- * declaration, so they are described by the declaration, and `withAuth(async (req) => …)` →
- * `withRole(async (req) => …)` moves the `syntax` axis. A producer that widened its full node
- * past its body's parent would move every fingerprint of that kind, which is why
- * `what-describes-a-declaration.test.ts` pins each producer's answer.
- */
 function describedNode(declaration: Pick<MergedDeclaration<Node>, "bodyNode" | "fullNode">): Node {
   const { bodyNode, fullNode } = declaration
   return bodyNode !== null && bodyNode.parent?.id === fullNode.id ? bodyNode : fullNode

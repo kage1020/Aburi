@@ -4,13 +4,6 @@ import { irValidator } from "../src/ir-schema"
 import { diffIRs, scanFixture } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
-/**
- * A rule's `condition`, `what` and `expr` reach the IR in the form ir-schema.md §8.2 gives
- * them. Written as the source spelled them, a long rule broke the schema's `maxLength: 123`, a
- * re-wrapped guard was listed under "rules modified" beside an unrelated edit, and a comment in
- * a condition moved `logic`, which fingerprint.md says comments do not.
- */
-
 const workspace = useScratchWorkspace("rule-text-form")
 
 let schemaViolations: (document: unknown) => string[]
@@ -58,9 +51,6 @@ describe("e2e scan — a long rule fits the schema", () => {
   })
 
   it("counts characters as code points, as the schema's maxLength does", async () => {
-    // Each 📦 is one code point and two UTF-16 code units, so the cut condition is 123
-    // characters to the schema and far more to `String.length`: a validator counting code
-    // units would reject it, and a cut counting them would split a pair.
     const parcel = "📦".repeat(60)
     await workspace.writeSource(
       "src/label.ts",

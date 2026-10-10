@@ -8,20 +8,9 @@ import { parseSubmodulePaths } from "../src/commands/diff"
 import { CliError } from "../src/errors"
 import { realGit as git, probeRealGit } from "./fixtures"
 
-/**
- * `git worktree add` does not populate submodules, so the base side of a ref diff sees each one
- * as an empty directory while the head side walks into the checked-out copy. `cli-spec.md`
- * §6.4.1 lists submodule-aware diff as unsupported; these pin that the run says so and keeps the
- * two sides agreeing, and that a sparse checkout is refused. Run against real git.
- */
-
 let scratch = ""
 let gitProbeError: unknown = null
 
-/**
- * The library's two functions. Two rather than one, so a submodule that leaks into one side
- * moves the count by two and cannot be mistaken for the one Symbol a test adds on purpose.
- */
 const LIB_SOURCE =
   "export function libFn(): number { return 1 }\nexport function libHelper(): number { return 2 }\n"
 
@@ -54,7 +43,6 @@ async function addSubmodule(directory: string, lib: string, at: string): Promise
   await git(["-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, at], directory)
 }
 
-/** The issue's layout: a repository whose first commit adds `lib` as a submodule at `at`. */
 async function superproject(directory: string, lib: string, at: string): Promise<void> {
   await workspace(directory)
   await addSubmodule(directory, lib, at)
@@ -127,8 +115,6 @@ describe("aburi diff in a repository with a submodule", () => {
   })
 
   it("finds the submodule from a subdirectory too", async () => {
-    // `git ls-files` lists only what lies under its cwd, relative to it, so asked from `src` it
-    // would name no submodule: no warning, and the head walking straight into the checkout.
     const demo = await demoAddingMain2()
 
     const result = await diffIn(resolve(demo, "src"))
@@ -139,9 +125,6 @@ describe("aburi diff in a repository with a submodule", () => {
   })
 
   it("leaves out only the submodule when its path holds glob characters", async () => {
-    // Unescaped, picomatch reads `[x]` as both the literal text and a character class, so
-    // `libs/[x]/**` also matches `libs/x/**`, and `keep` would vanish from the head alongside
-    // the submodule. The names, not only the count, tell that apart from the library leaking in.
     const lib = resolve(scratch, "lib")
     await library(lib)
     const demo = resolve(scratch, "demo")
@@ -156,8 +139,6 @@ describe("aburi diff in a repository with a submodule", () => {
   })
 
   it("reports nothing for a commit that only moves the submodule pointer", async () => {
-    // What the warning promises: a change inside the submodule is out of scope, so it neither
-    // reaches the report nor trips the gate.
     const lib = resolve(scratch, "lib")
     await library(lib)
     const demo = resolve(scratch, "demo")
@@ -175,10 +156,6 @@ describe("aburi diff in a repository with a submodule", () => {
   })
 
   it("leaves the path out of the base too, where it was a plain directory", async () => {
-    // The one layout where the base side has something to leave out: `git worktree add`
-    // populates no submodule, so for an ordinary one only the head-side patterns are observable.
-    // Here the base checks the same functions out as ordinary files, and without the patterns
-    // on that side they would read as removed.
     const lib = resolve(scratch, "lib")
     await library(lib)
     const demo = resolve(scratch, "demo")
@@ -244,9 +221,6 @@ describe("aburi diff in a sparse checkout", () => {
   })
 
   it("refuses `core.sparseCheckout=1` too, not only the `true` that `sparse-checkout` writes", async () => {
-    // `git config core.sparseCheckout` prints `1` as `1`; only `--bool` turns it into the
-    // `true` the check compares against. The same key serves the non-cone mode, so this covers
-    // that too.
     const demo = await twoCommits()
     await git(["config", "core.sparseCheckout", "1"], demo)
 

@@ -173,8 +173,6 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
   })
 
   it("names the diff Markdown when that is the artefact in the way", async () => {
-    // `--format json`, because the Markdown an earlier run left is cleared whatever this run
-    // writes: left behind, it would read as this run's report.
     const { base, head } = await writeIRPair()
     await mkdir(resolve(scratch, "out", DIFF_MD_FILENAME), { recursive: true })
 
