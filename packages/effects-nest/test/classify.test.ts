@@ -1,3 +1,4 @@
+import { classifyInputsAround } from "@aburi/test-harness"
 import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyNestCall } from "../src/index"
@@ -85,9 +86,11 @@ describe("classifyNestCall — upstream contract violations", () => {
   })
 
   it("leaves the CallCandidate and the ClassifyContext as it found them", () => {
-    const call = makeCall({ target: "eventBus.emit", literalArgs: ["order.created"] })
-    const before = structuredClone({ call, file: ctx.file, owner: ctx.owner })
-    classifyNestCall(call, ctx)
-    expect({ call, file: ctx.file, owner: ctx.owner }).toEqual(before)
+    const { before, after } = classifyInputsAround(
+      classifyNestCall,
+      makeCall({ target: "eventBus.emit", literalArgs: ["order.created"] }),
+      ctx,
+    )
+    expect(after).toEqual(before)
   })
 })

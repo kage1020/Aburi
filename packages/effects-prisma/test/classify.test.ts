@@ -1,3 +1,4 @@
+import { classifyInputsAround } from "@aburi/test-harness"
 import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyPrismaCall } from "../src/index"
@@ -200,9 +201,11 @@ describe("classifyPrismaCall — upstream contract violations", () => {
   })
 
   it("leaves the CallCandidate and the ClassifyContext as it found them", () => {
-    const call = makeCall({ target: "prisma.user.findMany", literalArgs: ["value"] })
-    const before = structuredClone({ call, file: ctx.file, owner: ctx.owner })
-    classifyPrismaCall(call, ctx)
-    expect({ call, file: ctx.file, owner: ctx.owner }).toEqual(before)
+    const { before, after } = classifyInputsAround(
+      classifyPrismaCall,
+      makeCall({ target: "prisma.user.findMany", literalArgs: ["value"] }),
+      ctx,
+    )
+    expect(after).toEqual(before)
   })
 })

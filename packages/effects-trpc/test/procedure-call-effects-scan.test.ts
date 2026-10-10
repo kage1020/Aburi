@@ -1,27 +1,18 @@
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { makeCtx, makeExtractionCtx } from "@aburi/test-support"
+import { scanWith } from "@aburi/test-harness"
+import { symbolNamed, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { classifyTrpcCall } from "../src/index"
+import { trpcEffectsPlugin } from "../src/index"
 
-/** Each call the TypeScript plugin finds in `source`, by target, beside what `classifyTrpcCall` makes of it. */
-async function classifiedCalls(source: string, path = "src/api/users.ts") {
-  const { tree, imports } = await langTypescriptPlugin.parseFile({ path, content: source })
-  if (tree === null) throw new Error(`${path} did not parse`)
-  const extraction = makeExtractionCtx(path, source)
-  const ctx = makeCtx({ path, imports })
-  return langTypescriptPlugin
-    .extractSymbols(tree, extraction)
-    .flatMap((symbol) => langTypescriptPlugin.walkBody(symbol, { ...extraction, symbol }).calls)
-    .map((call): [string, string | null] => [
-      call.target,
-      classifyTrpcCall(call, ctx)?.derivedBy ?? null,
-    ])
-    .sort(([a], [b]) => a.localeCompare(b))
-}
+const workspace = useScratchWorkspace("procedure-call-effects")
 
-describe("classifyTrpcCall over calls the TypeScript plugin extracts", () => {
-  it("records each procedure call of a vanilla client once, and nothing around it", async () => {
-    const calls = await classifiedCalls(
+const scanWorkspace = () =>
+  scanWith(workspace.root, { languages: [langTypescriptPlugin], effects: [trpcEffectsPlugin] })
+
+describe("scan — tRPC procedure calls", () => {
+  it("records each call a vanilla client makes once, and nothing around it", async () => {
+    await workspace.writeSource(
+      "src/api/users.ts",
       [
         'import { createTRPCClient, httpBatchLink } from "@trpc/client"',
         'import type { AppRouter } from "../server"',
@@ -29,7 +20,7 @@ describe("classifyTrpcCall over calls the TypeScript plugin extracts", () => {
         'const client = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: "/api" })] })',
         "",
         "export async function loadUser(id: string) {",
-        '  console.info("loading", id)',
+        '  report("loading", id)',
         "  return client.user.byId.query({ id }).then((user) => user)",
         "}",
         "",
@@ -51,37 +42,58 @@ describe("classifyTrpcCall over calls the TypeScript plugin extracts", () => {
       ].join("\n"),
     )
 
-    expect(calls).toEqual([
-      ["client.onAdd.subscribe", "effects-plugin:trpc:subscription:onAdd"],
-      ["client.user.byId.query", "effects-plugin:trpc:query:user.byId"],
-      ["client.user.byId.query.then", null],
-      ["client.user.create.mutate", "effects-plugin:trpc:mutation:user.create"],
-      ["console.info", null],
-      ["this.trpc.user.byId.query", "effects-plugin:trpc:query:user.byId"],
+    const result = await scanWorkspace()
+    const loadUser = symbolNamed(result, "loadUser")
+
+    expect(loadUser.effects).toMatchObject([
+      {
+        id: "network.rpc",
+        target: "client.user.byId.query",
+        confidence: "high",
+        derivedBy: "effects-plugin:trpc:query:user.byId",
+      },
+    ])
+    expect(loadUser.calls.map((c) => c.target).sort()).toEqual([
+      "client.user.byId.query.then",
+      "report",
+    ])
+    expect(symbolNamed(result, "createUser").effects).toMatchObject([
+      {
+        target: "client.user.create.mutate",
+        derivedBy: "effects-plugin:trpc:mutation:user.create",
+      },
+    ])
+    expect(symbolNamed(result, "watch").effects).toMatchObject([
+      { target: "client.onAdd.subscribe", derivedBy: "effects-plugin:trpc:subscription:onAdd" },
+    ])
+    expect(symbolNamed(result, "UserGateway.byId").effects).toMatchObject([
+      { target: "this.trpc.user.byId.query", derivedBy: "effects-plugin:trpc:query:user.byId" },
     ])
   })
 
   it("records the React Query hooks a component calls", async () => {
-    const calls = await classifiedCalls(
+    await workspace.writeSource(
+      "src/components/PostList.tsx",
       [
         'import { createTRPCReact } from "@trpc/react-query"',
         'import type { AppRouter } from "../server"',
         "",
+        "const trpc = createTRPCReact<AppRouter>()",
+        "",
         "export function PostList() {",
-        "  const trpc = createTRPCReact<AppRouter>()",
         "  const posts = trpc.post.list.useQuery()",
         "  const add = trpc.post.add.useMutation()",
         "  return { posts, add }",
         "}",
         "",
       ].join("\n"),
-      "src/components/PostList.tsx",
     )
 
-    expect(calls).toEqual([
-      ["createTRPCReact", null],
-      ["trpc.post.add.useMutation", "effects-plugin:trpc:mutation:post.add"],
-      ["trpc.post.list.useQuery", "effects-plugin:trpc:query:post.list"],
+    const result = await scanWorkspace()
+
+    expect(symbolNamed(result, "PostList").effects).toMatchObject([
+      { target: "trpc.post.list.useQuery", derivedBy: "effects-plugin:trpc:query:post.list" },
+      { target: "trpc.post.add.useMutation", derivedBy: "effects-plugin:trpc:mutation:post.add" },
     ])
   })
 
@@ -91,8 +103,10 @@ describe("classifyTrpcCall over calls the TypeScript plugin extracts", () => {
       [
         'import { initTRPC } from "@trpc/server"',
         'import { z } from "zod"',
+        "",
         "const t = initTRPC.create()",
         "const publicProcedure = t.procedure",
+        "",
         "export function createAppRouter() {",
         "  return t.router({",
         "    user: t.router({",
@@ -100,21 +114,26 @@ describe("classifyTrpcCall over calls the TypeScript plugin extracts", () => {
         "    }),",
         "  })",
         "}",
+        "",
       ],
     ],
     [
       "a file that imports no tRPC module",
       [
         'import { PrismaClient } from "@prisma/client"',
+        "",
         "export async function listUsers(prisma: PrismaClient) {",
         "  return prisma.user.byId.query()",
         "}",
+        "",
       ],
     ],
   ])("records nothing in %s", async (_label, lines) => {
-    const calls = await classifiedCalls(lines.join("\n"))
+    await workspace.writeSource("src/server.ts", lines.join("\n"))
 
-    expect(calls.length).toBeGreaterThan(0)
-    expect(calls.filter(([, derivedBy]) => derivedBy !== null)).toEqual([])
+    const result = await scanWorkspace()
+
+    expect(result.ir.symbols.length).toBeGreaterThan(0)
+    expect(result.ir.symbols.flatMap((s) => s.effects)).toEqual([])
   })
 })

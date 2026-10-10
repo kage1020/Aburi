@@ -1,3 +1,4 @@
+import { classifyInputsAround } from "@aburi/test-harness"
 import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyTrpcCall } from "../src/index"
@@ -138,9 +139,11 @@ describe("classifyTrpcCall — upstream contract violations", () => {
   })
 
   it("leaves the CallCandidate and the ClassifyContext as it found them", () => {
-    const call = makeCall({ target: "client.user.create.mutate", argumentCount: 1 })
-    const before = structuredClone({ call, file: clientCtx.file, owner: clientCtx.owner })
-    classifyTrpcCall(call, clientCtx)
-    expect({ call, file: clientCtx.file, owner: clientCtx.owner }).toEqual(before)
+    const { before, after } = classifyInputsAround(
+      classifyTrpcCall,
+      makeCall({ target: "client.user.create.mutate", argumentCount: 1 }),
+      clientCtx,
+    )
+    expect(after).toEqual(before)
   })
 })

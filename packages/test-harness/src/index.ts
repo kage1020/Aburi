@@ -2,6 +2,8 @@ import { type ScanInput, type ScanResult, scan } from "@aburi/core"
 import { buildDiff } from "@aburi/diff"
 import { VocabRegistry } from "@aburi/plugin-registry"
 import type {
+  CallCandidate,
+  ClassifyContext,
   Config,
   EffectPlugin,
   FrameworkClassifyContext,
@@ -68,4 +70,22 @@ export async function extractFile<TTree, TNode>(
   registry.register(language.manifest)
   const ctx: FrameworkClassifyContext = { file, registry, config: {}, imports }
   return { ctx, candidates: language.extractSymbols(tree, ctx) }
+}
+
+/** The parts of an effect classifier's inputs that are plain data. */
+export interface ClassifyInputs {
+  readonly call: CallCandidate
+  readonly file: ClassifyContext["file"]
+  readonly owner: ClassifyContext["owner"]
+}
+
+/** `classify` run once on `call` and `ctx`, with a copy of its inputs taken before and the inputs after. */
+export function classifyInputsAround(
+  classify: EffectPlugin["classify"],
+  call: CallCandidate,
+  ctx: ClassifyContext,
+): { before: ClassifyInputs; after: ClassifyInputs } {
+  const before = structuredClone({ call, file: ctx.file, owner: ctx.owner })
+  classify(call, ctx)
+  return { before, after: { call, file: ctx.file, owner: ctx.owner } }
 }

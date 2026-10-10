@@ -1,3 +1,4 @@
+import { classifyInputsAround } from "@aburi/test-harness"
 import { makeCall, makeCtx } from "@aburi/test-support"
 import type { CallCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
@@ -191,9 +192,11 @@ describe("classifyDrizzleCall — upstream contract violations", () => {
   })
 
   it("leaves the CallCandidate and the ClassifyContext as it found them", () => {
-    const call = makeCall({ target: "db.insert", argumentCount: 1, literalArgs: [null] })
-    const before = structuredClone({ call, file: ctx.file, owner: ctx.owner })
-    classifyDrizzleCall(call, ctx)
-    expect({ call, file: ctx.file, owner: ctx.owner }).toEqual(before)
+    const { before, after } = classifyInputsAround(
+      classifyDrizzleCall,
+      makeCall({ target: "db.insert", argumentCount: 1, literalArgs: [null] }),
+      ctx,
+    )
+    expect(after).toEqual(before)
   })
 })
