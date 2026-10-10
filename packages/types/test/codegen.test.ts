@@ -1,55 +1,51 @@
-import { describe, expect, it } from "vitest"
-import { applyAliasOverrides, ENTRIES, generateAll, rewriteCrossRefs } from "../scripts/codegen-lib"
+import { beforeAll, describe, expect, it } from "vitest"
+import {
+  applyAliasOverrides,
+  assertIdsAccountedFor,
+  ENTRIES,
+  generateAll,
+  rewriteCrossRefs,
+} from "../scripts/codegen-lib"
 
-describe("schema codegen", () => {
+describe("generateAll", () => {
+  let generated: Record<string, string>
+  beforeAll(async () => {
+    generated = await generateAll()
+  })
+
   it("is deterministic (running twice produces identical output)", async () => {
-    const a = await generateAll()
-    const b = await generateAll()
-    expect(b).toEqual(a)
+    expect(await generateAll()).toEqual(generated)
   })
 
-  it("diff.ts has no empty placeholder interfaces left over from cross-ref rewrite", async () => {
-    const generated = await generateAll()
+  it("re-exports diff.ts's cross-referenced types from ./ir instead of declaring placeholders", () => {
     const diff = generated["diff.ts"]
-    expect(diff).toBeDefined()
     for (const name of ["Symbol", "Component", "Dependency"]) {
-      const orphanPattern = new RegExp(String.raw`export interface ${name}\s*\{\s*\}`)
-      expect(diff, `diff.ts must not contain placeholder \`interface ${name} {}\``).not.toMatch(
-        orphanPattern,
-      )
+      expect(diff).not.toMatch(new RegExp(String.raw`export interface ${name}\s*\{\s*\}`))
     }
-  })
-
-  it("diff.ts re-exports Symbol/Component/Dependency from ./ir", async () => {
-    const generated = await generateAll()
-    const diff = generated["diff.ts"]
-    expect(diff).toBeDefined()
     expect(diff).toMatch(/import type \{[^}]*Symbol[^}]*\} from "\.\/ir"/)
     expect(diff).toMatch(/export type \{[^}]*Symbol[^}]*\} from "\.\/ir"/)
   })
 
-  it("no generated file leaks the JST permissive wrapper", async () => {
-    const generated = await generateAll()
+  it("leaks the JST permissive wrapper into no generated file", () => {
     const wrapper = /\(\{\s*\[k: string\]: unknown \| undefined\s*\} & \{/
     for (const entry of ENTRIES) {
-      const body = generated[entry.out]
-      expect(body, `${entry.out} content missing`).toBeDefined()
-      expect(body, `${entry.out} still contains the JST permissive wrapper`).not.toMatch(wrapper)
+      expect(generated[entry.out], entry.out).toBeDefined()
+      expect(generated[entry.out], entry.out).not.toMatch(wrapper)
     }
   })
+})
 
-  it("crossRef rewrite fails loudly when its placeholder is not found exactly once", async () => {
-    expect(() =>
-      rewriteCrossRefs("synthetic.json", "no placeholder here", { Foo: "./x" }),
-    ).toThrowError(/expected exactly 1 loose placeholder.*Foo/)
-    expect(() =>
-      rewriteCrossRefs("synthetic.json", "export interface Foo {\n}\nexport interface Foo {\n}\n", {
-        Foo: "./x",
-      }),
-    ).toThrowError(/expected exactly 1 loose placeholder.*Foo/)
+describe("rewriteCrossRefs", () => {
+  it.each([
+    ["is missing", "no placeholder here"],
+    ["appears twice", "export interface Foo {\n}\nexport interface Foo {\n}\n"],
+  ])("fails loudly when the placeholder %s", (_, body) => {
+    expect(() => rewriteCrossRefs("synthetic.json", body, { Foo: "./x" })).toThrowError(
+      /expected exactly 1 loose placeholder.*Foo/,
+    )
   })
 
-  it("crossRef rewrite strips string-alias placeholders as well as object ones", async () => {
+  it("strips string-alias placeholders as well as object ones", () => {
     const out = rewriteCrossRefs(
       "synthetic.json",
       "export type Foo = string\nexport interface Bar {\n}\n",
@@ -60,18 +56,53 @@ describe("schema codegen", () => {
     expect(out).toMatch(/import type \{ Bar, Foo \} from "\.\/x"/)
   })
 
-  it("alias override fails loudly when its target is not found exactly once", () => {
-    expect(() =>
-      applyAliasOverrides("synthetic.json", "no alias here", { Foo: "string & {}" }),
-    ).toThrowError(/expected exactly 1 `export type Foo = string`.*found 0/s)
-    expect(() =>
-      applyAliasOverrides(
-        "synthetic.json",
-        "export type Foo = string\nexport type Foo = string\n",
-        {
-          Foo: "string & {}",
-        },
-      ),
-    ).toThrowError(/expected exactly 1 `export type Foo = string`.*found 2/s)
+  it("strips a placeholder's own JSDoc without reaching back into the definition before it", () => {
+    const body =
+      "/**\n * Root.\n */\nexport interface Root {\nx: string\n}\n" +
+      "/**\n * Loose.\n */\nexport interface Foo {\n}\n"
+    expect(rewriteCrossRefs("synthetic.json", body, { Foo: "./x" })).toBe(
+      'import type { Foo } from "./x"\nexport type { Foo } from "./x"\n' +
+        "/**\n * Root.\n */\nexport interface Root {\nx: string\n}\n",
+    )
+  })
+})
+
+describe("applyAliasOverrides", () => {
+  it.each([
+    ["is missing", "no alias here", 0],
+    ["appears twice", "export type Foo = string\nexport type Foo = string\n", 2],
+  ])("fails loudly when its target %s", (_, body, found) => {
+    expect(() => applyAliasOverrides("synthetic.json", body, { Foo: "string & {}" })).toThrowError(
+      new RegExp(`expected exactly 1 \`export type Foo = string\`.*found ${found}`, "s"),
+    )
+  })
+
+  it("writes the replacement literally, `$&` included", () => {
+    expect(
+      applyAliasOverrides("synthetic.json", "export type Foo = string\n", { Foo: "`$&` & string" }),
+    ).toBe("export type Foo = `$&` & string\n")
+  })
+})
+
+describe("assertIdsAccountedFor", () => {
+  const entry = {
+    schema: "synthetic.json",
+    out: "synthetic.ts",
+    rootName: "Synthetic",
+    aliasOverrides: { SymbolId: "string & {}" },
+    crossRefs: { SliceId: "./ir" },
+    unbrandedIds: ["EffectId"],
+  }
+
+  it("accepts an id $def the entry brands, re-exports or lists as unbranded", () => {
+    const schema = { $defs: { SymbolId: {}, SliceId: {}, EffectId: {}, Name: {} } }
+    expect(() => assertIdsAccountedFor(entry, schema)).not.toThrow()
+  })
+
+  it("refuses an id $def the entry says nothing about, naming it", () => {
+    const schema = { $defs: { SymbolId: {}, TicketId: {}, Name: {} } }
+    expect(() => assertIdsAccountedFor(entry, schema)).toThrowError(
+      /^synthetic\.json declares \$defs\.TicketId, /,
+    )
   })
 })

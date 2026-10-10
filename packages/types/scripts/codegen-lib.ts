@@ -162,10 +162,29 @@ export function applyAliasOverrides(
   return out
 }
 
+/** An `*Id` $def left out of all three lists would ship as a bare `string` alias. */
+export function assertIdsAccountedFor(entry: SchemaEntry, schema: Record<string, unknown>): void {
+  const accountedFor = new Set([
+    ...Object.keys(entry.aliasOverrides ?? {}),
+    ...Object.keys(entry.crossRefs ?? {}),
+    ...(entry.unbrandedIds ?? []),
+  ])
+  const defs = Object.keys((schema.$defs ?? {}) as Record<string, unknown>)
+  const unaccounted = defs.filter((name) => name.endsWith("Id") && !accountedFor.has(name))
+  if (unaccounted.length > 0) {
+    throw new CodegenError(
+      `${entry.schema} declares ${unaccounted.map((name) => `$defs.${name}`).join(", ")}, ` +
+        `which ENTRIES neither brands (aliasOverrides), re-exports (crossRefs) nor lists in ` +
+        `unbrandedIds. Decide whether each owns a namespace and say so in ENTRIES.`,
+    )
+  }
+}
+
 async function generateContent(entry: SchemaEntry): Promise<string> {
   const schemaPath = join(SCHEMA_DIR, entry.schema)
   const raw = await readFile(schemaPath, "utf8")
   const schema = JSON.parse(raw) as Record<string, unknown>
+  assertIdsAccountedFor(entry, schema)
   schema.title = entry.rootName
   const ts = await compile(schema, entry.rootName, JST_OPTIONS)
 
@@ -185,7 +204,6 @@ async function generateContent(entry: SchemaEntry): Promise<string> {
   return banner + body
 }
 
-/** Generate every schema's TypeScript in-memory. */
 export async function generateAll(): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   for (const entry of ENTRIES) {

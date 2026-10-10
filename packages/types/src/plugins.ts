@@ -6,6 +6,7 @@ import type {
   EffectId,
   ExtKind,
   LanguageId,
+  Rule,
   Signature,
   SourceRange,
   SymbolId,
@@ -16,8 +17,6 @@ import type { PluginManifest } from "./generated/plugin"
 
 export type ParsedTree = unknown
 export type OpaqueAstNode = unknown
-
-// --- Source input / parse output ---
 
 export interface SourceFile {
   path: string
@@ -82,9 +81,7 @@ export interface CallCandidate {
   target: string
   line: number
   argumentCount: number
-  /** True if the call is under `await`. */
   inAwait: boolean
-  /** True if the call is a `new` expression. */
   inNew: boolean
   /** Per-argument literal value, or null when the argument is not a literal. */
   literalArgs: (string | null)[]
@@ -92,7 +89,7 @@ export interface CallCandidate {
 }
 
 export interface BodyExtraction {
-  rules: import("./generated/ir").Rule[]
+  rules: Rule[]
   /** Pre-classification call list. */
   calls: CallCandidate[]
 }
@@ -226,7 +223,7 @@ export interface EffectPlugin {
 
   classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | null
 
-  /** Optional: drop-list category C additions (logger-style plugins only). */
+  /** Drop-list category C additions (logger-style plugins only). */
   dropCallees?: string[]
 }
 
