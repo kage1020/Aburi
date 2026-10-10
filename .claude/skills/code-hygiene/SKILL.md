@@ -22,18 +22,20 @@ the lower package that both depend on, never into a package above either.
 ## 2. Redundant test cases
 
 ```bash
-node .claude/skills/code-hygiene/scripts/similar-tests.mjs --threshold 0.9 --min-lines 4 [globs…]
+node .claude/skills/code-hygiene/scripts/similar-tests.mjs --threshold 0.9 --min-lines 4 [pathspecs…]
 ```
 
 `similarity-ts` skips anonymous callbacks, so the script mirrors each `it()`/`test()` body as a named
-function first and maps the pairs back to `file:line` and title. Two cases are redundant only when they
-drive the same code path to the same assertion; similar shape with different inputs is usually a table —
-fold those into `it.each`. Never delete the only test of a branch.
+function first and maps the pairs back to `file:line` and title. Arguments are git pathspecs, where `*`
+also crosses directories (`packages/core/test/*.test.ts` covers its subfolders).
+
+Two cases are redundant only when they drive the same code path to the same assertion; similar shape with
+different inputs is usually a table — fold those into `it.each`. Never delete the only test of a branch.
 
 ## 3. References that rot
 
 ```bash
-node .claude/skills/code-hygiene/scripts/references.mjs [globs…]
+node .claude/skills/code-hygiene/scripts/references.mjs [pathspecs…]
 ```
 
 Lists comments and `describe`/`it` titles that cite `§` sections, `*.md` files, spec ids (`CR5`, `LP8q`),

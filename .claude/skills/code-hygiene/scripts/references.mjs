@@ -1,7 +1,7 @@
 // List comments and test titles that cite something that rots: design-doc sections (§3.4, foo.md),
 // spec ids (CR5, LP8q, DF12), invariant numbers and issue / pull-request numbers.
 //
-//   node .claude/skills/code-hygiene/scripts/references.mjs [globs…]
+//   node .claude/skills/code-hygiene/scripts/references.mjs [pathspecs…]
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"

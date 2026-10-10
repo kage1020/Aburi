@@ -35,11 +35,14 @@ Private packages:
 
 - `@aburi/schema` (`schema/`) — the JSON Schemas. Import them by name
   (`@aburi/schema/aburi.ir.v1.json`), never by walking up the tree. `v1` is frozen: additive changes only.
-- `@aburi/test-support` — helpers every suite may use: IR builders, plugin contexts, `noopRegistry`,
-  `recordingLogger`, `useScratchWorkspace`, `symbolById`, `irSchemaViolations`. Depends on nothing above
-  `@aburi/types`.
-- `@aburi/test-harness` — `scanWith` (the real scan over a plugin lineup) and `diffIRs`. It depends on core,
-  diff and plugin-registry, so only packages above those may use it.
+- `@aburi/test-support` — helpers every suite may use: IR and diff builders (`makeIR`, `makeSymbol`,
+  `makeDiff`, `changed`, …), plugin contexts and candidates (`makeCtx`, `makeCandidate`, `importEdge`),
+  `noopRegistry`, `recordingLogger`, `useScratchWorkspace`, `errorFrom`, `symbolById`,
+  `irSchemaViolations`. Depends on nothing above `@aburi/types`.
+- `@aburi/test-harness` — the real pipeline for suites: `scanWith` (scan over a plugin lineup), `diffIRs`,
+  `diffOfEditWith` (scan, edit, rescan, diff), `extractFile`, `classifyInputsAround`. It depends on core,
+  diff, plugin-registry and test-support, and never on a plugin (plugins are passed in), so only packages
+  above those may use it.
 - `@aburi/examples` (`examples/`) — the docs Showcase; its build runs `aburi diff` over each example.
 - `@aburi/docs` (`docs/`) — the VitePress site.
 

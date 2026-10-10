@@ -2,7 +2,7 @@
 // it()/test() callback is first mirrored into a temp directory as a named function, and the pairs it
 // reports are mapped back to file:line and title.
 //
-//   node .claude/skills/code-hygiene/scripts/similar-tests.mjs [--threshold 0.9] [--min-lines 4] [globs…]
+//   node .claude/skills/code-hygiene/scripts/similar-tests.mjs [--threshold 0.9] [--min-lines 4] [pathspecs…]
 import { execFileSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -20,8 +20,7 @@ const option = (name, fallback) => {
 }
 const threshold = option("--threshold", "0.9")
 const minLines = option("--min-lines", "4")
-const patterns =
-  args.length > 0 ? args : ["packages/*/test/**/*.test.ts", "examples/test/*.test.ts"]
+const patterns = args.length > 0 ? args : ["packages/*/test/*.test.ts", "examples/test/*.test.ts"]
 
 const files = execFileSync("git", ["ls-files", ...patterns], { encoding: "utf8" })
   .split("\n")
