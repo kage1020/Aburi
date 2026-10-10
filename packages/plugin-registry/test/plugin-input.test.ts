@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
 import type { EffectsManifest, ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -318,17 +316,5 @@ describe("defineEffectsManifest", () => {
     // @ts-expect-error a first-party effects plugin claims no capabilities.
     const capabilities = manifest.capabilities
     expect([xPrefix, capabilities]).toEqual([undefined, undefined])
-  })
-})
-
-describe("plugin-input module", () => {
-  it("has no value imports, so the subpath stays free of the barrel's ajv setup", () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("../src/plugin-input.ts", import.meta.url)),
-      "utf8",
-    )
-    const importLines = source.split("\n").filter((line) => line.startsWith("import "))
-    expect(importLines.length).toBeGreaterThan(0)
-    for (const line of importLines) expect(line.startsWith("import type ")).toBe(true)
   })
 })

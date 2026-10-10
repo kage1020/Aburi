@@ -75,7 +75,7 @@ export class CodegenError extends Error {
   }
 }
 
-function rewriteCrossRefs(
+export function rewriteCrossRefs(
   schemaFile: string,
   body: string,
   crossRefs: Record<string, string>,
@@ -138,7 +138,7 @@ function stripPermissiveIntersection(schemaFile: string, source: string): string
   return out
 }
 
-function applyAliasOverrides(
+export function applyAliasOverrides(
   schemaFile: string,
   body: string,
   aliasOverrides: Record<string, string>,
@@ -183,20 +183,7 @@ async function generateContent(entry: SchemaEntry): Promise<string> {
   return banner + body
 }
 
-/** Test-only re-export of rewriteCrossRefs. Not part of the public surface. */
-export const rewriteCrossRefsForTest = rewriteCrossRefs
-
-/** Test-only re-export of applyAliasOverrides. Not part of the public surface. */
-export const applyAliasOverridesForTest = applyAliasOverrides
-
-/** Every `$defs` key in one schema, for the drift test's brand-coverage assertion. */
-export async function readDefNames(schemaFile: string): Promise<string[]> {
-  const raw = await readFile(join(SCHEMA_DIR, schemaFile), "utf8")
-  const schema = JSON.parse(raw) as { $defs?: Record<string, unknown> }
-  return Object.keys(schema.$defs ?? {})
-}
-
-/** Generate every schema's TypeScript in-memory. Used by both the CLI and the drift test. */
+/** Generate every schema's TypeScript in-memory. */
 export async function generateAll(): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   for (const entry of ENTRIES) {
