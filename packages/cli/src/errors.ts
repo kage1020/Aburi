@@ -1,12 +1,4 @@
-export type CliErrorCode =
-  /** Bad CLI argument or missing required flag. Maps to exit 2. */
-  | "input-error"
-  /** Config or IR shape violation surfaced from @aburi/config or @aburi/core. Maps to exit 2. */
-  | "config-error"
-  /** Runtime failure (IO, git, filesystem). Maps to exit 1. */
-  | "runtime-error"
-  /** Plugin load / manifest / strict-mode violation. Maps to exit 3. */
-  | "plugin-error"
+export type CliErrorCode = "input-error" | "config-error" | "runtime-error" | "plugin-error"
 
 export class CliError extends Error {
   readonly code: CliErrorCode
@@ -17,7 +9,6 @@ export class CliError extends Error {
   }
 }
 
-/** The human-readable half of a thrown value, for a message that wraps it. */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)

@@ -104,7 +104,7 @@ describe("scan — integration through real plugins", () => {
     expect(effectIds.has("db.write")).toBe(true)
   })
 
-  it("drops console.* calls from effects and calls (Category C)", async () => {
+  it("drops console.* calls from effects and calls", async () => {
     await workspace.writeSource(
       "src/service.ts",
       `export function work() {\n  console.log("hello")\n  console.error("bad")\n}\n`,
@@ -183,7 +183,6 @@ describe("scan — integration through real plugins", () => {
     const caller = result.ir.symbols.find((symbol) => symbol.name === "caller")
     const resolvedCalls = (caller?.calls ?? []).filter((c) => c.resolved !== null)
     expect(resolvedCalls.length).toBe(3)
-    // ...but the Dependency projection collapses them into one triple.
     const edges = result.ir.dependencies.filter(
       (d) => d.via === "call" && d.from.endsWith("#caller") && d.to.endsWith("#helper"),
     )
@@ -209,7 +208,7 @@ describe("scan — integration through real plugins", () => {
     expect(callEdge).toBeDefined()
   })
 
-  it("emits every Class A key in the serialized IR", async () => {
+  it("writes the nullable keys out as null rather than leaving them absent", async () => {
     await workspace.writeSource("package.json", JSON.stringify({ name: "billing-app" }))
     await workspace.writeSource(
       "src/InvoiceService.ts",
@@ -253,7 +252,7 @@ describe("scan — integration through real plugins", () => {
     expect(irSchemaViolations(parsed)).toEqual([])
   })
 
-  it("reads an IR whose Class A keys were never written as absent", async () => {
+  it("reads an IR that left its nullable keys out as the same document", async () => {
     await workspace.writeSource(
       "src/InvoiceService.ts",
       "export class InvoiceService {\n  create() {}\n}\n",
@@ -287,7 +286,7 @@ describe("scan — integration through real plugins", () => {
     const ref = { ref: "aburi.ir.json", irSchema: result.ir.$schema }
     const diff = buildDiff({ baseIR: legacy, headIR: result.ir, base: ref, head: ref })
     expect(diff.summary.unchanged).toBe(result.ir.symbols.length)
-    expect(diff.symbols, "a Class A key going missing must not read as a change").toEqual([])
+    expect(diff.symbols, "a nullable key going missing must not read as a change").toEqual([])
   })
 
   it("writes a canonical JSON IR to disk via writeCanonicalIR", async () => {

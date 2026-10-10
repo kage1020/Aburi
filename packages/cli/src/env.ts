@@ -1,13 +1,8 @@
 export interface AburiEnv {
-  /** Override config path (equivalent to --config). */
   configPath: string | null
-  /** Log level override (equivalent to --log-level). */
   logLevel: LogLevel | null
-  /** `NO_COLOR` (standard): any non-empty value disables ANSI. */
   noColor: boolean
-  /** `FORCE_COLOR` (standard): any non-empty value forces ANSI even in non-TTY. */
   forceColor: boolean
-  /** `CI` (standard): any non-empty value activates CI mode (no progress animations). */
   ci: boolean
 }
 

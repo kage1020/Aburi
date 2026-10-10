@@ -1,39 +1,44 @@
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { runScan } from "../src"
-import { populate } from "./stub-language"
+import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it, vi } from "vitest"
+import { CliError, runScan } from "../src"
+import { writeStubWorkspace } from "./stub-language"
+
+const olderCore = vi.hoisted(() => ({
+  omits: "undeclaredVocab" as "undeclaredVocab" | "callResolution",
+}))
 
 vi.mock("@aburi/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aburi/core")>()
   return {
     ...actual,
     scan: async (input: Parameters<typeof actual.scan>[0]) => {
-      const { undeclaredVocab: _, ...older } = await actual.scan(input)
-      return older
+      const result = await actual.scan(input)
+      if (olderCore.omits === "undeclaredVocab") {
+        const { undeclaredVocab: _, ...older } = result
+        return older
+      }
+      const { callResolution: __, ...stats } = result.ir.stats
+      return { ...result, ir: { ...result.ir, stats } }
     },
   }
 })
 
-let scratch = ""
+const workspace = useScratchWorkspace("core-skew")
 
-beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-core-skew-"))
-})
+describe("runScan against an @aburi/core older than this CLI", () => {
+  it.each([
+    ["undeclaredVocab", "@aburi/core is older than this @aburi/cli"],
+    ["callResolution", "@aburi/core stopped emitting the call-resolution census"],
+  ] as const)("names the package that is behind when scan() returns no %s", async (omits, says) => {
+    olderCore.omits = omits
+    await writeStubWorkspace(workspace.root, ["ok.stub"])
 
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
+    const error = await errorFrom(CliError, () =>
+      runScan({ cwd: workspace.root, outputDir: resolve(workspace.root, "out"), format: "json" }),
+    )
 
-describe("runScan against an @aburi/core that reports no undeclared vocabulary", () => {
-  it("names the package that is behind instead of failing on the missing list", async () => {
-    await populate(scratch, ["ok.stub"])
-    await expect(
-      runScan({ cwd: scratch, outputDir: resolve(scratch, "out"), format: "json" }),
-    ).rejects.toMatchObject({
-      code: "runtime-error",
-      message: expect.stringContaining("@aburi/core is older than this @aburi/cli"),
-    })
+    expect(error.code).toBe("runtime-error")
+    expect(error.message).toContain(says)
   })
 })

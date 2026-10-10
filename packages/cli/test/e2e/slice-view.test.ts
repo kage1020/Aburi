@@ -80,7 +80,7 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     })
   })
 
-  it("marks the singleton a dynamic-dispatch call splits off (issue acceptance case)", async () => {
+  it("marks the singleton a dynamic-dispatch call splits off", async () => {
     const baseScan = await scanFixture(fixture.root)
 
     await writeHead({

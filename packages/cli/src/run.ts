@@ -1,4 +1,13 @@
-import { Command, InvalidArgumentError } from "commander"
+import { Command } from "commander"
+import {
+  collect,
+  definedOnly,
+  deriveFormat,
+  deriveStrict,
+  type OutputFormat,
+  parseFormat,
+  parseMaxBytes,
+} from "./cli-options"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
 import { type CoverageDoubt, runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
@@ -32,7 +41,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .name("aburi")
     .description("Render meaningful code structure as IR for review")
     .version(version, "-v, --version")
-    .exitOverride() // don't call process.exit — surface as CommanderError
+    .exitOverride()
     .configureOutput({
       writeOut: (str) => {
         stdout.write(str)
@@ -137,7 +146,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .action(
       (cmdOptions: {
         outputDir?: string
-        format?: "json" | "md" | "both"
+        format?: OutputFormat
         md?: boolean
         json?: boolean
         ignore?: string[]
@@ -204,7 +213,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           base?: string
           head?: string
           outputDir?: string
-          format?: "json" | "md" | "both"
+          format?: OutputFormat
           failOn?: string
           compact?: boolean
           maxBytes?: number
@@ -366,76 +375,4 @@ function handleError(error: unknown, stderr: NodeJS.WritableStream): ExitCode {
   }
   stderr.write(`${String(error)}\n`)
   return EXIT.RUNTIME
-}
-
-function definedOnly<T extends object>(fields: T): { [K in keyof T]-?: Exclude<T[K], undefined> } {
-  const present: Partial<Record<keyof T, unknown>> = {}
-  for (const key of Object.keys(fields) as (keyof T)[]) {
-    if (fields[key] !== undefined) present[key] = fields[key]
-  }
-  return present as { [K in keyof T]-?: Exclude<T[K], undefined> }
-}
-
-function parseFormat(value: string): "json" | "md" | "both" {
-  if (value === "json" || value === "md" || value === "both") return value
-  throw new InvalidArgumentError(`--format must be one of: json | md | both`)
-}
-
-function parseMaxBytes(value: string): number {
-  if (!/^[1-9][0-9]*$/.test(value)) {
-    throw new InvalidArgumentError(`--max-bytes must be a positive integer (got "${value}")`)
-  }
-  const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed)) {
-    throw new InvalidArgumentError(`--max-bytes is too large to be a byte count (got "${value}")`)
-  }
-  return parsed
-}
-
-function collect(value: string, accumulator: string[]): string[] {
-  return [...accumulator, value]
-}
-
-/** `--strict` / `--no-strict` / `--discover` to `ScanOptions.strict`; absent when none was typed. */
-function deriveStrict(cmdOptions: { strict?: boolean; discover?: boolean }): boolean | undefined {
-  if (cmdOptions.discover !== true) return cmdOptions.strict
-  if (cmdOptions.strict === true) {
-    throw new CliError("--strict and --discover contradict each other: drop one", "input-error")
-  }
-  return false
-}
-
-function deriveFormat(cmdOptions: {
-  format?: "json" | "md" | "both"
-  md?: boolean
-  json?: boolean
-}): "json" | "md" | "both" {
-  const dropped = [
-    ...(cmdOptions.md === false ? ["--no-md"] : []),
-    ...(cmdOptions.json === false ? ["--no-json"] : []),
-  ]
-  if (cmdOptions.format !== undefined) {
-    const format = `--format ${cmdOptions.format}`
-    // The output `--format` already leaves out: dropping it again changes nothing.
-    const redundant =
-      cmdOptions.format === "json" ? "--no-md" : cmdOptions.format === "md" ? "--no-json" : null
-    const conflicting = dropped.filter((flag) => flag !== redundant)
-    if (conflicting.length === 1) {
-      throw new CliError(
-        `${format} and ${conflicting[0]} contradict each other: drop one`,
-        "input-error",
-      )
-    }
-    if (conflicting.length === 2) {
-      throw new CliError(
-        `${format} contradicts both --no-md and --no-json: drop ${format}, or both of them`,
-        "input-error",
-      )
-    }
-    return cmdOptions.format
-  }
-  if (dropped.length === 2) {
-    throw new CliError("--no-md and --no-json leave scan nothing to write", "input-error")
-  }
-  return cmdOptions.md === false ? "json" : cmdOptions.json === false ? "md" : "both"
 }

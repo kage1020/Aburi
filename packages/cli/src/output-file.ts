@@ -4,12 +4,10 @@ import { OUTPUT_DIR_SOURCES } from "./artifact-paths"
 import { CliError, errorCode, errorMessage } from "./errors"
 import { ABSENT_ERRNOS } from "./fs-probe"
 
-/** The commands that write artefacts, as a failure names them: `aburi scan could not write …`. */
 export type OutputCommand = "init" | "scan" | "diff" | "explain"
 
 export interface OutputArtefact {
   command: OutputCommand
-  /** What the file is, in words — `the IR`, `the config` — rather than its basename, which the path shows. */
   artefact: string
   path: string
 }
@@ -20,6 +18,7 @@ const OUTPUT_FLAG: Record<OutputCommand, "--output" | "--output-dir"> = {
   scan: "--output-dir",
   diff: "--output-dir",
 }
+
 export async function writeOutputFile(output: OutputArtefact, contents: string): Promise<void> {
   try {
     await mkdir(dirname(output.path), { recursive: true })

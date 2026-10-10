@@ -7,7 +7,7 @@ import { scanFixture, useFixtureCheckout } from "./project"
 
 const fixture = useFixtureCheckout()
 
-describe("e2e diff — scenario A: single rule added to BillingService.applyRefund", () => {
+describe("e2e diff — a guard added to BillingService.applyRefund", () => {
   it("reports changed:1 with logicChanged=true and trips `--fail-on changed`", async () => {
     const baseIR = (await scanFixture(fixture.root)).ir
 
@@ -46,7 +46,6 @@ describe("e2e diff — scenario A: single rule added to BillingService.applyRefu
     expect(method.delta.logicChanged).toBe(true)
     expect(method.delta.rules?.added.length ?? 0).toBeGreaterThanOrEqual(1)
 
-    // A bare token means "any occurrence", so `changed` trips on the first changed symbol.
     const triggered = evaluateFailOn(parseFailOn("changed"), diff)
     expect(triggered.firstTriggered).not.toBeNull()
     expect(triggered.firstTriggered?.clause.token).toBe("changed")

@@ -7,7 +7,7 @@ import { scanFixture, useFixtureCheckout } from "./project"
 
 const fixture = useFixtureCheckout()
 
-describe("e2e diff — scenario C: logger.service.ts moves under common/logging/", () => {
+describe("e2e diff — logger.service.ts moved under common/logging/", () => {
   it("classifies the move as moved:N with no add/remove/changed and does not trip a removed/dropped-toggled gate", async () => {
     const baseIR = (await scanFixture(fixture.root)).ir
 

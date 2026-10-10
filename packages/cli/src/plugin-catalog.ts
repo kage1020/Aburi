@@ -19,7 +19,6 @@ export function pluginForDetectorId(
   return (field === "languages" ? LANGUAGE_TO_PLUGIN : FRAMEWORK_TO_PLUGIN).get(id)
 }
 
-/** The framework id a first-party framework plugin's manifest name stands for. */
 export function frameworkIdForPlugin(name: string): string | undefined {
   for (const [id, plugin] of FRAMEWORK_TO_PLUGIN) if (plugin === name) return id
   return undefined

@@ -1,371 +1,290 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { detectWorkspaceRoot } from "@aburi/core"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { type GitRunner, runDiff, runExplain, runScan } from "../src"
+import { errorFrom, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
 import {
+  CliError,
   DEFAULT_OUTPUT_DIRNAME,
   DIFF_JSON_FILENAME,
+  EXIT,
   IR_JSON_FILENAME,
   resolveOutputDir,
-} from "../src/artifact-paths"
-import { CliError } from "../src/errors"
-import { emptyIR } from "./fixtures"
+  runDiff,
+  runExplain,
+  runScan,
+} from "../src"
+import { pathExists } from "../src/fs-probe"
+import { commitAll, fakeGit, initRepository } from "./git"
+import { documentWith } from "./ir-documents"
+import { TYPESCRIPT, writeConfig, writeFileAt, writeIRs, writeMonorepo } from "./workspace"
 
-let scratch = ""
+const workspace = useScratchWorkspace("output-dir")
 
-async function exists(path: string): Promise<boolean> {
-  return await stat(path).then(
-    () => true,
-    () => false,
-  )
+async function configuredWith(dir: string | undefined, directory = workspace.root): Promise<void> {
+  await writeConfig(directory, dir === undefined ? TYPESCRIPT : { ...TYPESCRIPT, output: { dir } })
 }
 
-const CONFIG_SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
-
-async function writeConfigFile(path: string, output: string | undefined): Promise<void> {
-  await writeFile(
-    path,
-    JSON.stringify({
-      $schema: CONFIG_SCHEMA,
-      languages: ["lang-typescript"],
-      ...(output === undefined ? {} : { output: { dir: output } }),
-    }),
-    "utf8",
-  )
+async function writeAlpha(directory = workspace.root): Promise<void> {
+  await writeFileAt(directory, "src/a.ts", "export function alpha() { return 1 }\n")
 }
 
-async function writeConfig(directory: string, output: string | undefined): Promise<void> {
-  await writeConfigFile(resolve(directory, "aburi.json"), output)
-}
-
-async function writeSource(directory: string): Promise<void> {
-  await mkdir(resolve(directory, "src"), { recursive: true })
-  await writeFile(resolve(directory, "src/a.ts"), "export function alpha() { return 1 }\n", "utf8")
-}
-
-async function writeBrokenConfig(directory: string): Promise<void> {
-  await writeFile(
-    resolve(directory, "aburi.json"),
+async function writeBrokenConfig(): Promise<void> {
+  await workspace.writeSource(
+    "aburi.json",
     '{ "languages": ["lang-typescript"], "output": { "dir": "artifacts"',
-    "utf8",
   )
 }
 
-async function writeIRPair(directory: string): Promise<{ base: string; head: string }> {
-  const base = resolve(directory, "base.json")
-  const head = resolve(directory, "head.json")
-  await writeFile(base, JSON.stringify(emptyIR()), "utf8")
-  await writeFile(head, JSON.stringify(emptyIR()), "utf8")
-  return { base, head }
-}
-
-beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-output-dir-"))
-})
-
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
+const under = (...segments: string[]) => resolve(workspace.root, ...segments)
 
 describe("resolveOutputDir", () => {
-  it("falls through the flag to the configured name to the default", () => {
-    expect(resolveOutputDir("/work", undefined, undefined)).toBe(resolve("/work", "out"))
-    expect(resolveOutputDir("/work", undefined, "artifacts")).toBe(resolve("/work", "artifacts"))
-    expect(resolveOutputDir("/work", "flagged", "artifacts")).toBe(resolve("/work", "flagged"))
-  })
+  const absolute = resolve("/elsewhere/artifacts")
 
-  it("resolves a configured name against the working directory, and leaves an absolute one", () => {
-    const absolute = resolve("/elsewhere/artifacts")
-    expect(resolveOutputDir("/work/pkgs/app", undefined, "artifacts")).toBe(
-      resolve("/work/pkgs/app", "artifacts"),
-    )
-    expect(resolveOutputDir("/work/pkgs/app", undefined, absolute)).toBe(absolute)
-  })
-
-  it("still answers for the two-argument callers that predate the setting", () => {
-    expect(resolveOutputDir("/work", undefined)).toBe(resolve("/work", DEFAULT_OUTPUT_DIRNAME))
-    expect(resolveOutputDir("/work", "dist")).toBe(resolve("/work", "dist"))
+  it.each<[string, string | undefined, string | undefined, string]>([
+    ["/work", undefined, undefined, resolve("/work", DEFAULT_OUTPUT_DIRNAME)],
+    ["/work", undefined, "artifacts", resolve("/work", "artifacts")],
+    ["/work", "flagged", "artifacts", resolve("/work", "flagged")],
+    ["/work", "dist", undefined, resolve("/work", "dist")],
+    ["/work/pkgs/app", undefined, "artifacts", resolve("/work/pkgs/app", "artifacts")],
+    ["/work/pkgs/app", undefined, absolute, absolute],
+  ])("resolves cwd %s, flag %s, config %s to %s", (cwd, flag, configured, expected) => {
+    expect(resolveOutputDir(cwd, flag, configured)).toBe(expected)
   })
 })
 
-describe("aburi scan", () => {
-  it("writes where the config says, and nothing where it does not", async () => {
-    await writeConfig(scratch, "artifacts")
-    await writeSource(scratch)
+describe("aburi scan — where it writes", () => {
+  it.each<[string, string | undefined, string]>([
+    ["where the config says, and nothing where it does not", undefined, "artifacts"],
+    ["where the flag says, over the config", "dist", "dist"],
+  ])("writes %s", async (_, outputDir, expected) => {
+    await configuredWith("artifacts")
+    await writeAlpha()
 
-    const report = await runScan({ cwd: scratch, format: "json" })
+    const report = await runScan({
+      cwd: workspace.root,
+      format: "json",
+      ...(outputDir === undefined ? {} : { outputDir }),
+    })
 
-    expect(report.irPath).toBe(resolve(scratch, "artifacts", IR_JSON_FILENAME))
-    expect(await exists(resolve(scratch, DEFAULT_OUTPUT_DIRNAME))).toBe(false)
-  })
-
-  it("lets the flag win over the config", async () => {
-    await writeConfig(scratch, "artifacts")
-    await writeSource(scratch)
-
-    const report = await runScan({ cwd: scratch, format: "json", outputDir: "dist" })
-
-    expect(report.irPath).toBe(resolve(scratch, "dist", IR_JSON_FILENAME))
-    expect(await exists(resolve(scratch, "artifacts"))).toBe(false)
+    expect(report.irPath).toBe(under(expected, IR_JSON_FILENAME))
+    for (const other of ["artifacts", "dist", DEFAULT_OUTPUT_DIRNAME].filter(
+      (d) => d !== expected,
+    )) {
+      expect(await pathExists(under(other))).toBe(false)
+    }
   })
 
   it("anchors the configured name to the working directory, not the workspace root", async () => {
-    await writeFile(resolve(scratch, "pnpm-workspace.yaml"), "packages:\n  - 'pkgs/*'\n", "utf8")
-    await writeFile(
-      resolve(scratch, "package.json"),
-      JSON.stringify({ name: "root", private: true }),
-      "utf8",
-    )
-    await writeConfig(scratch, "artifacts")
-    const app = resolve(scratch, "pkgs/app")
-    await mkdir(app, { recursive: true })
-    await writeFile(resolve(app, "package.json"), JSON.stringify({ name: "app" }), "utf8")
-    await writeSource(app)
-    expect(await detectWorkspaceRoot({ cwd: app })).toBe(scratch)
+    const app = await writeMonorepo(workspace.root)
+    await configuredWith("artifacts")
 
     const report = await runScan({ cwd: app, format: "json" })
 
     expect(report.irPath).toBe(resolve(app, "artifacts", IR_JSON_FILENAME))
-    expect(await exists(resolve(scratch, "artifacts"))).toBe(false)
+    expect(await pathExists(under("artifacts"))).toBe(false)
   })
 })
 
-describe("aburi diff", () => {
+describe("aburi diff — where it writes", () => {
+  const EMPTY = documentWith({ symbols: [] })
+
   it("writes diff.json where the config says", async () => {
-    await writeConfig(scratch, "artifacts")
-    const { base, head } = await writeIRPair(scratch)
+    await configuredWith("artifacts")
+    const { base, head } = await writeIRs(workspace.root, EMPTY, EMPTY)
 
-    const report = await runDiff({ cwd: scratch, base, head, refSpec: null })
+    const report = await runDiff({ cwd: workspace.root, base, head, warn: () => {} })
 
-    expect(report.diffJsonPath).toBe(resolve(scratch, "artifacts", DIFF_JSON_FILENAME))
-    expect(await exists(resolve(scratch, DEFAULT_OUTPUT_DIRNAME))).toBe(false)
+    expect(report.diffJsonPath).toBe(under("artifacts", DIFF_JSON_FILENAME))
+    expect(await pathExists(under(DEFAULT_OUTPUT_DIRNAME))).toBe(false)
   })
 
   it("keeps a ref diff's per-side scans out of the configured directory", async () => {
-    await writeConfig(scratch, "artifacts")
-    await writeSource(scratch)
-    const runner: GitRunner = {
-      async run(args) {
-        const key = args.slice(0, 2).join(" ")
-        if (key === "rev-parse --verify") return { stdout: "abc\n", stderr: "" }
-        if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
-        if (key === "worktree add") {
-          const worktree = args[3] ?? ""
-          await mkdir(worktree, { recursive: true })
-          await writeConfig(worktree, "artifacts")
-          await writeSource(worktree)
-        }
-        return { stdout: "", stderr: "" }
-      },
-    }
+    await initRepository(workspace.root)
+    await configuredWith("artifacts")
+    await writeAlpha()
+    await workspace.writeSource(".gitignore", "artifacts/\n")
+    await commitAll(workspace.root)
 
-    const report = await runDiff({ cwd: scratch, refSpec: "main..HEAD", git: runner })
+    const report = await runDiff({ cwd: workspace.root, refSpec: "main..HEAD", warn: () => {} })
 
-    expect(report.diffJsonPath).toBe(resolve(scratch, "artifacts", DIFF_JSON_FILENAME))
-    expect(await exists(resolve(scratch, "artifacts", IR_JSON_FILENAME))).toBe(false)
+    expect(report.diffJsonPath).toBe(under("artifacts", DIFF_JSON_FILENAME))
+    expect(await pathExists(under("artifacts", IR_JSON_FILENAME))).toBe(false)
   })
 
-  it("refuses an unusable config before it computes anything", async () => {
-    await writeBrokenConfig(scratch)
-    await writeSource(scratch)
-    const asked: string[] = []
-    const runner: GitRunner = {
-      async run(args) {
-        asked.push(args.slice(0, 2).join(" "))
-        return { stdout: "", stderr: "" }
-      },
-    }
+  it("refuses an unusable config before it asks git anything", async () => {
+    await writeBrokenConfig()
+    const { runner, asked } = fakeGit()
 
-    const thrown = await runDiff({ cwd: scratch, refSpec: "main..HEAD", git: runner }).then(
-      () => null,
-      (error: unknown) => error,
+    const error = await errorFrom(CliError, () =>
+      runDiff({ cwd: workspace.root, refSpec: "main..HEAD", git: runner }),
     )
 
-    expect(thrown).toBeInstanceOf(CliError)
-    expect((thrown as CliError).code).toBe("config-error")
+    expect(error.code).toBe("config-error")
     expect(asked).toEqual([])
   })
 
-  it("does not read the config when the flag already answered", async () => {
-    await writeBrokenConfig(scratch)
-    const { base, head } = await writeIRPair(scratch)
+  it("refuses a config it cannot read rather than writing to the default", async () => {
+    await writeBrokenConfig()
+    const { base, head } = await writeIRs(workspace.root, EMPTY, EMPTY)
 
-    const report = await runDiff({ cwd: scratch, base, head, refSpec: null, outputDir: "dist" })
+    const error = await errorFrom(CliError, () => runDiff({ cwd: workspace.root, base, head }))
 
-    expect(report.diffJsonPath).toBe(resolve(scratch, "dist", DIFF_JSON_FILENAME))
+    expect(error.code).toBe("config-error")
+    expect(await pathExists(under(DEFAULT_OUTPUT_DIRNAME))).toBe(false)
   })
 
-  it("refuses a config it cannot read rather than writing to the default", async () => {
-    await writeBrokenConfig(scratch)
-    const { base, head } = await writeIRPair(scratch)
+  it("does not read the config when the flag already answered", async () => {
+    await writeBrokenConfig()
+    const { base, head } = await writeIRs(workspace.root, EMPTY, EMPTY)
 
-    const thrown = await runDiff({ cwd: scratch, base, head, refSpec: null }).then(
-      () => null,
-      (error: unknown) => error,
+    const report = await runDiff({
+      cwd: workspace.root,
+      base,
+      head,
+      outputDir: "dist",
+      warn: () => {},
+    })
+
+    expect(report.diffJsonPath).toBe(under("dist", DIFF_JSON_FILENAME))
+  })
+
+  it("places diff.json by the config --config names, not the discovered one", async () => {
+    await configuredWith("discovered")
+    await writeConfig(
+      workspace.root,
+      { ...TYPESCRIPT, output: { dir: "artifacts" } },
+      "custom.json",
     )
+    const { base, head } = await writeIRs(workspace.root, EMPTY, EMPTY)
 
-    expect(thrown).toBeInstanceOf(CliError)
-    expect((thrown as CliError).code).toBe("config-error")
-    expect(await exists(resolve(scratch, DEFAULT_OUTPUT_DIRNAME))).toBe(false)
+    const report = await runDiff({
+      cwd: workspace.root,
+      base,
+      head,
+      configPath: "./custom.json",
+      warn: () => {},
+    })
+
+    expect(report.diffJsonPath).toBe(under("artifacts", DIFF_JSON_FILENAME))
+    expect(await pathExists(under("discovered"))).toBe(false)
   })
 })
 
-describe("aburi explain", () => {
+describe("aburi explain — where it reads", () => {
   it("reads the IR back out of the configured directory", async () => {
-    await writeConfig(scratch, "artifacts")
-    await writeSource(scratch)
-    await runScan({ cwd: scratch, format: "json" })
+    await configuredWith("artifacts")
+    await writeAlpha()
+    await runScan({ cwd: workspace.root, format: "json" })
 
-    const outcome = await runExplain({ cwd: scratch, argument: "alpha", noRescan: true })
+    const outcome = await runExplain({ cwd: workspace.root, argument: "alpha", noRescan: true })
 
-    expect(outcome.exitCode).toBe(0)
+    expect(outcome.exitCode).toBe(EXIT.SUCCESS)
   })
 
-  it("rescans into the configured directory, and finds it again next time", async () => {
-    await writeConfig(scratch, "artifacts")
-    await writeSource(scratch)
+  it("rescans into the configured directory, and finds it there next time", async () => {
+    await configuredWith("artifacts")
+    await writeAlpha()
 
-    const rescanned = await runExplain({ cwd: scratch, argument: "alpha" })
+    const rescanned = await runExplain({ cwd: workspace.root, argument: "alpha" })
 
-    expect(rescanned.exitCode).toBe(0)
-    expect(await exists(resolve(scratch, "artifacts", IR_JSON_FILENAME))).toBe(true)
-    expect(await exists(resolve(scratch, DEFAULT_OUTPUT_DIRNAME))).toBe(false)
-    expect((await runExplain({ cwd: scratch, argument: "alpha", noRescan: true })).exitCode).toBe(0)
+    expect(rescanned.exitCode).toBe(EXIT.SUCCESS)
+    expect(await pathExists(under("artifacts", IR_JSON_FILENAME))).toBe(true)
+    expect(await pathExists(under(DEFAULT_OUTPUT_DIRNAME))).toBe(false)
+    const again = await runExplain({ cwd: workspace.root, argument: "alpha", noRescan: true })
+    expect(again.exitCode).toBe(EXIT.SUCCESS)
   })
 
   it("uses the configured name at every rung of the walk, and says which document answered", async () => {
-    await writeFile(resolve(scratch, "pnpm-workspace.yaml"), "packages:\n  - 'pkgs/*'\n", "utf8")
-    await writeFile(
-      resolve(scratch, "package.json"),
-      JSON.stringify({ name: "root", private: true }),
-      "utf8",
-    )
-    await writeConfig(scratch, "artifacts")
-    const app = resolve(scratch, "pkgs/app")
-    await mkdir(app, { recursive: true })
-    await writeFile(resolve(app, "package.json"), JSON.stringify({ name: "app" }), "utf8")
-    await writeSource(app)
-    await runScan({ cwd: scratch, format: "json" })
-    const said: string[] = []
+    const app = await writeMonorepo(workspace.root)
+    await configuredWith("artifacts")
+    await runScan({ cwd: workspace.root, format: "json" })
+    const log = recordingLogger()
 
     const outcome = await runExplain({
       cwd: app,
       argument: "alpha",
       noRescan: true,
-      warn: (message) => said.push(message),
+      warn: log.warn,
     })
 
-    expect(outcome.exitCode).toBe(0)
-    expect(said).toEqual([
-      `Answering from ${resolve(scratch, "artifacts", IR_JSON_FILENAME)}; there is no IR under ${app}.`,
+    expect(outcome.exitCode).toBe(EXIT.SUCCESS)
+    expect(log.warnings).toEqual([
+      `Answering from ${under("artifacts", IR_JSON_FILENAME)}; there is no IR under ${app}.`,
     ])
   })
 
   it("names the configured candidate when there is no IR", async () => {
-    await writeConfig(scratch, "artifacts")
-    await writeSource(scratch)
+    await configuredWith("artifacts")
+    await writeAlpha()
 
-    const thrown = await runExplain({ cwd: scratch, argument: "alpha", noRescan: true }).then(
-      () => null,
-      (error: unknown) => error,
+    const error = await errorFrom(CliError, () =>
+      runExplain({ cwd: workspace.root, argument: "alpha", noRescan: true }),
     )
 
-    expect((thrown as Error).message).toContain(resolve(scratch, "artifacts", IR_JSON_FILENAME))
-    expect((thrown as Error).message).not.toContain(
-      resolve(scratch, DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME),
-    )
+    expect(error.message).toContain(under("artifacts", IR_JSON_FILENAME))
+    expect(error.message).not.toContain(under(DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME))
   })
 
   it("searches an absolute configured directory once, and says so", async () => {
-    const elsewhere = resolve(scratch, "shared-artifacts")
-    const app = resolve(scratch, "pkgs/app")
-    await mkdir(app, { recursive: true })
-    await writeFile(resolve(scratch, "pnpm-workspace.yaml"), "packages:\n  - 'pkgs/*'\n", "utf8")
-    await writeFile(
-      resolve(scratch, "package.json"),
-      JSON.stringify({ name: "root", private: true }),
-      "utf8",
-    )
-    await writeConfig(scratch, elsewhere)
-    await writeSource(app)
+    const elsewhere = under("shared-artifacts")
+    const app = await writeMonorepo(workspace.root)
+    await configuredWith(elsewhere)
 
-    const thrown = await runExplain({ cwd: app, argument: "alpha", noRescan: true }).then(
-      () => null,
-      (error: unknown) => error,
+    const error = await errorFrom(CliError, () =>
+      runExplain({ cwd: app, argument: "alpha", noRescan: true }),
     )
 
-    const message = (thrown as Error).message
-    expect(message).toContain(resolve(elsewhere, IR_JSON_FILENAME))
-    expect(message).not.toContain("nor in any directory up to")
-    expect(message.split(resolve(elsewhere, IR_JSON_FILENAME)).length - 1).toBe(1)
+    expect(error.message).not.toContain("nor in any directory up to")
+    expect(error.message.split(resolve(elsewhere, IR_JSON_FILENAME))).toHaveLength(2)
+  })
+
+  it("searches the directory the config --config names gives", async () => {
+    await configuredWith("discovered")
+    await writeConfig(
+      workspace.root,
+      { ...TYPESCRIPT, output: { dir: "artifacts" } },
+      "custom.json",
+    )
+    await writeAlpha()
+
+    const error = await errorFrom(CliError, () =>
+      runExplain({
+        cwd: workspace.root,
+        argument: "alpha",
+        noRescan: true,
+        configPath: "./custom.json",
+      }),
+    )
+
+    expect(error.message).toContain(under("artifacts", IR_JSON_FILENAME))
+    expect(error.message).not.toContain(under("discovered"))
   })
 
   it("refuses a config it cannot read rather than answering from the wrong directory", async () => {
-    await writeConfig(scratch, undefined)
-    await writeSource(scratch)
-    await runScan({ cwd: scratch, format: "json" })
-    await writeBrokenConfig(scratch)
+    await configuredWith(undefined)
+    await writeAlpha()
+    await runScan({ cwd: workspace.root, format: "json" })
+    await writeBrokenConfig()
 
-    const thrown = await runExplain({ cwd: scratch, argument: "alpha", noRescan: true }).then(
-      () => null,
-      (error: unknown) => error,
+    const error = await errorFrom(CliError, () =>
+      runExplain({ cwd: workspace.root, argument: "alpha", noRescan: true }),
     )
 
-    expect(thrown).toBeInstanceOf(CliError)
-    expect((thrown as CliError).code).toBe("config-error")
+    expect(error.code).toBe("config-error")
   })
 
   it("does not read the config when --ir named the document", async () => {
-    await writeConfig(scratch, undefined)
-    await writeSource(scratch)
-    await runScan({ cwd: scratch, format: "json" })
-    await writeBrokenConfig(scratch)
+    await configuredWith(undefined)
+    await writeAlpha()
+    await runScan({ cwd: workspace.root, format: "json" })
+    await writeBrokenConfig()
 
     const outcome = await runExplain({
-      cwd: scratch,
+      cwd: workspace.root,
       argument: "alpha",
       irPath: `${DEFAULT_OUTPUT_DIRNAME}/${IR_JSON_FILENAME}`,
       noRescan: true,
     })
 
-    expect(outcome.exitCode).toBe(0)
-  })
-})
-
-describe("--config names which config the setting comes from", () => {
-  async function twoConfigs(): Promise<string> {
-    await writeConfig(scratch, "discovered")
-    await writeConfigFile(resolve(scratch, "custom.json"), "artifacts")
-    await writeSource(scratch)
-    return "./custom.json"
-  }
-
-  it("places diff.json by the named config, not the discovered one", async () => {
-    const configPath = await twoConfigs()
-    const { base, head } = await writeIRPair(scratch)
-
-    const report = await runDiff({ cwd: scratch, base, head, refSpec: null, configPath })
-
-    expect(report.diffJsonPath).toBe(resolve(scratch, "artifacts", DIFF_JSON_FILENAME))
-    expect(await exists(resolve(scratch, "discovered"))).toBe(false)
-  })
-
-  it("searches the directory the named config gives explain", async () => {
-    const configPath = await twoConfigs()
-
-    const thrown = await runExplain({
-      cwd: scratch,
-      argument: "alpha",
-      noRescan: true,
-      configPath,
-    }).then(
-      () => null,
-      (error: unknown) => error,
-    )
-
-    expect((thrown as Error).message).toContain(resolve(scratch, "artifacts", IR_JSON_FILENAME))
-    expect((thrown as Error).message).not.toContain(resolve(scratch, "discovered"))
+    expect(outcome.exitCode).toBe(EXIT.SUCCESS)
   })
 })

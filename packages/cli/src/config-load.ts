@@ -39,13 +39,6 @@ export async function loadPinnedConfig(pinned: PinnedConfig): Promise<LoadedConf
   }
 }
 
-export async function resolveConfig(
-  cwd: string,
-  overridePath: string | undefined,
-): Promise<LoadedConfig> {
-  return loadPinnedConfig(await pinConfig(cwd, overridePath))
-}
-
 export function classifyConfigError(error: unknown): CliError {
   if (!(error instanceof ConfigError))
     return internalFault(CONFIG_PHASE, errorMessage(error), error)

@@ -1,15 +1,13 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import type { DiffResult, SymbolChange } from "@aburi/types"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { EXIT, runDiff } from "../src"
-import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../src/artifact-paths"
-import { realGit as git, probeRealGit } from "./fixtures"
+import { describe, expect, it } from "vitest"
+import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, EXIT, runDiff } from "../src"
+import { commitAll, git, initRepository } from "./git"
+import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
-let scratch = ""
-let repository = ""
-let gitProbeError: unknown = null
+const workspace = useScratchWorkspace("diff-unknown-rename")
 
 const SIZE_CAP = 1024
 
@@ -34,79 +32,43 @@ function padding(lines: number): string {
   return text
 }
 
-async function commitAll(message: string): Promise<void> {
-  await git(["add", "-A"], repository)
-  await git(["commit", "-q", "-m", message], repository)
+async function commitRename(basePadding: number, headPadding: number): Promise<void> {
+  const root = workspace.root
+  await initRepository(root)
+  await writePackageJson(root, { name: "demo", private: true })
+  await writeConfig(root, { ...TYPESCRIPT, maxFileSizeBytes: SIZE_CAP })
+  await writeFileAt(root, "src/big.ts", billingClass() + padding(basePadding))
+  await writeFileAt(root, "src/ping.ts", "export function ping(): number {\n  return 1\n}\n")
+  await commitAll(root, "base")
+  await git(["mv", "src/big.ts", "src/billing.ts"], root)
+  await writeFileAt(root, "src/billing.ts", billingClass() + padding(headPadding))
+  await commitAll(root, "head")
 }
 
-async function commitBase(basePadding: number): Promise<void> {
-  await mkdir(resolve(repository, "src"), { recursive: true })
-  await writeFile(resolve(repository, "package.json"), '{"name":"demo","private":true}\n', "utf8")
-  await writeFile(
-    resolve(repository, "aburi.json"),
-    JSON.stringify({ languages: ["lang-typescript"], maxFileSizeBytes: SIZE_CAP }),
-    "utf8",
-  )
-  await writeFile(resolve(repository, "src/big.ts"), billingClass() + padding(basePadding), "utf8")
-  await writeFile(
-    resolve(repository, "src/ping.ts"),
-    "export function ping(): number {\n  return 1\n}\n",
-    "utf8",
-  )
-  await commitAll("base")
-}
-
-/** The head commit: `git mv` to `src/billing.ts`, with `headPadding` lines of padding. */
-async function commitRename(headPadding: number): Promise<void> {
-  await git(["mv", "src/big.ts", "src/billing.ts"], repository)
-  await writeFile(
-    resolve(repository, "src/billing.ts"),
-    billingClass() + padding(headPadding),
-    "utf8",
-  )
-  await commitAll("head")
-}
-
-async function diffRenamed(failOn: string, warnings: string[] = []) {
-  const outputDir = resolve(scratch, "out")
+async function diffRenamed(failOn: string) {
+  const outputDir = resolve(workspace.root, "out")
+  const log = recordingLogger()
   const report = await runDiff({
-    cwd: repository,
+    cwd: workspace.root,
     refSpec: "HEAD~1..HEAD",
     outputDir,
     failOn,
-    warn: (message) => warnings.push(message),
+    warn: log.warn,
   })
   const json = JSON.parse(
     await readFile(resolve(outputDir, DIFF_JSON_FILENAME), "utf8"),
   ) as DiffResult
   const md = await readFile(resolve(outputDir, DIFF_MD_FILENAME), "utf8")
-  return { report, json, md }
+  return { report, json, md, said: log.warnings.join("\n") }
 }
 
 function unknownEntries(symbols: readonly SymbolChange[]) {
   return symbols.filter((change) => change.status === "unknown")
 }
 
-beforeAll(async () => {
-  gitProbeError = await probeRealGit()
-})
-
-beforeEach(async () => {
-  expect(gitProbeError, `git probe failed: ${String(gitProbeError)}`).toBeNull()
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-diff-unknown-rename-"))
-  repository = resolve(scratch, "demo")
-  await mkdir(repository)
-  await git(["init", "-q", "-b", "main"], repository)
-})
-
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
-
 describe("aburi diff — a renamed file one scan skipped", () => {
   it("does not trip --fail-on removed when the head skipped the new path", async () => {
-    await commitBase(0)
-    await commitRename(4)
+    await commitRename(0, 4)
 
     const { report, json, md } = await diffRenamed("removed")
 
@@ -129,8 +91,7 @@ describe("aburi diff — a renamed file one scan skipped", () => {
   })
 
   it("does not trip --fail-on added when the base skipped the old path", async () => {
-    await commitBase(4)
-    await commitRename(0)
+    await commitRename(4, 0)
 
     const { report, json } = await diffRenamed("added")
 
@@ -144,11 +105,9 @@ describe("aburi diff — a renamed file one scan skipped", () => {
   })
 
   it("names a renamed file both scans skipped by both its paths", async () => {
-    await commitBase(4)
-    await commitRename(5)
-    const warnings: string[] = []
+    await commitRename(4, 5)
 
-    const { json, md } = await diffRenamed("removed", warnings)
+    const { json, md, said } = await diffRenamed("removed")
 
     expect(json.notCompared).toStrictEqual([
       {
@@ -159,7 +118,7 @@ describe("aburi diff — a renamed file one scan skipped", () => {
       },
     ])
     expect(md).toContain("- `src/big.ts` → `src/billing.ts` — over-size on both")
-    expect(warnings.join("\n")).toContain(
+    expect(said).toContain(
       "1 file(s) were skipped by both scans; see notCompared[] in diff.json: src/big.ts → src/billing.ts.",
     )
   })

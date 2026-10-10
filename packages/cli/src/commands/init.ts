@@ -13,7 +13,6 @@ import { outputIsADirectory, writeOutputFile } from "../output-file"
 import { FRAMEWORK_TO_PLUGIN, LANGUAGE_TO_PLUGIN } from "../plugin-catalog"
 import { resolveWorkspaceRoot } from "../workspace-root"
 
-/** What this command's one artefact is called when a write of it fails. */
 const CONFIG_ARTEFACT = "the config"
 
 const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
@@ -36,9 +35,7 @@ export interface InitReport {
   suggestedPlugins: readonly string[]
   unmappedLanguages: readonly string[]
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
-  /** Whether the written config's single component is the whole repository, for want of any. */
   fellBackToSingleComponent: boolean
-  /** Detected framework ids with no first-party plugin; classification is simply narrower. */
   unmappedFrameworks: readonly string[]
   overwrote: boolean
   exitCode: ExitCode
@@ -176,7 +173,6 @@ function renderConfig(input: RenderedConfigInput): string {
   const banner = input.suggestions
     .map((suggestion) => `// Suggested install: pnpm add -D ${suggestion}`)
     .join("\n")
-  // Insert the comment banner right after the opening `{` so the JSON stays valid JSONC.
   const insertion = `\n  ${banner.split("\n").join("\n  ")}`
   return `${json.replace("{\n", `{${insertion}\n`)}\n`
 }

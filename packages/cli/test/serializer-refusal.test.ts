@@ -1,10 +1,10 @@
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readdir } from "node:fs/promises"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { runDiff, runScan } from "../src"
-import { CliError } from "../src/errors"
-import { emptyIR, writeTypeScriptWorkspace } from "./fixtures"
+import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it, vi } from "vitest"
+import { CliError, runDiff, runScan } from "../src"
+import { documentWith } from "./ir-documents"
+import { writeIRs, writeTypeScriptWorkspace } from "./workspace"
 
 const REFUSAL = "serializeCanonical at $.symbols[0]: keys render identically after NFC"
 
@@ -28,56 +28,39 @@ vi.mock("@aburi/diff", async (importOriginal) => {
   }
 })
 
-let scratch = ""
-
-beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-serializer-"))
-})
-
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
-
-async function failure(run: Promise<unknown>): Promise<CliError> {
-  const thrown = await run.then(
-    () => null,
-    (error: unknown) => error,
-  )
-  expect(thrown).toBeInstanceOf(CliError)
-  return thrown as CliError
-}
+const workspace = useScratchWorkspace("serializer-refusal")
 
 describe("a document the serializer refuses", () => {
   it("is aburi scan's input error, naming the IR path and the refusal", async () => {
-    await writeTypeScriptWorkspace(scratch, "serializer-fixture")
+    await writeTypeScriptWorkspace(workspace.root, "serializer-fixture")
 
-    const error = await failure(runScan({ cwd: scratch, format: "json" }))
+    const error = await errorFrom(CliError, () => runScan({ cwd: workspace.root, format: "json" }))
 
     expect(error.code).toBe("config-error")
-    expect(error.message).toContain(`Failed to serialize the IR for ${resolve(scratch, "out")}`)
-    expect(error.message).toContain(REFUSAL)
-    expect(error.message).not.toContain("could not write")
+    expect(error.message).toBe(
+      `Failed to serialize the IR for ${resolve(workspace.root, "out", "aburi.ir.json")}: ${REFUSAL}`,
+    )
   })
 
   it("leaves no pages beside an IR it refuses, under the default format", async () => {
-    await writeTypeScriptWorkspace(scratch, "serializer-fixture")
+    await writeTypeScriptWorkspace(workspace.root, "serializer-fixture")
 
-    await failure(runScan({ cwd: scratch }))
+    await errorFrom(CliError, () => runScan({ cwd: workspace.root }))
 
-    expect(await readdir(resolve(scratch, "out"))).toEqual([])
+    expect(await readdir(resolve(workspace.root, "out"))).toEqual([])
   })
 
   it("is aburi diff's input error the same way", async () => {
-    const base = resolve(scratch, "base.json")
-    const head = resolve(scratch, "head.json")
-    await writeFile(base, JSON.stringify(emptyIR()), "utf8")
-    await writeFile(head, JSON.stringify(emptyIR()), "utf8")
+    const empty = documentWith({ symbols: [] })
+    const { base, head } = await writeIRs(workspace.root, empty, empty)
 
-    const error = await failure(runDiff({ cwd: scratch, base, head, format: "json" }))
+    const error = await errorFrom(CliError, () =>
+      runDiff({ cwd: workspace.root, base, head, format: "json", warn: () => {} }),
+    )
 
     expect(error.code).toBe("config-error")
-    expect(error.message).toContain(`Failed to serialize the diff for ${resolve(scratch, "out")}`)
-    expect(error.message).toContain(REFUSAL)
-    expect(error.message).not.toContain("could not write")
+    expect(error.message).toBe(
+      `Failed to serialize the diff for ${resolve(workspace.root, "out", "diff.json")}: ${REFUSAL}`,
+    )
   })
 })

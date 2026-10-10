@@ -21,7 +21,6 @@ export interface FixtureCheckout {
   readonly root: string
 }
 
-/** A copy of `projects/<name>` under the OS temp dir, fresh per test or per file. */
 export function useFixtureCheckout(
   name: string = DEFAULT_PROJECT,
   scope: "each" | "all" = "each",
@@ -54,14 +53,11 @@ export function useFixtureCheckout(
   }
 }
 
-/** Plugins layered on top of `scanFixture`'s TypeScript + NestJS lineup. */
-export type ScanFixturePluginOverlay = PluginLineup
-
-/** `scanWith` for the NestJS projects: TypeScript, NestJS and Nest effects plus `overlay`. */
+/** `scanWith` over TypeScript, NestJS and Nest effects, plus `overlay`. */
 export function scanFixture(
   workspaceRoot: string,
   config: Config = {},
-  overlay: ScanFixturePluginOverlay = {},
+  overlay: PluginLineup = {},
   components: readonly Component[] = [],
   lspServerFactory?: ServerFactory,
 ): Promise<ScanResult> {

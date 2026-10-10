@@ -52,7 +52,7 @@ async function appendTo(path: string, tail: string): Promise<void> {
   await writeFile(path, current + tail, "utf8")
 }
 
-describe("e2e scenario D — controller inherits db.write via propagation", () => {
+describe("e2e scan — a controller inherits db.write through propagation", () => {
   it("propagates db.write from repository → service → boundary controller", async () => {
     const billingDir = resolve(fixture.root, "src/billing")
     await writeFile(resolve(billingDir, "invoice.repository.ts"), INVOICE_REPOSITORY_TS, "utf8")
@@ -72,7 +72,6 @@ describe("e2e scenario D — controller inherits db.write via propagation", () =
       "ts:src/billing/billing.controller.ts#PersistedInvoiceController.createPersisted",
     )
 
-    // Repository has the local prisma.invoice.create effect.
     const repoLocal = repoWrite.effects.find(
       (e) => e.id === "db.write" && e.target.endsWith(".invoice.create"),
     )
@@ -80,7 +79,6 @@ describe("e2e scenario D — controller inherits db.write via propagation", () =
     expect(repoLocal?.propagated).not.toBe(true)
     expect(repoLocal?.line).toBeDefined()
 
-    // Service function carries a propagated db.write derived from the repository.
     const servicePropagated = servicePersist.effects.find(
       (e) => e.id === "db.write" && e.propagated === true,
     )
@@ -91,7 +89,6 @@ describe("e2e scenario D — controller inherits db.write via propagation", () =
     expect(servicePropagated?.line).toBeUndefined()
     expect(servicePropagated?.derivedFrom).toEqual([repoWrite.id])
 
-    // Boundary controller carries a propagated db.write derived from the service function.
     const controllerPropagated = controllerCreate.effects.find(
       (e) => e.id === "db.write" && e.propagated === true,
     )

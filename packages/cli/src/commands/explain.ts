@@ -13,7 +13,6 @@ import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan } from "./scan"
 
-/** What this command's one artefact is called when a write of it fails. */
 const MARKDOWN_ARTEFACT = "the explain Markdown"
 
 export interface ExplainOptions {
@@ -49,13 +48,11 @@ export type ExplainOutcome =
       kind: "unknown"
       exitCode: typeof EXIT.GATE
       skipped: SkippedFile
-      /** Whether the file came from the argument itself or from the file segment of an id. */
       namedBy: "id" | "path"
     }
 
 export type CoverageDoubt =
   | { kind: "named-losses"; files: readonly [SkippedFile, ...SkippedFile[]] }
-  /** The document predates `stats.skippedFiles`: it counts its losses but cannot name them. */
   | { kind: "unnamed-losses"; fileCount: number }
 
 export async function runExplain(options: ExplainOptions): Promise<ExplainOutcome> {
@@ -186,13 +183,13 @@ function assertDebugResolutionCombination(options: ExplainOptions): void {
   if (options.debugResolution !== true) return
   if (options.noRescan) {
     throw new CliError(
-      "--debug-resolution needs a fresh scan (call-resolution.md keeps the per-call buckets out of the IR), so it cannot be combined with --no-rescan.",
+      "--debug-resolution needs a fresh scan (the IR does not keep the per-call buckets), so it cannot be combined with --no-rescan.",
       "input-error",
     )
   }
   if (options.irPath !== undefined) {
     throw new CliError(
-      "--debug-resolution needs a fresh scan (call-resolution.md keeps the per-call buckets out of the IR), so it cannot read an existing --ir file.",
+      "--debug-resolution needs a fresh scan (the IR does not keep the per-call buckets), so it cannot read an existing --ir file.",
       "input-error",
     )
   }

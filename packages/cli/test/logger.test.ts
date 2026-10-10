@@ -13,10 +13,10 @@ describe("createLogger", () => {
       ...(minimum === undefined ? {} : { minimum }),
       write: (line) => lines.push(line),
     })
-    logger.debug?.("d")
-    logger.info?.("i")
-    logger.warn?.("w")
-    logger.error?.("e")
+    logger.debug("d")
+    logger.info("i")
+    logger.warn("w")
+    logger.error("e")
     expect(lines).toEqual(expected)
   })
 })

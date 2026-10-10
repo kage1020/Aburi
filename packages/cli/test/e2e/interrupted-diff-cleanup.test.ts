@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { gitTestEnv } from "../git"
 
 const TSX_LOADER = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href
 const CLI_ENTRY = fileURLToPath(new URL("../../src/bin/aburi.ts", import.meta.url))
@@ -19,27 +20,10 @@ await new Promise(() => setInterval(() => {}, 1000))
 let repo = ""
 let decoy = ""
 let child: ChildProcess | null = null
-/** The `aburi-worktree-*` temp directories that existed before the test started. */
 let tempDirsBefore = new Set<string>()
 
-function pinnedGitEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    GIT_CONFIG_GLOBAL: join(repo, "absent-gitconfig"),
-    GIT_CONFIG_SYSTEM: join(repo, "absent-gitconfig"),
-    GIT_AUTHOR_NAME: "Aburi Test",
-    GIT_AUTHOR_EMAIL: "test@example.invalid",
-    GIT_COMMITTER_NAME: "Aburi Test",
-    GIT_COMMITTER_EMAIL: "test@example.invalid",
-  }
-  // A run started from a commit hook carries these; the fixture must not be built through them.
-  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", "GIT_COMMON_DIR"])
-    delete env[name]
-  return env
-}
-
 function git(args: string[], cwd = repo): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", env: pinnedGitEnv() })
+  return execFileSync("git", args, { cwd, encoding: "utf8", env: gitTestEnv(repo) })
 }
 
 async function worktreeTempDirs(): Promise<string[]> {
@@ -122,11 +106,10 @@ describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the ba
       ["--import", TSX_LOADER, CLI_ENTRY, "diff", "HEAD~1..HEAD"],
       {
         cwd: repo,
-        env: {
-          ...pinnedGitEnv(),
+        env: gitTestEnv(repo, {
           ABURI_TEST_READY_FILE: ready,
           ...(decoyEnv ? { GIT_INDEX_FILE: decoyIndex, GIT_PREFIX: "src/" } : {}),
-        },
+        }),
         stdio: "ignore",
       },
     )

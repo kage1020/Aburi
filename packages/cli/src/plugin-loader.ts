@@ -11,7 +11,6 @@ import type {
 import { assertNever, CliError, errorMessage } from "./errors"
 import { pluginForDetectorId } from "./plugin-catalog"
 
-/** Every field of the config that lists plugin refs, and the manifest type each must declare. */
 const PLUGIN_FIELDS = {
   languages: "lang",
   frameworks: "framework",
@@ -29,10 +28,8 @@ export interface LoadedPlugins {
 
 export interface LoadPluginsOptions {
   config: Config
-  /** Workspace root — the base for everything the scan reads out of the config. */
   workspaceRoot: string
   pluginRefRoot?: string
-  /** Dynamic import hook for testing (default: real ESM import). */
   importModule?: (specifier: string) => Promise<unknown>
   syntheticPlugins?: readonly FrameworkPlugin[]
 }
@@ -73,7 +70,6 @@ function resolveSpecifier(ref: string, field: PluginField, pluginRefRoot: string
   return `@aburi/${ref}`
 }
 
-/** The prefix the plugins published under `@aburi` carry in each field (`lang-typescript`). */
 const NAME_PREFIX = {
   languages: "lang-",
   frameworks: "framework-",
@@ -127,7 +123,6 @@ function registerHint(registry: VocabRegistry, manifest: PluginManifest): void {
   }
 }
 
-/** A manifest the registry refuses is the plugin's fault, which the CLI reports as one. */
 function registerManifest(registry: VocabRegistry, manifest: PluginManifest): void {
   try {
     registry.register(manifest)

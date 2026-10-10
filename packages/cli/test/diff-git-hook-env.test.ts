@@ -1,34 +1,27 @@
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { copyFile, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { useScratchWorkspace } from "@aburi/test-support"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EXIT, runDiff } from "../src"
-import { gitChildEnv } from "../src/commands/diff"
-import { realGit as git, probeRealGit } from "./fixtures"
+import { gitChildEnv } from "../src/git/runner"
+import { git, initRepository } from "./git"
+import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
-const HOOK_ENV = ["GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX"] as const
+const workspace = useScratchWorkspace("diff-hook-env")
 
-let scratch = ""
-let savedEnv: Partial<Record<(typeof HOOK_ENV)[number], string>> = {}
-let gitProbeError: unknown = null
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
+/** Two commits, the second adding `two()`, made through `run` so the caller picks the repository. */
 async function commitTwice(directory: string, run: (args: string[]) => Promise<string>) {
-  await mkdir(resolve(directory, "src"), { recursive: true })
-  await writeFile(resolve(directory, "package.json"), '{"name":"demo","private":true}\n', "utf8")
-  await writeFile(resolve(directory, "aburi.json"), '{"languages":["lang-typescript"]}\n', "utf8")
-  await writeFile(resolve(directory, ".gitignore"), "out/\n", "utf8")
-  await writeFile(
-    resolve(directory, "src/one.ts"),
-    "export function one(): number { return 1 }\n",
-    "utf8",
-  )
+  await writePackageJson(directory, { name: "demo", private: true })
+  await writeConfig(directory, TYPESCRIPT)
+  await writeFileAt(directory, ".gitignore", "out/\n")
+  await writeFileAt(directory, "src/one.ts", "export function one(): number { return 1 }\n")
   await run(["add", "-A"])
   await run(["commit", "-q", "-m", "c1"])
-  await writeFile(
-    resolve(directory, "src/two.ts"),
-    "export function two(): number { return 2 }\n",
-    "utf8",
-  )
+  await writeFileAt(directory, "src/two.ts", "export function two(): number { return 2 }\n")
   await run(["add", "-A"])
   await run(["commit", "-q", "-m", "c2"])
 }
@@ -40,29 +33,6 @@ function diffFrom(cwd: string, refSpec = "HEAD~1..HEAD"): ReturnType<typeof runD
 function stagedIn(indexFile: string, cwd: string): Promise<string> {
   return git(["ls-files", "--stage"], cwd, { GIT_INDEX_FILE: indexFile })
 }
-
-beforeAll(async () => {
-  gitProbeError = await probeRealGit()
-})
-
-beforeEach(async () => {
-  expect(gitProbeError, `git probe failed: ${String(gitProbeError)}`).toBeNull()
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-diff-hook-env-"))
-  savedEnv = {}
-  for (const name of HOOK_ENV) {
-    const value = process.env[name]
-    if (value !== undefined) savedEnv[name] = value
-  }
-})
-
-afterEach(async () => {
-  for (const name of HOOK_ENV) {
-    const value = savedEnv[name]
-    if (value === undefined) delete process.env[name]
-    else process.env[name] = value
-  }
-  await rm(scratch, { recursive: true, force: true })
-})
 
 describe("the environment aburi diff spawns git with", () => {
   it("drops the hook's index and prefix and passes the repository and the caller's settings on", () => {
@@ -78,17 +48,15 @@ describe("the environment aburi diff spawns git with", () => {
       PATH: "/usr/bin",
     }
     const child = gitChildEnv(caller)
-    expect(Object.keys(child).sort()).toEqual(
-      [
-        "GIT_COMMON_DIR",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_DIR",
-        "GIT_IMPLICIT_WORK_TREE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_WORK_TREE",
-        "PATH",
-      ].sort(),
-    )
+    expect(Object.keys(child).sort()).toEqual([
+      "GIT_COMMON_DIR",
+      "GIT_CONFIG_PARAMETERS",
+      "GIT_DIR",
+      "GIT_IMPLICIT_WORK_TREE",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_WORK_TREE",
+      "PATH",
+    ])
     expect(child.GIT_DIR).toBe(caller.GIT_DIR)
     expect(caller.GIT_INDEX_FILE).toBe("/repo/.git/index.lock")
   })
@@ -98,9 +66,8 @@ describe("aburi diff inside a commit hook", () => {
   let repository = ""
 
   beforeEach(async () => {
-    repository = resolve(scratch, "demo")
-    await mkdir(repository)
-    await git(["init", "-q", "-b", "main"], repository)
+    repository = resolve(workspace.root, "demo")
+    await initRepository(repository)
     await commitTwice(repository, (args) => git(args, repository))
   })
 
@@ -109,7 +76,7 @@ describe("aburi diff inside a commit hook", () => {
     await copyFile(resolve(repository, ".git/index"), indexFile)
     const before = await readFile(indexFile)
     const ownIndex = await readFile(resolve(repository, ".git/index"))
-    process.env.GIT_INDEX_FILE = indexFile
+    vi.stubEnv("GIT_INDEX_FILE", indexFile)
 
     const result = await diffFrom(repository)
 
@@ -123,8 +90,8 @@ describe("aburi diff inside a commit hook", () => {
   it("runs with the relative `.git/index` a plain `commit` exports in the main worktree", async () => {
     const index = resolve(repository, ".git/index")
     const before = await readFile(index)
-    process.env.GIT_INDEX_FILE = ".git/index"
-    process.env.GIT_PREFIX = ""
+    vi.stubEnv("GIT_INDEX_FILE", ".git/index")
+    vi.stubEnv("GIT_PREFIX", "")
 
     const result = await diffFrom(repository)
 
@@ -134,13 +101,13 @@ describe("aburi diff inside a commit hook", () => {
   })
 
   it("leaves a linked worktree's index untouched, where every commit exports an absolute one", async () => {
-    const linked = resolve(scratch, "linked")
+    const linked = resolve(workspace.root, "linked")
     await git(["worktree", "add", "-q", "-b", "feat", linked, "HEAD"], repository)
     const gitDir = resolve(repository, ".git/worktrees/linked")
     const indexFile = resolve(gitDir, "index")
     const before = await readFile(indexFile)
-    process.env.GIT_DIR = gitDir
-    process.env.GIT_INDEX_FILE = indexFile
+    vi.stubEnv("GIT_DIR", gitDir)
+    vi.stubEnv("GIT_INDEX_FILE", indexFile)
 
     const result = await diffFrom(linked)
 
@@ -155,14 +122,13 @@ describe("aburi diff on a repository only the environment names", () => {
   let workTree = ""
 
   beforeEach(async () => {
-    const gitDir = resolve(scratch, "dotfiles.git")
-    workTree = resolve(scratch, "home")
-    await mkdir(workTree)
-    await git(["init", "-q", "--bare", "-b", "main", gitDir], scratch)
+    const gitDir = resolve(workspace.root, "dotfiles.git")
+    workTree = resolve(workspace.root, "home")
+    await git(["init", "-q", "--bare", "-b", "main", gitDir], workspace.root)
     const env = { GIT_DIR: gitDir, GIT_WORK_TREE: workTree }
     await commitTwice(workTree, (args) => git(args, workTree, env))
-    process.env.GIT_DIR = gitDir
-    process.env.GIT_WORK_TREE = workTree
+    vi.stubEnv("GIT_DIR", gitDir)
+    vi.stubEnv("GIT_WORK_TREE", workTree)
   })
 
   it("compares its revisions, which only GIT_DIR can find", async () => {

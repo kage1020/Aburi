@@ -1,84 +1,45 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { runScan } from "../src"
+import { useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
+import { COMPONENTS_DIRNAME, EXIT, runScan } from "../src"
+import { TYPESCRIPT, writeConfig, writePackageJson } from "./workspace"
 
-let scratch = ""
+const workspace = useScratchWorkspace("component-md")
 
-beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-component-md-"))
-  await writeFile(
-    resolve(scratch, "package.json"),
-    JSON.stringify({ name: "component-md-fixture", private: true }),
-    "utf8",
-  )
-  await writeSource(
-    "packages/api/src/orders.ts",
-    ["export function submitOrder(total: number): number {", "  return total + 1", "}", ""].join(
-      "\n",
-    ),
-  )
-  await writeSource(
-    "packages/web/src/page.ts",
-    ["export function renderPage(total: number): string {", '  return "" + total', "}", ""].join(
-      "\n",
-    ),
-  )
-})
-
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
-
-async function writeSource(rel: string, content: string): Promise<void> {
-  const abs = resolve(scratch, rel)
-  await mkdir(resolve(abs, ".."), { recursive: true })
-  await writeFile(abs, content, "utf8")
-}
-
-async function scanTwoComponents(): Promise<{ api: string; web: string }> {
-  await writeFile(
-    resolve(scratch, "aburi.json"),
-    JSON.stringify({
-      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
-      languages: ["lang-typescript"],
+describe("out/components/<id>.md", () => {
+  it("lists the Symbols of the component whose root holds their file, and counts them", async () => {
+    await writePackageJson(workspace.root)
+    await workspace.writeSource(
+      "packages/api/src/orders.ts",
+      "export function submitOrder(total: number): number {\n  return total + 1\n}\n",
+    )
+    await workspace.writeSource(
+      "packages/web/src/page.ts",
+      'export function renderPage(total: number): string {\n  return "" + total\n}\n',
+    )
+    await writeConfig(workspace.root, {
+      ...TYPESCRIPT,
       components: [
         { id: "api", roots: ["packages/api"], languages: ["ts"] },
         { id: "web", roots: ["packages/web"], languages: ["ts"] },
       ],
-    }),
-    "utf8",
-  )
-  const report = await runScan({
-    cwd: scratch,
-    outputDir: resolve(scratch, "out"),
-    format: "both",
-  })
-  expect(report.exitCode).toBe(0)
-  const read = async (id: string): Promise<string> =>
-    readFile(resolve(scratch, "out", "components", `${id}.md`), "utf8")
-  return { api: await read("api"), web: await read("web") }
-}
+    })
 
-describe("out/components/<id>.md", () => {
-  it("lists the Symbols of the component whose root holds their file", async () => {
-    const { api, web } = await scanTwoComponents()
+    const report = await runScan({ cwd: workspace.root, format: "both" })
 
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    const page = (id: string) =>
+      readFile(resolve(workspace.root, "out", COMPONENTS_DIRNAME, `${id}.md`), "utf8")
+    const api = await page("api")
     expect(api).toContain("# Component: api")
+    expect(api).toMatch(/\*\*Symbols\*\*: [1-9]\d* kept/)
     expect(api).toContain("## Symbols")
     expect(api).toContain("packages/api/src/orders.ts")
     expect(api).toContain("submitOrder")
     expect(api).not.toContain("packages/web/")
-
-    expect(web).toContain("## Symbols")
+    const web = await page("web")
     expect(web).toContain("packages/web/src/page.ts")
     expect(web).not.toContain("packages/api/")
-  })
-
-  it("counts the component's Symbols in its header instead of reporting zero", async () => {
-    const { api } = await scanTwoComponents()
-
-    expect(api).toMatch(/\*\*Symbols\*\*: [1-9]\d* kept/)
   })
 })

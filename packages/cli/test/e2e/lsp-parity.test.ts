@@ -16,7 +16,6 @@ const baseServerConfig: LspServerConfig = {
 
 const LSP_ON: Config = { lsp: { enabled: true, servers: { ts: baseServerConfig } } }
 
-/** An in-memory LSP client whose lifecycle methods succeed and whose `request` is `request`. */
 function mockServer(request: LspClient["request"]): ServerFactory {
   return () => ({
     async initialize() {
@@ -36,7 +35,6 @@ function mockServer(request: LspClient["request"]): ServerFactory {
 const healthyMockFactory = (): ServerFactory =>
   mockServer(async (): Promise<never | LspFailure> => null as never)
 
-/** Erroring mock: initialize succeeds but every request returns an `LspError`. */
 const erroringMockFactory = (): ServerFactory =>
   mockServer(
     async (): Promise<never | LspFailure> => ({
@@ -61,7 +59,6 @@ const fixture = useFixtureCheckout("lsp-parity")
 
 const scanWithLsp = (factory: ServerFactory) => scanFixture(fixture.root, LSP_ON, {}, [], factory)
 
-/** Symbols of both scans paired by id; the id sets must be identical. */
 function pairById(off: readonly IRSymbol[], on: readonly IRSymbol[]): [IRSymbol, IRSymbol][] {
   const onById = new Map(on.map((symbol) => [symbol.id, symbol]))
   expect([...onById.keys()].sort()).toEqual(off.map((symbol) => symbol.id).sort())

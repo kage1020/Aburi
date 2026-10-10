@@ -45,7 +45,7 @@ const HEAD_BILLING_SERVICE = [
 
 const fixture = useFixtureCheckout()
 
-describe("e2e diff — scenario B: BillingService stubbed → dropped-toggled:>10", () => {
+describe("e2e diff — every BillingService method body emptied", () => {
   it("emits ≥11 dropped-toggled:to-dropped changes and trips the `>10` gate", async () => {
     const baseIR = (await scanFixture(fixture.root)).ir
 

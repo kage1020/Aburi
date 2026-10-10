@@ -1,116 +1,115 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { chmod, mkdir } from "node:fs/promises"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { EXIT, runCli, runScan } from "../src"
+import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
 import {
+  CliError,
   COMPONENTS_DIRNAME,
   DIFF_FULL_MD_FILENAME,
   DIFF_JSON_FILENAME,
   DIFF_MD_FILENAME,
+  EXIT,
   IR_JSON_FILENAME,
+  runScan,
   WORKSPACE_MD_FILENAME,
-} from "../src/artifact-paths"
-import { CliError } from "../src/errors"
-import { emptyIR, MemStream, writeTypeScriptWorkspace } from "./fixtures"
+} from "../src"
+import { pathExists } from "../src/fs-probe"
+import { documentWith } from "./ir-documents"
+import { runCliIn } from "./run-cli"
+import { TYPESCRIPT, writeConfig, writeIRs, writeTypeScriptWorkspace } from "./workspace"
 
-let scratch = ""
+const workspace = useScratchWorkspace("write-faults")
 
-beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-write-faults-"))
-})
+const under = (...segments: string[]) => resolve(workspace.root, ...segments)
+const run = (...argv: string[]) => runCliIn(workspace.root, argv)
 
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
-
-async function writeIRPair(): Promise<{ base: string; head: string }> {
-  const base = resolve(scratch, "base.json")
-  const head = resolve(scratch, "head.json")
-  await writeFile(base, JSON.stringify(emptyIR()), "utf8")
-  await writeFile(head, JSON.stringify(emptyIR()), "utf8")
-  return { base, head }
-}
-
-async function run(argv: string[]): Promise<{ exitCode: number; stderr: string }> {
-  const stderr = new MemStream()
-  const exitCode = await runCli({ argv, cwd: scratch, stdout: new MemStream(), stderr })
-  return { exitCode, stderr: stderr.text() }
+async function documents(): Promise<string[]> {
+  const empty = documentWith({ symbols: [] })
+  const { base, head } = await writeIRs(workspace.root, empty, empty)
+  return ["--base", base, "--head", head]
 }
 
 const onPosixAsAUser = it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
 
 describe("aburi scan with an --output-dir that cannot hold the outputs", () => {
   it("names the command, the directory and the flag when a file stands where it would go", async () => {
-    await writeTypeScriptWorkspace(scratch, "write-fixture")
-    await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    await workspace.writeSource("notadir", "not a directory\n")
 
-    const { exitCode, stderr } = await run(["scan", "--output-dir", "notadir"])
+    const { code, stderr } = await run("scan", "--output-dir", "notadir")
 
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
+    expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi scan could not write the output directory to ${resolve(scratch, "notadir")}`,
+      `aburi scan could not write the output directory to ${under("notadir")}`,
     )
     expect(stderr).toContain("--output-dir")
     expect(stderr).toContain("EEXIST")
   })
 
-  it("refuses the directory before it scans anything", async () => {
-    await writeFile(
-      resolve(scratch, "aburi.json"),
-      JSON.stringify({ languages: ["lang-typescript"] }),
-      "utf8",
-    )
-    await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
+  it("refuses the directory before it reads the workspace", async () => {
+    await writeConfig(workspace.root, TYPESCRIPT)
+    await workspace.writeSource("notadir", "not a directory\n")
 
-    const { exitCode, stderr } = await run(["scan", "--output-dir", "notadir"])
+    const { code, stderr } = await run("scan", "--output-dir", "notadir")
 
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
+    expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain("could not write the output directory")
   })
 
+  it("carries the failure it wraps as its cause", async () => {
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    await workspace.writeSource("notadir", "not a directory\n")
+
+    const error = await errorFrom(CliError, () =>
+      runScan({ cwd: workspace.root, format: "json", outputDir: "notadir" }),
+    )
+
+    expect(error.cause).toMatchObject({ code: "EEXIST" })
+  })
+
   it("names the workspace Markdown when a directory stands where it would go", async () => {
-    await writeTypeScriptWorkspace(scratch, "write-fixture")
-    await mkdir(resolve(scratch, "out", WORKSPACE_MD_FILENAME), { recursive: true })
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    await mkdir(under("out", WORKSPACE_MD_FILENAME), { recursive: true })
 
-    const { exitCode, stderr } = await run(["scan", "--format", "md"])
+    const { code, stderr } = await run("scan", "--format", "md")
 
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
+    expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi scan could not write the workspace Markdown to ${resolve(scratch, "out", WORKSPACE_MD_FILENAME)}`,
+      `aburi scan could not write the workspace Markdown to ${under("out", WORKSPACE_MD_FILENAME)}`,
     )
     expect(stderr).toContain("--output-dir")
   })
 
   it("names the component whose Markdown could not be written", async () => {
-    await writeTypeScriptWorkspace(scratch, "write-fixture")
-    const clean = await runScan({ cwd: scratch, format: "md" })
-    const [componentMd] = clean.componentMdPaths
-    if (componentMd === undefined) throw new Error("the clean scan wrote no component Markdown")
-    expect(componentMd).toContain(resolve(scratch, "out", COMPONENTS_DIRNAME))
-    await rm(componentMd)
-    await mkdir(componentMd)
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    const componentMd = under("out", COMPONENTS_DIRNAME, "write-fixture.md")
+    await mkdir(componentMd, { recursive: true })
 
-    const { exitCode, stderr } = await run(["scan", "--format", "md"])
+    const { code, stderr } = await run("scan", "--format", "md")
 
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
-    expect(stderr).toContain(`aburi scan could not write the Markdown for component "`)
-    expect(stderr).toContain(`" to ${componentMd}`)
+    expect(code).toBe(EXIT.INPUT_ERROR)
+    expect(stderr).toContain(
+      `aburi scan could not write the Markdown for component "write-fixture" to ${componentMd}`,
+    )
   })
 })
 
 describe("aburi scan into a place the machine refuses", () => {
   onPosixAsAUser("names the IR when the directory may not be written to", async () => {
-    await writeTypeScriptWorkspace(scratch, "write-fixture")
-    const locked = resolve(scratch, "locked")
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    const locked = under("locked")
     await mkdir(locked)
     await chmod(locked, 0o500)
 
-    const { exitCode, stderr } = await run(["scan", "--format", "json", "--output-dir", "locked"])
+    const { code, stderr } = await run(
+      "scan",
+      "--format",
+      "json",
+      "--output-dir",
+      "locked",
+    ).finally(() => chmod(locked, 0o700))
 
-    await chmod(locked, 0o700)
-
-    expect(exitCode).toBe(EXIT.RUNTIME)
+    expect(code).toBe(EXIT.RUNTIME)
     expect(stderr).toContain(
       `aburi scan could not write the IR to ${resolve(locked, IR_JSON_FILENAME)}`,
     )
@@ -121,14 +120,14 @@ describe("aburi scan into a place the machine refuses", () => {
   it.skipIf(process.platform === "win32")(
     "reports any other refusal as the command's runtime failure, with the errno",
     async () => {
-      await writeTypeScriptWorkspace(scratch, "write-fixture")
+      await writeTypeScriptWorkspace(workspace.root, "write-fixture")
       const tooLong = "x".repeat(300)
 
-      const { exitCode, stderr } = await run(["scan", "--output-dir", tooLong])
+      const { code, stderr } = await run("scan", "--output-dir", tooLong)
 
-      expect(exitCode).toBe(EXIT.RUNTIME)
+      expect(code).toBe(EXIT.RUNTIME)
       expect(stderr).toContain(
-        `aburi scan could not write the output directory to ${resolve(scratch, tooLong)}`,
+        `aburi scan could not write the output directory to ${under(tooLong)}`,
       )
       expect(stderr).toContain("ENAMETOOLONG")
       expect(stderr).not.toContain("Remove that file")
@@ -137,114 +136,54 @@ describe("aburi scan into a place the machine refuses", () => {
 })
 
 describe("aburi diff with an --output-dir that cannot hold the outputs", () => {
-  it("names the command and the directory when a file stands where it would go", async () => {
-    const { base, head } = await writeIRPair()
-    await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
+  it("names the command, the directory and the flag when a file stands where it would go", async () => {
+    await workspace.writeSource("notadir", "not a directory\n")
 
-    const { exitCode, stderr } = await run([
+    const { code, stderr } = await run("diff", ...(await documents()), "--output-dir", "notadir")
+
+    expect(code).toBe(EXIT.INPUT_ERROR)
+    expect(stderr).toContain(
+      `aburi diff could not write the output directory to ${under("notadir")}`,
+    )
+    expect(stderr).toContain("--output-dir")
+  })
+
+  it("refuses the directory before it reads either IR", async () => {
+    await workspace.writeSource("notadir", "not a directory\n")
+    const absent = under("absent.json")
+
+    const { code, stderr } = await run(
       "diff",
       "--base",
-      base,
+      absent,
       "--head",
-      head,
+      absent,
       "--output-dir",
       "notadir",
-    ])
-
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
-    expect(stderr).toContain(
-      `aburi diff could not write the output directory to ${resolve(scratch, "notadir")}`,
     )
+
+    expect(code).toBe(EXIT.INPUT_ERROR)
+    expect(stderr).toContain("could not write the output directory")
+  })
+
+  it.each([
+    ["the diff JSON", DIFF_JSON_FILENAME, []],
+    ["the diff Markdown", DIFF_MD_FILENAME, ["--format", "json"]],
+    ["the uncapped diff Markdown", DIFF_FULL_MD_FILENAME, []],
+  ])("names %s an earlier run left when a directory stands in its place", async (artefact, filename, flags) => {
+    await mkdir(under("out", filename), { recursive: true })
+
+    const { code, stderr } = await run("diff", ...(await documents()), ...flags)
+
+    expect(code).toBe(EXIT.INPUT_ERROR)
+    expect(stderr).toContain(`aburi diff could not remove ${artefact} at ${under("out", filename)}`)
     expect(stderr).toContain("--output-dir")
   })
 
-  it("names the diff JSON when a directory stands where it would go", async () => {
-    // The removal, not the write, is what meets the directory: it runs before either IR is read.
-    const { base, head } = await writeIRPair()
-    await mkdir(resolve(scratch, "out", DIFF_JSON_FILENAME), { recursive: true })
+  it("refuses a malformed invocation with nothing created for it", async () => {
+    const { code } = await run("diff", "--base", under("base.json"))
 
-    const { exitCode, stderr } = await run(["diff", "--base", base, "--head", head])
-
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
-    expect(stderr).toContain(
-      `aburi diff could not remove the diff JSON at ${resolve(scratch, "out", DIFF_JSON_FILENAME)}`,
-    )
-    expect(stderr).toContain("--output-dir")
-  })
-
-  it("names the diff Markdown when that is the artefact in the way", async () => {
-    const { base, head } = await writeIRPair()
-    await mkdir(resolve(scratch, "out", DIFF_MD_FILENAME), { recursive: true })
-
-    const { exitCode, stderr } = await run([
-      "diff",
-      "--base",
-      base,
-      "--head",
-      head,
-      "--format",
-      "json",
-    ])
-
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
-    expect(stderr).toContain(
-      `aburi diff could not remove the diff Markdown at ${resolve(scratch, "out", DIFF_MD_FILENAME)}`,
-    )
-  })
-
-  it("names the uncapped report an earlier run left when it cannot be removed", async () => {
-    const { base, head } = await writeIRPair()
-    await mkdir(resolve(scratch, "out", DIFF_FULL_MD_FILENAME), { recursive: true })
-
-    const { exitCode, stderr } = await run(["diff", "--base", base, "--head", head])
-
-    expect(exitCode).toBe(EXIT.INPUT_ERROR)
-    expect(stderr).toContain(
-      `aburi diff could not remove the uncapped diff Markdown at ${resolve(scratch, "out", DIFF_FULL_MD_FILENAME)}`,
-    )
-    expect(stderr).toContain("--output-dir")
-  })
-
-  it("is refused before either IR is read", async () => {
-    await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
-
-    const thrown = await run([
-      "diff",
-      "--base",
-      resolve(scratch, "absent.json"),
-      "--head",
-      resolve(scratch, "absent.json"),
-      "--output-dir",
-      "notadir",
-    ])
-
-    expect(thrown.exitCode).toBe(EXIT.INPUT_ERROR)
-    expect(thrown.stderr).toContain("could not write the output directory")
-  })
-
-  it("still refuses a malformed invocation with nothing created for it", async () => {
-    const thrown = await runCli({
-      argv: ["diff", "--base", resolve(scratch, "base.json")],
-      cwd: scratch,
-      stdout: new MemStream(),
-      stderr: new MemStream(),
-    })
-    expect(thrown).toBe(EXIT.INPUT_ERROR)
-    await expect(mkdir(resolve(scratch, "out"))).resolves.toBeUndefined()
-  })
-})
-
-describe("the error a write failure throws", () => {
-  it("carries the failure it wraps as its cause", async () => {
-    await writeTypeScriptWorkspace(scratch, "write-fixture")
-    await writeFile(resolve(scratch, "notadir"), "not a directory\n", "utf8")
-
-    const thrown = await runScan({ cwd: scratch, format: "json", outputDir: "notadir" }).then(
-      () => null,
-      (error: unknown) => error,
-    )
-
-    expect(thrown).toBeInstanceOf(CliError)
-    expect((thrown as CliError).cause).toMatchObject({ code: "EEXIST" })
+    expect(code).toBe(EXIT.INPUT_ERROR)
+    expect(await pathExists(under("out"))).toBe(false)
   })
 })

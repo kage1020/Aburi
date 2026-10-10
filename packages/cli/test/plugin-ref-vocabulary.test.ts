@@ -1,126 +1,97 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { IR_JSON_FILENAME } from "../src"
-import { runCli } from "../src/run"
-import { MemStream } from "./fixtures"
+import { readFile } from "node:fs/promises"
+import { resolve } from "node:path"
+import { useScratchWorkspace } from "@aburi/test-support"
+import type { IR } from "@aburi/types"
+import { beforeEach, describe, expect, it } from "vitest"
+import { EXIT, IR_JSON_FILENAME } from "../src"
+import { runCliIn } from "./run-cli"
+import { TYPESCRIPT, writeConfig } from "./workspace"
 
-let workRoot = ""
+const workspace = useScratchWorkspace("plugin-ref-vocabulary")
 
 beforeEach(async () => {
-  workRoot = await mkdtemp(resolve(tmpdir(), "aburi-ref-vocab-"))
-  await write("src/app.ts", "export const x = 1\n")
+  await workspace.writeSource("src/app.ts", "export const x = 1\n")
 })
 
-afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true })
-})
-
-async function write(relativePath: string, body: string): Promise<void> {
-  const path = resolve(workRoot, relativePath)
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, body, "utf8")
-}
-
-async function writeConfig(config: Record<string, unknown>): Promise<void> {
-  await write(
-    "aburi.json",
-    JSON.stringify({
-      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
-      ...config,
-    }),
-  )
-}
-
-async function scan(): Promise<{ exitCode: number; stderr: string }> {
-  const stdout = new MemStream()
-  const stderr = new MemStream()
-  const exitCode = await runCli({
-    argv: ["scan", "--no-timestamp"],
-    cwd: workRoot,
-    stdout,
-    stderr,
-    env: {},
-  })
-  return { exitCode, stderr: `${stderr.text()}${stdout.text()}` }
+async function scanWith(config: Record<string, unknown>) {
+  await writeConfig(workspace.root, config)
+  const { code, stdout, stderr } = await runCliIn(workspace.root, ["scan", "--no-timestamp"])
+  return { code, output: `${stderr}${stdout}` }
 }
 
 async function componentFrameworks(): Promise<unknown> {
-  const ir = JSON.parse(await readFile(resolve(workRoot, "out", IR_JSON_FILENAME), "utf8"))
-  return ir.components[0].frameworks
+  const ir = JSON.parse(
+    await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+  ) as IR
+  return ir.components[0]?.frameworks
 }
 
-const appComponent = (frameworks: string[]) => ({
+const appWith = (frameworks: string[]) => ({
   components: [{ id: "app", roots: ["src"], languages: ["ts"], frameworks }],
 })
 
-describe("a detector id where a plugin ref belongs", () => {
-  it("refuses a language id with exit 2 and names the plugin to write", async () => {
-    await writeConfig({ languages: ["ts"] })
+describe("aburi scan — a detector id where a plugin ref belongs", () => {
+  it.each([
+    [
+      "a language id",
+      { languages: ["ts"] },
+      'Plugin "ts" in "languages" is not a plugin name',
+      'Write "lang-typescript".',
+    ],
+    [
+      "a framework id",
+      { ...TYPESCRIPT, frameworks: ["nestjs"] },
+      'Plugin "nestjs" in "frameworks" is not a plugin name',
+      'Write "framework-nestjs".',
+    ],
+  ])("refuses %s at exit 2, naming the plugin to write", async (_, config, refusal, fix) => {
+    const { code, output } = await scanWith(config)
 
-    const { exitCode, stderr } = await scan()
-
-    expect(exitCode, stderr).toBe(2)
-    expect(stderr).toContain(`Plugin "ts" in "languages" is not a plugin name`)
-    expect(stderr).toContain(`Write "lang-typescript".`)
-  })
-
-  it("refuses a framework id the same way", async () => {
-    await writeConfig({ languages: ["lang-typescript"], frameworks: ["nestjs"] })
-
-    const { exitCode, stderr } = await scan()
-
-    expect(exitCode, stderr).toBe(2)
-    expect(stderr).toContain(`Write "framework-nestjs".`)
+    expect(code, output).toBe(EXIT.INPUT_ERROR)
+    expect(output).toContain(refusal)
+    expect(output).toContain(fix)
   })
 })
 
-describe("a plugin name where a framework id belongs", () => {
-  it("warns, naming the id the loaded plugin provides, and keeps the value", async () => {
-    await writeConfig({
-      languages: ["lang-typescript"],
-      frameworks: ["framework-nestjs"],
-      ...appComponent(["framework-nestjs"]),
-    })
+describe("aburi scan — a plugin name where a framework id belongs", () => {
+  it.each([
+    [
+      "a loaded plugin",
+      { ...TYPESCRIPT, frameworks: ["framework-nestjs"], ...appWith(["framework-nestjs"]) },
+      "framework-nestjs",
+      'Write "nestjs".',
+    ],
+    [
+      "a first-party plugin that is not loaded",
+      { ...TYPESCRIPT, ...appWith(["framework-next"]) },
+      "framework-next",
+      'Write "nextjs".',
+    ],
+  ])("warns about %s, naming the framework id, and keeps the value", async (_, config, value, fix) => {
+    const { code, output } = await scanWith(config)
 
-    const { exitCode, stderr } = await scan()
-
-    expect(exitCode, stderr).toBe(0)
-    expect(stderr).toContain(
-      `Component "app" lists "framework-nestjs" in frameworks, which names a plugin, not a framework`,
+    expect(code, output).toBe(EXIT.SUCCESS)
+    expect(output).toContain(
+      `Component "app" lists "${value}" in frameworks, which names a plugin, not a framework`,
     )
-    expect(stderr).toContain(`Write "nestjs".`)
-    expect(await componentFrameworks()).toEqual(["framework-nestjs"])
+    expect(output).toContain(fix)
+    expect(await componentFrameworks()).toEqual([value])
   })
 
-  it("knows a first-party plugin's framework id when the plugin is not loaded", async () => {
-    await writeConfig({ languages: ["lang-typescript"], ...appComponent(["framework-next"]) })
-
-    const { exitCode, stderr } = await scan()
-
-    expect(exitCode, stderr).toBe(0)
-    expect(stderr).toContain(`Component "app" lists "framework-next"`)
-    expect(stderr).toContain(`Write "nextjs".`)
-    expect(await componentFrameworks()).toEqual(["framework-next"])
-  })
-
-  it("says nothing about framework ids, hyphenated or not provided by any plugin", async () => {
-    await writeConfig({
-      languages: ["lang-typescript"],
+  it("says nothing about framework ids, hyphenated or provided by no plugin", async () => {
+    const { code, output } = await scanWith({
+      ...TYPESCRIPT,
       frameworks: ["framework-nestjs"],
       frameworkHints: [{ name: "acme-rpc", decorators: {} }],
-      ...appComponent(["nestjs", "acme-rpc", "vue"]),
+      ...appWith(["nestjs", "acme-rpc", "vue"]),
     })
 
-    const { exitCode, stderr } = await scan()
-
-    expect(exitCode, stderr).toBe(0)
-    expect(stderr).not.toContain("names a plugin")
+    expect(code, output).toBe(EXIT.SUCCESS)
+    expect(output).not.toContain("names a plugin")
   })
 
   it("says nothing when the plugin's name is also the framework it provides", async () => {
-    await write(
+    await workspace.writeSource(
       "plugins/acme.mjs",
       `export const plugin = {
   manifest: {
@@ -145,15 +116,14 @@ describe("a plugin name where a framework id belongs", () => {
 }
 `,
     )
-    await writeConfig({
-      languages: ["lang-typescript"],
+
+    const { code, output } = await scanWith({
+      ...TYPESCRIPT,
       frameworks: ["./plugins/acme.mjs"],
-      ...appComponent(["acme-rpc"]),
+      ...appWith(["acme-rpc"]),
     })
 
-    const { exitCode, stderr } = await scan()
-
-    expect(stderr).not.toContain("names a plugin")
-    expect(exitCode, stderr).toBe(0)
+    expect(code, output).toBe(EXIT.SUCCESS)
+    expect(output).not.toContain("names a plugin")
   })
 })

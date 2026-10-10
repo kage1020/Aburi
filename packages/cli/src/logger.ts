@@ -5,7 +5,6 @@ const LOG_LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, e
 
 export interface LoggerOptions {
   minimum?: LogLevel
-  /** Sink for a fully formatted line, newline included. Defaults to stderr. */
   write?: (line: string) => void
 }
 

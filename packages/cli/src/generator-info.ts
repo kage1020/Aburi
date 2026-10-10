@@ -28,6 +28,5 @@ function locatePackageJson(): string {
     if (next === dir) break
     dir = next
   }
-  // Fallback: two-levels-up guess.
   return resolve(dirname(here), "..", "package.json")
 }

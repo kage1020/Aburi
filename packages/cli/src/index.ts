@@ -12,12 +12,10 @@ export {
   classifyDiffError,
   type DiffOptions,
   type DiffReport,
-  type DiffSide,
   formatFailOnMessage,
-  type GitRunner,
   runDiff,
-  type WarnFn,
 } from "./commands/diff"
+export type { DiffSide } from "./commands/diff-revisions"
 export {
   type CoverageDoubt,
   type ExplainOptions,
@@ -29,14 +27,9 @@ export {
   type InitReport,
   runInit,
 } from "./commands/init"
-export {
-  type CoverageFault,
-  type PluginNamedFramework,
-  reportScanIncidents,
-  runScan,
-  type ScanOptions,
-  type ScanReport,
-} from "./commands/scan"
+export { runScan, type ScanOptions } from "./commands/scan"
+export { reportScanIncidents } from "./commands/scan-incidents"
+export type { CoverageFault, PluginNamedFramework, ScanReport } from "./commands/scan-report"
 export {
   classifyConfigError,
   loadPinnedConfig,
@@ -58,6 +51,7 @@ export {
   formatTriggered,
   parseFailOn,
 } from "./fail-on"
+export type { GitRunner } from "./git/runner"
 export { readIR } from "./ir-io"
 export { type LoadedPlugins, type LoadPluginsOptions, loadPlugins } from "./plugin-loader"
 export { type RunCliOptions, runCli } from "./run"
@@ -65,3 +59,4 @@ export {
   type DiscoveredVocabItem,
   VOCAB_DISCOVERED_FILENAME,
 } from "./vocab-discovered"
+export type { WarnFn } from "./warn"

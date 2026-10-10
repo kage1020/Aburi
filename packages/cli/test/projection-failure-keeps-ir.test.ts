@@ -1,10 +1,9 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { runScan } from "../src"
-import { CliError } from "../src/errors"
-import { writeTypeScriptWorkspace } from "./fixtures"
+import { errorFrom, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { CliError, IR_JSON_FILENAME, runScan, WORKSPACE_MD_FILENAME } from "../src"
+import { writeTypeScriptWorkspace } from "./workspace"
 
 const FAILURE = "Maximum call stack size exceeded"
 
@@ -25,66 +24,60 @@ vi.mock("@aburi/markdown-projection", async (importOriginal) => {
   }
 })
 
-let scratch = ""
+const workspace = useScratchWorkspace("projection-failure")
 
 beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-projection-failure-"))
-  await writeTypeScriptWorkspace(scratch, "projection-failure-fixture")
+  await writeTypeScriptWorkspace(workspace.root, "projection-failure-fixture")
 })
 
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
-
-async function written(): Promise<string[]> {
-  return readdir(resolve(scratch, "out"))
-}
+const written = () => readdir(resolve(workspace.root, "out"))
 
 describe("a Markdown projection that throws", () => {
   it("leaves the IR when the first page fails, because the IR is written before any page", async () => {
     failing.page = "workspace"
 
-    await expect(runScan({ cwd: scratch })).rejects.toThrow(FAILURE)
+    await expect(runScan({ cwd: workspace.root })).rejects.toThrow(FAILURE)
 
-    expect(await written()).toContain("aburi.ir.json")
-    expect(await written()).not.toContain("workspace.md")
-    const ir = JSON.parse(await readFile(resolve(scratch, "out", "aburi.ir.json"), "utf8"))
+    expect(await written()).toContain(IR_JSON_FILENAME)
+    expect(await written()).not.toContain(WORKSPACE_MD_FILENAME)
+    const ir = JSON.parse(
+      await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+    ) as { components: unknown[] }
     expect(ir.components.length).toBeGreaterThan(0)
   })
 
   it("keeps the pages written before the one that failed", async () => {
     failing.page = "component"
 
-    await expect(runScan({ cwd: scratch })).rejects.toThrow(FAILURE)
+    await expect(runScan({ cwd: workspace.root })).rejects.toThrow(FAILURE)
 
-    expect(await written()).toContain("aburi.ir.json")
-    expect(await written()).toContain("workspace.md")
+    expect(await written()).toEqual(
+      expect.arrayContaining([IR_JSON_FILENAME, WORKSPACE_MD_FILENAME]),
+    )
   })
 
   it.each([
     ["workspace", "the workspace Markdown"],
-    ["component", 'the Markdown for component "'],
+    ["component", 'the Markdown for component "projection-failure-fixture"'],
   ] as const)("reports the %s page's failure as a bug in Aburi, naming the page", async (page, named) => {
     failing.page = page
 
-    const error = await runScan({ cwd: scratch }).catch((thrown: unknown) => thrown)
+    const error = await errorFrom(CliError, () => runScan({ cwd: workspace.root }))
 
-    expect(error).toBeInstanceOf(CliError)
-    expect((error as CliError).code).toBe("runtime-error")
-    expect((error as CliError).message).toContain(`Internal error while rendering ${named}`)
-    expect((error as CliError).message).toContain(FAILURE)
-    expect((error as CliError).message).toContain("This is a bug in Aburi")
+    expect(error.code).toBe("runtime-error")
+    expect(error.message).toContain(`Internal error while rendering ${named}: ${FAILURE}`)
+    expect(error.message).toContain("This is a bug in Aburi")
   })
 
   it("reports the scan's incidents before it ends the command", async () => {
     failing.page = "component"
-    await writeFile(resolve(scratch, "src/broken.ts"), "export const a = (\n", "utf8")
-    const warnings: string[] = []
+    await workspace.writeSource("src/broken.ts", "export const a = (\n")
+    const log = recordingLogger()
 
-    await expect(
-      runScan({ cwd: scratch, incidents: { warn: (m: string) => warnings.push(m) } }),
-    ).rejects.toThrow(FAILURE)
+    await expect(runScan({ cwd: workspace.root, incidents: { warn: log.warn } })).rejects.toThrow(
+      FAILURE,
+    )
 
-    expect(warnings).toContain("⚠ 1 file(s) had recoverable parse errors.")
+    expect(log.warnings).toContain("⚠ 1 file(s) had recoverable parse errors.")
   })
 })

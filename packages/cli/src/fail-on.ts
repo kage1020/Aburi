@@ -22,7 +22,6 @@ export type FailOnToken = FailOnStatusToken | FailOnDeltaAxis
 
 export interface FailOnClause {
   token: FailOnToken
-  /** `null` when the clause is bare (fires on `observed > 0`); the numeric bound otherwise. */
   threshold: number | null
 }
 
@@ -63,7 +62,6 @@ export function parseFailOn(value: string): FailOnClause[] {
     )
   }
   return segments.map((segment, index) => {
-    // Which clause, when there is more than one to choose from.
     const where = segments.length === 1 ? "" : `clause ${index + 1} of ${segments.length}`
     if (segment.length === 0) {
       throw new FailOnParseError(
@@ -80,7 +78,6 @@ export function parseFailOn(value: string): FailOnClause[] {
   })
 }
 
-/** A clause's own fault, before `parseFailOn` says which clause of which value it was. */
 class ClauseError extends Error {}
 
 function parseSingle(segment: string): FailOnClause {

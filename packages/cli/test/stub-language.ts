@@ -1,8 +1,13 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import type { GitRunner } from "../src"
-import { fakeGit } from "./fixtures"
+import { commitAll, initRepository } from "./git"
+import { writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
+/**
+ * A language plugin for `.stub` files whose name decides what happens to them: `bad` fails to
+ * parse, `notree` parses to nothing, `noisy` and `warn` parse with recoverable errors, `boom`
+ * throws in extraction, `odd` emits an undeclared extKind and `twin` two Symbols with one id.
+ */
 export const STUB_PLUGIN = `
 const manifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
@@ -40,6 +45,7 @@ export const plugin = {
   init: async () => {},
   parseFile: async (file) => {
     const tree = { path: file.path }
+    if (file.path.includes("notree")) return { tree: null, errors: [], imports: [] }
     if (file.path.includes("bad")) {
       return {
         tree,
@@ -95,30 +101,28 @@ export const plugin = {
 }
 `
 
-export async function populate(
-  dir: string,
+/** A workspace configured with only the stub plugin, holding `files`, each containing its own name. */
+export async function writeStubWorkspace(
+  directory: string,
   files: readonly string[],
   config: Record<string, unknown> = {},
 ): Promise<void> {
-  await mkdir(dir, { recursive: true })
-  await writeFile(
-    resolve(dir, "package.json"),
-    JSON.stringify({ name: "scan-incidents-fixture", private: true }),
-    "utf8",
-  )
-  await writeFile(
-    resolve(dir, "aburi.json"),
-    JSON.stringify({
-      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
-      languages: ["./lang-stub.mjs"],
-      ...config,
-    }),
-    "utf8",
-  )
-  await writeFile(resolve(dir, "lang-stub.mjs"), STUB_PLUGIN, "utf8")
-  for (const file of files) await writeFile(resolve(dir, file), file, "utf8")
+  await writePackageJson(directory, { name: "stub-fixture", private: true })
+  await writeConfig(directory, { languages: ["./lang-stub.mjs"], ...config })
+  await writeFileAt(directory, "lang-stub.mjs", STUB_PLUGIN)
+  for (const file of files) await writeFileAt(directory, file, file)
 }
 
-export function gitWith(baseFiles: readonly string[]): GitRunner {
-  return fakeGit({ onWorktreeAdd: (dir) => populate(dir, baseFiles) }).runner
+/** A repository on `main` whose one commit holds `base`, with the working tree changed to `head`. */
+export async function writeStubRepository(
+  directory: string,
+  files: { base: readonly string[]; head: readonly string[] },
+): Promise<void> {
+  await writeStubWorkspace(directory, files.base)
+  await initRepository(directory)
+  await commitAll(directory, "base")
+  for (const file of files.base) {
+    if (!files.head.includes(file)) await rm(resolve(directory, file))
+  }
+  for (const file of files.head) await writeFile(resolve(directory, file), file, "utf8")
 }
