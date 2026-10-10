@@ -559,7 +559,7 @@ When scanning the base ref for `aburi diff <base>..<head>`, Aburi **shares the h
 Required setup when using `aburi diff` in CI:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with:
     fetch-depth: 0    # full history (aburi diff fails on shallow clones)
 ```

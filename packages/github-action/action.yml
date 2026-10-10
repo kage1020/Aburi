@@ -174,13 +174,13 @@ runs:
 
     - name: "Setup pnpm"
       if: inputs.cli == 'dlx'
-      uses: "pnpm/action-setup@v4"
+      uses: "pnpm/action-setup@v6"
       with:
         version: ${{ inputs.pnpm-version }}
 
     - name: "Setup Node.js"
       if: inputs.cli == 'dlx'
-      uses: "actions/setup-node@v4"
+      uses: "actions/setup-node@v7"
       with:
         node-version: ${{ inputs.node-version }}
 

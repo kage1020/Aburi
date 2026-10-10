@@ -20,7 +20,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # Moves with every 0.x release, breaking input changes included. Pin the full
@@ -110,13 +110,13 @@ prescribes. Install the workspace first (and build it, if the CLI comes from sou
 installed the workspace is the one that should run it.
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with:
     fetch-depth: 0
-- uses: pnpm/action-setup@v4
+- uses: pnpm/action-setup@v6
   with:
     version: 10
-- uses: actions/setup-node@v4
+- uses: actions/setup-node@v7
   with:
     node-version: 24
     cache: pnpm
@@ -232,7 +232,7 @@ jobs:
           && steps.aburi.outputs.comment-id == ''
           && (steps.aburi.outputs.cli-exit-code == '0' || steps.aburi.outputs.cli-exit-code == '3')
         run: echo "posted by the companion" > out/comment-pending
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && hashFiles('out/diff.md') != ''
         with:
           name: aburi-diff
@@ -240,7 +240,7 @@ jobs:
 ```
 
 The companion runs on `workflow_run`, checks out **this repository** for the upsert script — not
-yours; a plain `actions/checkout@v4` would give you your own tree and the last step would fail on
+yours; a plain `actions/checkout@v7` would give you your own tree and the last step would fail on
 a module that is not there — downloads the artifact from the run that triggered it, resolves the
 pull request **from the event** rather than from the artifact, and posts:
 
@@ -266,7 +266,7 @@ jobs:
       # tracking a branch. `v0` follows the newest `0.x` release of the action, which is
       # what keeps this example from naming a version that goes stale; `v<x.y.z>` or a
       # commit SHA holds exact bytes instead — see Pinning above, the same trade as `uses:`.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: kage1020/Aburi
           ref: v0
