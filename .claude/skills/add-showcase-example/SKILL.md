@@ -35,8 +35,9 @@ The slug is the URL (`/showcase/<slug>`); pages are listed in slug order. The so
 4. Write the README from what the report really says. Never claim the report shows something it does not;
    if Aburi misses part of the change, either rework the example or leave that part out, and tell the user
    about the gap.
-5. `pnpm --filter @aburi/examples test` renders every example; the renderer refuses an example whose change
-   the report does not see.
+5. `pnpm --filter @aburi/examples test` renders every example. The renderer refuses an example whose
+   change the report does not see, and one where `aburi diff` exits non-zero (a scan that skipped or
+   failed files); the error names the example and carries the CLI's warnings.
 6. Preview: `pnpm --filter @aburi/docs dev` (it builds the packages the site depends on first).
 
 ## The plugins an example can name

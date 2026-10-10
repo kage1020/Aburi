@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process"
-import { cp, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises"
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { promisify } from "node:util"
-import { runDiff } from "@aburi/cli"
+import { EXIT, runDiff } from "@aburi/cli"
 import type { DiffResult } from "@aburi/types"
 
 const execFileAsync = promisify(execFile)
@@ -25,10 +25,21 @@ export interface Showcase {
  * renders the README, the config, the source change and the report as one page.
  */
 export async function renderExample(dir: string): Promise<Showcase> {
+  const slug = basename(dir)
+  try {
+    return await render(dir, slug)
+  } catch (error) {
+    throw new Error(`${slug}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    })
+  }
+}
+
+async function render(dir: string, slug: string): Promise<Showcase> {
   const { title, narrative } = parseReadme(await readFile(join(dir, "README.md"), "utf8"))
   const config = await readFile(join(dir, CONFIG_FILENAME), "utf8")
 
-  const scratch = await mkdtemp(join(tmpdir(), "aburi-showcase-"))
+  const scratch = await realpath(await mkdtemp(join(tmpdir(), "aburi-showcase-")))
   try {
     const repo = join(scratch, "repo")
     await mkdir(repo)
@@ -38,7 +49,7 @@ export async function renderExample(dir: string): Promise<Showcase> {
     const sourceDiff = await git(repo, ["diff", "--no-color", "--no-ext-diff", "HEAD~1", "HEAD"])
     const report = await diffReport(repo, join(scratch, "out"))
     return {
-      slug: basename(dir),
+      slug,
       title,
       summary: (narrative.split(/\n\s*\n/)[0] ?? "").replace(/\s+/g, " ").trim(),
       page: [
@@ -78,20 +89,28 @@ async function commitSide(repo: string, dir: string, side: "before" | "after"): 
 }
 
 async function diffReport(repo: string, outputDir: string): Promise<string> {
+  const warnings: string[] = []
   const report = await runDiff({
     cwd: repo,
     refSpec: "HEAD~1..HEAD",
     format: "both",
     outputDir,
-    warn: () => {},
+    warn: (message) => {
+      warnings.push(message)
+    },
   })
+  if (report.exitCode !== EXIT.SUCCESS) {
+    throw new Error(
+      [`aburi diff exited ${report.exitCode} (${report.summaryLine})`, ...warnings].join("\n"),
+    )
+  }
   if (report.diffJsonPath === null || report.diffMdPath === null) {
-    throw new Error(`aburi diff wrote no report for this example: ${report.summaryLine}`)
+    throw new Error(`aburi diff wrote no report: ${report.summaryLine}`)
   }
   const { summary } = JSON.parse(await readFile(report.diffJsonPath, "utf8")) as DiffResult
   const { added, removed, changed, moved, movedChanged } = summary
   if (added + removed + changed + moved + movedChanged === 0) {
-    throw new Error(`aburi diff reports no change for this example (${report.summaryLine})`)
+    throw new Error(`aburi diff reports no change (${report.summaryLine})`)
   }
   return lf(await readFile(report.diffMdPath, "utf8")).trim()
 }

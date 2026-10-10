@@ -4,10 +4,12 @@ import { renderExample } from "../src/render"
 
 const workspace = useScratchWorkspace("showcase")
 
-const CONFIG = `${JSON.stringify({ languages: ["@aburi/lang-typescript"] }, null, 2)}\n`
+const LANGUAGES = { languages: ["@aburi/lang-typescript"] }
+const CONFIG = `${JSON.stringify(LANGUAGES, null, 2)}\n`
 
 async function writeExample(files: {
   readme?: string
+  config?: string
   before: Record<string, string>
   after: Record<string, string>
 }): Promise<string> {
@@ -15,7 +17,7 @@ async function writeExample(files: {
     "example/README.md",
     files.readme ?? "# Guard removed\n\nThe price check stops refusing negative totals.\n",
   )
-  await workspace.writeSource("example/aburi.json", CONFIG)
+  await workspace.writeSource("example/aburi.json", files.config ?? CONFIG)
   for (const [path, content] of Object.entries(files.before)) {
     await workspace.writeSource(`example/before/${path}`, content)
   }
@@ -104,6 +106,27 @@ describe("renderExample", () => {
     })
 
     await expect(renderExample(dir)).rejects.toThrow(/reports no change/)
+  })
+
+  it("refuses an example whose scans fell short, even when the report shows a change", async () => {
+    const oversized = `export const table = ${JSON.stringify("x".repeat(2048))}
+`
+    const dir = await writeExample({
+      config: JSON.stringify({ ...LANGUAGES, maxFileSizeBytes: 1024, minParsedFileRatio: 1 }),
+      before: { "src/price.ts": GUARDED, "src/table.ts": oversized },
+      after: { "src/price.ts": UNGUARDED, "src/table.ts": oversized },
+    })
+
+    await expect(renderExample(dir)).rejects.toThrow(/example: aburi diff exited 3/)
+  })
+
+  it("names the example in every refusal", async () => {
+    const dir = await writeExample({
+      before: { "src/price.ts": GUARDED },
+      after: { "src/price.ts": GUARDED },
+    })
+
+    await expect(renderExample(dir)).rejects.toThrow(/^example: /)
   })
 
   it("renders the same page every time", async () => {
