@@ -14,13 +14,17 @@ function listenerCounts(): number[] {
 describe("cleanUpOnFatalSignal", () => {
   it.each(
     FATAL_SIGNALS,
-  )("cleans up on %s, stops listening, then re-raises the same signal", (signal) => {
+  )("stops listening on %s, cleans up, then re-raises the same signal", (signal) => {
     const before = listenerCounts()
     const events: string[] = []
+    let atCleanup: number[] = []
     let atReraise: number[] = []
     releases.push(
       cleanUpOnFatalSignal(
-        () => events.push("cleanup"),
+        () => {
+          events.push("cleanup")
+          atCleanup = listenerCounts()
+        },
         (raised) => {
           events.push(`reraise:${raised}`)
           atReraise = listenerCounts()
@@ -32,6 +36,7 @@ describe("cleanUpOnFatalSignal", () => {
     process.emit(signal)
 
     expect(events).toEqual(["cleanup", `reraise:${signal}`])
+    expect(atCleanup).toEqual(before)
     expect(atReraise).toEqual(before)
     expect(listenerCounts()).toEqual(before)
   })

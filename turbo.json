@@ -25,6 +25,12 @@
       "outputs": [],
       "outputLogs": "errors-only"
     },
+    "@aburi/cli#test": {
+      "dependsOn": ["^build", "codegen", "build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**", "$TURBO_ROOT$/vitest.shared.ts"],
+      "outputs": [],
+      "outputLogs": "errors-only"
+    },
     "@aburi/lang-typescript#test": {
       "dependsOn": ["^build", "@aburi/lang-typescript#build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**", "$TURBO_ROOT$/vitest.shared.ts"],

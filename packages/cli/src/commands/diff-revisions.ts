@@ -105,6 +105,7 @@ export async function scanRevisions(
     const headIR = await readIR(headReport.irPath)
     return { baseIR, headIR, gitRenames, scans: { base: baseReport, head: headReport } }
   } finally {
+    // Failures here only warn: a throw from `finally` would replace the error that ended the scan.
     if (worktreeAdded) {
       try {
         await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
@@ -126,6 +127,7 @@ export async function scanRevisions(
 }
 
 function removeCheckoutSynchronously(cwd: string, worktreeDir: string, tempParent: string): void {
+  // Read first, so a checkout the `finally` already removed is not reported as a failed remove.
   const hadCheckout = existsSync(worktreeDir)
   const removal = spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
     cwd,
@@ -134,6 +136,7 @@ function removeCheckoutSynchronously(cwd: string, worktreeDir: string, tempParen
   })
   if (hadCheckout && (removal.error !== undefined || removal.status !== 0)) {
     const why = removal.error?.message ?? `git exited ${removal.status ?? removal.signal}`
+    // No `git worktree prune`: it would also remove prunable worktrees other people or tools made.
     reportFromSignal(
       `⚠ git worktree cleanup failed for "${worktreeDir}"; ${why}. Consider running \`git worktree prune\`.`,
     )
@@ -148,9 +151,12 @@ function removeCheckoutSynchronously(cwd: string, worktreeDir: string, tempParen
 }
 
 function reportFromSignal(message: string): void {
+  // Not `warn`: its asynchronous write to a pipe is not flushed before the signal is re-raised.
   try {
     writeSync(2, `${message}\n`)
-  } catch {}
+  } catch {
+    // stderr may have gone with the terminal (SIGHUP); a throw would skip the rest of the cleanup.
+  }
 }
 
 function baseWorktreeLeaf(headWorkspaceRoot: string): string {

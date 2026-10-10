@@ -1,15 +1,13 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
-import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { fileURLToPath } from "node:url"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { gitTestEnv } from "../git"
 
-const TSX_LOADER = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href
-const CLI_ENTRY = fileURLToPath(new URL("../../src/bin/aburi.ts", import.meta.url))
+const CLI_BIN = fileURLToPath(new URL("../../dist/bin/aburi.mjs", import.meta.url))
 
 const STALLING_PLUGIN = `
 import { writeFileSync } from "node:fs"
@@ -89,6 +87,12 @@ afterEach(async () => {
 })
 
 describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the base scan", () => {
+  beforeAll(() => {
+    if (!existsSync(CLI_BIN)) {
+      throw new Error(`${CLI_BIN} is missing: build @aburi/cli before running this file.`)
+    }
+  })
+
   it.each([
     { signal: "SIGINT", decoyEnv: false },
     { signal: "SIGTERM", decoyEnv: false },
@@ -101,18 +105,14 @@ describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the ba
     const ready = join(repo, "ready")
     const decoyIndex = join(decoy, ".git", "index")
     const decoyIndexBefore = await readFile(decoyIndex)
-    const running = spawn(
-      process.execPath,
-      ["--import", TSX_LOADER, CLI_ENTRY, "diff", "HEAD~1..HEAD"],
-      {
-        cwd: repo,
-        env: gitTestEnv(repo, {
-          ABURI_TEST_READY_FILE: ready,
-          ...(decoyEnv ? { GIT_INDEX_FILE: decoyIndex, GIT_PREFIX: "src/" } : {}),
-        }),
-        stdio: "ignore",
-      },
-    )
+    const running = spawn(process.execPath, [CLI_BIN, "diff", "HEAD~1..HEAD"], {
+      cwd: repo,
+      env: gitTestEnv(repo, {
+        ABURI_TEST_READY_FILE: ready,
+        ...(decoyEnv ? { GIT_INDEX_FILE: decoyIndex, GIT_PREFIX: "src/" } : {}),
+      }),
+      stdio: "ignore",
+    })
     child = running
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((done) =>
       running.on("exit", (code, signalCode) => done({ code, signal: signalCode })),

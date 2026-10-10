@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, rm } from "node:fs/promises"
+import { cp, mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -29,7 +29,7 @@ export function useFixtureCheckout(
   let root = ""
 
   const setup = async () => {
-    parent = await mkdtemp(join(tmpdir(), "aburi-e2e-"))
+    parent = await realpath(await mkdtemp(join(tmpdir(), "aburi-e2e-")))
     root = join(parent, name)
     await mkdir(root, { recursive: true })
     await cp(fixtureRoot(name), root, { recursive: true })

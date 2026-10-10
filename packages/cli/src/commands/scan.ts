@@ -190,7 +190,9 @@ function reportIncidents(report: ScanReport, incidents: ScanOptions["incidents"]
   if (incidents === undefined) return
   try {
     reportScanIncidents(report, incidents.warn, incidents.label ?? null)
-  } catch {}
+  } catch {
+    // The exit code must not depend on stderr surviving: `aburi scan 2>&1 | head -1` closes it.
+  }
 }
 
 function describeParseErrors(errors: readonly ParseError[]): string {

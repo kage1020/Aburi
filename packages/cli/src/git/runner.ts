@@ -32,6 +32,7 @@ export const defaultGitRunner: GitRunner = {
       })
       child.on("error", rejectPromise)
       child.on("close", (code, signal) => {
+        // Decoded once: a multi-byte character split across two chunks would become U+FFFD.
         const stdout = Buffer.concat(stdoutChunks).toString("utf8")
         const stderr = Buffer.concat(stderrChunks).toString("utf8")
         if (code === 0) return resolvePromise({ stdout, stderr })

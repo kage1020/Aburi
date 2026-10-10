@@ -159,4 +159,35 @@ describe("aburi diff — a file renamed between the revisions", () => {
     expect(report.exitCode).toBe(EXIT.SUCCESS)
     expect(log.warnings).toEqual([])
   })
+
+  it("passes git's rename-limit warning to the caller's warn", async () => {
+    const root = workspace.root
+    await initRepository(root)
+    await writePackageJson(root, { name: "demo", private: true })
+    await writeConfig(root, TYPESCRIPT)
+    for (const name of ["a", "b", "c"]) {
+      await writeFileAt(root, `src/${name}.ts`, `export const ${name} = 1\n// one\n// two\n`)
+    }
+    await commitAll(root, "base")
+    for (const name of ["a", "b", "c"]) {
+      await git(["mv", `src/${name}.ts`, `src/${name}2.ts`], root)
+      await writeFileAt(root, `src/${name}2.ts`, `export const ${name} = 1\n// one\n// three\n`)
+    }
+    await commitAll(root, "head")
+    await git(["config", "diff.renameLimit", "1"], root)
+    const log = recordingLogger()
+
+    await runDiff({
+      cwd: root,
+      refSpec: "HEAD~1..HEAD",
+      outputDir: resolve(root, "out"),
+      warn: log.warn,
+    })
+
+    expect(log.warnings).toContainEqual(
+      expect.stringMatching(
+        /git reported while collecting renames for HEAD~1\.\.HEAD: .*rename detection was skipped/,
+      ),
+    )
+  })
 })

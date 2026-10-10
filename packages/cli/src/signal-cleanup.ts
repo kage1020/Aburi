@@ -24,6 +24,7 @@ export function cleanUpOnFatalSignal(
 ): () => void {
   const listeners = FATAL_SIGNALS.map((signal) => {
     const listener = () => {
+      // Released first, so a second Ctrl-C during a slow cleanup ends the process at once.
       release()
       try {
         cleanup()
