@@ -135,23 +135,14 @@ runs:
           dlx|workspace) : ;;
           *) echo "::error::cli must be one of: dlx | workspace (got '$CLI')." >&2; exit 2 ;;
         esac
-        # Checked rather than compared: every other value of `comment` reads as false further down,
-        # so `comment: yes` would run green, post nothing, and slip past the format check above
-        # without ever saying why.
         case "$COMMENT" in
           true|false) : ;;
           *) echo "::error::comment must be true or false (got '$COMMENT')." >&2; exit 2 ;;
         esac
-        # `scripts/resolve-max-bytes.mjs` rejects the same values, and is where the rule is
-        # tested. Repeated here so a typo is caught before the toolchain is installed and, under
-        # `cli: dlx`, before a package is fetched — not because the later check might miss it.
-        # `0` is the documented "no cap" spelling, so it passes.
         if [ -n "$MAX_BYTES" ] && ! printf '%s' "$MAX_BYTES" | grep -Eq '^(0|[1-9][0-9]*)$'; then
           echo "::error::max-bytes must be a non-negative integer, or empty (got '$MAX_BYTES')." >&2
           exit 2
         fi
-        # The CLI reads `--output-dir ""` as the directory it runs in, while the report paths
-        # would be looked for elsewhere; an empty value has no one meaning, so it is refused.
         if [ -z "$OUTPUT_DIR" ]; then
           echo "::error::output-dir must not be empty." >&2
           exit 2
@@ -247,20 +238,8 @@ runs:
         status=$?
         set -e
 
-        # Preserve the CLI's own exit code:
-        #   0 = success, 1 = runtime error, 2 = input error, 3 = --fail-on gate or plugin error.
-        # See `packages/cli/src/exit-codes.ts` for the canonical mapping.
-        # We propagate `status` instead of failing here so the subsequent comment step
-        # can still post the diff (which is especially valuable when status=3 — a
-        # triggered gate is precisely what reviewers need to see on the PR). Written before the
-        # report paths are worked out, so a failure there cannot lose the gate's verdict.
         echo "cli-exit-code=$status" >> "$GITHUB_OUTPUT"
 
-        # Absolute, and only for a file this run wrote: `scripts/report-paths.mjs` says why, and
-        # `test/report-paths.test.ts` runs it. An empty `diff-md-path` is what keeps the comment
-        # step from posting after a plugin error, which exits 3 like a tripped gate. Same shape as
-        # the two scripts above: captured, and both paths written empty if the script fails, so
-        # `$GITHUB_OUTPUT` never holds half of its answer.
         set +e
         paths=$(node "$GITHUB_ACTION_PATH/scripts/report-paths.mjs")
         paths_status=$?
@@ -274,15 +253,6 @@ runs:
 
     - name: "Aburi: upsert PR comment"
       id: post-comment
-      # Only post when the CLI actually produced the Markdown file. That means:
-      #   - `comment: true` (opt-in),
-      #   - this run wrote `diff.md` (diff-md-path is non-empty: `format` included markdown,
-      #     and the CLI got as far as writing it — a plugin error's exit 3 does not),
-      #   - the CLI exited either clean (0) or with a --fail-on gate trip (3).
-      # We deliberately skip on exit=1 (runtime error) and exit=2 (input error)
-      # because the diff artefact will be missing or partial, and running the
-      # comment step against a non-existent file would surface as an ENOENT that
-      # obscures the CLI's real failure in the workflow log.
       if: >-
         ${{ inputs.comment == 'true'
             && steps.diff.outputs.diff-md-path != ''
@@ -291,18 +261,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-        # The upsert is a committed script, not a heredoc, because a second caller runs the same
-        # one: the `workflow_run` companion that posts for a pull request whose own token is
-        # read-only (`docs/design/github-action.md`). It runs on the caller's Node — the same
-        # one that just ran the CLI — and needs nothing installed.
-        # Absolute already (`scripts/report-paths.mjs`), so it reads the same from this step's
-        # directory as from the one the CLI ran in.
         MARKDOWN_PATH: ${{ steps.diff.outputs.diff-md-path }}
-        # The same pair `actions/github-script` calls `context.issue.number`, spelled out because a
-        # manifest has no such helper: the pull request on a `pull_request` / `pull_request_target`
-        # event, and the issue on an `issue_comment` one, which is how a slash-command workflow
-        # passing its own `refspec` used to reach its pull request. Empty on any other event, and
-        # the script exits 2 saying so.
         PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
       run: node "$GITHUB_ACTION_PATH/scripts/upsert-comment.mjs"
 

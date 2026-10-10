@@ -318,10 +318,8 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
     noun: "(from, to, via) triple",
     show: (parts) => `(${parts.join(", ")})`,
     consequence:
-      "direction and effect are deliberately outside Dependency identity " +
-      "(diff-algorithm.md), so a " +
-      "repeat surfaces as an added + removed pair no reader can tell from a real flip " +
-      "(ir-schema.md #13)",
+      "direction and effect are deliberately outside Dependency identity, so a " +
+      "repeat surfaces as an added + removed pair no reader can tell from a real flip",
   },
 ]
 
