@@ -80,7 +80,6 @@ interface ListedComment extends StoredComment {
   readonly author: { readonly login: string; readonly isBot: boolean }
 }
 
-/** What every call to the API needs: where it is, who is asking, and how to reach it. */
 interface ApiContext {
   readonly ref: PullRequestRef
   readonly apiBase: string
@@ -149,7 +148,6 @@ async function findMarkerComment(api: ApiContext, marker: string): Promise<Liste
   }
 }
 
-/** Create (`POST`) or update (`PATCH`) a comment; the two differ only in method and path. */
 async function writeComment(
   api: ApiContext,
   method: "POST" | "PATCH",
@@ -194,7 +192,6 @@ async function githubError(operation: string, response: Response): Promise<Error
   )
 }
 
-/** A comment the list endpoint returned: {@link parseComment}, plus the author it must name. */
 function parseListedComment(row: unknown): ListedComment | null {
   const comment = parseComment(row)
   if (comment === null) return null

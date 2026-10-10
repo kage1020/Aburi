@@ -1,133 +1,81 @@
-import { execFile } from "node:child_process"
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
-import { promisify } from "node:util"
-import { afterAll, describe, expect, it } from "vitest"
+import { join } from "node:path"
+import { useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
 import { ABURI_COMMENT_BODY_MAX_BYTES } from "../src/comment"
+import { runScript } from "./fixtures/scripts"
 
-const execFileAsync = promisify(execFile)
+const scratch = useScratchWorkspace("resolve-max-bytes")
 
-const SCRIPT = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "scripts",
-  "resolve-max-bytes.mjs",
-)
-
-interface RunResult {
-  readonly status: number
-  readonly stdout: string
-  readonly stderr: string
+/** A CLI runner (`node <script>`) whose `diff --help` runs `body`. */
+async function fakeCli(body: string): Promise<string[]> {
+  await scratch.writeSource("cli.mjs", body)
+  return [process.execPath, join(scratch.root, "cli.mjs")]
 }
 
-const workspaces: string[] = []
-
-afterAll(async () => {
-  await Promise.all(workspaces.map((dir) => rm(dir, { recursive: true, force: true })))
-})
-
-async function fakeCli(body: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "aburi-fake-cli-"))
-  workspaces.push(dir)
-  const path = join(dir, "cli.mjs")
-  await writeFile(path, body)
-  await chmod(path, 0o755)
-  return path
-}
-
-/** A CLI whose `diff --help` lists the flag: what a current @aburi/cli answers. */
-function currentCli(): Promise<string> {
+/** What a current @aburi/cli answers: its `diff --help` lists the flag. */
+function currentCli(): Promise<string[]> {
   return fakeCli(
     `process.stdout.write("Usage: aburi diff\\n  --fail-on <spec>\\n  --max-bytes <n>  cap diff.md\\n")\n`,
   )
 }
 
-/** A CLI from before the flag existed — the arrangement `version` pinning makes routine. */
-function olderCli(): Promise<string> {
-  return fakeCli(`process.stdout.write("Usage: aburi diff\\n  --fail-on <spec>\\n")\n`)
-}
-
-/** A CLI that cannot run at all: a registry failure, a bad `version`, a crash at startup. */
-function brokenCli(): Promise<string> {
-  return fakeCli(`process.stderr.write("ERR_PNPM_NO_MATCHING_VERSION\\n")\nprocess.exit(1)\n`)
-}
-
-async function run(
-  env: Record<string, string>,
-  runner: readonly string[] = [],
-): Promise<RunResult> {
-  const spawnEnv: Record<string, string> = { PATH: process.env.PATH ?? "", ...env }
-  try {
-    const done = await execFileAsync(process.execPath, [SCRIPT, ...runner], { env: spawnEnv })
-    return { status: 0, stdout: done.stdout, stderr: done.stderr }
-  } catch (error) {
-    const failure = error as { code?: number; stdout?: string; stderr?: string }
-    return {
-      status: failure.code ?? -1,
-      stdout: failure.stdout ?? "",
-      stderr: failure.stderr ?? "",
-    }
-  }
+function run(env: Record<string, string>, runner: readonly string[] = []) {
+  return runScript("resolve-max-bytes.mjs", { env, args: runner })
 }
 
 describe("resolve-max-bytes.mjs", () => {
   it("defaults to what a comment body can hold, once the CLI says it can take it", async () => {
-    const cli = await currentCli()
-    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, [process.execPath, cli])
-    expect(result.status).toBe(0)
-    expect(result.stdout).toBe(String(ABURI_COMMENT_BODY_MAX_BYTES))
-    expect(result.stderr).toBe("")
+    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, await currentCli())
+    expect(result).toEqual({ status: 0, stdout: String(ABURI_COMMENT_BODY_MAX_BYTES), stderr: "" })
   })
 
   it("passes a caller's own budget through", async () => {
-    const cli = await currentCli()
-    const result = await run({ MAX_BYTES: "4000", FORMAT: "both" }, [process.execPath, cli])
-    expect(result.status).toBe(0)
-    expect(result.stdout).toBe("4000")
+    const result = await run({ MAX_BYTES: "4000", FORMAT: "both" }, await currentCli())
+    expect(result).toEqual({ status: 0, stdout: "4000", stderr: "" })
   })
 
-  it("takes `0` as no cap, without probing anything", async () => {
+  it.each([
+    ["`0` as no cap", { MAX_BYTES: "0", FORMAT: "both" }],
+    [
+      "`format: json`, which writes no Markdown, as nothing to cap",
+      { MAX_BYTES: "", FORMAT: "json" },
+    ],
+  ])("takes %s without probing anything", async (_, env) => {
     // No runner at all: reaching the probe would be an error, which is the assertion.
-    const result = await run({ MAX_BYTES: "0", FORMAT: "both" })
-    expect(result.status).toBe(0)
-    expect(result.stdout).toBe("")
-    expect(result.stderr).toBe("")
+    expect(await run(env)).toEqual({ status: 0, stdout: "", stderr: "" })
   })
 
-  it("caps nothing under `format: json`, which writes no Markdown", async () => {
-    const result = await run({ MAX_BYTES: "", FORMAT: "json" })
-    expect(result.status).toBe(0)
+  it.each([
+    "64kb",
+    "-1",
+    "1.5",
+    " 4000",
+    "00",
+  ])("is exit 2 on %j, which is not a byte count", async (value) => {
+    const result = await run({ MAX_BYTES: value, FORMAT: "both" }, [process.execPath])
+    expect(result.status).toBe(2)
+    expect(result.stderr).toMatch(/^::error::max-bytes must be a non-negative integer/)
     expect(result.stdout).toBe("")
-    expect(result.stderr).toBe("")
-  })
-
-  it("is exit 2 on a value that is not a byte count", async () => {
-    for (const value of ["64kb", "-1", "1.5", " 4000", "00"]) {
-      const result = await run({ MAX_BYTES: value, FORMAT: "both" }, [process.execPath])
-      expect(result.status, `accepted ${JSON.stringify(value)}`).toBe(2)
-      expect(result.stderr).toContain("::error::")
-      expect(result.stderr).toContain("max-bytes must be a non-negative integer")
-      expect(result.stdout).toBe("")
-    }
   })
 
   it("renders uncapped, with a warning naming both upgrade routes, against an older CLI", async () => {
-    const cli = await olderCli()
-    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, [process.execPath, cli])
+    const older = await fakeCli(
+      `process.stdout.write("Usage: aburi diff\\n  --fail-on <spec>\\n")\n`,
+    )
+    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, older)
     expect(result.status).toBe(0)
     expect(result.stdout).toBe("")
-    expect(result.stderr).toContain("::warning::")
-    expect(result.stderr).toContain("has no --max-bytes")
+    expect(result.stderr).toMatch(/^::warning::This @aburi\/cli has no --max-bytes/)
     // `version` is meaningless under `cli: workspace`, where the CLI is the caller's own.
     expect(result.stderr).toContain("'version' input")
     expect(result.stderr).toContain("cli: workspace")
   })
 
   it("does not blame the CLI for a probe that could not run", async () => {
-    const cli = await brokenCli()
-    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, [process.execPath, cli])
+    const broken = await fakeCli(
+      `process.stderr.write("ERR_PNPM_NO_MATCHING_VERSION\\n")\nprocess.exit(1)\n`,
+    )
+    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, broken)
     expect(result.status).toBe(0)
     expect(result.stdout).toBe("")
     expect(result.stderr).toContain("Could not ask the CLI whether it supports --max-bytes")
@@ -135,18 +83,14 @@ describe("resolve-max-bytes.mjs", () => {
     expect(result.stderr).not.toContain("has no --max-bytes")
   })
 
-  it("matches the flag however long the help text is", async () => {
-    const cli = await fakeCli(
+  it.each([
+    [
+      "however long the help text is",
       `process.stdout.write("  --max-bytes <n>\\n" + "x".repeat(2_000_000) + "\\n")\n`,
-    )
-    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, [process.execPath, cli])
-    expect(result.status).toBe(0)
-    expect(result.stdout).toBe(String(ABURI_COMMENT_BODY_MAX_BYTES))
-  })
-
-  it("finds the flag in help text a CLI writes to stderr", async () => {
-    const cli = await fakeCli(`process.stderr.write("  --max-bytes <n>  cap diff.md\\n")\n`)
-    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, [process.execPath, cli])
+    ],
+    ["in help text a CLI writes to stderr", `process.stderr.write("  --max-bytes <n>\\n")\n`],
+  ])("finds the flag %s", async (_, body) => {
+    const result = await run({ MAX_BYTES: "", FORMAT: "both" }, await fakeCli(body))
     expect(result.status).toBe(0)
     expect(result.stdout).toBe(String(ABURI_COMMENT_BODY_MAX_BYTES))
   })

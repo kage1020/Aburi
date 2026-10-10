@@ -198,7 +198,7 @@ async function main() {
   if (size > MAX_BYTES) {
     fail(
       INPUT_ERROR,
-      `${context.markdownPath} is ${size} bytes with the marker, over GitHub's ${MAX_BYTES}-byte comment limit; posting it would fail with a 422. Re-run the diff with a smaller --max-bytes (markdown-projection.md) and post that.`,
+      `${context.markdownPath} is ${size} bytes with the marker, over GitHub's ${MAX_BYTES}-byte comment limit; posting it would fail with a 422. Re-run the diff with a smaller --max-bytes and post that.`,
     )
     return
   }
