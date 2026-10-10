@@ -79,7 +79,7 @@ describe("runFilePipeline — list fields leave in line order", () => {
     expect(read(symbols[0] as IRSymbol)).toEqual(expected)
   })
 
-  it("orders calls on one line by target", async () => {
+  it("orders calls on one line by target, not by where the source wrote them", async () => {
     const { symbols } = await extractOneSymbol({
       body: {
         rules: [],
