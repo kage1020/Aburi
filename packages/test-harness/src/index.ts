@@ -1,4 +1,4 @@
-import { type ScanInput, type ScanResult, scan } from "@aburi/core"
+import { CLASSIFY_TIMEOUT_MAX_MS, type ScanInput, type ScanResult, scan } from "@aburi/core"
 import { buildDiff } from "@aburi/diff"
 import { VocabRegistry } from "@aburi/plugin-registry"
 import type { ScratchWorkspace } from "@aburi/test-support"
@@ -25,7 +25,11 @@ export interface PluginLineup {
 /** The parts of `ScanInput` a suite occasionally sets beyond plugins and config. */
 export type ScanExtras = Pick<ScanInput, "components" | "logger" | "lspServerFactory">
 
-/** `scan` over `workspaceRoot` with `lineup`, every plugin's manifest registered first. */
+/**
+ * `scan` over `workspaceRoot` with `lineup`, every plugin's manifest registered first. Classification
+ * gets the ceiling budget unless `config` sets one: the 50 ms default is overrun by the first
+ * classification in a process on a slow CI runner, which drops a correct effect.
+ */
 export async function scanWith(
   workspaceRoot: string,
   lineup: PluginLineup,
@@ -39,7 +43,15 @@ export async function scanWith(
   const registry = new VocabRegistry()
   for (const plugin of [...languages, ...frameworks, ...effects]) registry.register(plugin.manifest)
 
-  return scan({ workspaceRoot, config, languages, frameworks, effects, registry, ...extras })
+  return scan({
+    workspaceRoot,
+    config: { classifyTimeoutMs: CLASSIFY_TIMEOUT_MAX_MS, ...config },
+    languages,
+    frameworks,
+    effects,
+    registry,
+    ...extras,
+  })
 }
 
 /** `buildDiff` between two IRs under the refs `base` and `head`. */
