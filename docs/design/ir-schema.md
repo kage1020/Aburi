@@ -76,7 +76,7 @@ Most of the table is convention that the schema cannot express, and the rows mar
 
 **Why the schema does not use `"default": null`.** JSON Schema's `default` is an annotation; it does not participate in validation. Writing it would look like a declaration that absence means `null` while no validator treats it that way. The rule lives here and in each property's `description` instead.
 
-**Adding an optional field to v1** means adding a row to the table above and stating the class in the property's `description` in `schema/aburi.ir.v1.json`. An optional property with no `description` has not declared its class, and `packages/types/test/schema-conventions.test.ts` fails on it.
+**Adding an optional field to v1** means adding a row to the table above and stating the class in the property's `description` in `schema/aburi.ir.v1.json`. An optional property with no `description` has not declared its class.
 
 ### 1.2 Unicode normalization
 

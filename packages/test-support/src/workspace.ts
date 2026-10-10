@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach } from "vitest"
@@ -12,13 +12,14 @@ export interface ScratchWorkspace {
 
 /**
  * A fresh directory under the OS temp dir for every test, removed afterwards. Never inside the
- * repository: config discovery walks up to the repository's own `aburi.json`.
+ * repository: config discovery walks up to the repository's own `aburi.json`. `root` is the real path,
+ * so it compares equal to what the code under test resolves (macOS links its temp dir).
  */
 export function useScratchWorkspace(prefix: string): ScratchWorkspace {
   let root = ""
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), `aburi-${prefix}-`))
+    root = await realpath(await mkdtemp(join(tmpdir(), `aburi-${prefix}-`)))
   })
 
   afterEach(async () => {

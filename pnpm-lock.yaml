@@ -211,6 +211,9 @@ importers:
       '@aburi/schema':
         specifier: workspace:*
         version: link:../../schema
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -548,6 +551,9 @@ importers:
       '@aburi/cli':
         specifier: workspace:*
         version: link:../cli
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -560,9 +566,6 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
 
   packages/lang-typescript:
     dependencies:
@@ -635,6 +638,9 @@ importers:
       '@aburi/schema':
         specifier: workspace:*
         version: link:../../schema
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
