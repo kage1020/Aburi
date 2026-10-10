@@ -3,12 +3,9 @@ import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
 import { representativeSymbol } from "./status"
 
-/** The three inputs of the Slice View pass. */
 export interface SliceInput {
-  /** SymbolChange records produced by `buildDiff` (pre-sort is not required). */
   changes: readonly SymbolChange[]
   baseCallEdges: readonly CallEdge[]
-  /** Resolved call edges from the head IR (same source rule as base). */
   headCallEdges: readonly CallEdge[]
 }
 
@@ -40,7 +37,7 @@ function makeSliceRecord(members: readonly SymbolId[]): SliceRecord {
   if (anchor === undefined) {
     throw new DiffError(
       "computeSlices: the clustering utility returned an empty component; every weakly-connected " +
-        "component contains at least the node that seeded it (slice-view.md).",
+        "component contains at least the node that seeded it.",
       { code: "slice-invariant-violated" },
     )
   }
@@ -62,22 +59,15 @@ export function sliceAnchor(record: SliceRecord): SymbolId {
 }
 
 export type SliceViolationKind =
-  /** Not a `SliceRecord` at all: not an object, or `id` / `members` of the wrong type. */
   | "malformed-shape"
-  /** `members[]` has no entries, so the Slice has no anchor. */
   | "members-empty"
-  /** `members[]` is not in strictly ascending order, so `members[0]` need not be the smallest. */
   | "members-unordered"
-  /** `id` is not `"slice:" + members[0]`. */
   | "id-not-derived"
-  /** The anchor is itself in a reserved id namespace, so `id` would read as a doubled prefix. */
   | "anchor-in-reserved-namespace"
 
 export interface SliceRecordViolation {
   kind: SliceViolationKind
-  /** The offending record's `id` when it has a usable one, else a short stand-in. */
   subject: string
-  /** Human-facing explanation, suitable for an error message or a validator error. */
   message: string
 }
 
@@ -115,7 +105,7 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
       subject,
       message:
         `SliceRecord anchor "${anchor}" uses the reserved language token "${reservedAnchor}", ` +
-        `so its Slice id would repeat the prefix (ir-schema.md, slice-view.md).`,
+        `so its Slice id would repeat the prefix.`,
     }
   }
   for (let i = 1; i < members.length; i++) {
@@ -127,8 +117,7 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
       subject,
       message:
         `SliceRecord ${subject}: members[] is not in strictly ascending order at index ${i} ` +
-        `("${current}" follows "${previous}"), so members[0] is not necessarily the anchor ` +
-        `(slice-view.md for the order and uniqueness).`,
+        `("${current}" follows "${previous}"), so members[0] is not necessarily the anchor.`,
     }
   }
   const expected = sliceIdFor(anchor as SymbolId)
@@ -138,13 +127,12 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
       subject,
       message:
         `SliceRecord id "${id}" is not derived from the anchor "${anchor}"; ` +
-        `expected "${expected}" (slice-view.md).`,
+        `expected "${expected}".`,
     }
   }
   return null
 }
 
-/** The reserved token an id opens with, or `null`. Shares the list `@aburi/core` enforces. */
 function reservedNamespaceOf(id: string): string | null {
   const colon = id.indexOf(":")
   if (colon < 0) return null
@@ -152,14 +140,11 @@ function reservedNamespaceOf(id: string): string | null {
   return RESERVED_LANGUAGE_IDS.has(token) ? token : null
 }
 
-/** Single source of the empty-`members[]` wording, shared with `sliceAnchor`. */
 function emptyMembersViolation(subject: string): SliceRecordViolation {
   return {
     kind: "members-empty",
     subject,
-    message:
-      `SliceRecord ${subject}: members[] is empty, so the Slice has no anchor ` +
-      `(slice-view.md requires at least one member).`,
+    message: `SliceRecord ${subject}: members[] is empty, so the Slice has no anchor.`,
   }
 }
 
@@ -196,7 +181,7 @@ function collectNodeIds(changes: readonly SymbolChange[]): SymbolId[] {
 function assertNeverChange(change: never): never {
   throw new Error(
     `computeSlices: unhandled SymbolChange status ${JSON.stringify(change)}; every status has ` +
-      "to declare whether it is a Slice Node (slice-view.md).",
+      "to declare whether it is a Slice Node.",
   )
 }
 

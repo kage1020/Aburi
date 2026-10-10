@@ -16,7 +16,6 @@ export function classifyStatus(base: IRSymbol, head: IRSymbol): SymbolStatus {
   return "unchanged"
 }
 
-/** Direction of a `dropped-toggled` transition. */
 export type DropDirection = "to-dropped" | "to-kept"
 
 export function dropDirection(head: IRSymbol): DropDirection {

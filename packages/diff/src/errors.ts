@@ -1,7 +1,6 @@
 import type { IntegrityViolation } from "@aburi/core"
 
 export type DiffErrorCode =
-  /** `base.$schema` and `head.$schema` disagree. */
   | "schema-mismatch"
   | "invalid-line-fuzz"
   | "ir-shape-invalid"
@@ -10,7 +9,6 @@ export type DiffErrorCode =
 
 export interface DiffErrorDetail {
   code: DiffErrorCode
-  /** Offending value (schema id, fuzz value, etc.) when applicable. */
   value?: string
   violations?: readonly IntegrityViolation[]
 }

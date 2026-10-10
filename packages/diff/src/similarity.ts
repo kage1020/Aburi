@@ -95,12 +95,10 @@ function jaccardSets(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
   return intersection / (a.size + b.size - intersection)
 }
 
-/** Jaccard over the tokens of two strings. Public surface only; nothing in this file calls it. */
 export function jaccardTokens(a: string, b: string): number {
   return jaccard(tokenizeName(a), tokenizeName(b))
 }
 
-/** A qualified name split at its last separator, `.` or `::`; a top-level name has an empty owner. */
 function splitQualifiedName(qname: string): { owner: string; member: string } {
   const lastStatic = qname.lastIndexOf("::")
   const lastDot = qname.lastIndexOf(".")
@@ -110,17 +108,14 @@ function splitQualifiedName(qname: string): { owner: string; member: string } {
   return { owner: "", member: qname }
 }
 
-/** The member name; read by the weak matcher and the threshold lookup. */
 export function lastSegment(qname: string): string {
   return splitQualifiedName(qname).member
 }
 
-/** Looks up the token set of a name. `createNameScorer` memoises it; the plain functions do not. */
 type TokenSets = (value: string) => ReadonlySet<string>
 
 const uncachedTokenSets: TokenSets = (value) => new Set(tokenizeName(value))
 
-/** Jaccard over the tokens of the full qualified name, every segment weighted alike. */
 export function nameSimilarity(baseName: string, headName: string): number {
   return nameJaccard(uncachedTokenSets, baseName, headName)
 }
@@ -145,7 +140,6 @@ function sameWord(a: string, b: string): boolean {
 
 const MAX_OWNER_SEGMENT_TOKENS = 32
 
-/** English noun inflection, which is what a pluralised class name goes through. */
 function pluralises(singular: string, plural: string): boolean {
   if (plural === `${singular}s` || plural === `${singular}es`) return true
   return singular.endsWith("y") && plural === `${singular.slice(0, -1)}ies`
@@ -189,7 +183,7 @@ function hasPerfectTokenMatching(a: ReadonlySet<string>, b: ReadonlySet<string>)
   return true
 }
 
-/** Kuhn's step: claim a free partner for `token`, or displace one that can move on. */
+/** Kuhn's augmenting-path step. */
 function augment(
   token: string,
   right: readonly string[],
@@ -238,7 +232,6 @@ function dotOrEnd(owner: string): number {
   return dot < 0 ? owner.length : dot
 }
 
-/** The formulas stage 4 reads, over a token table shared for one matching pass. */
 export interface NameScorer {
   name(baseName: string, headName: string): number
   member(baseName: string, headName: string): number

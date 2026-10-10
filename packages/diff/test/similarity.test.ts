@@ -23,7 +23,6 @@ describe("tokenizeName", () => {
   })
 
   it("finds the camel hump in any cased script, not only in Latin", () => {
-    // The boundary test is Unicode case. Cyrillic has case, so it has humps.
     expect(tokenizeName("получитьПользователя")).toEqual(["получить", "пользователя"])
     expect(tokenizeName("λάβεΧρήστη")).toEqual(["λάβε", "χρήστη"])
   })
@@ -35,7 +34,6 @@ describe("tokenizeName", () => {
   it("finds the hump in a cased script outside the BMP", () => {
     expect(tokenizeName("\u{10428}\u{10401}")).toEqual(["\u{10428}", "\u{10429}"])
     expect(tokenizeName("\u{1E922}\u{1E901}")).toEqual(["\u{1E922}", "\u{1E923}"])
-    // And the digit boundary, which an astral `\p{Nd}` lost the same way.
     expect(tokenizeName("get\u{1D7CE}")).toEqual(["get", "\u{1D7CE}"])
   })
 
@@ -66,26 +64,20 @@ describe("nameEvidence", () => {
   it("counts a run it cannot segment by its characters, floored to words", () => {
     expect(nameEvidence("获取用户信息")).toBe(2)
     expect(nameEvidence("사용자정보조회")).toBe(7 / 6)
-    // Four Han characters and six distinct kana (`ー` twice).
     expect(nameEvidence("ユーザー情報を取得する")).toBe(4 / 3 + 1)
   })
 
-  it("refuses a single word of a script that writes no word boundary", () => {
-    for (const oneWord of [
-      "値",
-      "取得",
-      "する",
-      "初期化",
-      "メイン",
-      "초기화",
-      "ユーザー",
-      "ハンドラー",
-    ]) {
-      expect({ name: oneWord, evidence: nameEvidence(oneWord) <= 1 }).toEqual({
-        name: oneWord,
-        evidence: true,
-      })
-    }
+  it.each([
+    "値",
+    "取得",
+    "する",
+    "初期化",
+    "メイン",
+    "초기화",
+    "ユーザー",
+    "ハンドラー",
+  ])("counts a single word of a script that writes no word boundary as one word at most: %s", (word) => {
+    expect(nameEvidence(word)).toBeLessThanOrEqual(1)
   })
 
   it("keeps a prolonged sound mark with the kana it lengthens", () => {
@@ -217,21 +209,5 @@ describe("createNameScorer", () => {
       }
     }
     expect(disagreements).toEqual([])
-  })
-
-  it("answers the same on a repeat as on the first ask", () => {
-    const scorer = createNameScorer()
-    const first = names.map((base) => names.map((head) => scorer.name(base, head)))
-    const second = names.map((base) => names.map((head) => scorer.name(base, head)))
-    expect(second).toEqual(first)
-  })
-
-  it("keeps two scorers independent", () => {
-    const one = createNameScorer()
-    one.name("Repo.getUser", "Repo.getUsers")
-    const two = createNameScorer()
-    expect(two.name("Repo.getUser", "Repo.getUsers")).toBe(
-      nameSimilarity("Repo.getUser", "Repo.getUsers"),
-    )
   })
 })

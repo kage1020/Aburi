@@ -61,7 +61,6 @@ export function diffComponents(
 
 export interface DependencySideView {
   symbolFiles: ReadonlyMap<DependencyEndpoint, RelativePath>
-  /** Files this document never analysed, by path, with the reason it gave. */
   lostFiles: ReadonlyMap<RelativePath, SkipReason>
 }
 
@@ -84,10 +83,8 @@ export function renameDirections(
   return { baseToHead, headToBase }
 }
 
-/** The document that lacks an entry, and so the one a loss is looked up in. */
 export type AbsentSide = "base" | "head"
 
-/** Everything a loss lookup reads: both side views, and the rename map that joins them. */
 export interface LossSides {
   base: DependencySideView
   head: DependencySideView
@@ -103,7 +100,7 @@ export function lostCounterparts(
   const found: DiffSkippedFile[] = []
   const reason = absent.lostFiles.get(path)
   if (reason !== undefined) found.push({ path, reason })
-  for (const other of namesOnSide(path, absentFrom, sides.renames)) {
+  for (const other of renamedOnAbsentSide(path, absentFrom, sides.renames)) {
     if (other === path) continue
     const otherReason = absent.lostFiles.get(other)
     if (otherReason !== undefined) found.push({ path: other, reason: otherReason })
@@ -119,8 +116,7 @@ export function lostCounterpart(
   return lostCounterparts(path, absentFrom, sides)[0]
 }
 
-/** What git renamed the other document's `path` to, or from, on the `absentFrom` side. */
-function namesOnSide(
+function renamedOnAbsentSide(
   path: RelativePath,
   absentFrom: AbsentSide,
   renames: RenameDirections,

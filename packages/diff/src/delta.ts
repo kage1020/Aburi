@@ -109,7 +109,6 @@ interface Slot<T> {
   element: Identified<T>
 }
 
-/** The elements of each key on either side, in array order; only a shared key pairs. */
 function groupByKey<T>(
   base: readonly Identified<T>[],
   head: readonly Identified<T>[],
@@ -128,7 +127,6 @@ function groupByKey<T>(
   return [...byKey.values()].filter((group) => group.base.length > 0 && group.head.length > 0)
 }
 
-/** How good an assignment is: more pairings first, then less total line movement. */
 interface AssignmentScore {
   pairs: number
   distance: number
@@ -140,15 +138,20 @@ function outranks(a: AssignmentScore, b: AssignmentScore): boolean {
   return a.pairs !== b.pairs ? a.pairs > b.pairs : a.distance < b.distance
 }
 
+function sameScore(a: AssignmentScore, b: AssignmentScore): boolean {
+  return a.pairs === b.pairs && a.distance === b.distance
+}
+
 function assignInOrder<T>(
   base: readonly Slot<T>[],
   head: readonly Slot<T>[],
   admits: (b: Identified<T>, h: Identified<T>) => boolean,
 ): Array<[Slot<T>, Slot<T>]> {
-  // best[i][j] is the score of the best assignment over base[i..] and head[j..].
-  const best: AssignmentScore[][] = Array.from({ length: base.length + 1 }, () =>
+  const bestFromSuffix: AssignmentScore[][] = Array.from({ length: base.length + 1 }, () =>
     Array.from({ length: head.length + 1 }, () => EMPTY_ASSIGNMENT),
   )
+  const bestFrom = (i: number, j: number): AssignmentScore =>
+    bestFromSuffix[i]?.[j] ?? EMPTY_ASSIGNMENT
   const pairingAt = (
     i: number,
     j: number,
@@ -156,42 +159,37 @@ function assignInOrder<T>(
     const b = base[i]
     const h = head[j]
     if (b === undefined || h === undefined || !admits(b.element, h.element)) return null
-    const rest = best[i + 1]?.[j + 1] ?? EMPTY_ASSIGNMENT
+    const rest = bestFrom(i + 1, j + 1)
     const distance = rest.distance + Math.abs(b.element.line - h.element.line)
     return { score: { pairs: rest.pairs + 1, distance }, pair: [b, h] }
   }
   for (let i = base.length - 1; i >= 0; i--) {
     for (let j = head.length - 1; j >= 0; j--) {
-      const skipBase = best[i + 1]?.[j] ?? EMPTY_ASSIGNMENT
-      const skipHead = best[i]?.[j + 1] ?? EMPTY_ASSIGNMENT
+      const skipBase = bestFrom(i + 1, j)
+      const skipHead = bestFrom(i, j + 1)
       let winner = outranks(skipBase, skipHead) ? skipBase : skipHead
       const paired = pairingAt(i, j)?.score
       if (paired !== undefined && outranks(paired, winner)) winner = paired
-      const row = best[i]
+      const row = bestFromSuffix[i]
       if (row !== undefined) row[j] = winner
     }
   }
 
-  // Walk the table back down, taking a pairing wherever it is what the optimum was built from.
   const chosen: Array<[Slot<T>, Slot<T>]> = []
   let i = 0
   let j = 0
   while (i < base.length && j < head.length) {
-    const here = best[i]?.[j] ?? EMPTY_ASSIGNMENT
+    const optimum = bestFrom(i, j)
     const paired = pairingAt(i, j)
-    if (
-      paired !== null &&
-      paired.score.pairs === here.pairs &&
-      paired.score.distance === here.distance
-    ) {
+    if (paired !== null && sameScore(paired.score, optimum)) {
       chosen.push(paired.pair)
       i++
       j++
-      continue
+    } else if (sameScore(bestFrom(i + 1, j), optimum)) {
+      i++
+    } else {
+      j++
     }
-    const skipBase = best[i + 1]?.[j] ?? EMPTY_ASSIGNMENT
-    if (skipBase.pairs === here.pairs && skipBase.distance === here.distance) i++
-    else j++
   }
   return chosen
 }
@@ -308,7 +306,6 @@ function diffSignature(base: Signature | null, head: Signature | null): Signatur
   }
 }
 
-/** The delta against a missing side: every list lands whole in `bucket`, flags against defaults. */
 function oneSidedSignatureDelta(present: Signature, bucket: "added" | "removed"): SignatureDelta {
   const whole = (values: readonly unknown[]): ArrayDelta => ({
     added: bucket === "added" ? [...values] : [],

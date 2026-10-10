@@ -1,343 +1,79 @@
-import { call, decorator, effect, fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
-import type { Symbol as IRSymbol } from "@aburi/types"
+import {
+  call,
+  componentId,
+  decorator,
+  effect,
+  errorFrom,
+  fp,
+  makeSymbol,
+  sig,
+} from "@aburi/test-support"
+import type {
+  Decorator,
+  Effect,
+  Symbol as IRSymbol,
+  Signature,
+  SignatureDelta,
+  SymbolDelta,
+} from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDiff, classifyStatus, computeSymbolDelta, dropDirection } from "../src"
+import { computeSymbolDelta, DiffError, MAX_LINE_FUZZ, MIN_LINE_FUZZ } from "../src"
+import { diffSymbols } from "./helpers"
 
-const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
+function symbolWith(overrides: Partial<IRSymbol>, seed: string): IRSymbol {
+  return makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", fingerprint: fp(seed), ...overrides })
+}
 
-describe("a Symbol whose component moved under it", () => {
-  const inApi = makeSymbol({ id: "ts:packages/api/a.ts#f", name: "f", component: "api" })
-  const inShared = makeSymbol({ ...inApi, component: "shared" })
+const NOTHING = { added: [], removed: [], modified: [] }
 
-  it("is unchanged: redrawing a boundary is not editing the code", () => {
-    expect(classifyStatus(inApi, inShared)).toBe("unchanged")
-  })
+describe("lineFuzz", () => {
+  const foo = symbolWith({}, "a")
 
-  it("still records the move on the delta, for a Symbol that changed for another reason", () => {
-    expect(computeSymbolDelta(inApi, inShared).componentChanged).toBe(true)
-    expect(computeSymbolDelta(inApi, inApi).componentChanged).toBe(false)
-  })
-})
-
-describe("a Symbol whose confidence moved under it", () => {
-  const sure = makeSymbol({ id: "ts:src/a.ts#C", name: "C", kind: "class", confidence: "high" })
-  const unsure = makeSymbol({ ...sure, confidence: "medium" })
-
-  it("is changed although no fingerprint moved", () => {
-    expect(classifyStatus(sure, unsure)).toBe("changed")
-    expect(classifyStatus(unsure, sure)).toBe("changed")
-  })
-
-  it("is moved+changed when the Symbol also moved file", () => {
-    const moved = makeSymbol({
-      ...unsure,
-      id: "ts:src/b.ts#C",
-      source: { ...unsure.source, file: "src/b.ts" },
+  it.each([
+    [-1, "lineFuzz must be within [0, 10]; got -1."],
+    [MAX_LINE_FUZZ + 1, "lineFuzz must be within [0, 10]; got 11."],
+    [Number.NaN, "lineFuzz must be an integer in [0, 10]; got NaN."],
+    [Number.POSITIVE_INFINITY, "lineFuzz must be an integer in [0, 10]; got Infinity."],
+    [1.5, "lineFuzz must be an integer in [0, 10]; got 1.5."],
+  ])("refuses %s rather than clamping it", async (lineFuzz, message) => {
+    expect(
+      await errorFrom(DiffError, () => computeSymbolDelta(foo, foo, { lineFuzz })),
+    ).toMatchObject({
+      code: "invalid-line-fuzz",
+      value: String(lineFuzz),
+      message,
     })
-    expect(classifyStatus(sure, moved)).toBe("moved+changed")
   })
 
-  it("leaves a dropped pair unchanged", () => {
-    const dropped = { dropped: true, dropReason: "pure DTO", fingerprint: zeroFp() }
-    expect(classifyStatus({ ...sure, ...dropped }, { ...unsure, ...dropped })).toBe("unchanged")
+  it.each([MIN_LINE_FUZZ, MAX_LINE_FUZZ])("accepts the bound %i", (lineFuzz) => {
+    expect(() => computeSymbolDelta(foo, foo, { lineFuzz })).not.toThrow()
   })
 
-  it("records the flag on the delta, false included", () => {
-    expect(computeSymbolDelta(sure, unsure).confidenceChanged).toBe(true)
-    expect(computeSymbolDelta(sure, sure).confidenceChanged).toBe(false)
-  })
-
-  it("reports the pair through buildDiff with only the confidence axis set", () => {
-    const diff = buildDiff({
-      baseIR: makeIR({ symbols: [sure] }),
-      headIR: makeIR({ symbols: [unsure] }),
-      base: IR_REF,
-      head: IR_REF,
-    })
-    const [change] = diff.symbols
-    expect(diff.summary.changed).toBe(1)
-    expect(change?.status).toBe("changed")
-    if (change?.status !== "changed") return
-    expect(change.delta).toMatchObject({
-      apiChanged: false,
-      logicChanged: false,
-      syntaxChanged: false,
-      confidenceChanged: true,
-    })
+  it("is checked when buildDiff passes it through", async () => {
+    const error = await errorFrom(DiffError, () =>
+      diffSymbols([foo], [symbolWith({}, "b")], { delta: { lineFuzz: 999 } }),
+    )
+    expect(error.code).toBe("invalid-line-fuzz")
   })
 })
 
-describe("dropped-toggled status", () => {
-  it("classifies dropped=false → dropped=true as dropped-toggled regardless of fingerprint", () => {
-    const b = makeSymbol({ id: "ts:src/a.ts#Dto", name: "Dto", kind: "class" })
-    const h = makeSymbol({
-      ...b,
-      dropped: true,
-      dropReason: "DTO shape",
-      fingerprint: zeroFp(),
-    })
-    expect(classifyStatus(b, h)).toBe("dropped-toggled")
-    expect(dropDirection(h)).toBe("to-dropped")
-  })
+describe("the flags beside the fingerprint axes", () => {
+  const base = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", component: "api" })
 
-  it("classifies dropped=true → dropped=false as dropped-toggled (to-kept)", () => {
-    const b = makeSymbol({
-      id: "ts:src/a.ts#Dto",
-      name: "Dto",
-      kind: "class",
-      dropped: true,
-      fingerprint: zeroFp(),
-    })
-    const h = makeSymbol({ ...b, dropped: false, dropReason: null, fingerprint: fp("v1") })
-    expect(classifyStatus(b, h)).toBe("dropped-toggled")
-    expect(dropDirection(h)).toBe("to-kept")
-  })
-
-  it("buildDiff increments summary.droppedToggled and omits the delta field", () => {
-    const b = makeSymbol({ id: "ts:src/a.ts#Dto", name: "Dto", kind: "class" })
-    const h = makeSymbol({
-      ...b,
-      dropped: true,
-      dropReason: "DTO shape",
-      fingerprint: zeroFp(),
-    })
-    const result = buildDiff({
-      baseIR: makeIR({ symbols: [b] }),
-      headIR: makeIR({ symbols: [h] }),
-      base: IR_REF,
-      head: IR_REF,
-    })
-    expect(result.summary.droppedToggled).toBe(1)
-    expect(result.summary.changed).toBe(0)
-    expect(result.summary.moved).toBe(0)
-    const change = result.symbols[0]
-    if (change?.status !== "dropped-toggled") throw new Error("expected dropped-toggled")
-    expect(change.direction).toBe("to-dropped")
-    // Delta must not appear on dropped-toggled entries.
-    const anyChange: Record<string, unknown> = change as unknown as Record<string, unknown>
-    expect(anyChange.delta).toBeUndefined()
-  })
-
-  it("does NOT surface a DTO ruleset toggle as `changed`", () => {
-    // Simulate a DTO rule flip: multiple symbols move from kept to dropped in one PR.
-    const before = [
-      makeSymbol({ id: "ts:src/a.ts#A", name: "A", kind: "class" }),
-      makeSymbol({ id: "ts:src/a.ts#B", name: "B", kind: "class" }),
-    ]
-    const after = before.map((s) => ({ ...s, dropped: true, fingerprint: zeroFp() }))
-    const result = buildDiff({
-      baseIR: makeIR({ symbols: before }),
-      headIR: makeIR({ symbols: after }),
-      base: IR_REF,
-      head: IR_REF,
-    })
-    expect(result.summary.changed).toBe(0)
-    expect(result.summary.droppedToggled).toBe(2)
+  it.each<[string, Partial<IRSymbol>, keyof SymbolDelta]>([
+    ["component", { component: componentId("shared") }, "componentChanged"],
+    ["visibility", { visibility: "private" }, "visibilityChanged"],
+    ["confidence", { confidence: "medium" }, "confidenceChanged"],
+  ])("records a %s move, and writes false when it did not move", (_, moved, flag) => {
+    expect(computeSymbolDelta(base, { ...base, ...moved })[flag]).toBe(true)
+    expect(computeSymbolDelta(base, base)[flag]).toBe(false)
   })
 })
 
-describe("Decorator delta", () => {
-  it("emits modified when the same name gets a different argument list", () => {
-    const b = makeSymbol({
-      id: "ts:src/a.ts#Foo",
-      name: "Foo",
-      decorators: [decorator({ name: "Post", arguments: ["/invoices"], line: 5 })],
-    })
-    const h = makeSymbol({
-      ...b,
-      decorators: [decorator({ name: "Post", arguments: ["/invoices/v2"], line: 5 })],
-      fingerprint: { ...b.fingerprint, api: "api-changed" },
-    })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.decorators?.modified).toHaveLength(1)
-    expect(delta.decorators?.added).toHaveLength(0)
-    expect(delta.decorators?.removed).toHaveLength(0)
-  })
-
-  it("emits nothing when only the line drifted within fuzz", () => {
-    const b = makeSymbol({
-      id: "ts:src/a.ts#Foo",
-      name: "Foo",
-      decorators: [decorator({ name: "Post", arguments: ["/x"], line: 5 })],
-    })
-    const h = makeSymbol({
-      ...b,
-      decorators: [decorator({ name: "Post", arguments: ["/x"], line: 6 })],
-      fingerprint: { ...b.fingerprint, syntax: "syn-drift" },
-    })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.decorators?.modified).toHaveLength(0)
-    expect(delta.decorators?.added).toHaveLength(0)
-    expect(delta.decorators?.removed).toHaveLength(0)
-  })
-
-  it("emits added + removed when the name itself changed", () => {
-    const b = makeSymbol({
-      id: "ts:src/a.ts#Foo",
-      name: "Foo",
-      decorators: [decorator({ name: "Get", line: 5 })],
-    })
-    const h = makeSymbol({
-      ...b,
-      decorators: [decorator({ name: "Post", line: 5 })],
-      fingerprint: { ...b.fingerprint, api: "api-changed" },
-    })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.decorators?.added).toHaveLength(1)
-    expect(delta.decorators?.removed).toHaveLength(1)
-    expect(delta.decorators?.modified).toHaveLength(0)
-  })
-})
-
-describe("Effects delta", () => {
-  const shared = fp("v1")
-  const propagatedEffect = (source: string) =>
-    effect({
-      id: "db.write",
-      target: "prisma.user.create",
-      plugin: "effects-prisma",
-      propagated: true,
-      derivedFrom: [source],
-    })
-  const baseSym = makeSymbol({
-    id: "ts:src/a.ts#Foo",
-    name: "Foo",
-    fingerprint: shared,
-    effects: [
-      effect({
-        id: "db.write",
-        target: "prisma.user.create",
-        plugin: "effects-prisma",
-        line: 10,
-      }),
-    ],
-  })
-
-  it("emits modified when plugin/confidence changes but (id, target) survive", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      effects: [
-        effect({
-          id: "db.write",
-          target: "prisma.user.create",
-          plugin: "effects-prisma",
-          confidence: "medium",
-          derivedBy: "convention:test",
-          line: 10,
-        }),
-      ],
-      fingerprint: { ...shared, logic: "logic-changed" },
-    })
-    const delta = computeSymbolDelta(baseSym, h)
-    expect(delta.effects?.modified).toHaveLength(1)
-  })
-
-  it("ignores line drift regardless of fuzz (effects use unbounded line tolerance)", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      effects: [
-        effect({
-          id: "db.write",
-          target: "prisma.user.create",
-          plugin: "effects-prisma",
-          line: 10_000,
-        }),
-      ],
-      fingerprint: { ...shared, syntax: "syn-diff" },
-    })
-    const delta = computeSymbolDelta(baseSym, h, { lineFuzz: 0 })
-    expect(delta.effects?.added).toHaveLength(0)
-    expect(delta.effects?.removed).toHaveLength(0)
-    expect(delta.effects?.modified).toHaveLength(0)
-  })
-
-  it("emits modified when an effect changes from local to propagated", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      effects: [propagatedEffect("ts:src/repository.ts#Repository.save")],
-    })
-    const delta = computeSymbolDelta(baseSym, h)
-    expect(delta.effects?.modified).toEqual(h.effects)
-  })
-
-  it("emits modified when a propagated effect's direct source changes", () => {
-    const b = makeSymbol({ ...baseSym, effects: [propagatedEffect("ts:src/a.ts#a")] })
-    const h = makeSymbol({
-      ...baseSym,
-      effects: [propagatedEffect("ts:src/b.ts#b")],
-    })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.effects?.modified).toEqual(h.effects)
-  })
-
-  it("treats a propagated effect's direct sources as a set", () => {
-    const b = makeSymbol({
-      ...baseSym,
-      effects: [
-        effect({
-          id: "db.write",
-          target: "prisma.user.create",
-          plugin: "effects-prisma",
-          propagated: true,
-          derivedFrom: ["ts:src/a.ts#a", "ts:src/b.ts#b"],
-        }),
-      ],
-    })
-    const h = makeSymbol({
-      ...b,
-      effects: [
-        effect({
-          id: "db.write",
-          target: "prisma.user.create",
-          plugin: "effects-prisma",
-          propagated: true,
-          derivedFrom: ["ts:src/b.ts#b", "ts:src/a.ts#a"],
-        }),
-      ],
-    })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.effects?.modified).toHaveLength(0)
-  })
-
-  it("treats an omitted propagated flag like explicit false", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      effects: [
-        effect({
-          id: "db.write",
-          target: "prisma.user.create",
-          plugin: "effects-prisma",
-          line: 10,
-          propagated: false,
-        }),
-      ],
-    })
-    const delta = computeSymbolDelta(baseSym, h)
-    expect(delta.effects?.modified).toHaveLength(0)
-  })
-
-  it("added + removed when the target itself changed", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      effects: [
-        effect({
-          id: "db.write",
-          target: "prisma.invoice.create",
-          plugin: "effects-prisma",
-          line: 10,
-        }),
-      ],
-      fingerprint: { ...shared, logic: "logic-diff" },
-    })
-    const delta = computeSymbolDelta(baseSym, h)
-    expect(delta.effects?.added).toHaveLength(1)
-    expect(delta.effects?.removed).toHaveLength(1)
-  })
-})
-
-describe("Decorator delta — qualifier", () => {
-  const withDecorators = (decorators: IRSymbol["decorators"], seed: string) =>
-    makeSymbol({ id: "ts:src/a.ts#Foo.create", name: "create", decorators, fingerprint: fp(seed) })
+describe("decorators", () => {
+  const decoratorDelta = (base: Decorator[], head: Decorator[]) =>
+    computeSymbolDelta(symbolWith({ decorators: base }, "a"), symbolWith({ decorators: head }, "b"))
+      .decorators
   const post = (qualifier?: string) =>
     decorator({
       name: "Post",
@@ -346,169 +82,255 @@ describe("Decorator delta — qualifier", () => {
       line: 3,
     })
 
-  it("emits modified when only the receiver changed", () => {
-    const delta = computeSymbolDelta(
-      withDecorators([post("nest")], "a"),
-      withDecorators([post("tsed")], "b"),
-    )
-    expect(delta.decorators).toEqual({ added: [], removed: [], modified: [post("tsed")] })
+  it("reports a changed argument list as modified", () => {
+    const after = decorator({ name: "Post", arguments: ["/invoices/v2"], line: 5 })
+    expect(
+      decoratorDelta([decorator({ name: "Post", arguments: ["/invoices"], line: 5 })], [after]),
+    ).toEqual({ added: [], removed: [], modified: [after] })
   })
 
-  it("emits modified when a receiver is gained", () => {
-    const delta = computeSymbolDelta(
-      withDecorators([post()], "a"),
-      withDecorators([post("nest")], "b"),
-    )
-    expect(delta.decorators?.modified).toEqual([post("nest")])
+  it("reports a renamed decorator as added + removed", () => {
+    const before = decorator({ name: "Get", line: 5 })
+    const after = decorator({ name: "Post", line: 5 })
+    expect(decoratorDelta([before], [after])).toEqual({
+      added: [after],
+      removed: [before],
+      modified: [],
+    })
   })
 
-  it("emits modified when a receiver is lost, and names the head side only", () => {
-    const delta = computeSymbolDelta(
-      withDecorators([post("nest")], "a"),
-      withDecorators([post()], "b"),
-    )
-    // `modified` carries the head element, so the row reads `@Post`, as an argument edit would.
-    expect(delta.decorators?.modified).toStrictEqual([post()])
-  })
-
-  it("carries a multi-segment receiver whole", () => {
-    const delta = computeSymbolDelta(
-      withDecorators([post("nest")], "a"),
-      withDecorators([post("a.b")], "b"),
-    )
-    expect(delta.decorators?.modified).toStrictEqual([post("a.b")])
+  it.each([
+    ["changed", post("nest"), post("tsed")],
+    ["was gained", post(), post("nest")],
+    ["was lost", post("nest"), post()],
+    ["became multi-segment", post("nest"), post("a.b")],
+  ])("reports a receiver that %s as modified, carrying the head element", (_, before, after) => {
+    expect(decoratorDelta([before], [after])).toStrictEqual({
+      added: [],
+      removed: [],
+      modified: [after],
+    })
   })
 
   it("does not compare raw, so a reformat of the same decorator is no change", () => {
-    const delta = computeSymbolDelta(
-      withDecorators([{ ...post(), raw: 'Post("/x")' }], "a"),
-      withDecorators([{ ...post(), raw: 'Post( "/x" )' }], "b"),
-    )
-    expect(delta.decorators).toEqual({ added: [], removed: [], modified: [] })
+    expect(
+      decoratorDelta([{ ...post(), raw: 'Post("/x")' }], [{ ...post(), raw: 'Post( "/x" )' }]),
+    ).toEqual(NOTHING)
+  })
+
+  it("does not compare boundary, which plugins derive rather than read", () => {
+    expect(
+      decoratorDelta([{ ...post(), boundary: false }], [{ ...post(), boundary: true }]),
+    ).toEqual(NOTHING)
   })
 })
 
-describe("Calls delta", () => {
-  const shared = fp("v1")
-  const baseSym = makeSymbol({
-    id: "ts:src/a.ts#Foo",
-    name: "Foo",
-    fingerprint: shared,
-    calls: [call({ target: "helper.doWork", line: 20 })],
+describe("effects", () => {
+  const local = (overrides: Partial<Effect> = {}) =>
+    effect({
+      id: "db.write",
+      target: "prisma.user.create",
+      plugin: "effects-prisma",
+      line: 10,
+      ...overrides,
+    })
+  const propagated = (...derivedFrom: string[]) =>
+    effect({
+      id: "db.write",
+      target: "prisma.user.create",
+      plugin: "effects-prisma",
+      propagated: true,
+      derivedFrom,
+    })
+  const effectDelta = (base: Effect[], head: Effect[]) =>
+    computeSymbolDelta(symbolWith({ effects: base }, "a"), symbolWith({ effects: head }, "b"))
+      .effects
+
+  it.each<[string, Partial<Effect>]>([
+    ["confidence", { confidence: "medium" }],
+    ["plugin", { plugin: "effects-drizzle" }],
+  ])("reports a changed %s as modified while (id, target) survive", (_, edit) => {
+    expect(effectDelta([local()], [local(edit)])).toEqual({
+      added: [],
+      removed: [],
+      modified: [local(edit)],
+    })
   })
 
-  it("treats fuzz-eligible line drift as the same call", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      calls: [call({ target: "helper.doWork", line: 21 })],
-      fingerprint: { ...shared, syntax: "syn-diff" },
-    })
-    const delta = computeSymbolDelta(baseSym, h, { lineFuzz: 2 })
-    expect(delta.calls?.added).toHaveLength(0)
-    expect(delta.calls?.removed).toHaveLength(0)
+  it("reports an effect that turned propagated as modified", () => {
+    const after = propagated("ts:src/repository.ts#Repository.save")
+    expect(effectDelta([local()], [after])?.modified).toEqual([after])
   })
 
-  it("treats an unchanged call as the same call however far it drifted", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      calls: [call({ target: "helper.doWork", line: 100 })],
-      fingerprint: { ...shared, syntax: "syn-diff" },
-    })
-    const delta = computeSymbolDelta(baseSym, h, { lineFuzz: 2 })
-    expect(delta.calls).toEqual({ added: [], removed: [], modified: [] })
+  it("reports a propagated effect whose direct source changed as modified", () => {
+    const after = propagated("ts:src/b.ts#b")
+    expect(effectDelta([propagated("ts:src/a.ts#a")], [after])?.modified).toEqual([after])
   })
 
-  it("emits added + removed once an edited call drifts past the fuzz window", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      calls: [call({ target: "helper.doWork", line: 100, resolved: "ts:src/helper.ts#doWork" })],
-      fingerprint: { ...shared, logic: "logic-diff" },
-    })
-    const delta = computeSymbolDelta(baseSym, h, { lineFuzz: 2 })
-    expect(delta.calls?.added).toHaveLength(1)
-    expect(delta.calls?.removed).toHaveLength(1)
+  it("compares a propagated effect's direct sources as a set", () => {
+    expect(
+      effectDelta(
+        [propagated("ts:src/a.ts#a", "ts:src/b.ts#b")],
+        [propagated("ts:src/b.ts#b", "ts:src/a.ts#a")],
+      ),
+    ).toEqual(NOTHING)
   })
 
-  it("emits modified when resolved changes but target stays", () => {
-    const h = makeSymbol({
-      ...baseSym,
-      calls: [call({ target: "helper.doWork", line: 20, resolved: "ts:src/util.ts#doWork" })],
-      fingerprint: { ...shared, syntax: "syn-diff" },
+  it("reads an omitted propagated flag as false", () => {
+    expect(effectDelta([local()], [local({ propagated: false })])).toEqual(NOTHING)
+  })
+
+  it("does not compare derivedBy, which is evidence text rather than identity", () => {
+    expect(
+      effectDelta(
+        [local({ derivedBy: "convention:prisma-client" })],
+        [local({ derivedBy: "convention:prisma-client-v2" })],
+      ),
+    ).toEqual(NOTHING)
+  })
+
+  it("reports a changed target as added + removed", () => {
+    const after = local({ target: "prisma.invoice.create" })
+    expect(effectDelta([local()], [after])).toEqual({
+      added: [after],
+      removed: [local()],
+      modified: [],
     })
-    const delta = computeSymbolDelta(baseSym, h)
-    expect(delta.calls?.modified).toHaveLength(1)
   })
 })
 
-describe("Signature delta three branches", () => {
-  const shared = fp("v1")
+describe("calls", () => {
+  const callDelta = (base: IRSymbol["calls"], head: IRSymbol["calls"]) =>
+    computeSymbolDelta(symbolWith({ calls: base }, "a"), symbolWith({ calls: head }, "b"), {
+      lineFuzz: 2,
+    }).calls
 
-  it("returns null when both sides have no signature", () => {
-    const b = makeSymbol({ id: "ts:src/a.ts#I", name: "I", kind: "interface" })
-    const h = makeSymbol({
-      ...b,
-      fingerprint: { ...shared, syntax: "syn-diff" },
+  it("reports a call whose resolution changed as modified", () => {
+    const after = call({ target: "helper.doWork", line: 20, resolved: "ts:src/util.ts#doWork" })
+    expect(callDelta([call({ target: "helper.doWork", line: 20 })], [after])).toEqual({
+      added: [],
+      removed: [],
+      modified: [after],
     })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.signature).toBeNull()
   })
 
-  it("emits added-only signature delta when base has none and head does", () => {
-    const b = makeSymbol({ id: "ts:src/a.ts#F", name: "F" })
-    const h = makeSymbol({
-      ...b,
-      signature: sig({ inputs: [{ name: "x", type: "string" }] }),
-      fingerprint: { ...shared, api: "api-diff" },
+  it("reports an edited call beyond the line window as added + removed", () => {
+    const before = call({ target: "helper.doWork", line: 20 })
+    const after = call({ target: "helper.doWork", line: 100, resolved: "ts:src/helper.ts#doWork" })
+    expect(callDelta([before], [after])).toEqual({
+      added: [after],
+      removed: [before],
+      modified: [],
     })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.signature).not.toBeNull()
-    expect(delta.signature?.inputs.added).toHaveLength(1)
-    expect(delta.signature?.inputs.removed).toHaveLength(0)
+  })
+})
+
+describe("signature", () => {
+  const signatureDelta = (base: Signature | null, head: Signature | null) =>
+    computeSymbolDelta(symbolWith({ signature: base }, "a"), symbolWith({ signature: head }, "b"))
+      .signature
+  const UNCHANGED_FLAGS = {
+    asyncChanged: false,
+    generatorChanged: false,
+    typeParametersChanged: false,
+  }
+
+  it("is null when neither side has one", () => {
+    expect(signatureDelta(null, null)).toBeNull()
   })
 
-  it("emits per-list sub-deltas when both sides carry signatures", () => {
-    const b = makeSymbol({
-      id: "ts:src/a.ts#F",
-      name: "F",
-      signature: sig({ inputs: [{ name: "x", type: "string" }] }),
+  it("puts every list of a gained signature in added, and reads its flags against the defaults", () => {
+    expect(
+      signatureDelta(null, sig({ inputs: [{ name: "x", type: "string" }], async: true })),
+    ).toEqual<SignatureDelta>({
+      inputs: { added: [{ name: "x", type: "string" }], removed: [], modified: [] },
+      outputs: { added: ["void"], removed: [], modified: [] },
+      throws: NOTHING,
+      ...UNCHANGED_FLAGS,
+      asyncChanged: true,
     })
-    const h = makeSymbol({
-      ...b,
-      signature: sig({
-        inputs: [{ name: "x", type: "number" }],
-        outputs: ["boolean"],
-      }),
-      fingerprint: { ...shared, api: "api-diff" },
+  })
+
+  it("puts every list of a lost signature in removed, and reads its flags against the defaults", () => {
+    expect(
+      signatureDelta(sig({ throws: ["AuthError"], generator: true, typeParameters: ["T"] }), null),
+    ).toEqual<SignatureDelta>({
+      inputs: NOTHING,
+      outputs: { added: [], removed: ["void"], modified: [] },
+      throws: { added: [], removed: ["AuthError"], modified: [] },
+      asyncChanged: false,
+      generatorChanged: true,
+      typeParametersChanged: true,
     })
-    const delta = computeSymbolDelta(b, h)
-    expect(delta.signature).not.toBeNull()
-    // strict positional compare on `(index, name)`: same key + isEqual(a,b) false → modified
-    const inputs = delta.signature?.inputs
-    expect(inputs?.modified).toHaveLength(1)
-    // outputs positional compare: base ["void"] vs head ["boolean"] → added + removed pair
-    const outputs = delta.signature?.outputs
-    expect(outputs?.added).toEqual(["boolean"])
-    expect(outputs?.removed).toEqual(["void"])
+  })
+
+  it("reports an input whose type changed as modified, and outputs by position", () => {
+    expect(
+      signatureDelta(
+        sig({ inputs: [{ name: "x", type: "string" }] }),
+        sig({ inputs: [{ name: "x", type: "number" }], outputs: ["boolean"] }),
+      ),
+    ).toEqual<SignatureDelta>({
+      inputs: { added: [], removed: [], modified: [{ name: "x", type: "number" }] },
+      outputs: { added: ["boolean"], removed: ["void"], modified: [] },
+      throws: NOTHING,
+      ...UNCHANGED_FLAGS,
+    })
   })
 
   it.each([
     ["turns optional", { optional: true } as const],
     ["turns into a rest parameter", { rest: true } as const],
-  ])("reports an input that %s as modified, since the api moved with it", (_label, form) => {
-    const b = makeSymbol({
-      id: "ts:src/a.ts#F",
-      name: "F",
-      signature: sig({ inputs: [{ name: "x", type: "string" }] }),
+  ])("reports an input that %s as modified, since the api moved with it", (_, form) => {
+    expect(
+      signatureDelta(
+        sig({ inputs: [{ name: "x", type: "string" }] }),
+        sig({ inputs: [{ name: "x", type: "string", ...form }] }),
+      )?.inputs,
+    ).toEqual({ added: [], removed: [], modified: [{ name: "x", type: "string", ...form }] })
+  })
+
+  it("does not compare the bindings a plugin read out of a destructuring input", () => {
+    const destructured = { name: "{ id }", type: "Request" }
+    expect(
+      signatureDelta(
+        sig({ inputs: [destructured] }),
+        sig({ inputs: [{ ...destructured, bindings: ["id"] }] }),
+      )?.inputs,
+    ).toEqual(NOTHING)
+  })
+
+  it("identifies an input by its position, so one that moved is removed and added", () => {
+    const a = { name: "a", type: "string" }
+    const b = { name: "b", type: "number" }
+    expect(signatureDelta(sig({ inputs: [a, b] }), sig({ inputs: [b] }))?.inputs).toEqual({
+      added: [b],
+      removed: [a, b],
+      modified: [],
     })
-    const h = makeSymbol({
-      ...b,
-      signature: sig({ inputs: [{ name: "x", type: "string", ...form }] }),
-      fingerprint: { ...shared, api: "api-diff" },
-    })
-    expect(computeSymbolDelta(b, h).signature?.inputs).toEqual({
-      added: [],
-      removed: [],
-      modified: [{ name: "x", type: "string", ...form }],
+  })
+
+  it("compares throws as a set", () => {
+    const base = sig({ throws: ["AuthError", "RateLimitError"] })
+    expect(signatureDelta(base, sig({ throws: ["RateLimitError", "AuthError"] }))?.throws).toEqual(
+      NOTHING,
+    )
+    expect(
+      signatureDelta(base, sig({ throws: ["RateLimitError", "TimeoutError"] }))?.throws,
+    ).toEqual({ added: ["TimeoutError"], removed: ["AuthError"], modified: [] })
+  })
+
+  it.each<[string, Partial<Signature>, keyof typeof UNCHANGED_FLAGS]>([
+    ["async", { async: true }, "asyncChanged"],
+    ["generator", { generator: true }, "generatorChanged"],
+    ["typeParameters", { typeParameters: ["T"] }, "typeParametersChanged"],
+  ])("sets only the %s flag when that alone moved", (_, moved, flag) => {
+    expect(signatureDelta(sig(), sig(moved))).toEqual<SignatureDelta>({
+      inputs: NOTHING,
+      outputs: NOTHING,
+      throws: NOTHING,
+      ...UNCHANGED_FLAGS,
+      [flag]: true,
     })
   })
 })

@@ -1,7 +1,5 @@
 import {
-  checkDocumentShape,
   compareCodeUnit,
-  DOCUMENT_SUBJECT,
   reconstructCallEdgesFromIR,
   type SerializeOptions,
   serializeCanonical,
@@ -19,8 +17,6 @@ import type {
 } from "@aburi/types"
 import {
   type AbsentSide,
-  DEPENDENCY_IDENTITY_FIELDS,
-  dependencyIdentity,
   dependencySideView,
   diffComponents,
   diffDependencies,
@@ -30,7 +26,7 @@ import {
   renameDirections,
 } from "./components"
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
-import { DiffError } from "./errors"
+import { assertDiffable, ensureSchemasAgree } from "./input-gate"
 import {
   type GitRenameMap,
   matchStageDroppedWeak,
@@ -53,13 +49,10 @@ interface UnknownCounters {
 export interface DiffInput {
   baseIR: IR
   headIR: IR
-  /** IR reference metadata (git ref / file path) for provenance. */
   base: IRRef
   head: IRRef
-  /** Generator record for the diff output. Defaults to `{name: "aburi", version: "0.0.0"}`. */
   generator?: { name: string; version: string }
   gitRenames?: GitRenameMap | null
-  /** Passed through to computeSymbolDelta. */
   delta?: DeltaOptions
 }
 
@@ -255,124 +248,6 @@ function filesNeitherSideRead(sides: LossSides): NotComparedFile[] {
 
 const compareNotCompared = (a: NotComparedFile, b: NotComparedFile): number =>
   compareCodeUnit(a.path, b.path) || compareCodeUnit(a.basePath ?? a.path, b.basePath ?? b.path)
-
-/** Refuse to diff across schema versions. */
-function ensureSchemasAgree(base: IR, head: IR): void {
-  if (base.$schema !== head.$schema) {
-    throw new DiffError(
-      `Base IR schema "${base.$schema}" does not match head IR schema "${head.$schema}"; a diff across schema versions is not supported.`,
-      { code: "schema-mismatch", value: base.$schema },
-    )
-  }
-}
-
-/** Which of the two inputs a message is about. */
-type IRSide = "baseIR" | "headIR"
-
-interface IdentifiedCollection {
-  readonly field: "symbols" | "components" | "dependencies"
-  /** The identity fields of every entry, in the order `keyOf` receives them. */
-  readonly identities: (ir: IR) => readonly (readonly string[])[]
-  /** Join them the way the diff itself keys on them, or the check guards nothing. */
-  readonly keyOf: (parts: readonly string[]) => string
-  /** How a message names the repeated value. */
-  readonly noun: string
-  /** The repeated value as the IR spells it; also what `DiffError.value` carries. */
-  readonly show: (parts: readonly string[]) => string
-  /** What the diff does with a repeat, and the invariant that forbids it. */
-  readonly consequence: string
-}
-
-/** Identity is a single field, so joining the one-member tuple is joining nothing. */
-const soleField = (parts: readonly string[]): string => parts.join("")
-
-const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
-  {
-    field: "symbols",
-    identities: (ir) => ir.symbols.map((symbol) => [symbol.id]),
-    keyOf: soleField,
-    noun: "id",
-    show: soleField,
-    consequence:
-      "stage 1 pairs Symbols by id and every later stage tracks the base Symbols it has " +
-      "consumed by id, so a repeat leaves one entry out of the diff entirely or classifies " +
-      "its counterpart twice (ir-schema.md #1)",
-  },
-  {
-    field: "components",
-    identities: (ir) => ir.components.map((component) => [component.id]),
-    keyOf: soleField,
-    noun: "id",
-    show: soleField,
-    consequence:
-      "Component identity is the id, so a repeat hides one entry and can report a change " +
-      "the two revisions do not contain (ir-schema.md #2)",
-  },
-  {
-    field: "dependencies",
-    identities: (ir) =>
-      ir.dependencies.map((dependency) =>
-        DEPENDENCY_IDENTITY_FIELDS.map((field) => dependency[field]),
-      ),
-    keyOf: dependencyIdentity,
-    noun: "(from, to, via) triple",
-    show: (parts) => `(${parts.join(", ")})`,
-    consequence:
-      "direction and effect are deliberately outside Dependency identity, so a " +
-      "repeat surfaces as an added + removed pair no reader can tell from a real flip",
-  },
-]
-
-function assertDiffable(ir: IR, name: IRSide): void {
-  const violations = checkDocumentShape(ir)
-  const first = violations[0]
-  if (first !== undefined) {
-    const subject = sidedSubject(name, first.subject)
-    const rest = violations.length - 1
-    const more = rest > 0 ? ` (and ${rest} more)` : ""
-    throw new DiffError(`${subject}: ${first.message}${more}.`, {
-      code: "ir-shape-invalid",
-      value: subject,
-      violations: violations.map((v) => ({ ...v, subject: sidedSubject(name, v.subject) })),
-    })
-  }
-  if (ir.$schema.length === 0) {
-    throw new DiffError(`${name}: "$schema" is empty, not a schema URL.`, {
-      code: "ir-shape-invalid",
-      value: name,
-    })
-  }
-  for (const collection of IDENTIFIED_COLLECTIONS) {
-    assertUniqueIdentity(collection.identities(ir), `${name}.${collection.field}`, collection)
-  }
-}
-
-/** A shape violation's subject prefixed with its side, so a two-sided failure is readable. */
-function sidedSubject(name: IRSide, subject: string): string {
-  return subject === DOCUMENT_SUBJECT ? name : `${name}.${subject}`
-}
-
-function assertUniqueIdentity(
-  identities: readonly (readonly string[])[],
-  subject: string,
-  collection: IdentifiedCollection,
-): void {
-  const firstSeen = new Map<string, number>()
-  for (const [index, parts] of identities.entries()) {
-    const key = collection.keyOf(parts)
-    const first = firstSeen.get(key)
-    if (first === undefined) {
-      firstSeen.set(key, index)
-      continue
-    }
-    const shown = collection.show(parts)
-    throw new DiffError(
-      `${subject}[${index}] repeats the ${collection.noun} "${shown}" first seen at index ` +
-        `${first}; ${collection.consequence}.`,
-      { code: "ir-identity-collision", value: shown },
-    )
-  }
-}
 
 function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
   return (

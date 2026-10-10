@@ -1,25 +1,16 @@
-import { makeIR, makeSymbol } from "@aburi/test-support"
-import type { Dependency, IR, SkippedFile } from "@aburi/types"
+import { dependency, makeIR, makeSymbol } from "@aburi/test-support"
+import type { Dependency, SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDiff, type DependencySideView, diffDependencies, renameDirections } from "../src"
+import { type DependencySideView, diffDependencies, renameDirections } from "../src"
+import { diffOf, withSkipped } from "./helpers"
 
-const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
-
-function dep(from: string, to: string, over: Partial<Dependency> = {}): Dependency {
-  return { from, to, via: "call", direction: "outbound", effect: null, ...over } as Dependency
-}
-
-function withSkipped(ir: IR, skipped: readonly SkippedFile[], totalFiles = 3): IR {
-  return {
-    ...ir,
-    stats: {
-      ...ir.stats,
-      totalFiles,
-      parsedFiles: totalFiles - skipped.length,
-      skippedFiles: [...skipped],
-    },
-  }
-}
+const call = (from: string, to: string, overrides: Partial<Dependency> = {}) =>
+  dependency({ from, to, via: "call", ...overrides })
+const imports = (from: string, to: string) => dependency({ from, to, via: "import" })
+const lost = (path: string, reason: SkippedFile["reason"] = "parse-failed"): SkippedFile => ({
+  path,
+  reason,
+})
 
 const gone = makeSymbol({ id: "ts:src/gone.ts#gone", name: "gone" })
 const goneToo = makeSymbol({ id: "ts:src/gone.ts#goneToo", name: "goneToo" })
@@ -28,320 +19,201 @@ const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
 const relocated = makeSymbol({
   id: "ts:src/old.ts#relocated",
   name: "relocated",
-  source: {
-    file: "src/actual.ts",
-    startLine: 1,
-    endLine: 10,
-    startColumn: null,
-    endColumn: null,
-  },
+  source: { file: "src/actual.ts", startLine: 1, endLine: 10, startColumn: null, endColumn: null },
 })
 
-function diffOf(baseIR: IR, headIR: IR) {
-  return buildDiff({ baseIR, headIR, base: IR_REF, head: IR_REF })
-}
+const GONE_TO_KEPT = call(gone.id, kept.id)
 
-describe("buildDiff — an edge into a file the other side never analysed", () => {
-  it("is unknown, not removed, when the lost endpoint is the source", () => {
-    const base = makeIR({
-      symbols: [gone, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept")],
-    })
-    const head = withSkipped(makeIR({ symbols: [kept] }), [
-      { path: "src/gone.ts", reason: "parse-failed" },
+describe("an edge into a file the other side never analysed", () => {
+  it("is unknown, not removed, when head lost its source's file", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, kept], dependencies: [GONE_TO_KEPT] }),
+      withSkipped(makeIR({ symbols: [kept] }), [lost("src/gone.ts")]),
+    )
+    expect(diff.summary).toMatchObject({ depsRemoved: 0, depsUnknown: 1 })
+    expect(diff.dependencies.removed).toEqual([])
+    expect(diff.dependencies.unknown).toEqual([
+      { dependency: GONE_TO_KEPT, absentFrom: "head", lostFiles: [lost("src/gone.ts")] },
     ])
-    const result = diffOf(base, head)
+  })
 
-    expect(result.summary.depsRemoved).toBe(0)
-    expect(result.summary.depsUnknown).toBe(1)
-    expect(result.dependencies.removed).toEqual([])
-    expect(result.dependencies.unknown).toEqual([
+  it("is unknown when only its target's file was lost", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, kept], dependencies: [call(kept.id, gone.id)] }),
+      withSkipped(makeIR({ symbols: [kept] }), [lost("src/gone.ts", "over-size")]),
+    )
+    expect(diff.summary.depsRemoved).toBe(0)
+    expect(diff.dependencies.unknown?.[0]?.lostFiles).toEqual([lost("src/gone.ts", "over-size")])
+  })
+
+  it("is unknown, not added, when base lost the file", () => {
+    const diff = diffOf(
+      withSkipped(makeIR({ symbols: [kept] }), [lost("src/gone.ts", "unreadable")]),
+      makeIR({ symbols: [gone, kept], dependencies: [GONE_TO_KEPT] }),
+    )
+    expect(diff.summary).toMatchObject({ depsAdded: 0, depsUnknown: 1 })
+    expect(diff.dependencies.unknown).toEqual([
       {
-        dependency: dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept"),
-        absentFrom: "head",
-        lostFiles: [{ path: "src/gone.ts", reason: "parse-failed" }],
+        dependency: GONE_TO_KEPT,
+        absentFrom: "base",
+        lostFiles: [lost("src/gone.ts", "unreadable")],
       },
     ])
   })
 
-  it("is unknown when only the target was lost and the source survived", () => {
-    const base = makeIR({
-      symbols: [gone, kept],
-      dependencies: [dep("ts:src/kept.ts#kept", "ts:src/gone.ts#gone")],
-    })
-    const head = withSkipped(makeIR({ symbols: [kept] }), [
-      { path: "src/gone.ts", reason: "over-size" },
-    ])
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsRemoved).toBe(0)
-    expect(result.dependencies.unknown?.[0]?.lostFiles).toEqual([
-      { path: "src/gone.ts", reason: "over-size" },
-    ])
-  })
-
-  it("is unknown, not added, when base is the side that lost the file", () => {
-    const base = withSkipped(makeIR({ symbols: [kept] }), [
-      { path: "src/gone.ts", reason: "parse-timeout" },
-    ])
-    const head = makeIR({
-      symbols: [gone, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept")],
-    })
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsAdded).toBe(0)
-    expect(result.summary.depsUnknown).toBe(1)
-    expect(result.dependencies.unknown?.[0]?.absentFrom).toBe("base")
-  })
-
-  it("collapses an intra-file edge to the one file it lost", () => {
-    const base = makeIR({
-      symbols: [gone, goneToo, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/gone.ts#goneToo")],
-    })
-    const head = withSkipped(makeIR({ symbols: [kept] }), [
-      { path: "src/gone.ts", reason: "parse-failed" },
-    ])
-    expect(diffOf(base, head).dependencies.unknown?.[0]?.lostFiles).toEqual([
-      { path: "src/gone.ts", reason: "parse-failed" },
-    ])
-  })
-
-  it("names both files, path-sorted, when the two endpoints went for different reasons", () => {
-    const base = makeIR({
-      symbols: [gone, alsoGone, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/also.ts#alsoGone")],
-    })
-    const head = withSkipped(
-      makeIR({ symbols: [kept] }),
-      [
-        { path: "src/also.ts", reason: "parse-timeout" },
-        { path: "src/gone.ts", reason: "extraction-failed" },
-      ],
-      4,
+  it("names the one file an intra-file edge lost", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, goneToo, kept], dependencies: [call(gone.id, goneToo.id)] }),
+      withSkipped(makeIR({ symbols: [kept] }), [lost("src/gone.ts")]),
     )
-    expect(diffOf(base, head).dependencies.unknown?.[0]?.lostFiles).toEqual([
-      { path: "src/also.ts", reason: "parse-timeout" },
-      { path: "src/gone.ts", reason: "extraction-failed" },
-    ])
+    expect(diff.dependencies.unknown?.[0]?.lostFiles).toEqual([lost("src/gone.ts")])
   })
 
-  it("leaves a component-level edge alone, because a Component has no file to lose", () => {
-    const base = makeIR({
-      symbols: [gone, kept],
-      dependencies: [
-        dep("billing", "pricing", { via: "import" }),
-        dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept"),
-      ],
-    })
-    const head = withSkipped(
-      makeIR({ symbols: [kept], dependencies: [] }),
-      [
-        { path: "billing", reason: "unroutable" },
-        { path: "src/gone.ts", reason: "parse-failed" },
-      ],
-      4,
+  it.each([
+    ["different reasons", "parse-timeout", "extraction-failed"],
+    ["the same reason", "parse-failed", "parse-failed"],
+  ] as const)("names both files, path-sorted, when its two ends went for %s", (_, alsoReason, goneReason) => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, alsoGone, kept], dependencies: [call(gone.id, alsoGone.id)] }),
+      withSkipped(makeIR({ symbols: [kept] }), [
+        lost("src/also.ts", alsoReason),
+        lost("src/gone.ts", goneReason),
+      ]),
     )
-    const result = diffOf(base, head)
-
-    expect(result.dependencies.removed).toEqual([dep("billing", "pricing", { via: "import" })])
-    expect(result.summary.depsRemoved).toBe(1)
-    expect(result.summary.depsUnknown).toBe(1)
-  })
-
-  it("leaves an edge whose file nobody lost as a removal", () => {
-    const base = makeIR({
-      symbols: [gone, kept],
-      dependencies: [dep("ts:src/kept.ts#kept", "ts:src/gone.ts#gone")],
-    })
-    const head = makeIR({ symbols: [gone, kept] })
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsRemoved).toBe(1)
-    expect(result.summary.depsUnknown).toBe(0)
-  })
-
-  it("says nothing about a file both sides lost, because neither holds the edge", () => {
-    const skipped = [{ path: "src/gone.ts", reason: "over-size" as const }]
-    const base = withSkipped(makeIR({ symbols: [kept] }), skipped)
-    const head = withSkipped(makeIR({ symbols: [kept] }), skipped)
-    const result = diffOf(base, head)
-
-    expect(result.dependencies.unknown).toEqual([])
-    expect(result.summary.depsUnknown).toBe(0)
-  })
-
-  it("keeps a direction flip as an added + removed pair", () => {
-    const base = makeIR({
-      symbols: [gone, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept")],
-    })
-    const head = makeIR({
-      symbols: [gone, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept", { direction: "inbound" })],
-    })
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsAdded).toBe(1)
-    expect(result.summary.depsRemoved).toBe(1)
-    expect(result.summary.depsUnknown).toBe(0)
-    expect(result.dependencies.unknown).toEqual([])
+    expect(diff.dependencies.unknown?.[0]?.lostFiles).toEqual([
+      lost("src/also.ts", alsoReason),
+      lost("src/gone.ts", goneReason),
+    ])
   })
 
   it("asks the document where the Symbol says it is, not where its id says", () => {
-    const base = makeIR({
-      symbols: [relocated, kept],
-      dependencies: [dep("ts:src/old.ts#relocated", "ts:src/kept.ts#kept")],
-    })
-    const head = withSkipped(makeIR({ symbols: [kept] }), [
-      { path: "src/actual.ts", reason: "parse-failed" },
-    ])
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsRemoved).toBe(0)
-    expect(result.dependencies.unknown).toEqual([
-      {
-        dependency: dep("ts:src/old.ts#relocated", "ts:src/kept.ts#kept"),
-        absentFrom: "head",
-        lostFiles: [{ path: "src/actual.ts", reason: "parse-failed" }],
-      },
-    ])
-  })
-
-  it("is a removal when only the path inside the id was skipped", () => {
-    const base = makeIR({
-      symbols: [relocated, kept],
-      dependencies: [dep("ts:src/old.ts#relocated", "ts:src/kept.ts#kept")],
-    })
-    const head = withSkipped(makeIR({ symbols: [kept] }), [
-      { path: "src/old.ts", reason: "parse-failed" },
-    ])
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsRemoved).toBe(1)
-    expect(result.summary.depsUnknown).toBe(0)
-    expect(result.dependencies.unknown).toEqual([])
-  })
-
-  it("keeps both files when two endpoints went for the same reason", () => {
-    const base = makeIR({
-      symbols: [gone, alsoGone, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/also.ts#alsoGone")],
-    })
-    const head = withSkipped(
-      makeIR({ symbols: [kept] }),
-      [
-        { path: "src/also.ts", reason: "parse-failed" },
-        { path: "src/gone.ts", reason: "parse-failed" },
-      ],
-      4,
+    const edge = call(relocated.id, kept.id)
+    const diff = diffOf(
+      makeIR({ symbols: [relocated, kept], dependencies: [edge] }),
+      withSkipped(makeIR({ symbols: [kept] }), [lost("src/actual.ts")]),
     )
-    expect(diffOf(base, head).dependencies.unknown?.[0]?.lostFiles).toEqual([
-      { path: "src/also.ts", reason: "parse-failed" },
-      { path: "src/gone.ts", reason: "parse-failed" },
+    expect(diff.summary.depsRemoved).toBe(0)
+    expect(diff.dependencies.unknown).toEqual([
+      { dependency: edge, absentFrom: "head", lostFiles: [lost("src/actual.ts")] },
     ])
   })
 
-  it("ignores a file the document holding the edge skipped itself", () => {
-    const base = withSkipped(
-      makeIR({
-        symbols: [gone, kept],
-        dependencies: [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept")],
-      }),
-      [{ path: "src/gone.ts", reason: "over-size" }],
+  it("is sorted with the others by the same key as added and removed", () => {
+    const edges = [call(kept.id, goneToo.id), call(gone.id, kept.id), call(alsoGone.id, kept.id)]
+    const diff = diffOf(
+      makeIR({ symbols: [gone, goneToo, alsoGone, kept], dependencies: edges }),
+      withSkipped(makeIR({ symbols: [kept] }), [lost("src/also.ts"), lost("src/gone.ts")]),
     )
-    const head = makeIR({ symbols: [gone, kept] })
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsRemoved).toBe(1)
-    expect(result.summary.depsUnknown).toBe(0)
-  })
-
-  it("counts the three kinds apart, and puts each edge in exactly one array", () => {
-    const base = makeIR({
-      symbols: [gone, kept],
-      dependencies: [
-        dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept"),
-        dep("billing", "legacy", { via: "import" }),
-      ],
-    })
-    const head = withSkipped(
-      makeIR({
-        symbols: [kept],
-        dependencies: [dep("billing", "payments", { via: "import" })],
-      }),
-      [{ path: "src/gone.ts", reason: "parse-failed" }],
-    )
-    const result = diffOf(base, head)
-
-    expect(result.summary.depsAdded).toBe(1)
-    expect(result.summary.depsRemoved).toBe(1)
-    expect(result.summary.depsUnknown).toBe(1)
-    const unknownEdge = result.dependencies.unknown?.[0]?.dependency
-    expect(unknownEdge).toEqual(dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept"))
-    expect(result.dependencies.added).toEqual([dep("billing", "payments", { via: "import" })])
-    expect(result.dependencies.removed).toEqual([dep("billing", "legacy", { via: "import" })])
-  })
-
-  it("carries the lost files on a base-side loss too, not just the side", () => {
-    const base = withSkipped(makeIR({ symbols: [kept] }), [
-      { path: "src/gone.ts", reason: "unreadable" },
+    expect(diff.dependencies.unknown?.map((entry) => entry.dependency)).toEqual([
+      edges[2],
+      edges[1],
+      edges[0],
     ])
-    const head = makeIR({
-      symbols: [gone, kept],
-      dependencies: [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept")],
-    })
-    expect(diffOf(base, head).dependencies.unknown).toEqual([
-      {
-        dependency: dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept"),
-        absentFrom: "base",
-        lostFiles: [{ path: "src/gone.ts", reason: "unreadable" }],
-      },
-    ])
-  })
-
-  it("writes the array and the counter even when nothing was unknown", () => {
-    const result = diffOf(makeIR({ symbols: [kept] }), makeIR({ symbols: [kept] }))
-    expect(result.dependencies.unknown).toEqual([])
-    expect(result.summary.depsUnknown).toBe(0)
-  })
-
-  it("sorts the unknown edges by the same key as added and removed", () => {
-    const base = makeIR({
-      symbols: [gone, goneToo, alsoGone, kept],
-      dependencies: [
-        dep("ts:src/kept.ts#kept", "ts:src/gone.ts#goneToo"),
-        dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept"),
-        dep("ts:src/also.ts#alsoGone", "ts:src/kept.ts#kept"),
-      ],
-    })
-    const head = withSkipped(
-      makeIR({ symbols: [kept] }),
-      [
-        { path: "src/also.ts", reason: "parse-failed" },
-        { path: "src/gone.ts", reason: "parse-failed" },
-      ],
-      4,
-    )
-    const keys = diffOf(base, head).dependencies.unknown?.map(
-      (u) => `${u.dependency.from}::${u.dependency.to}::${u.dependency.via}`,
-    )
-    expect(keys).toEqual([...(keys ?? [])].sort())
-    expect(keys).toHaveLength(3)
   })
 })
 
-describe("diffDependencies — a side view with nothing to say", () => {
-  it("classifies every one-sided edge as before, and still writes the unknown array", () => {
-    const blind: DependencySideView = { symbolFiles: new Map(), lostFiles: new Map() }
-    const result = diffDependencies(
-      [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept")],
-      [dep("billing", "pricing", { via: "import" })],
-      { base: blind, head: blind, renames: renameDirections(null) },
+describe("an edge that is not unknown although a file was lost", () => {
+  it("is removed when only the path inside its endpoint's id was skipped", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [relocated, kept], dependencies: [call(relocated.id, kept.id)] }),
+      withSkipped(makeIR({ symbols: [kept] }), [lost("src/old.ts")]),
     )
-    expect(result.removed).toHaveLength(1)
-    expect(result.added).toHaveLength(1)
-    expect(result.unknown).toEqual([])
+    expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 0 })
+  })
+
+  it("is removed when it runs between Components, which have no file to lose", () => {
+    const diff = diffOf(
+      makeIR({
+        symbols: [gone, kept],
+        dependencies: [imports("billing", "pricing"), GONE_TO_KEPT],
+      }),
+      withSkipped(makeIR({ symbols: [kept] }), [
+        lost("billing", "unroutable"),
+        lost("src/gone.ts"),
+      ]),
+    )
+    expect(diff.dependencies.removed).toEqual([imports("billing", "pricing")])
+    expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 1 })
+  })
+
+  it("is removed when nobody lost its file", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, kept], dependencies: [call(kept.id, gone.id)] }),
+      makeIR({ symbols: [gone, kept] }),
+    )
+    expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 0 })
+  })
+
+  it("is removed when the file was lost by the document that holds the edge", () => {
+    const diff = diffOf(
+      withSkipped(makeIR({ symbols: [gone, kept], dependencies: [GONE_TO_KEPT] }), [
+        lost("src/gone.ts", "over-size"),
+      ]),
+      makeIR({ symbols: [gone, kept] }),
+    )
+    expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 0 })
+  })
+
+  it("is an added + removed pair when its direction flipped, whatever either side lost", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, kept], dependencies: [GONE_TO_KEPT] }),
+      withSkipped(
+        makeIR({
+          symbols: [gone, kept],
+          dependencies: [call(gone.id, kept.id, { direction: "inbound" })],
+        }),
+        [lost("src/gone.ts")],
+      ),
+    )
+    expect(diff.summary).toMatchObject({ depsAdded: 1, depsRemoved: 1, depsUnknown: 0 })
+  })
+
+  it("does not exist when both sides lost the file, since neither holds it", () => {
+    const skipped = [lost("src/gone.ts", "over-size")]
+    const diff = diffOf(
+      withSkipped(makeIR({ symbols: [kept] }), skipped),
+      withSkipped(makeIR({ symbols: [kept] }), skipped),
+    )
+    expect(diff.dependencies.unknown).toEqual([])
+    expect(diff.summary.depsUnknown).toBe(0)
+  })
+})
+
+describe("the three edge outcomes", () => {
+  it("are counted apart, each edge in exactly one array", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, kept], dependencies: [GONE_TO_KEPT, imports("billing", "legacy")] }),
+      withSkipped(makeIR({ symbols: [kept], dependencies: [imports("billing", "payments")] }), [
+        lost("src/gone.ts"),
+      ]),
+    )
+    expect(diff.summary).toMatchObject({ depsAdded: 1, depsRemoved: 1, depsUnknown: 1 })
+    expect(diff.dependencies).toEqual({
+      added: [imports("billing", "payments")],
+      removed: [imports("billing", "legacy")],
+      unknown: [{ dependency: GONE_TO_KEPT, absentFrom: "head", lostFiles: [lost("src/gone.ts")] }],
+    })
+  })
+
+  it("write the unknown array and its counter even when nothing was unknown", () => {
+    const diff = diffOf(makeIR({ symbols: [kept] }), makeIR({ symbols: [kept] }))
+    expect(diff.dependencies.unknown).toEqual([])
+    expect(diff.summary.depsUnknown).toBe(0)
+  })
+})
+
+describe("diffDependencies given side views with nothing to say", () => {
+  it("classifies every one-sided edge plainly, and still writes the unknown array", () => {
+    const blind: DependencySideView = { symbolFiles: new Map(), lostFiles: new Map() }
+    const result = diffDependencies([GONE_TO_KEPT], [imports("billing", "pricing")], {
+      base: blind,
+      head: blind,
+      renames: renameDirections(null),
+    })
+    expect(result).toEqual({
+      added: [imports("billing", "pricing")],
+      removed: [GONE_TO_KEPT],
+      unknown: [],
+    })
   })
 })

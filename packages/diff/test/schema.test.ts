@@ -1,323 +1,221 @@
-import diffSchema from "@aburi/schema/aburi.diff.v1.json" with { type: "json" }
-import { component, fp, makeIR, makeSymbol } from "@aburi/test-support"
-import type { DiffResult, IR } from "@aburi/types"
-import Ajv2020, { type ErrorObject, type SchemaObject } from "ajv/dist/2020.js"
+import irSchema from "@aburi/schema/aburi.ir.v1.json" with { type: "json" }
+import { component, dependency, fp, makeIR, makeSymbol } from "@aburi/test-support"
+import type { DiffResult, SkipReason } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDiff } from "../src/diff"
-import { sliceRecordViolation } from "../src/slice"
+import { diffSchemaViolations } from "./diff-schema"
+import { diffOf, diffSymbols, soleChange, withSkipped } from "./helpers"
 
-const ajv = new Ajv2020({
-  strict: true,
-  strictTypes: false,
-  allErrors: true,
-  allowUnionTypes: false,
-})
+const changing = makeSymbol({ id: "ts:src/a.ts#A", name: "A" })
+const gone = makeSymbol({ id: "ts:src/gone.ts#foo", name: "foo" })
+const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
 
-interface AnchorKeywordValidator {
-  (enabled: boolean, record: unknown): boolean
-  errors?: Partial<ErrorObject>[]
+/** A changed Symbol, a Symbol and an edge into a file head lost, and a file neither side read. */
+function lossyDiff(reason: SkipReason = "parse-failed"): DiffResult {
+  return diffOf(
+    withSkipped(
+      makeIR({
+        symbols: [changing, gone, kept],
+        dependencies: [dependency({ from: gone.id, to: kept.id, via: "call" })],
+      }),
+      [{ path: "vendor/huge.ts", reason }],
+    ),
+    withSkipped(makeIR({ symbols: [{ ...changing, fingerprint: fp("x") }, kept] }), [
+      { path: "src/gone.ts", reason },
+      { path: "vendor/huge.ts", reason },
+    ]),
+  )
 }
 
-const validateAnchorDerived: AnchorKeywordValidator = (enabled, record) => {
-  if (!enabled) return true
-  const violation = sliceRecordViolation(record)
-  if (violation === null) return true
-  validateAnchorDerived.errors = [
-    { keyword: "sliceAnchorDerived", message: violation.message, params: { kind: violation.kind } },
-  ]
-  return false
-}
-
-ajv.addKeyword({
-  keyword: "sliceAnchorDerived",
-  type: "object",
-  schemaType: "boolean",
-  errors: true,
-  validate: validateAnchorDerived,
-})
-
-const validate = ajv.compile<DiffResult>(diffSchema satisfies SchemaObject)
-
-const schemaWithAnchorInvariant = {
-  ...diffSchema,
-  // Distinct base URI so Ajv does not see two schemas registered under one $id.
-  $id: "https://aburi.kage1020.com/schema/aburi.diff.v1.with-anchor-invariant.json",
-  $defs: {
-    ...diffSchema.$defs,
-    SliceRecord: { ...diffSchema.$defs.SliceRecord, sliceAnchorDerived: true },
-  },
-} satisfies SchemaObject
-const validateWithAnchorInvariant = ajv.compile<DiffResult>(schemaWithAnchorInvariant)
-
-function baseIR(): IR {
-  return makeIR({
-    symbols: [
-      makeSymbol({ id: "ts:src/a.ts#A", name: "A" }),
-      makeSymbol({ id: "ts:src/b.ts#B", name: "B" }),
-    ],
-  })
-}
-
-function headIR(): IR {
-  return makeIR({
-    symbols: [
-      makeSymbol({ id: "ts:src/a.ts#A", name: "A", fingerprint: fp("changed-a") }),
-      makeSymbol({ id: "ts:src/b.ts#B", name: "B", fingerprint: fp("changed-b") }),
-      makeSymbol({ id: "ts:src/c.ts#C", name: "C" }),
-    ],
-  })
-}
-
-describe("aburi.diff.v1.json — runtime schema validation", () => {
-  it("validates a `buildDiff` output containing a non-empty slices[]", () => {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "base", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "head", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    const ok = validate(diff)
-    if (!ok) {
-      throw new Error(`schema validation failed: ${JSON.stringify(validate.errors, null, 2)}`)
-    }
-    expect(ok).toBe(true)
+describe("a diff buildDiff writes validates against aburi.diff.v1", () => {
+  it("with changed and unknown Symbols, an unknown edge, a file neither side read, and slices", () => {
+    const diff = lossyDiff()
+    expect(diff.summary).toMatchObject({ changed: 1, unknown: 1, depsUnknown: 1 })
+    expect(diff.notCompared).toHaveLength(1)
+    expect(diff.slices).not.toEqual([])
+    expect(diffSchemaViolations(diff)).toEqual([])
   })
 
-  it("validates a `buildDiff` output whose slices[] is empty (zero-Node case)", () => {
-    const ir = makeIR({ symbols: [makeSymbol({ id: "ts:src/x.ts#X", name: "X" })] })
-    const diff = buildDiff({
-      baseIR: ir,
-      headIR: ir,
-      base: { ref: "b", irSchema: ir.$schema },
-      head: { ref: "h", irSchema: ir.$schema },
-    })
+  it.each(
+    irSchema.$defs.SkippedFile.properties.reason.enum,
+  )("with every skip reason the IR can carry: %s", (reason) => {
+    expect(diffSchemaViolations(lossyDiff(reason as SkipReason))).toEqual([])
+  })
+
+  it("with no Slice Node, and so an empty slices[]", () => {
+    const diff = diffSymbols([kept], [kept])
     expect(diff.slices).toEqual([])
-    expect(validate(diff)).toBe(true)
+    expect(diffSchemaViolations(diff)).toEqual([])
   })
 
-  it("validates a changed component whose three delta booleans are all false", () => {
-    const before = component({ id: "billing", name: "Billing" })
-    const after = component({ id: "billing", name: "Billing & Invoicing" })
-    const diff = buildDiff({
-      baseIR: makeIR({ components: [before], symbols: [] }),
-      headIR: makeIR({ components: [after], symbols: [] }),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    expect(diff.summary.componentsChanged).toBe(1)
+  it("with a changed Component whose three delta booleans are all false", () => {
+    const diff = diffOf(
+      makeIR({ components: [component({ id: "billing", name: "Billing" })] }),
+      makeIR({ components: [component({ id: "billing", name: "Billing & Invoicing" })] }),
+    )
     expect(diff.components.changed[0]?.delta).toEqual({
       rootsChanged: false,
       publicApiChanged: false,
       frameworksChanged: false,
     })
-    const ok = validate(diff)
-    if (!ok) {
-      throw new Error(`schema validation failed: ${JSON.stringify(validate.errors, null, 2)}`)
-    }
-    expect(ok).toBe(true)
+    expect(diffSchemaViolations(diff)).toEqual([])
   })
 
-  it("validates a Symbol whose only change is its confidence, and one written before the flag", () => {
-    const sure = makeSymbol({ id: "ts:src/x.ts#X", name: "X", confidence: "high" })
-    const diff = buildDiff({
-      baseIR: makeIR({ symbols: [sure] }),
-      headIR: makeIR({ symbols: [{ ...sure, confidence: "low" }] }),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    const [change] = diff.symbols
-    if (change?.status !== "changed") throw new Error("expected a changed entry")
-    expect(change.delta.confidenceChanged).toBe(true)
-    expect(validate(diff)).toBe(true)
-
-    const { confidenceChanged: _, ...older } = change.delta
-    expect(validate({ ...diff, symbols: [{ ...change, delta: older }] })).toBe(true)
+  it("with a Symbol whose only change is its confidence", () => {
+    const diff = diffSymbols([kept], [{ ...kept, confidence: "low" }])
+    expect(soleChange(diff.symbols, "changed").delta.confidenceChanged).toBe(true)
+    expect(diffSchemaViolations(diff)).toEqual([])
   })
 
-  it("rejects a slices[] entry that omits the required `slice:` prefix", () => {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    const malformed = {
-      ...diff,
-      slices: [{ id: "ts:src/a.ts#A", members: ["ts:src/a.ts#A"] }],
-    }
-    expect(validate(malformed)).toBe(false)
-    expect(
-      validate.errors?.some((e) => e.instancePath.includes("/slices/") && e.keyword === "pattern"),
-    ).toBe(true)
+  it("with an unknown Symbol naming the path a renamed file was skipped under", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [gone, kept] }),
+      withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/renamed.ts", reason: "over-size" }]),
+      { gitRenames: new Map([["src/gone.ts", "src/renamed.ts"]]) },
+    )
+    expect(soleChange(diff.symbols, "unknown").lostPath).toBe("src/renamed.ts")
+    expect(diffSchemaViolations(diff)).toEqual([])
   })
 
-  it("rejects a SliceRecord with empty members[]", () => {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    const malformed = {
-      ...diff,
-      slices: [{ id: "slice:ts:src/a.ts#A", members: [] as string[] }],
-    }
-    expect(validate(malformed)).toBe(false)
-    expect(
-      validate.errors?.some((e) => e.instancePath.includes("/slices/") && e.keyword === "minItems"),
-    ).toBe(true)
-  })
-
-  it("rejects a SliceRecord carrying an undeclared property (additionalProperties: false)", () => {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    const malformed = {
-      ...diff,
-      slices: [
-        {
-          id: "slice:ts:src/a.ts#A",
-          members: ["ts:src/a.ts#A"],
-          confidence: "high",
-        },
-      ],
-    }
-    expect(validate(malformed)).toBe(false)
-    expect(validate.errors?.some((e) => e.keyword === "additionalProperties")).toBe(true)
-  })
-
-  it("rejects a SliceRecord.members[] that contains duplicates", () => {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    const malformed = {
-      ...diff,
-      slices: [
-        {
-          id: "slice:ts:src/a.ts#A",
-          members: ["ts:src/a.ts#A", "ts:src/a.ts#A"],
-        },
-      ],
-    }
-    expect(validate(malformed)).toBe(false)
-    expect(validate.errors?.some((e) => e.keyword === "uniqueItems")).toBe(true)
-  })
-
-  it("rejects a DiffResult that omits the required `slices` field", () => {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    const { slices: _slices, ...malformed } = diff
-    expect(validate(malformed)).toBe(false)
-    expect(
-      validate.errors?.some(
-        (e) => e.keyword === "required" && e.params?.missingProperty === "slices",
-      ),
-    ).toBe(true)
+  it("with a file neither side read under its renamed path, carrying the base's path", () => {
+    const diff = diffOf(
+      withSkipped(makeIR({ symbols: [kept] }), [{ path: "vendor/old.ts", reason: "over-size" }]),
+      withSkipped(makeIR({ symbols: [kept] }), [{ path: "vendor/new.ts", reason: "over-size" }]),
+      { gitRenames: new Map([["vendor/old.ts", "vendor/new.ts"]]) },
+    )
+    expect(diff.notCompared).toStrictEqual([
+      {
+        path: "vendor/new.ts",
+        basePath: "vendor/old.ts",
+        baseReason: "over-size",
+        headReason: "over-size",
+      },
+    ])
+    expect(diffSchemaViolations(diff)).toEqual([])
   })
 })
 
-describe("aburi.diff.v1.json — anchor derivation invariant", () => {
-  function diffWithSlices(slices: Array<{ id: string; members: string[] }>): unknown {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    return { ...diff, slices }
+describe("a diff written before a field existed still validates", () => {
+  it("without confidenceChanged on a delta", () => {
+    const diff = diffSymbols([kept], [{ ...kept, confidence: "low" }])
+    const change = soleChange(diff.symbols, "changed")
+    const { confidenceChanged: _, ...delta } = change.delta
+    expect(diffSchemaViolations({ ...diff, symbols: [{ ...change, delta }] })).toEqual([])
+  })
+
+  it("without dependencies.unknown or summary.depsUnknown", () => {
+    const diff = lossyDiff()
+    const { unknown: _unknown, ...dependencies } = diff.dependencies
+    const { depsUnknown: _depsUnknown, ...summary } = diff.summary
+    expect(diffSchemaViolations({ ...diff, dependencies, summary })).toEqual([])
+  })
+
+  it("without notCompared", () => {
+    const { notCompared: _, ...older } = lossyDiff()
+    expect(diffSchemaViolations(older)).toEqual([])
+  })
+})
+
+describe("the schema refuses a malformed diff", () => {
+  const unknownEdge = (diff: DiffResult) => {
+    const [edge] = diff.dependencies.unknown ?? []
+    if (edge === undefined) throw new Error("the fixture lost no edge")
+    return edge
   }
 
-  it("accepts a real `buildDiff` output whose slices[] the pass derived itself", () => {
-    const diff = buildDiff({
-      baseIR: baseIR(),
-      headIR: headIR(),
-      base: { ref: "base", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-      head: { ref: "head", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
-    })
-    expect(diff.slices.length).toBeGreaterThan(0)
-    const ok = validateWithAnchorInvariant(diff)
-    if (!ok) {
-      throw new Error(
-        `schema validation failed: ${JSON.stringify(validateWithAnchorInvariant.errors, null, 2)}`,
-      )
-    }
-    expect(ok).toBe(true)
-
-    for (const slice of diff.slices) {
-      expect(slice.id).toBe(`slice:${slice.members[0]}`)
-      for (let i = 1; i < slice.members.length; i++) {
-        expect((slice.members[i - 1] as string) < (slice.members[i] as string)).toBe(true)
-      }
-    }
-  })
-
-  it("rejects a correct `slice:` prefix whose id is not the anchor", () => {
-    const malformed = diffWithSlices([
-      { id: "slice:ts:src/b.ts#B", members: ["ts:src/a.ts#A", "ts:src/b.ts#B"] },
-    ])
-
-    expect(validate(malformed)).toBe(true)
-
-    expect(validateWithAnchorInvariant(malformed)).toBe(false)
-    expect(
-      validateWithAnchorInvariant.errors?.some(
-        (e) => e.instancePath.includes("/slices/") && e.keyword === "sliceAnchorDerived",
-      ),
-    ).toBe(true)
-  })
-
-  it("rejects members[] that are not in ascending order", () => {
-    const malformed = diffWithSlices([
-      { id: "slice:ts:src/b.ts#B", members: ["ts:src/b.ts#B", "ts:src/a.ts#A"] },
-    ])
-    expect(validate(malformed)).toBe(true)
-    expect(validateWithAnchorInvariant(malformed)).toBe(false)
-    expect(
-      validateWithAnchorInvariant.errors?.some((e) => e.keyword === "sliceAnchorDerived"),
-    ).toBe(true)
-  })
-
-  it("still rejects a malformed prefix, the same way the base schema does", () => {
-    const malformed = diffWithSlices([{ id: "ts:src/a.ts#A", members: ["ts:src/a.ts#A"] }])
-    expect(validate(malformed)).toBe(false)
-    expect(validateWithAnchorInvariant(malformed)).toBe(false)
-  })
-
-  it("points at the offending entry rather than always at slices[0]", () => {
-    const malformed = diffWithSlices([
-      { id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A"] },
-      { id: "slice:ts:src/c.ts#C", members: ["ts:src/b.ts#B", "ts:src/c.ts#C"] },
-      { id: "slice:ts:src/d.ts#D", members: ["ts:src/d.ts#D"] },
-    ])
-    expect(validateWithAnchorInvariant(malformed)).toBe(false)
-    const paths = (validateWithAnchorInvariant.errors ?? [])
-      .filter((e) => e.keyword === "sliceAnchorDerived")
-      .map((e) => e.instancePath)
-    expect(paths).toEqual(["/slices/1"])
-  })
-
-  it("reports every offending entry under allErrors, each with its own reason", () => {
-    const malformed = diffWithSlices([
-      { id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A"] },
-      { id: "slice:ts:src/z.ts#Z", members: ["ts:src/b.ts#B", "ts:src/c.ts#C"] },
-      { id: "slice:ts:src/e.ts#E", members: ["ts:src/f.ts#F", "ts:src/e.ts#E"] },
-    ])
-    expect(validateWithAnchorInvariant(malformed)).toBe(false)
-    const reported = (validateWithAnchorInvariant.errors ?? [])
-      .filter((e) => e.keyword === "sliceAnchorDerived")
-      .map((e) => `${e.instancePath}: ${e.message}`)
-    expect(reported).toHaveLength(2)
-    expect(reported[0]).toMatch(/^\/slices\/1: .*not derived from the anchor/)
-    expect(reported[1]).toMatch(/^\/slices\/2: .*strictly ascending/)
+  it.each<[string, (diff: DiffResult) => unknown, string]>([
+    [
+      "a Slice id without the `slice:` prefix",
+      (diff) => ({ ...diff, slices: [{ id: "ts:src/a.ts#A", members: ["ts:src/a.ts#A"] }] }),
+      "/slices/0/id pattern",
+    ],
+    [
+      "a Slice with no members",
+      (diff) => ({ ...diff, slices: [{ id: "slice:ts:src/a.ts#A", members: [] }] }),
+      "/slices/0/members minItems",
+    ],
+    [
+      "a Slice member listed twice",
+      (diff) => ({
+        ...diff,
+        slices: [{ id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A", "ts:src/a.ts#A"] }],
+      }),
+      "/slices/0/members uniqueItems",
+    ],
+    [
+      "a Slice carrying an undeclared property",
+      (diff) => ({
+        ...diff,
+        slices: [{ id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A"], confidence: "high" }],
+      }),
+      "/slices/0 additionalProperties",
+    ],
+    ["a diff without slices", ({ slices: _, ...rest }) => rest, "/ required"],
+    [
+      "an unknown Symbol with an empty lostPath",
+      (diff) => ({ ...diff, symbols: [{ ...soleChange(diff.symbols, "unknown"), lostPath: "" }] }),
+      "/symbols/0/lostPath minLength",
+    ],
+    [
+      "an unknown Symbol that does not say which side lost the file",
+      (diff) => {
+        const { absentFrom: _, ...entry } = soleChange(diff.symbols, "unknown")
+        return { ...diff, symbols: [entry] }
+      },
+      "/symbols/0 oneOf",
+    ],
+    [
+      "an unknown edge with no lost files",
+      (diff) => ({
+        ...diff,
+        dependencies: { ...diff.dependencies, unknown: [{ ...unknownEdge(diff), lostFiles: [] }] },
+      }),
+      "/dependencies/unknown/0/lostFiles minItems",
+    ],
+    [
+      "a lost file carrying an undeclared property",
+      (diff) => ({
+        ...diff,
+        dependencies: {
+          ...diff.dependencies,
+          unknown: [
+            {
+              ...unknownEdge(diff),
+              lostFiles: [{ path: "src/gone.ts", reason: "over-size", detail: "big" }],
+            },
+          ],
+        },
+      }),
+      "/dependencies/unknown/0/lostFiles/0 additionalProperties",
+    ],
+    [
+      "a notCompared entry with only one side's reason",
+      (diff) => ({ ...diff, notCompared: [{ path: "vendor/huge.ts", baseReason: "over-size" }] }),
+      "/notCompared/0 required",
+    ],
+    [
+      "a notCompared reason the IR could never have written",
+      (diff) => ({
+        ...diff,
+        notCompared: [{ path: "vendor/huge.ts", baseReason: "over-size", headReason: "gave-up" }],
+      }),
+      "/notCompared/0/headReason enum",
+    ],
+    [
+      "a notCompared entry carrying an undeclared property",
+      (diff) => ({
+        ...diff,
+        notCompared: [
+          {
+            path: "vendor/huge.ts",
+            baseReason: "over-size",
+            headReason: "parse-timeout",
+            detail: "3.2 MB",
+          },
+        ],
+      }),
+      "/notCompared/0 additionalProperties",
+    ],
+  ])("refuses %s", (_, malform, violation) => {
+    expect(diffSchemaViolations(malform(lossyDiff()))).toContain(violation)
   })
 })
