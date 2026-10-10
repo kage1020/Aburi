@@ -1,9 +1,9 @@
+import diffSchema from "@aburi/schema/aburi.diff.v1.json" with { type: "json" }
+import irSchema from "@aburi/schema/aburi.ir.v1.json" with { type: "json" }
 import { dependency, makeIR, makeSymbol } from "@aburi/test-support"
 import type { DiffResult, IR, SkippedFile } from "@aburi/types"
 import Ajv2020, { type SchemaObject } from "ajv/dist/2020.js"
 import { describe, expect, it } from "vitest"
-import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" }
-import irSchema from "../../../schema/aburi.ir.v1.json" with { type: "json" }
 import { buildDiff } from "../src/diff"
 
 const ajv = new Ajv2020({ strict: true, strictTypes: false, allErrors: true })

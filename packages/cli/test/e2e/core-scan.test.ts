@@ -1,0 +1,304 @@
+import { join } from "node:path"
+import {
+  apiFingerprint,
+  assertIRIntegrity,
+  detectComponents,
+  serializeCanonical,
+  writeCanonicalIR,
+} from "@aburi/core"
+import { buildDiff } from "@aburi/diff"
+import { prismaEffectsPlugin } from "@aburi/effects-prisma"
+import { nextFrameworkPlugin } from "@aburi/framework-next"
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
+import { IR_SCHEMA_URL, type PluginLineup, type ScanExtras, scanWith } from "@aburi/test-harness"
+import { irSchemaViolations, useScratchWorkspace } from "@aburi/test-support"
+import type { Config, IR, IRSymbol } from "@aburi/types"
+import { describe, expect, it } from "vitest"
+import { DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME } from "../../src"
+
+const workspace = useScratchWorkspace("scan-e2e")
+
+const scanWorkspace = (lineup: PluginLineup = {}, config: Config = {}, extras: ScanExtras = {}) =>
+  scanWith(workspace.root, { languages: [langTypescriptPlugin], ...lineup }, config, extras)
+
+describe("scan — integration through real plugins", () => {
+  it("produces an IR that survives every integrity invariant", async () => {
+    await workspace.writeSource(
+      "app/dashboard/page.tsx",
+      "export default function DashboardPage() {\n  return null\n}\n",
+    )
+    await workspace.writeSource(
+      "app/api/users/route.ts",
+      `import { PrismaClient } from "@prisma/client"\nexport async function GET(prisma: PrismaClient) {\n  const users = await prisma.user.findMany()\n  return users\n}\n`,
+    )
+    await workspace.writeSource(
+      "src/lib/helpers.ts",
+      "export function formatDate(d: Date) {\n  return d.toISOString()\n}\n",
+    )
+
+    const result = await scanWorkspace({
+      frameworks: [nextFrameworkPlugin],
+      effects: [prismaEffectsPlugin],
+    })
+
+    // scan() throws on integrity violation, so reaching here means every invariant is green.
+    expect(result.ir.$schema).toBe(IR_SCHEMA_URL)
+    expect(result.ir.workspace.root).toBe(".")
+    expect(result.ir.symbols.length).toBeGreaterThan(0)
+    expect(result.ir.stats.totalFiles).toBe(3)
+    expect(result.ir.stats.parsedFiles).toBe(3)
+
+    const callResolution = result.ir.stats.callResolution
+    expect(callResolution).toBeDefined()
+    expect(callResolution?.unresolved).toEqual({
+      localScope: expect.any(Number),
+      external: expect.any(Number),
+      dynamic: expect.any(Number),
+      ambiguous: expect.any(Number),
+      noMatch: expect.any(Number),
+    })
+    expect(result.unresolvedCalls.length).toBe(
+      (callResolution?.totalCalls ?? 0) - (callResolution?.resolvedCalls ?? 0),
+    )
+  })
+
+  it("buckets an expression-receiver call as `dynamic`, end to end", async () => {
+    await workspace.writeSource(
+      "app/api/reports/route.ts",
+      `export function GET() {\n  return getRepo().save({})\n}\n`,
+    )
+
+    const result = await scanWorkspace({ frameworks: [nextFrameworkPlugin] })
+
+    const dynamic = result.unresolvedCalls.filter((call) => call.bucket === "dynamic")
+    expect(dynamic.map((call) => call.target)).toContain("getRepo.save")
+    expect(result.ir.stats.callResolution?.unresolved.dynamic).toBeGreaterThan(0)
+  })
+
+  it("routes Next.js page.tsx defaults to framework:next:page extKind", async () => {
+    await workspace.writeSource(
+      "app/page.tsx",
+      "export default function Home() {\n  return null\n}\n",
+    )
+
+    const result = await scanWorkspace({ frameworks: [nextFrameworkPlugin] })
+
+    const home = result.ir.symbols.find((symbol) => symbol.name === "Home")
+    expect(home?.extKind).toBe("framework:next:page")
+  })
+
+  it("classifies prisma.<model>.<verb> calls into db.read / db.write effects", async () => {
+    await workspace.writeSource(
+      "app/api/orders/route.ts",
+      `import { PrismaClient } from "@prisma/client"\nexport async function POST(prisma: PrismaClient) {\n  const order = await prisma.order.create({ data: {} })\n  const orders = await prisma.order.findMany()\n  return { order, orders }\n}\n`,
+    )
+
+    const result = await scanWorkspace({
+      frameworks: [nextFrameworkPlugin],
+      effects: [prismaEffectsPlugin],
+    })
+
+    const post = result.ir.symbols.find((symbol) => symbol.name === "POST")
+    const effectIds = new Set(post?.effects.map((e) => e.id) ?? [])
+    expect(effectIds.has("db.read")).toBe(true)
+    expect(effectIds.has("db.write")).toBe(true)
+  })
+
+  it("drops console.* calls from effects and calls (Category C)", async () => {
+    await workspace.writeSource(
+      "src/service.ts",
+      `export function work() {\n  console.log("hello")\n  console.error("bad")\n}\n`,
+    )
+
+    const result = await scanWorkspace()
+
+    const work = result.ir.symbols.find((symbol) => symbol.name === "work")
+    for (const call of work?.calls ?? []) {
+      expect(call.target.startsWith("console.")).toBe(false)
+    }
+    for (const effect of work?.effects ?? []) {
+      expect(effect.target.startsWith("console.")).toBe(false)
+    }
+  })
+
+  it("respects config.suppress[] to drop app-specific loggers", async () => {
+    await workspace.writeSource(
+      "src/service.ts",
+      `export function work() {\n  myLogger.debug("hi")\n  metrics.counter("x")\n}\n`,
+    )
+
+    const result = await scanWorkspace({}, { suppress: ["myLogger", "metrics"] })
+
+    const work = result.ir.symbols.find((symbol) => symbol.name === "work")
+    for (const call of work?.calls ?? []) {
+      expect(call.target.startsWith("myLogger.")).toBe(false)
+      expect(call.target.startsWith("metrics.")).toBe(false)
+    }
+  })
+
+  it("marks interface / type alias declarations as dropped with correct dropReason", async () => {
+    await workspace.writeSource(
+      "src/types.ts",
+      "export interface Foo { x: number }\nexport type Bar = string\nexport function baz(): void {}\n",
+    )
+
+    const result = await scanWorkspace()
+
+    const foo = result.ir.symbols.find((symbol) => symbol.name === "Foo")
+    const bar = result.ir.symbols.find((symbol) => symbol.name === "Bar")
+    expect(foo?.dropped).toBe(true)
+    expect(bar?.dropped).toBe(true)
+    expect([foo?.dropReason, bar?.dropReason]).toEqual(
+      expect.arrayContaining(["interface (data model)", "type alias"]),
+    )
+  })
+
+  it("resolves same-file top-level calls into via:call symbol edges", async () => {
+    await workspace.writeSource(
+      "src/service.ts",
+      `export function helper(n: number): number {\n  return n + 1\n}\nexport function caller(): number {\n  return helper(3)\n}\n`,
+    )
+
+    const result = await scanWorkspace()
+
+    const callEdge = result.ir.dependencies.find(
+      (d) => d.via === "call" && d.from.endsWith("#caller") && d.to.endsWith("#helper"),
+    )
+    expect(callEdge).toBeDefined()
+    expect(callEdge?.direction).toBe("outbound")
+    expect(callEdge?.effect).toBeNull()
+    const caller = result.ir.symbols.find((symbol) => symbol.name === "caller")
+    const resolvedCall = caller?.calls.find((c) => c.target === "helper")
+    expect(resolvedCall?.resolved).toBe(callEdge?.to)
+  })
+
+  it("dedupes multi-line calls to the same callee into a single via:call Dependency", async () => {
+    await workspace.writeSource(
+      "src/service.ts",
+      `export function helper(n: number): number {\n  return n + 1\n}\nexport function caller(): number {\n  const a = helper(1)\n  const b = helper(2)\n  const c = helper(3)\n  return a + b + c\n}\n`,
+    )
+
+    const result = await scanWorkspace()
+
+    const caller = result.ir.symbols.find((symbol) => symbol.name === "caller")
+    const resolvedCalls = (caller?.calls ?? []).filter((c) => c.resolved !== null)
+    expect(resolvedCalls.length).toBe(3)
+    // ...but the Dependency projection collapses them into one triple.
+    const edges = result.ir.dependencies.filter(
+      (d) => d.via === "call" && d.from.endsWith("#caller") && d.to.endsWith("#helper"),
+    )
+    expect(edges.length).toBe(1)
+  })
+
+  it("resolves relative-import calls into via:call symbol edges (import scope)", async () => {
+    await workspace.writeSource(
+      "src/util.ts",
+      `export function stringify(v: unknown): string {\n  return JSON.stringify(v)\n}\n`,
+    )
+    await workspace.writeSource(
+      "src/main.ts",
+      `import { stringify } from "./util"\nexport function main(): string {\n  return stringify({ hello: "world" })\n}\n`,
+    )
+
+    const result = await scanWorkspace()
+
+    const callEdge = result.ir.dependencies.find(
+      (d) =>
+        d.via === "call" && d.from.endsWith("main.ts#main") && d.to.endsWith("util.ts#stringify"),
+    )
+    expect(callEdge).toBeDefined()
+  })
+
+  it("emits every Class A key in the serialized IR", async () => {
+    await workspace.writeSource("package.json", JSON.stringify({ name: "billing-app" }))
+    await workspace.writeSource(
+      "src/InvoiceService.ts",
+      "export class InvoiceService {\n  create() {}\n}\n",
+    )
+    await workspace.writeSource("src/types.ts", "export interface Invoice {\n  id: string\n}\n")
+
+    const components = await detectComponents({ workspaceRoot: workspace.root })
+    const result = await scanWorkspace({}, {}, { components })
+
+    const parsed = JSON.parse(serializeCanonical(result.ir)) as {
+      symbols: Array<Record<string, unknown> & { source: Record<string, unknown> }>
+      components: Array<Record<string, unknown>>
+    }
+
+    expect(parsed.symbols.length).toBeGreaterThan(0)
+    for (const symbol of parsed.symbols) {
+      for (const key of ["component", "signature"]) {
+        expect(Object.hasOwn(symbol, key), `symbols[].${key} on ${String(symbol.id)}`).toBe(true)
+      }
+      for (const key of ["startColumn", "endColumn"]) {
+        expect(
+          Object.hasOwn(symbol.source, key),
+          `symbols[].source.${key} on ${String(symbol.id)}`,
+        ).toBe(true)
+      }
+    }
+
+    expect(parsed.components.length).toBeGreaterThan(0)
+    for (const component of parsed.components) {
+      expect(Object.hasOwn(component, "description"), `components[].description`).toBe(true)
+      for (const key of ["publicApi", "frameworks"]) {
+        if (!Object.hasOwn(component, key)) continue
+        expect(
+          (component[key] as unknown[]).length,
+          `components[].${key} present but empty`,
+        ).toBeGreaterThan(0)
+      }
+    }
+
+    expect(irSchemaViolations(parsed)).toEqual([])
+  })
+
+  it("reads an IR whose Class A keys were never written as absent", async () => {
+    await workspace.writeSource(
+      "src/InvoiceService.ts",
+      "export class InvoiceService {\n  create() {}\n}\n",
+    )
+    const result = await scanWorkspace()
+
+    const legacy = JSON.parse(serializeCanonical(result.ir)) as IR
+    const dropIfNull = <T extends object>(record: T, key: keyof T): void => {
+      if (record[key] === null) delete record[key]
+    }
+    for (const symbol of legacy.symbols) {
+      dropIfNull(symbol, "component")
+      dropIfNull(symbol, "signature")
+      dropIfNull(symbol.source, "startColumn")
+      dropIfNull(symbol.source, "endColumn")
+    }
+    const first = legacy.symbols[0] as IRSymbol
+    expect(Object.hasOwn(first, "component")).toBe(false)
+    expect(Object.hasOwn(first.source, "startColumn")).toBe(false)
+
+    // Still a valid v1 document — absence is exactly why the keys stay out of `required`.
+    expect(irSchemaViolations(legacy)).toEqual([])
+    expect(() => assertIRIntegrity(legacy)).not.toThrow()
+
+    for (const [i, symbol] of legacy.symbols.entries()) {
+      const emitted = result.ir.symbols[i] as IRSymbol
+      expect(apiFingerprint(symbol), `api fingerprint drift on ${symbol.id}`).toBe(
+        apiFingerprint(emitted),
+      )
+    }
+    const ref = { ref: "aburi.ir.json", irSchema: result.ir.$schema }
+    const diff = buildDiff({ baseIR: legacy, headIR: result.ir, base: ref, head: ref })
+    expect(diff.summary.unchanged).toBe(result.ir.symbols.length)
+    expect(diff.symbols, "a Class A key going missing must not read as a change").toEqual([])
+  })
+
+  it("writes a canonical JSON IR to disk via writeCanonicalIR", async () => {
+    await workspace.writeSource("src/app.ts", "export function main() {}\n")
+
+    const result = await scanWorkspace()
+
+    const outPath = join(workspace.root, DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME)
+    const serialized = await writeCanonicalIR(result.ir, outPath)
+    expect(serialized.startsWith("{\n")).toBe(true)
+    const parsed = JSON.parse(serialized)
+    expect(parsed.$schema).toBe(IR_SCHEMA_URL)
+  })
+})

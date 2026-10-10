@@ -37,6 +37,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@aburi/schema": "workspace:*",
     "@types/node": "^26.0.1",
     "json-schema-to-typescript": "^15.0.4",
     "tsdown": "^0.22.3",

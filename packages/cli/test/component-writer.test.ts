@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
+import irSchema from "@aburi/schema/aburi.ir.v1.json" with { type: "json" }
 import Ajv2020 from "ajv/dist/2020.js"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import irSchema from "../../../schema/aburi.ir.v1.json" with { type: "json" }
 import { runScan } from "../src"
 
 const ajv = new Ajv2020({ strict: false, allErrors: true })

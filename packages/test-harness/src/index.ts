@@ -1,0 +1,42 @@
+import { type ScanInput, type ScanResult, scan } from "@aburi/core"
+import { buildDiff } from "@aburi/diff"
+import { VocabRegistry } from "@aburi/plugin-registry"
+import type { Config, EffectPlugin, FrameworkPlugin, IR, LanguagePlugin } from "@aburi/types"
+
+export const IR_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
+
+export interface PluginLineup {
+  languages?: readonly LanguagePlugin[]
+  frameworks?: readonly FrameworkPlugin[]
+  effects?: readonly EffectPlugin[]
+}
+
+/** The parts of `ScanInput` a suite occasionally sets beyond plugins and config. */
+export type ScanExtras = Pick<ScanInput, "components" | "logger" | "lspServerFactory">
+
+/** `scan` over `workspaceRoot` with `lineup`, every plugin's manifest registered first. */
+export async function scanWith(
+  workspaceRoot: string,
+  lineup: PluginLineup,
+  config: Config = {},
+  extras: ScanExtras = {},
+): Promise<ScanResult> {
+  const languages = lineup.languages ?? []
+  const frameworks = lineup.frameworks ?? []
+  const effects = lineup.effects ?? []
+
+  const registry = new VocabRegistry()
+  for (const plugin of [...languages, ...frameworks, ...effects]) registry.register(plugin.manifest)
+
+  return scan({ workspaceRoot, config, languages, frameworks, effects, registry, ...extras })
+}
+
+/** `buildDiff` between two IRs under the refs `base` and `head`. */
+export function diffIRs(baseIR: IR, headIR: IR): ReturnType<typeof buildDiff> {
+  return buildDiff({
+    baseIR,
+    headIR,
+    base: { ref: "base", irSchema: IR_SCHEMA_URL },
+    head: { ref: "head", irSchema: IR_SCHEMA_URL },
+  })
+}

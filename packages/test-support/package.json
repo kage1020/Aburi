@@ -2,7 +2,7 @@
   "name": "@aburi/test-support",
   "version": "0.0.1",
   "private": true,
-  "description": "Test fixtures shared across the workspace's Vitest suites: a no-op vocab registry, a silent logger, and builders for IR records, classify contexts and symbol candidates. Not published; consumed from source.",
+  "description": "Helpers shared across the workspace's Vitest suites: builders for IR records, classify contexts and symbol candidates, a no-op vocab registry, loggers, scratch workspaces and IR schema validation. Depends on nothing above @aburi/types, so every package can use it. Not published; consumed from source.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -11,7 +11,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aburi/types": "workspace:*"
+    "@aburi/schema": "workspace:*",
+    "@aburi/types": "workspace:*",
+    "ajv": "^8.20.0",
+    "vitest": "^4.1.11"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",

@@ -1,15 +1,15 @@
 import { cp, mkdir, readdir, readFile, rm } from "node:fs/promises"
+import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const DOCS_ROOT = resolve(HERE, "..")
-const SCHEMA_DIR = resolve(DOCS_ROOT, "..", "schema")
+const DOCS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const SCHEMA_DIR = dirname(createRequire(import.meta.url).resolve("@aburi/schema/aburi.ir.v1.json"))
 const PUBLIC_DIR = join(DOCS_ROOT, "public", "schema")
 
 const SITE_ORIGIN = "https://aburi.kage1020.com"
 
-const names = (await readdir(SCHEMA_DIR)).filter((name) => name.endsWith(".json")).sort()
+const names = (await readdir(SCHEMA_DIR)).filter((name) => /^aburi\..+\.json$/.test(name)).sort()
 
 if (names.length === 0) {
   throw new Error(`No schemas found in ${SCHEMA_DIR}`)

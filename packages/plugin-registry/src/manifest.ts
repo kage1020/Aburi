@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import pluginSchema from "@aburi/schema/aburi.plugin.v1.json" with { type: "json" }
 import type { PluginManifest } from "@aburi/types"
 import Ajv2020, {
   type ErrorObject,
@@ -6,7 +7,6 @@ import Ajv2020, {
   type ValidateFunction,
 } from "ajv/dist/2020.js"
 import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
-import pluginSchema from "../../../schema/aburi.plugin.v1.json" with { type: "json" }
 import { RegistryError } from "./errors"
 import { describeRepeatedKey, JSONC_PARSE_OPTIONS, scanKeys } from "./repeated-keys"
 

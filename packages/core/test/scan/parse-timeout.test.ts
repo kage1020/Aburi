@@ -1,3 +1,4 @@
+import configSchema from "@aburi/schema/aburi.config.v1.json" with { type: "json" }
 import { noopRegistry, silentLogger } from "@aburi/test-support"
 import type {
   BodyExtraction,
@@ -9,7 +10,6 @@ import type {
   SymbolCandidate,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import configSchema from "../../../../schema/aburi.config.v1.json" with { type: "json" }
 import {
   buildDropCFilter,
   DEFAULT_PARSE_TIMEOUT_MS,

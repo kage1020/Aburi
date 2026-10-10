@@ -4,6 +4,7 @@ import {
   JSONC_PARSE_OPTIONS,
   scanKeys,
 } from "@aburi/plugin-registry/repeated-keys"
+import configSchema from "@aburi/schema/aburi.config.v1.json" with { type: "json" }
 import type { Config } from "@aburi/types"
 import Ajv2020, {
   type ErrorObject,
@@ -11,7 +12,6 @@ import Ajv2020, {
   type ValidateFunction,
 } from "ajv/dist/2020.js"
 import { type ParseError, type ParseOptions, parse, printParseErrorCode } from "jsonc-parser"
-import configSchema from "../../../schema/aburi.config.v1.json" with { type: "json" }
 import { ConfigError, MISSING_FILE_ERRNOS } from "./errors"
 
 const ajv = new Ajv2020({

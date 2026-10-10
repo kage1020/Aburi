@@ -1,13 +1,15 @@
 import { readFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { compile, type Options as JstOptions } from "json-schema-to-typescript"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PKG_ROOT = resolve(HERE, "..")
-const REPO_ROOT = resolve(PKG_ROOT, "../..")
 
-export const SCHEMA_DIR = join(REPO_ROOT, "schema")
+export const SCHEMA_DIR = dirname(
+  createRequire(import.meta.url).resolve("@aburi/schema/aburi.ir.v1.json"),
+)
 export const OUT_DIR = join(PKG_ROOT, "src", "generated")
 
 export interface SchemaEntry {

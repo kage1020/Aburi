@@ -49,8 +49,18 @@
     "commander": "^15.0.0"
   },
   "devDependencies": {
+    "@aburi/effects-drizzle": "workspace:*",
+    "@aburi/effects-nest": "workspace:*",
+    "@aburi/effects-prisma": "workspace:*",
+    "@aburi/effects-trpc": "workspace:*",
+    "@aburi/framework-express": "workspace:*",
     "@aburi/framework-nestjs": "workspace:*",
+    "@aburi/framework-next": "workspace:*",
+    "@aburi/framework-react": "workspace:*",
     "@aburi/lang-typescript": "workspace:*",
+    "@aburi/schema": "workspace:*",
+    "@aburi/test-harness": "workspace:*",
+    "@aburi/test-support": "workspace:*",
     "@types/node": "^26.0.1",
     "ajv": "^8.20.0",
     "tsdown": "^0.22.3",

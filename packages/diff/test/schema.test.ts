@@ -1,8 +1,8 @@
+import diffSchema from "@aburi/schema/aburi.diff.v1.json" with { type: "json" }
 import { component, fp, makeIR, makeSymbol } from "@aburi/test-support"
 import type { DiffResult, IR } from "@aburi/types"
 import Ajv2020, { type ErrorObject, type SchemaObject } from "ajv/dist/2020.js"
 import { describe, expect, it } from "vitest"
-import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" }
 import { buildDiff } from "../src/diff"
 import { sliceRecordViolation } from "../src/slice"
 

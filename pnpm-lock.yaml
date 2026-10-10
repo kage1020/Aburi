@@ -53,6 +53,9 @@ importers:
 
   docs:
     devDependencies:
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../schema
       vitepress:
         specifier: 2.0.0-alpha.19
         version: 2.0.0-alpha.19(@types/node@26.0.1)(esbuild@0.28.1)(postcss@8.5.26)(tsx@4.22.4)(typescript@6.0.3)(yaml@2.9.0)
@@ -84,12 +87,42 @@ importers:
         specifier: ^15.0.0
         version: 15.0.0
     devDependencies:
+      '@aburi/effects-drizzle':
+        specifier: workspace:*
+        version: link:../effects-drizzle
+      '@aburi/effects-nest':
+        specifier: workspace:*
+        version: link:../effects-nest
+      '@aburi/effects-prisma':
+        specifier: workspace:*
+        version: link:../effects-prisma
+      '@aburi/effects-trpc':
+        specifier: workspace:*
+        version: link:../effects-trpc
+      '@aburi/framework-express':
+        specifier: workspace:*
+        version: link:../framework-express
       '@aburi/framework-nestjs':
         specifier: workspace:*
         version: link:../framework-nestjs
+      '@aburi/framework-next':
+        specifier: workspace:*
+        version: link:../framework-next
+      '@aburi/framework-react':
+        specifier: workspace:*
+        version: link:../framework-react
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../../schema
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -124,6 +157,9 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
     devDependencies:
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../../schema
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -158,6 +194,9 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../../schema
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -186,6 +225,9 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../../schema
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -205,78 +247,6 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
 
-  packages/e2e-integration:
-    devDependencies:
-      '@aburi/cli':
-        specifier: workspace:*
-        version: link:../cli
-      '@aburi/config':
-        specifier: workspace:*
-        version: link:../config
-      '@aburi/core':
-        specifier: workspace:*
-        version: link:../core
-      '@aburi/diff':
-        specifier: workspace:*
-        version: link:../diff
-      '@aburi/effects-drizzle':
-        specifier: workspace:*
-        version: link:../effects-drizzle
-      '@aburi/effects-nest':
-        specifier: workspace:*
-        version: link:../effects-nest
-      '@aburi/effects-prisma':
-        specifier: workspace:*
-        version: link:../effects-prisma
-      '@aburi/effects-trpc':
-        specifier: workspace:*
-        version: link:../effects-trpc
-      '@aburi/framework-express':
-        specifier: workspace:*
-        version: link:../framework-express
-      '@aburi/framework-nestjs':
-        specifier: workspace:*
-        version: link:../framework-nestjs
-      '@aburi/framework-next':
-        specifier: workspace:*
-        version: link:../framework-next
-      '@aburi/framework-react':
-        specifier: workspace:*
-        version: link:../framework-react
-      '@aburi/github-action':
-        specifier: workspace:*
-        version: link:../github-action
-      '@aburi/lang-typescript':
-        specifier: workspace:*
-        version: link:../lang-typescript
-      '@aburi/markdown-projection':
-        specifier: workspace:*
-        version: link:../markdown-projection
-      '@aburi/plugin-registry':
-        specifier: workspace:*
-        version: link:../plugin-registry
-      '@aburi/types':
-        specifier: workspace:*
-        version: link:../types
-      '@types/node':
-        specifier: ^26.0.1
-        version: 26.0.1
-      ajv:
-        specifier: ^8.20.0
-        version: 8.20.0
-      tinyglobby:
-        specifier: ^0.2.17
-        version: 0.2.17
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      typescript-language-server:
-        specifier: ^5.3.0
-        version: 5.3.0
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
-
   packages/effects-drizzle:
     dependencies:
       '@aburi/plugin-registry':
@@ -289,6 +259,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -342,9 +315,15 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@aburi/core':
+        specifier: workspace:*
+        version: link:../core
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -401,6 +380,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -432,6 +414,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -488,6 +473,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -537,6 +525,9 @@ importers:
         specifier: ^0.26.10
         version: 0.26.10
     devDependencies:
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
       '@aburi/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -590,6 +581,9 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
     devDependencies:
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../../schema
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -603,8 +597,17 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
 
-  packages/test-support:
+  packages/test-harness:
     dependencies:
+      '@aburi/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aburi/diff':
+        specifier: workspace:*
+        version: link:../diff
+      '@aburi/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
       '@aburi/types':
         specifier: workspace:*
         version: link:../types
@@ -616,8 +619,33 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/test-support:
+    dependencies:
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../../schema
+      '@aburi/types':
+        specifier: workspace:*
+        version: link:../types
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
+    devDependencies:
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.0.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/types:
     devDependencies:
+      '@aburi/schema':
+        specifier: workspace:*
+        version: link:../../schema
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -636,6 +664,8 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
+
+  schema: {}
 
 packages:
 
