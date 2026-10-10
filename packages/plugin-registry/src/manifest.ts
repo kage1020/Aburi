@@ -78,7 +78,6 @@ export function parsePluginManifest(text: string, sourcePath: string): PluginMan
   return parsed
 }
 
-/** Read + parse + ajv-validate a manifest file on disk. */
 export async function loadPluginManifest(path: string): Promise<PluginManifest> {
   let text: string
   try {

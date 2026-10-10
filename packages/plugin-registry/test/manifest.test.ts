@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
 import { loadPluginManifest, parsePluginManifest, RegistryError } from "../src/index"
+import { langManifest } from "./fixtures/manifests"
 
 const VALID_MANIFEST = `{
   // valid effects plugin
@@ -24,6 +24,10 @@ const VALID_MANIFEST = `{
   }
 }`
 
+function refusalOf(text: string): Promise<RegistryError> {
+  return errorFrom(RegistryError, () => parsePluginManifest(text, "inline"))
+}
+
 describe("parsePluginManifest", () => {
   it("accepts JSONC with comments and trailing commas", () => {
     const m = parsePluginManifest(VALID_MANIFEST, "inline")
@@ -31,102 +35,74 @@ describe("parsePluginManifest", () => {
     expect(m.type).toBe("effects")
   })
 
-  it("throws on malformed JSON", () => {
-    expect(() => parsePluginManifest("{not json", "inline")).toThrowError(RegistryError)
+  it("refuses text that is not JSONC, saying where", async () => {
+    const caught = await refusalOf("{not json")
+    expect(caught).toMatchObject({ code: "manifest-parse-failed", plugins: [] })
+    expect(caught.message).toMatch(
+      /^Plugin manifest at inline is not valid JSONC: .* at offset \d+/,
+    )
   })
 
-  it("throws on schema violation (wrong $schema)", () => {
-    const text = JSON.stringify({
-      $schema: "https://example.com/wrong",
-      name: "lang-foo",
-      version: "1.0.0",
-      type: "lang",
-      engines: { aburi: "^1.0.0" },
-      provides: {
-        effects: [],
-        effectPrefixes: [],
-        extKinds: [],
-        extKindPrefixes: [],
-        derivedByPrefixes: [],
-        frameworks: [],
-      },
-    })
-    expect(() => parsePluginManifest(text, "inline")).toThrowError(RegistryError)
-  })
-
-  it("throws on schema violation (lang plugin with x-* effects, per schema allOf)", () => {
-    const text = JSON.stringify({
-      $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-      name: "lang-foo",
-      version: "1.0.0",
-      type: "lang",
-      engines: { aburi: "^1.0.0" },
-      provides: {
-        effects: [{ id: "x-foo:read", description: "x" }],
-        effectPrefixes: [],
-        extKinds: [],
-        extKindPrefixes: [],
-        derivedByPrefixes: [],
-        frameworks: [],
-      },
-    })
-    expect(() => parsePluginManifest(text, "inline")).toThrowError(RegistryError)
+  it.each([
+    ["a wrong $schema", { ...langManifest(), $schema: "https://example.com/wrong" }],
+    [
+      "a lang plugin declaring x-* effects",
+      langManifest({ provides: { effects: [{ id: "x-foo:read", description: "x" }] } }),
+    ],
+  ])("refuses %s against the schema, naming the plugin and carrying ajv's errors", async (_, m) => {
+    const caught = await refusalOf(JSON.stringify(m))
+    expect(caught).toMatchObject({ code: "manifest-invalid", plugins: ["lang-foo"] })
+    expect(caught.message).toMatch(/^Plugin manifest at inline does not conform to /)
+    expect(Array.isArray(caught.cause)).toBe(true)
   })
 })
 
 describe("parsePluginManifest given a key named twice in one object", () => {
-  function refusalOf(text: string): RegistryError {
-    try {
-      parsePluginManifest(text, "inline")
-    } catch (error) {
-      if (error instanceof RegistryError) return error
-      throw error
-    }
-    throw new Error("expected a RegistryError")
-  }
-
-  it("refuses a second name, naming no plugin, before the schema runs", () => {
-    const caught = refusalOf(`{ "name": "effects-foo", "name": "effects-bar" }`)
-    expect(caught.code).toBe("manifest-invalid")
-    expect(caught.plugins).toEqual([])
+  it("refuses a second name, naming no plugin, before the schema runs", async () => {
+    const caught = await refusalOf(`{ "name": "effects-foo", "name": "effects-bar" }`)
+    expect(caught).toMatchObject({ code: "manifest-invalid", plugins: [] })
     expect(caught.message).toBe(
       'Plugin manifest at inline names "name" twice in the top-level object (again at line 1, column 26)',
     )
     expect(caught.cause).toMatchObject({ kind: "repeated", key: "name", owner: [] })
   })
 
-  it("refuses a name repeated after a nested object closes", () => {
+  it("refuses a name repeated after a nested object closes", async () => {
     const text = VALID_MANIFEST.replace(
       '"engines": { "aburi": "^1.0.0" },',
       '"engines": { "aburi": "^1.0.0" },\n  "name": "effects-bar",',
     )
-    expect(refusalOf(text).cause).toMatchObject({ key: "name", owner: [] })
+    expect((await refusalOf(text)).cause).toMatchObject({ key: "name", owner: [] })
   })
 
-  it("refuses one inside a nested array element", () => {
-    const caught = refusalOf(`{ "provides": { "effects": [{ "id": "x-a:b", "id": "x-a:c" }] } }`)
+  it("refuses one inside a nested array element", async () => {
+    const caught = await refusalOf(
+      `{ "provides": { "effects": [{ "id": "x-a:b", "id": "x-a:c" }] } }`,
+    )
     expect(caught.cause).toMatchObject({ key: "id", owner: ["provides", "effects", 0] })
   })
 
-  it("refuses __proto__", () => {
-    const caught = refusalOf(`{ "__proto__": {} }`)
+  it("refuses __proto__", async () => {
+    const caught = await refusalOf(`{ "__proto__": {} }`)
     expect(caught.cause).toMatchObject({ kind: "prototype-key", key: "__proto__", owner: [] })
     expect(caught.message).toMatch(/never becomes a key the schema can see$/)
   })
 
-  it("reports the repeat, not the schema failure, when a manifest has both", () => {
+  it("reports the repeat, not the schema failure, when a manifest has both", async () => {
     const text = VALID_MANIFEST.replace(
       '"name": "effects-foo",',
       '"name": "effects-foo",\n  "name": "effects-bar",',
     ).replace('"type": "effects",', '"type": "bogus",')
-    const caught = refusalOf(text)
+    const caught = await refusalOf(text)
     expect(caught.plugins).toEqual([])
     expect(caught.cause).toMatchObject({ key: "name" })
     expect(caught.message).not.toMatch(/does not conform/)
   })
 
-  it("reports the syntax error, not the repeat, when a manifest has both", () => {
-    expect(refusalOf(`{ "name": "a", "name": "b", "x": }`).code).toBe("manifest-parse-failed")
+  it("reports the syntax error, not the repeat, when a manifest has both", async () => {
+    expect((await refusalOf(`{ "name": "a", "name": "b", "x": }`)).code).toBe(
+      "manifest-parse-failed",
+    )
   })
 
   it("lets two objects use the same key", () => {
@@ -138,63 +114,24 @@ describe("parsePluginManifest given a key named twice in one object", () => {
   })
 })
 
-describe("parsePluginManifest — a schema failure", () => {
-  it("carries ajv's errors as the cause", () => {
-    const text = VALID_MANIFEST.replace('"type": "effects",', '"type": "bogus",')
-    let caught: unknown
-    try {
-      parsePluginManifest(text, "inline")
-    } catch (error) {
-      caught = error
-    }
-    expect(caught).toBeInstanceOf(RegistryError)
-    expect(Array.isArray((caught as RegistryError).cause)).toBe(true)
-  })
-})
-
 describe("loadPluginManifest", () => {
-  let tmpDir: string
-  beforeAll(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aburi-registry-test-"))
-  })
-  afterAll(async () => {
-    await rm(tmpDir, { recursive: true, force: true })
-  })
+  const scratch = useScratchWorkspace("registry-manifest")
 
   it("reads a manifest from disk", async () => {
-    const path = join(tmpDir, "aburi-plugin.json")
-    await writeFile(path, VALID_MANIFEST, "utf8")
-    const m = await loadPluginManifest(path)
-    expect(m.name).toBe("effects-foo")
-  })
-
-  it("throws with a clear message when the path does not exist", async () => {
-    await expect(loadPluginManifest(join(tmpDir, "missing.json"))).rejects.toThrowError(
-      RegistryError,
+    await scratch.writeSource("aburi-plugin.json", VALID_MANIFEST)
+    expect((await loadPluginManifest(join(scratch.root, "aburi-plugin.json"))).name).toBe(
+      "effects-foo",
     )
   })
 
-  it("surfaces the errno in the read-failure message (regression: Error instances)", async () => {
-    let caught: unknown
-    try {
-      await loadPluginManifest(join(tmpDir, "still-missing.json"))
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(RegistryError)
-    expect((caught as RegistryError).code).toBe("manifest-read-failed")
-    expect((caught as RegistryError).message).toMatch(/ENOENT/)
-  })
-
-  it("surfaces EISDIR when the path resolves to a directory", async () => {
-    let caught: unknown
-    try {
-      await loadPluginManifest(tmpDir)
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(RegistryError)
-    expect((caught as RegistryError).code).toBe("manifest-read-failed")
-    expect((caught as RegistryError).message).toMatch(/EISDIR/)
+  it.each([
+    ["is not there", "missing.json", "ENOENT"],
+    ["is a directory", ".", "EISDIR"],
+  ])("refuses a path that %s, naming the errno", async (_, name, errno) => {
+    await expect(loadPluginManifest(join(scratch.root, name))).rejects.toMatchObject({
+      code: "manifest-read-failed",
+      plugins: [],
+      message: expect.stringContaining(`(${errno})`),
+    })
   })
 })

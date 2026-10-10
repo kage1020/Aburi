@@ -2,6 +2,7 @@ import type { EffectsManifest, ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   assertImportBinding,
+  assertNamespaceBinding,
   assertNonEmptySegments,
   defineEffectsManifest,
   hasLiteralFirstArgument,
@@ -20,16 +21,11 @@ function edge(source: string, line: number): ImportEdge {
 }
 
 describe("assertNonEmptySegments", () => {
-  it("splits a well-formed target into its segments", () => {
-    const result = assertNonEmptySegments("prisma.user.create", ORIGIN)
-    expect(result.segments).toEqual(["prisma", "user", "create"])
-    expect(result.last).toBe("create")
-  })
-
-  it("accepts a single-segment target", () => {
-    const result = assertNonEmptySegments("fetch", ORIGIN)
-    expect(result.segments).toEqual(["fetch"])
-    expect(result.last).toBe("fetch")
+  it.each([
+    ["prisma.user.create", ["prisma", "user", "create"], "create"],
+    ["fetch", ["fetch"], "fetch"],
+  ])("splits %s into its segments and its last one", (target, segments, last) => {
+    expect(assertNonEmptySegments(target, ORIGIN)).toEqual({ segments, last })
   })
 
   it("types the first segment as present, so callers index it without a cast", () => {
@@ -68,18 +64,12 @@ describe("assertNonEmptySegments", () => {
 describe("hasMatchingImport", () => {
   const isExample = (source: string) => source === "example-orm"
 
-  it("returns true when any edge satisfies the predicate", () => {
-    expect(hasMatchingImport([edge("react", 1), edge("example-orm", 2)], ORIGIN, isExample)).toBe(
-      true,
-    )
-  })
-
-  it("returns false when no edge satisfies the predicate", () => {
-    expect(hasMatchingImport([edge("react", 1), edge("zod", 2)], ORIGIN, isExample)).toBe(false)
-  })
-
-  it("returns false for an empty import list without throwing", () => {
-    expect(hasMatchingImport([], ORIGIN, isExample)).toBe(false)
+  it.each([
+    ["some edge", [edge("react", 1), edge("example-orm", 2)], true],
+    ["no edge", [edge("react", 1), edge("zod", 2)], false],
+    ["an empty import list", [], false],
+  ])("answers whether the predicate holds for %s", (_, imports, expected) => {
+    expect(hasMatchingImport(imports, ORIGIN, isExample)).toBe(expected)
   })
 
   it("throws for an empty ImportEdge.source, naming the plugin, file, and line", () => {
@@ -116,46 +106,40 @@ describe("assertImportBinding", () => {
     dynamic: false,
   })
 
-  it("accepts an unaliased entry", () => {
-    expect(() =>
-      assertImportBinding({ imported: "Thing", local: "Thing" }, "Thing", named(["Thing"]), ORIGIN),
-    ).not.toThrow()
+  it.each([
+    ["an unaliased entry", { imported: "Thing", local: "Thing" }, "Thing"],
+    ["an aliased entry", { imported: "Thing", local: "T" }, "Thing as T"],
+  ])("accepts %s", (_, binding, raw) => {
+    expect(() => assertImportBinding(binding, raw, named([raw]), ORIGIN)).not.toThrow()
   })
 
-  it("accepts an aliased entry", () => {
-    expect(() =>
-      assertImportBinding(
-        { imported: "Thing", local: "T" },
-        "Thing as T",
-        named(["Thing as T"]),
-        ORIGIN,
-      ),
-    ).not.toThrow()
-  })
-
-  it("rejects an entry whose exported half is empty", () => {
-    expect(() =>
-      assertImportBinding({ imported: "", local: "T" }, " as T", named([" as T"], 4), ORIGIN),
-    ).toThrow(
-      /effects-example \(src\/service\.ts, line 4\).*ImportEdge\.symbols entry " as T" has an empty half/,
+  it.each([
+    ["exported half", { imported: "", local: "T" }, " as T"],
+    ["local half", { imported: "Thing", local: "" }, "Thing as "],
+    ["entry as a whole", { imported: "", local: "" }, ""],
+  ])("rejects an entry whose %s is empty, naming the plugin, file and line", (_, binding, raw) => {
+    expect(() => assertImportBinding(binding, raw, named([raw], 4), ORIGIN)).toThrow(
+      `effects-example (src/service.ts, line 4): ImportEdge.symbols entry "${raw}" has an empty half — language plugin emitted an unnormalized import edge`,
     )
   })
+})
 
-  it("rejects an entry whose local half is empty", () => {
-    expect(() =>
-      assertImportBinding(
-        { imported: "Thing", local: "" },
-        "Thing as ",
-        named(["Thing as "], 6),
-        ORIGIN,
-      ),
-    ).toThrow(/line 6.*"Thing as " has an empty half/)
+describe("assertNamespaceBinding", () => {
+  const namespaceEdge: ImportEdge = {
+    source: "example-orm",
+    symbols: "*",
+    line: 3,
+    dynamic: false,
+  }
+
+  it("accepts a binding that names something", () => {
+    expect(() => assertNamespaceBinding("orm", namespaceEdge, ORIGIN)).not.toThrow()
   })
 
-  it("rejects an entry that is empty outright", () => {
-    expect(() =>
-      assertImportBinding({ imported: "", local: "" }, "", named([""], 2), ORIGIN),
-    ).toThrow(/line 2.*"" has an empty half/)
+  it("rejects an empty binding, naming the plugin, file and line", () => {
+    expect(() => assertNamespaceBinding("", namespaceEdge, ORIGIN)).toThrow(
+      "effects-example (src/service.ts, line 3): ImportEdge.namespaceBinding is empty — language plugin emitted an unnormalized import edge",
+    )
   })
 })
 
@@ -169,6 +153,7 @@ describe("identifierWords", () => {
     expect(identifierWords("_prisma")).toEqual(["prisma"])
     expect(identifierWords("read_replica_db")).toEqual(["read", "replica", "db"])
     expect(identifierWords("$db")).toEqual(["db"])
+    expect(identifierWords("read-replica")).toEqual(["read", "replica"])
   })
 
   it("keeps an acronym run whole", () => {

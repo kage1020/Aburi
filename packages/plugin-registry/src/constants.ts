@@ -6,19 +6,16 @@ export type ReservedNamespace = (typeof RESERVED_NAMESPACES)[number]
 export const HINT_NAMESPACE: ReservedNamespace = "framework:hint"
 
 export const TYPE_NAMESPACE_RULES = {
-  /** Lang plugins own fp:* / oop:* / meta:*. They never own framework / x-. */
   lang: {
     allowedExtKindRoots: ["fp", "oop", "meta"] as const,
     canOwnEffects: false,
     canOwnFrameworks: false,
   },
-  /** Effects plugins own x-<xPrefix>:*. They never own extKinds or frameworks. */
   effects: {
     allowedExtKindRoots: [] as const,
     canOwnEffects: true,
     canOwnFrameworks: false,
   },
-  /** Framework plugins own framework:*, plus framework name entries. Never x-, never fp/oop/meta. */
   framework: {
     allowedExtKindRoots: ["framework"] as const,
     canOwnEffects: false,
@@ -37,7 +34,6 @@ export function isUnderPrefix(value: string, prefix: string): boolean {
   return value.startsWith(`${prefix}:`)
 }
 
-/** True iff `value` falls under any of the central-reserved namespaces. */
 export function isReserved(value: string): boolean {
   return RESERVED_NAMESPACES.some((reserved) => isUnderPrefix(value, reserved))
 }

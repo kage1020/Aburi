@@ -43,3 +43,15 @@ export class RegistryError extends Error {
     this.value = detail.value
   }
 }
+
+export function raise(
+  message: string,
+  code: RegistryErrorCode,
+  plugins: readonly string[],
+  value?: string,
+): never {
+  throw new RegistryError(
+    message,
+    value === undefined ? { code, plugins } : { code, plugins, value },
+  )
+}
