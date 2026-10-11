@@ -176,8 +176,7 @@ not have: a second caller runs it (§5.1), and an inline block cannot be called 
 Its input is environment only — `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `PR_NUMBER`, `MARKDOWN_PATH`,
 and `GITHUB_API_URL` for Enterprise Server — because on a fork's pull request the Markdown names
 symbols that pull request declares, and a body on a command line is one quoting mistake from being
-run. `src/comment.ts` is the same flow as a library, for importers; `test/upsert-comment.test.ts`
-pins the two to the same marker.
+run. `src/comment.ts` is the same flow as a library, for importers, and the two write the same marker.
 
 ### 5.1 A pull request that cannot comment for itself
 
@@ -260,9 +259,9 @@ and which it dropped ([`markdown-projection.md`](./markdown-projection.md)
 Markdown beside it as `diff.full.md`, which the note names: an upload of the output directory, as
 `aburi.yml` does with its `aburi-diff` artifact, keeps everything the comment could not.
 
-The budget is `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`, and `test/action-yml.test.ts`
-holds the manifest's copy of the number to it — a marker of a different length moves the budget,
-and a manifest still passing the old one is either 29 bytes short or 29 bytes over.
+The budget is `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`, and the manifest's default copies
+the number: a marker of a different length moves the budget, and a manifest still passing the old
+one is either 29 bytes short or 29 bytes over.
 
 The decision lives in [`scripts/resolve-max-bytes.mjs`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/resolve-max-bytes.mjs)
 rather than in a branch inside the step, for the reason the CLI resolver does (§3.2): a `run:`

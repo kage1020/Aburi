@@ -1,20 +1,8 @@
+import { component, decorator, dependency, effect, makeIR, rule, sig } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { checkIRIntegrity } from "../src/index"
-import { makeComponent, makeDependency, makeSymbol, minimalIR } from "./fixtures/ir"
-
-/**
- * `checkIRIntegrity` answers "what is wrong with this Document?" and is the only gate
- * `readIR` applies, so it has to have an answer for anything a JSON parse can produce.
- * Nineteen of the twenty invariants dereference fields, and every one of those is a
- * `TypeError` waiting for a Document that does not carry them.
- *
- * A hand-written list of malformed shapes cannot establish that: it pins the cases someone
- * thought of, which is exactly the set already known to work. This walks a well-formed
- * Document instead, replacing each leaf and each container in turn with values a parse can
- * yield, and asserts only that the checker *answers*. The eight crashes this file was
- * written for were all in fields no hand-written case covered.
- */
+import { makeSymbol } from "./fixtures/ir"
 
 /** Values a `JSON.parse` can hand back, plus the two non-finite numbers a hand-edit can. */
 const SUBSTITUTES: readonly unknown[] = [
@@ -34,39 +22,29 @@ const SUBSTITUTES: readonly unknown[] = [
 
 /** A Document exercising every optional container, so the walk reaches all of them. */
 function richIR(): IR {
-  const ir = minimalIR()
+  const ir = makeIR()
   ir.components = [
-    makeComponent("a", { publicApi: ["src/index.ts"], frameworks: ["nextjs"], description: null }),
+    component({
+      id: "a",
+      name: "a",
+      publicApi: ["src/index.ts"],
+      frameworks: ["nextjs"],
+      description: null,
+    }),
   ]
   ir.workspace.managers = [{ tool: "pnpm", roots: ["apps/a"] }]
   ir.symbols = [
     makeSymbol("ts:src/a.ts#foo", {
       component: "a",
-      decorators: [{ name: "D", raw: "@D()", arguments: [], boundary: false, line: 1 }],
-      rules: [{ type: "guard", line: 2, condition: "x", what: null, expr: null, loopKind: null }],
-      effects: [
-        {
-          id: "db.write",
-          target: "t",
-          line: 3,
-          plugin: "p",
-          confidence: "high",
-          derivedBy: "convention:test",
-        },
-      ],
+      decorators: [decorator({ name: "D", line: 1 })],
+      rules: [rule({ type: "guard", line: 2, condition: "x" })],
+      effects: [effect({ id: "db.write", target: "t", plugin: "p", line: 3 })],
       calls: [{ target: "helper", line: 4, resolved: "ts:src/a.ts#helper" }],
-      signature: {
-        inputs: [{ name: "x", type: "string" }],
-        outputs: ["void"],
-        throws: [],
-        async: false,
-        generator: false,
-        typeParameters: [],
-      },
+      signature: sig({ inputs: [{ name: "x", type: "string" }] }),
     }),
     makeSymbol("ts:src/a.ts#helper", { component: "a" }),
   ]
-  ir.dependencies = [makeDependency({ from: "ts:src/a.ts#foo", to: "ts:src/a.ts#helper" })]
+  ir.dependencies = [dependency({ from: "ts:src/a.ts#foo", to: "ts:src/a.ts#helper", via: "call" })]
   ir.stats.callResolution = {
     totalCalls: 1,
     resolvedCalls: 1,
@@ -80,8 +58,6 @@ function richIR(): IR {
     requestsTimedOut: 0,
     requestsFailed: 0,
     languagesDisabled: [],
-    // The LSP hint counters, so #20 actually walks `LspHintRejections` — the nested record
-    // is the one container in the Document that no other fixture here reaches.
     hintsProduced: 0,
     hintsConsumed: 0,
     hintsRejected: {
@@ -96,26 +72,24 @@ function richIR(): IR {
   return ir
 }
 
-/** Every addressable position in the Document, as a dotted/bracketed path. */
-function leafPaths(value: unknown, prefix = ""): string[] {
+function positionsOf(value: unknown, prefix = ""): string[] {
   if (Array.isArray(value)) {
     const out = prefix === "" ? [] : [prefix]
     for (const [index, entry] of value.entries()) {
-      out.push(...leafPaths(entry, `${prefix}[${index}]`))
+      out.push(...positionsOf(entry, `${prefix}[${index}]`))
     }
     return out
   }
   if (typeof value === "object" && value !== null) {
     const out = prefix === "" ? [] : [prefix]
     for (const [key, entry] of Object.entries(value)) {
-      out.push(...leafPaths(entry, prefix === "" ? key : `${prefix}.${key}`))
+      out.push(...positionsOf(entry, prefix === "" ? key : `${prefix}.${key}`))
     }
     return out
   }
   return prefix === "" ? [] : [prefix]
 }
 
-/** Write `substitute` at `path` in a fresh deep copy of `document`. */
 function replaceAt(document: unknown, path: string, substitute: unknown): unknown {
   const copy = structuredClone(document)
   const steps = path.split(/\.|(?=\[)/).filter((s) => s.length > 0)
@@ -135,7 +109,7 @@ function replaceAt(document: unknown, path: string, substitute: unknown): unknow
 describe("checkIRIntegrity is total", () => {
   it("answers rather than throwing for every single-position corruption of a Document", () => {
     const document = richIR()
-    const paths = leafPaths(document)
+    const paths = positionsOf(document)
     expect(paths.length).toBeGreaterThan(80)
 
     const crashes: string[] = []
@@ -152,22 +126,12 @@ describe("checkIRIntegrity is total", () => {
     expect(crashes).toEqual([])
   })
 
-  it("reports something for every corruption that is not a valid Document", () => {
-    // Answering is necessary but not sufficient: a checker that returned `[]` for everything
-    // would also never throw. Each substitution below breaks the schema's own shape, so a
-    // silent pass would mean #20 walked past it.
+  it("reports an object written at any position that holds something else", () => {
     const document = richIR()
-    const silent: string[] = []
-    for (const path of leafPaths(document)) {
-      for (const substitute of [undefined, {}] as const) {
-        const corrupted = replaceAt(document, path, substitute)
-        if (checkIRIntegrity(corrupted).length === 0) {
-          silent.push(`${path} = ${substitute === undefined ? "absent" : "{}"}`)
-        }
-      }
-    }
-    // Class B optional keys are the documented exception: their absence is the value.
-    expect(silent.filter((s) => !s.endsWith("= absent"))).toEqual([])
+    const silent = positionsOf(document).filter(
+      (path) => checkIRIntegrity(replaceAt(document, path, {})).length === 0,
+    )
+    expect(silent).toEqual([])
   })
 
   it("says nothing about the Document the corruptions are derived from", () => {

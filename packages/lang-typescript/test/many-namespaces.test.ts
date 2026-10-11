@@ -1,19 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { parseSource, symbolsOf } from "./fixtures/ctx"
+import { parseSource, requireTree, symbolsOf } from "./fixtures/ctx"
 
-/**
- * LP8r — lang-plugin.md §8.2 for the namespace-beside-a-class check (LP8n): the statement list a
- * namespace is written in is read once, not once per namespace. Counted as the children
- * statement lists hand across the WASM boundary through `namedChildren`, since a timing budget
- * would measure the machine as much as the code: each namespace's own body is read once, so the
- * count grows with the file, and reading the list it sits in once per namespace makes it grow
- * with its square.
- */
-
+// Counts the children statement lists hand across the WASM boundary rather than timing the
+// extraction, which would measure the machine as much as the code.
 async function childrenRead(source: string): Promise<number> {
-  const { tree } = await parseSource("")
-  if (tree === null) throw new Error("test fixture invariant: parse returned null")
+  const tree = requireTree((await parseSource("")).tree)
   const prototype = Object.getPrototypeOf(tree.rootNode) as object
   const descriptor = Object.getOwnPropertyDescriptor(prototype, "namedChildren")
   const read = descriptor?.get
@@ -46,7 +38,7 @@ function nested(count: number): string {
   return `export namespace Pets {\n${topLevel(count)}}\n`
 }
 
-describe("LP8r: a file of many namespaces", () => {
+describe("a file of many namespaces", () => {
   it.each([
     ["at the top level", topLevel],
     ["inside one outer namespace", nested],
