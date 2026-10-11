@@ -8,12 +8,6 @@ import type {
 import { classifyTrpcCall } from "./classify"
 import { effectsTrpcManifest } from "./manifest"
 
-/**
- * tRPC effect plugin: maps client procedure calls onto the core `network.rpc` vocabulary,
- * recording the router-relative procedure path in `derivedBy`. `classify` is pure
- * (effect-plugin.md) and throws on a malformed CallCandidate or ImportEdge —
- * upstream contract violations. No `dropCallees`: tRPC has no logger surface.
- */
 class TrpcEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsTrpcManifest
 
@@ -24,7 +18,7 @@ class TrpcEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Ready-to-register instance; left unannotated so the manifest literals stay visible. */
+/** Left unannotated so the manifest literals stay visible. */
 export const trpcEffectsPlugin = new TrpcEffectsPlugin()
 
 export { TrpcEffectsPlugin }

@@ -11,7 +11,6 @@ import type {
 import { assertNever, CliError, errorMessage } from "./errors"
 import { pluginForDetectorId } from "./plugin-catalog"
 
-/** Every field of the config that lists plugin refs, and the manifest type each must declare. */
 const PLUGIN_FIELDS = {
   languages: "lang",
   frameworks: "framework",
@@ -29,50 +28,12 @@ export interface LoadedPlugins {
 
 export interface LoadPluginsOptions {
   config: Config
-  /** Workspace root — the base for everything the scan reads out of the config. */
   workspaceRoot: string
-  /**
-   * Where a relative `./plugins/*.mjs` ref resolves from. Defaults to `workspaceRoot`, and
-   * differs from it only for `aburi diff`'s base scan, whose config comes from the head tree
-   * while its workspace root is the temporary worktree (`cli-spec.md`, plugin resolution at the
-   * base ref).
-   */
   pluginRefRoot?: string
-  /** Dynamic import hook for testing (default: real ESM import). */
   importModule?: (specifier: string) => Promise<unknown>
-  /**
-   * The framework plugins `@aburi/config` builds from `frameworkHints`, one per entry. Each
-   * manifest goes into the registry through `registerHint`, the one door to the reserved
-   * `framework:hint` namespace, and each plugin runs after every configured framework.
-   */
   syntheticPlugins?: readonly FrameworkPlugin[]
 }
 
-/**
- * Resolve every plugin ref in `config.{languages,frameworks,effects}` to a live plugin
- * object, register its manifest with a fresh `VocabRegistry`, and bucket by type.
- *
- * A ref may be one of:
- * - manifest name (`effects-prisma`) — resolved against `node_modules` via the runtime's
- *   ESM resolver, prefixed with `@aburi/` when no scope is present.
- * - npm package (`@aburi/lang-typescript`) — resolved verbatim.
- * - relative path (`./plugins/x.mjs`) — resolved from `pluginRefRoot`, which is the
- *   workspace root unless the caller says otherwise.
- * - absolute path (on POSIX `/opt/plugins/x.mjs`; on Windows `C:/plugins/x.mjs`,
- *   `C:\plugins\x.mjs` or a UNC share `\\server\share\x.mjs`) — normalized, then converted to a
- *   file URL. Unlike a relative ref, where it points does not depend on `pluginRefRoot`.
- * - `file:` URL — contains `/`, so it is used verbatim, as a package subpath would be.
- *
- * A ref whose target would depend on Windows' per-drive state, or that names a Windows drive
- * where there are none, is a config error (`windowsDriveRefusal`), and so is a bare id by which
- * no plugin can be named (`detectorIdRefusal`). Every ref is resolved before the first import,
- * so a refused ref stops the run before any plugin code has run.
- *
- * Once imported, the loader accepts the following export shapes, first hit wins:
- *   1. `default` export whose value has a `manifest` field
- *   2. named `plugin` export whose value has a `manifest` field
- *   3. any top-level export whose value has a `manifest` field
- */
 export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPlugins> {
   const registry = new VocabRegistry()
   const loaded: LoadedPlugins = { languages: [], frameworks: [], effects: [], registry }
@@ -91,10 +52,6 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
     registerManifest(registry, plugin.manifest)
     routePlugin(plugin, field, loaded, ref)
   }
-  // After the imported plugins, so that a namespace both claim is refused on the hint's side,
-  // the one the reader wrote and can change. Last in the framework stage for the same reason:
-  // a configured plugin that recognizes a Symbol keeps its classification, boundary flags
-  // included, where a hint ahead of it would take the turn and drop them.
   for (const plugin of options.syntheticPlugins ?? []) {
     registerHint(registry, plugin.manifest)
     loaded.frameworks.push(plugin)
@@ -113,25 +70,12 @@ function resolveSpecifier(ref: string, field: PluginField, pluginRefRoot: string
   return `@aburi/${ref}`
 }
 
-/** The prefix the plugins published under `@aburi` carry in each field (`lang-typescript`). */
 const NAME_PREFIX = {
   languages: "lang-",
   frameworks: "framework-",
   effects: "effects-",
 } as const satisfies Record<PluginField, string>
 
-/**
- * Why `ref` is refused as an id standing where a plugin belongs (`"ts"` for
- * `"lang-typescript"`), or `null` when it is not. A bare name resolves to `@aburi/<name>`, and
- * the plugins published there are named with their kind as a prefix — a convention, not
- * something the manifest schema enforces — so a name of lowercase letters and digits alone,
- * the shape of a language or framework id, names none of them. The schema cannot say so
- * without tightening `PluginRef`, which v1 does not.
- *
- * The suggestion is what `aburi init` would write for the id. No detector emits an effects id,
- * so that field has no table; an effects plugin's name is its `xPrefix` with `effects-` in
- * front (`extension-vocab.md`), which is offered instead.
- */
 export function detectorIdRefusal(ref: string, field: PluginField): string | null {
   if (!/^[a-z][a-z0-9]*$/.test(ref)) return null
   const prefix = NAME_PREFIX[field]
@@ -143,17 +87,6 @@ export function detectorIdRefusal(ref: string, field: PluginField): string | nul
   return `Plugin "${ref}" in "${field}" is not a plugin name: a bare name resolves to "@aburi/${ref}", and the plugins there are named "${prefix}<name>". ${fix}`
 }
 
-/**
- * Why `ref` is refused as a Windows path, or `null` when it is not. The ref is read with
- * Windows path rules on every platform, so `platform` decides only which forms are refused:
- *
- * - On Windows, a path rooted with no drive (`/opt/x.mjs`, `\x.mjs`) counts as absolute but
- *   takes the drive of `pluginRefRoot`, and a drive with no root (`C:x.mjs`) resolves against
- *   whatever directory is current on that drive. Either names a different file depending on
- *   where Aburi runs.
- * - Anywhere else, a ref naming a drive (`C:/x.mjs`, `C:\x.mjs`) cannot be loaded at all, and
- *   would otherwise reach the ESM resolver as a URL scheme or an `@aburi/` package name.
- */
 export function windowsDriveRefusal(
   ref: string,
   platform: NodeJS.Platform,
@@ -176,10 +109,6 @@ export function windowsDriveRefusal(
   return null
 }
 
-/**
- * A refusal here is the config's: the manifest is what `@aburi/config` derived from one
- * `frameworkHints` entry, so the message names the entry the reader has to change.
- */
 function registerHint(registry: VocabRegistry, manifest: PluginManifest): void {
   try {
     registry.registerHint(manifest)
@@ -194,7 +123,6 @@ function registerHint(registry: VocabRegistry, manifest: PluginManifest): void {
   }
 }
 
-/** A manifest the registry refuses is the plugin's fault, which the CLI reports as one. */
 function registerManifest(registry: VocabRegistry, manifest: PluginManifest): void {
   try {
     registry.register(manifest)
@@ -280,8 +208,6 @@ function routePlugin(
       into.effects.push(plugin as unknown as EffectPlugin)
       break
     default:
-      // A fourth plugin-bearing config field is a type error here rather than a ref the loader
-      // accepts, reports nothing about, and then never hands to the scan.
       assertNever(field, "plugin field")
   }
 }

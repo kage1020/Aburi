@@ -64,6 +64,7 @@ them.
 
 ## Going deeper
 
-The [design documents](../design/overview.md) specify every stage above in full, and
-an implementation is expected to cite them. To write a plugin, start with
+The [design documents](../design/overview.md) specify every stage above in full. A
+change in behaviour updates the document in the same pull request; the code
+itself does not cite sections, which move as the documents grow. To write a plugin, start with
 [Plugin development](./plugin-development.md).

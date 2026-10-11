@@ -2,8 +2,6 @@ import type { UndeclaredVocabOccurrence } from "@aburi/core"
 import { describe, expect, it } from "vitest"
 import { summarizeUndeclaredVocab } from "../src/vocab-discovered"
 
-/** `extension-vocab.md` §11.5.1: one item per (kind, value), first emitter first. */
-
 function occurrence(
   plugin: string,
   file: string,

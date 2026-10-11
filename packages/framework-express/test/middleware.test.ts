@@ -1,59 +1,50 @@
-import { extractSymbols, parseTypescriptFile } from "@aburi/lang-typescript"
-import type { SymbolCandidate } from "@aburi/types"
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
+import { extractFile } from "@aburi/test-harness"
 import { describe, expect, it } from "vitest"
 import { analyzeUseArguments } from "../src/middleware"
-import { makeCtx } from "./fixtures/symbol"
 
-async function firstCallSymbol(source: string): Promise<SymbolCandidate<unknown>> {
-  const parsed = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  if (parsed.tree === null) throw new Error("parse failed")
-  const symbols = extractSymbols(
-    parsed.tree,
-    makeCtx("src/a.ts", source),
-  ) as SymbolCandidate<unknown>[]
-  const found = symbols.find((s) => s.kind === "call")
-  if (found === undefined) throw new Error("no call symbol found")
-  return found
+/** The module-level `use` call written on the last line, after an express import and an app. */
+async function useCall(line: string) {
+  const source = `import express from "express"\nconst app = express()\n${line}\n`
+  const { candidates } = await extractFile(langTypescriptPlugin, "src/a.ts", source)
+  const call = candidates.find((candidate) => candidate.kind === "call")
+  if (call === undefined) throw new Error(`no call Symbol in ${line}`)
+  return call
 }
 
 describe("analyzeUseArguments", () => {
-  it("detects arity-3 arrow handler as regular middleware", async () => {
-    const sym = await firstCallSymbol(
-      `import express from "express"\nconst app = express()\napp.use((req, res, next) => next())\n`,
-    )
-    const shape = analyzeUseArguments(sym.fullNode)
-    expect(shape?.hasRegularHandler).toBe(true)
-    expect(shape?.hasErrorHandler).toBe(false)
-    expect(shape?.hasIdentifierArg).toBe(false)
+  it.each([
+    ["an arity-3 arrow", "app.use((req, res, next) => next())", { hasRegularHandler: true }],
+    ["an arity-4 arrow", "app.use((err, req, res, next) => next(err))", { hasErrorHandler: true }],
+    [
+      "an arity-4 function expression",
+      "app.use(function (err, req, res, next) { return next(err) })",
+      { hasErrorHandler: true },
+    ],
+    ["a handler named by an identifier", "app.use(logger)", { hasIdentifierArg: true }],
+    ["an arity-2 arrow, which is neither shape", "app.use((req, res) => res.end())", {}],
+  ])("reads %s", async (_label, line, flags) => {
+    const shape = analyzeUseArguments((await useCall(line)).fullNode)
+
+    expect(shape).toMatchObject({
+      hasRegularHandler: false,
+      hasErrorHandler: false,
+      hasIdentifierArg: false,
+      ...flags,
+    })
   })
 
-  it("detects arity-4 arrow handler as error middleware", async () => {
-    const sym = await firstCallSymbol(
-      `import express from "express"\nconst app = express()\napp.use((err, req, res, next) => next(err))\n`,
-    )
-    const shape = analyzeUseArguments(sym.fullNode)
-    expect(shape?.hasErrorHandler).toBe(true)
-    expect(shape?.hasRegularHandler).toBe(false)
-  })
+  it("reads a mount: a path literal, then a router identifier", async () => {
+    const shape = analyzeUseArguments((await useCall("app.use('/api', router)")).fullNode)
 
-  it("detects arity-4 function_expression handler as error middleware", async () => {
-    const sym = await firstCallSymbol(
-      `import express from "express"\nconst app = express()\napp.use(function (err, req, res, next) { return next(err) })\n`,
-    )
-    const shape = analyzeUseArguments(sym.fullNode)
-    expect(shape?.hasErrorHandler).toBe(true)
-  })
-
-  it("flags mount-point shape: (pathLiteral, identifier)", async () => {
-    const sym = await firstCallSymbol(
-      `import express from "express"\nconst app = express()\napp.use('/api', router)\n`,
-    )
-    const shape = analyzeUseArguments(sym.fullNode)
-    expect(shape?.firstArgIsPathLiteral).toBe(true)
-    expect(shape?.secondArgIsIdentifier).toBe(true)
-    expect(shape?.argCount).toBe(2)
-    expect(shape?.hasRegularHandler).toBe(false)
-    expect(shape?.hasErrorHandler).toBe(false)
+    expect(shape).toEqual({
+      hasErrorHandler: false,
+      hasRegularHandler: false,
+      firstArgIsPathLiteral: true,
+      secondArgIsIdentifier: true,
+      argCount: 2,
+      hasIdentifierArg: true,
+    })
   })
 
   it.each([
@@ -62,34 +53,26 @@ describe("analyzeUseArguments", () => {
     ["in parentheses", 'app.use(("/api"), router)'],
     ["under an assertion", 'app.use("/api" as string, router)'],
   ])("reads the mount path written %s as the path it is", async (_label, line) => {
-    // `@aburi/lang-typescript` names each of these registrations by the path `/api`, so the
-    // classification has to agree that there is one: a Symbol whose id says `$api` and whose
-    // kind says `middleware` contradicts itself.
-    const sym = await firstCallSymbol(
-      `import express from "express"\nconst app = express()\n${line}\n`,
-    )
-    expect(sym.name).toBe("app__use__$api__d0")
+    const call = await useCall(line)
+    expect(call.name).toBe("app__use__$api__d0")
 
-    const shape = analyzeUseArguments(sym.fullNode)
-    expect(shape?.firstArgIsPathLiteral).toBe(true)
-    expect(shape?.argCount).toBe(2)
+    expect(analyzeUseArguments(call.fullNode)).toMatchObject({
+      firstArgIsPathLiteral: true,
+      argCount: 2,
+    })
   })
 
   it("reads no path from a backtick with a substitution", async () => {
     // Its value is decided when it runs, so it is no more a path than an identifier is.
-    const sym = await firstCallSymbol(
-      `import express from "express"\nconst app = express()\napp.use(\`/\${v}\`, router)\n`,
-    )
+    const call = await useCall(`app.use(\`/\${v}\`, router)`)
 
-    expect(analyzeUseArguments(sym.fullNode)?.firstArgIsPathLiteral).toBe(false)
+    expect(analyzeUseArguments(call.fullNode)?.firstArgIsPathLiteral).toBe(false)
   })
 
-  it("flags identifier-arg middleware without asserting arity", async () => {
-    const sym = await firstCallSymbol(
-      `import express from "express"\nconst app = express()\napp.use(logger)\n`,
-    )
-    const shape = analyzeUseArguments(sym.fullNode)
-    expect(shape?.hasIdentifierArg).toBe(true)
-    expect(shape?.hasRegularHandler).toBe(false)
+  it.each([
+    null,
+    { placeholder: true },
+  ])("returns null for %o, which is not a syntax node", (value) => {
+    expect(analyzeUseArguments(value)).toBeNull()
   })
 })
