@@ -1,29 +1,8 @@
-/**
- * Coded error class for every registry failure. Consumers can branch on `code`
- * without parsing message text. See docs/design/extension-vocab.md
- * (namespaces and conflict resolution) for the underlying rules; `manifest-*` codes are
- * I/O / parse / schema failures that surface before the registry sees the manifest.
- *
- * `plugins[]` carries 0, 1, or 2 names:
- *   - 0: failure occurred before the manifest could be identified (file read, JSON
- *        parse before any structure was recovered, a key named twice).
- *   - 1: single-plugin failure (reserved namespace, xPrefix mismatch, an id one manifest
- *        declares twice, two of one manifest's prefixes nesting, etc.).
- *   - 2: cross-plugin conflict (duplicate id, prefix overlap between two plugins, etc.). The first
- *        entry is the existing owner; the second is the manifest that triggered
- *        the conflict.
- */
-
 export type RegistryErrorCode =
   /** Filesystem failure while reading the manifest file (ENOENT, EACCES, EIO, etc.). */
   | "manifest-read-failed"
   /** Manifest file is not valid JSONC (lexical error). */
   | "manifest-parse-failed"
-  /**
-   * Manifest does not conform to aburi.plugin.v1.json, contains non-JSON values, or names one key
-   * twice in an object (or `__proto__` at all). `cause` is ajv's `ErrorObject[]` for a schema
-   * failure and a `RepeatedKey` for a key, so `Array.isArray` tells them apart.
-   */
   | "manifest-invalid"
   /** Manifest references a reserved namespace (core / aburi / _ / framework:hint). */
   | "reserved-namespace"
@@ -31,20 +10,11 @@ export type RegistryErrorCode =
   | "xprefix-mismatch"
   /** Plugin declares vocab outside the namespaces allowed for its `type`. */
   | "namespace-type-mismatch"
-  /**
-   * Two plugins declare the same id (effect / extKind) or framework name, or one plugin declares
-   * the same id twice. The second case names one plugin, since the manifest is its own conflict.
-   */
   | "duplicate-id"
   /** Two plugins declare the same prefix (effect / extKind / derivedBy). */
   | "duplicate-prefix"
   /** A prefix in one plugin shadows or is shadowed by an id in another. */
   | "prefix-shadow-id"
-  /**
-   * Two effect or extKind prefixes nest, one under the other at a segment boundary (`fp:pipe` and
-   * `fp:pipe:async`, but not `fp:pipeline`). Declared by two plugins, or by one; the second case
-   * names one plugin, since the manifest is its own conflict.
-   */
   | "prefix-prefix-overlap"
   /** Two derivedByPrefixes nest, the same way and with the same one-plugin case. */
   | "derivedby-prefix-overlap"
@@ -55,12 +25,6 @@ export type RegistryErrorCode =
 
 export interface RegistryErrorDetail {
   code: RegistryErrorCode
-  /**
-   * Plugin name(s) at fault. May be empty (pre-identification failures),
-   * length 1 (single-plugin failures, a `duplicate-id` or a prefix overlap within one manifest
-   * included), or length
-   * 2 (cross-plugin conflicts: [existing-owner, new-arrival]).
-   */
   plugins: readonly string[]
   /** Offending value (id, prefix, framework name) when applicable. */
   value?: string
@@ -78,4 +42,16 @@ export class RegistryError extends Error {
     this.plugins = detail.plugins
     this.value = detail.value
   }
+}
+
+export function raise(
+  message: string,
+  code: RegistryErrorCode,
+  plugins: readonly string[],
+  value?: string,
+): never {
+  throw new RegistryError(
+    message,
+    value === undefined ? { code, plugins } : { code, plugins, value },
+  )
 }

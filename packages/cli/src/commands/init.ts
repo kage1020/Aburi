@@ -13,17 +13,11 @@ import { outputIsADirectory, writeOutputFile } from "../output-file"
 import { FRAMEWORK_TO_PLUGIN, LANGUAGE_TO_PLUGIN } from "../plugin-catalog"
 import { resolveWorkspaceRoot } from "../workspace-root"
 
-/** What this command's one artefact is called when a write of it fails. */
 const CONFIG_ARTEFACT = "the config"
 
 const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
 export interface InitOptions {
-  /**
-   * Whether to honour `.gitignore` while counting a component's languages. Absent means the
-   * default, which is to honour it — `aburi scan` reads this from the config, and this command
-   * runs before there is one.
-   */
   respectGitignore?: boolean
   cwd?: string
   output?: string
@@ -39,35 +33,14 @@ export interface InitReport {
   detectedFrameworks: string[]
   componentCount: number
   suggestedPlugins: readonly string[]
-  /**
-   * Detected language ids with no first-party plugin. Non-empty means the written config
-   * names no language plugin, so `aburi scan` cannot parse anything and will say so.
-   */
   unmappedLanguages: readonly string[]
-  /**
-   * Manifests that declared package patterns and resolved none of them.
-   *
-   * The config this command writes describes the workspace it found, so a manifest that named
-   * packages and produced none makes that description wrong before it is ever read — and
-   * `components[]` is the one part of it a reader cannot check against anything else.
-   */
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
-  /** Whether the written config's single component is the whole repository, for want of any. */
   fellBackToSingleComponent: boolean
-  /** Detected framework ids with no first-party plugin; classification is simply narrower. */
   unmappedFrameworks: readonly string[]
   overwrote: boolean
   exitCode: ExitCode
 }
 
-/**
- * `cli-spec.md` — `aburi init`. Runs the autodetect chain (workspace root → managers → components),
- * writes an `aburi.json` (or the caller's `--output` path), and returns a structured report.
- *
- * Refuses to overwrite an existing file unless `--force` is set (exit 2). The
- * overwrite guard probes with `pathKind` so a permission-denied on `aburi.json` cannot
- * silently bypass it and let the write clobber a file the user cannot read.
- */
 export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
@@ -85,8 +58,6 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   }
 
   const managers = await detectManagers(workspaceRoot)
-  // Same wrapping rationale as `resolveComponents` in scan.ts: an id the detection cannot
-  // derive is a property of the project, and belongs in the input-error exit code.
   let components: Awaited<ReturnType<typeof detectComponents>>
   try {
     components = await detectComponents({
@@ -139,8 +110,6 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     unmappedLanguages: unmappedIds(languageSet, LANGUAGE_TO_PLUGIN),
     unmappedFrameworks: unmappedIds(frameworkSet, FRAMEWORK_TO_PLUGIN),
     unresolvedDeclarations: managers.unresolved,
-    // `aburi init` has no `components[]` to defer to — it is the command that writes the
-    // first one — so an empty candidate list is always detection's own answer here.
     fellBackToSingleComponent: managers.workspaces.length === 0,
     overwrote: existing === "file",
     exitCode: EXIT.SUCCESS,
@@ -159,14 +128,6 @@ function pluginRefsFor(
   return [...out].sort()
 }
 
-/**
- * The `--with-suggestions` banner. Install instructions name the npm package,
- * so these carry the `@aburi/` scope that `PluginRef` leaves implicit.
- *
- * Languages come first and are included unconditionally, per `cli-spec.md`: the
- * language plugin `init` just wrote into `languages` is a hard requirement for the next
- * `aburi scan`, where a framework plugin only adds classification.
- */
 function suggestPluginsFor(
   languages: ReadonlySet<string>,
   frameworks: ReadonlySet<string>,
@@ -177,13 +138,6 @@ function suggestPluginsFor(
   ].map((name) => `@aburi/${name}`)
 }
 
-/**
- * Detected ids this CLI has no plugin for. They stay in `components[].languages` /
- * `components[].frameworks` — that is the detector's own vocabulary and remains accurate —
- * but they cannot appear in the top-level plugin-ref arrays, so the caller surfaces them:
- * an unmapped *language* means the generated config resolves no language plugin at all, and
- * `aburi scan` will refuse to run until one is added.
- */
 function unmappedIds(detected: ReadonlySet<string>, table: ReadonlyMap<string, string>): string[] {
   return [...detected].filter((id) => !table.has(id)).sort()
 }
@@ -201,12 +155,6 @@ interface RenderedConfigInput {
   suggestions: readonly string[]
 }
 
-/**
- * Emits the JSONC form of `aburi.json`. Values that the autodetector could not fill are
- * left as empty arrays instead of `undefined` because the schema uses `[]`-default
- * semantics; comments encode the suggestion list so `--with-suggestions` output stays
- * readable.
- */
 function renderConfig(input: RenderedConfigInput): string {
   const config: Partial<Config> & { $schema: string } = {
     $schema: CONFIG_SCHEMA_URL,
@@ -225,19 +173,10 @@ function renderConfig(input: RenderedConfigInput): string {
   const banner = input.suggestions
     .map((suggestion) => `// Suggested install: pnpm add -D ${suggestion}`)
     .join("\n")
-  // Insert the comment banner right after the opening `{` so the JSON stays valid JSONC.
   const insertion = `\n  ${banner.split("\n").join("\n  ")}`
   return `${json.replace("{\n", `{${insertion}\n`)}\n`
 }
 
-/**
- * The one recovery for a `.gitignore` this command cannot read.
- *
- * `aburi scan` can be told to leave `.gitignore` alone through the config; this command is what
- * writes that config, so the flag is the whole of the escape hatch and the message has to name
- * it. Silently carrying on instead would put a vendored tree's language into the file the user
- * is about to keep.
- */
 function gitignoreEscapeHatch(error: unknown): string {
   if (!(error instanceof CoreError) || error.code !== "scan-gitignore-unreadable") return ""
   return " Pass --no-respect-gitignore to detect components without reading it."

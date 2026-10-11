@@ -2,17 +2,6 @@ import type { ChildProcess } from "node:child_process"
 import type { MessageConnection } from "vscode-jsonrpc/node"
 import type { SpawnedServer } from "../../../src/lsp"
 
-/**
- * In-memory stand-in for the `vscode-jsonrpc` `MessageConnection` a real
- * `SpawnedServer` carries. Only the four members `createLspClient` touches are
- * implemented — `listen`, `sendRequest`, `sendNotification`, `dispose`.
- *
- * The point of this fixture (as opposed to `MockLspClient`, which replaces the
- * client wholesale) is that it lets a test drive `createLspClient` itself: the
- * timeout bookkeeping lives inside the client, so the seam has to sit one layer
- * below it. `"pending"` is the interesting behavior — it models a clogged pipe,
- * where the write promise simply never settles.
- */
 export type SendBehavior = "resolve" | "pending" | "reject" | "throw-sync"
 
 export interface FakeConnectionOptions {
@@ -53,9 +42,6 @@ export class FakeConnection {
     )
   }
 
-  // Not `async`: `vscode-jsonrpc` throws synchronously once the connection is
-  // closed or disposed, and an `async` wrapper would quietly convert that into
-  // a rejection, hiding the path the client has to survive.
   sendNotification(type: unknown, params?: unknown): Promise<void> {
     this.notifications.push({ method: methodNameOf(type), params })
     return settle(
@@ -79,13 +65,6 @@ export interface FakeServer {
   exit: (code: number | null) => Promise<void>
 }
 
-/**
- * A `SpawnedServer` whose child process is still running and whose connection
- * is a `FakeConnection`. `exited` starts pending on purpose — `createLspClient`
- * flips its internal `disposed` flag when that promise settles, and a client
- * that believes its server is gone short-circuits every method under test.
- * Call `exit()` to reach the other side of that branch.
- */
 export function createFakeServer(options: FakeConnectionOptions = {}): FakeServer {
   const connection = new FakeConnection(options)
   const killAfterCalls: number[] = []
@@ -106,8 +85,6 @@ export function createFakeServer(options: FakeConnectionOptions = {}): FakeServe
     server,
     connection,
     killAfterCalls,
-    // The client sets `disposed` in a `.then` on `exited`, so the await here
-    // lets that continuation run before the caller asserts on the next call.
     exit: async (code) => {
       signalExit(code)
       await exited
@@ -115,11 +92,6 @@ export function createFakeServer(options: FakeConnectionOptions = {}): FakeServe
   }
 }
 
-/**
- * `sendRequest` / `sendNotification` accept either a protocol type object
- * (`InitializeRequest.type`) or a bare method string; both carry the method
- * name the recording arrays are asserted against.
- */
 function methodNameOf(type: unknown): string {
   if (typeof type === "string") return type
   if (typeof type === "object" && type !== null && "method" in type) {

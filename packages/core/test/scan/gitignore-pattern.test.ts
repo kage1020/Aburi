@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { compileRules, readRuleLines } from "../../src/scan/gitignore-pattern"
 
-/**
- * One `.gitignore`'s rules against one path. Every expectation here was measured with git
- * 2.43 (`git ls-files -o --exclude-standard` or `git check-ignore --no-index`) on the same rules
- * and paths, not reasoned out of the documentation, which git's own matcher departs from in
- * places (`a**\/b` below).
- */
+// Every expectation was measured with git itself on the same rules and paths, not read off its
+// documentation, which its matcher departs from in places.
 function verdicts(content: string, paths: readonly string[], isDirectory = false): string[] {
   const rules = compileRules(readRuleLines(Buffer.from(content, "utf8")))
   return paths.map((path) => rules.decide(path, isDirectory))
@@ -159,23 +155,21 @@ describe("brackets", () => {
       "ignored",
       "none",
     ])
-    for (const [name, inside, outside] of [
-      ["alnum", "z", "-"],
-      ["alpha", "Q", "1"],
-      ["blank", "\t", "\n"],
-      ["cntrl", "\u0001", " "],
-      ["graph", "~", " "],
-      ["lower", "q", "Q"],
-      ["print", " ", "\u007f"],
-      ["space", "\r", "\u000b"],
-      ["upper", "Q", "q"],
-      ["xdigit", "F", "g"],
-    ] as const) {
-      expect(verdicts(`a[[:${name}:]]\n`, [`a${inside}`, `a${outside}`]), name).toEqual([
-        "ignored",
-        "none",
-      ])
-    }
+  })
+
+  it.each([
+    ["alnum", "z", "-"],
+    ["alpha", "Q", "1"],
+    ["blank", "\t", "\n"],
+    ["cntrl", "\u0001", " "],
+    ["graph", "~", " "],
+    ["lower", "q", "Q"],
+    ["print", " ", "\u007f"],
+    ["space", "\r", "\u000b"],
+    ["upper", "Q", "q"],
+    ["xdigit", "F", "g"],
+  ])("reads [[:%s:]] as git's own class", (name, inside, outside) => {
+    expect(verdicts(`a[[:${name}:]]\n`, [`a${inside}`, `a${outside}`])).toEqual(["ignored", "none"])
   })
 
   it("matches nothing for an unknown class or an unterminated bracket", () => {

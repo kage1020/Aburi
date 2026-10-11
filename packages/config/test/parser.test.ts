@@ -1,11 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { parseConfig, readConfigFile } from "../src/index"
-import { configErrorFrom } from "./fixtures/errors"
-
-const SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
+import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
+import { ConfigError, parseConfig, readConfigFile } from "../src/index"
+import { CONFIG_SCHEMA as SCHEMA } from "./fixtures/configs"
 
 const VALID_JSONC = `{
   // comment is allowed
@@ -19,50 +16,30 @@ const VALID_JSONC = `{
 }`
 
 describe("parseConfig", () => {
-  it("C1 accepts an empty {} config", () => {
-    expect(parseConfig("{}", "inline")).toEqual({})
-  })
-
   it("accepts JSONC with comments and trailing commas", () => {
     const config = parseConfig(VALID_JSONC, "inline")
     expect(config.effects).toEqual(["effects-prisma", "effects-pino"])
     expect(config.components?.[0]?.id).toBe("billing")
   })
 
-  it("C2 allows empty effects array", () => {
-    expect(parseConfig(JSON.stringify({ effects: [] }), "inline").effects).toEqual([])
-  })
-
-  it("C3 preserves effects order (first-match-wins is consumer-side)", () => {
-    const config = parseConfig(
-      JSON.stringify({ effects: ["effects-prisma", "effects-stripe"] }),
-      "inline",
-    )
-    expect(config.effects).toEqual(["effects-prisma", "effects-stripe"])
-  })
-
-  it("C5 keep/suppress overlap is accepted at parse time (precedence is consumer-side)", () => {
-    const config = parseConfig(
-      JSON.stringify({ $schema: SCHEMA, suppress: ["logger"], keep: ["logger.audit"] }),
-      "inline",
-    )
-    expect(config.suppress).toEqual(["logger"])
-    expect(config.keep).toEqual(["logger.audit"])
-  })
-
-  it("accepts pluginOptions as an opaque object", () => {
-    const config = parseConfig(
-      JSON.stringify({
-        $schema: SCHEMA,
-        pluginOptions: { "effects-prisma": { treatExtendsAsTx: true } },
-      }),
-      "inline",
-    )
-    expect(config.pluginOptions?.["effects-prisma"]).toEqual({ treatExtendsAsTx: true })
+  it.each([
+    ["an empty config", {}],
+    ["an empty effects array", { effects: [] }],
+    ["effects in the order written", { effects: ["effects-prisma", "effects-stripe"] }],
+    [
+      "keep and suppress that overlap",
+      { $schema: SCHEMA, suppress: ["logger"], keep: ["logger.audit"] },
+    ],
+    [
+      "pluginOptions as an opaque object",
+      { $schema: SCHEMA, pluginOptions: { "effects-prisma": { treatExtendsAsTx: true } } },
+    ],
+  ])("accepts %s as written", (_, config) => {
+    expect(parseConfig(JSON.stringify(config), "inline")).toEqual(config)
   })
 
   it("throws config-parse-failed on a lexical error, with the offset in the message and the parse errors as cause", async () => {
-    const caught = await configErrorFrom(() => parseConfig("{not json", "inline"))
+    const caught = await errorFrom(ConfigError, () => parseConfig("{not json", "inline"))
     expect(caught.code).toBe("config-parse-failed")
     expect(caught.message).toMatch(/offset \d+/)
     expect(Array.isArray(caught.cause)).toBe(true)
@@ -70,13 +47,12 @@ describe("parseConfig", () => {
   })
 
   it("throws config-invalid on a schema violation, with the ajv errors as cause and their params in the message", async () => {
-    const caught = await configErrorFrom(() =>
+    const caught = await errorFrom(ConfigError, () =>
       parseConfig(JSON.stringify({ $schema: SCHEMA, unknownField: 1 }), "inline"),
     )
     expect(caught.code).toBe("config-invalid")
     expect(Array.isArray(caught.cause)).toBe(true)
     expect((caught.cause as unknown[]).length).toBeGreaterThan(0)
-    // ajv params are embedded in the message so log shippers without `cause` still see them.
     expect(caught.message).toMatch(/additionalProperty/)
   })
 
@@ -122,31 +98,35 @@ describe("parseConfig", () => {
     )
   })
 
-  it("C4 rejects duplicate component ids", async () => {
-    const text = JSON.stringify({
-      $schema: SCHEMA,
-      components: [
-        { id: "billing", roots: ["apps/a"] },
-        { id: "billing", roots: ["apps/b"] },
-      ],
-    })
-    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
-    expect(caught.code).toBe("duplicate-component-id")
-    expect(caught.value).toBe("billing")
-  })
-
-  it("C6 rejects duplicate frameworkHints names", async () => {
-    const text = JSON.stringify({
-      $schema: SCHEMA,
-      frameworkHints: [{ name: "acme" }, { name: "acme" }],
-    })
-    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
-    expect(caught.code).toBe("duplicate-hint-name")
-    expect(caught.value).toBe("acme")
+  it.each([
+    [
+      "component ids",
+      {
+        components: [
+          { id: "billing", roots: ["apps/a"] },
+          { id: "billing", roots: ["apps/b"] },
+        ],
+      },
+      "duplicate-component-id",
+      "billing",
+      'declares components[].id "billing" more than once',
+    ],
+    [
+      "frameworkHints names",
+      { frameworkHints: [{ name: "acme" }, { name: "acme" }] },
+      "duplicate-hint-name",
+      "acme",
+      'declares frameworkHints[].name "acme" more than once',
+    ],
+  ])("rejects duplicate %s, naming the value", async (_, config, code, value, message) => {
+    const text = JSON.stringify({ $schema: SCHEMA, ...config })
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
+    expect(caught).toMatchObject({ code, value })
+    expect(caught.message).toBe(`Config at inline ${message}`)
   })
 })
 
-describe("C19 — a key named twice in one object", () => {
+describe("a key named twice in one object", () => {
   it.each([
     [
       "at the top level",
@@ -164,14 +144,14 @@ describe("C19 — a key named twice in one object", () => {
       'names "dir" twice in /output (again at line 1, column 27)',
     ],
   ])("refuses the config %s", async (_label, text, message) => {
-    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
     expect(caught.code).toBe("config-invalid")
     expect(caught.message).toBe(`Config at inline ${message}`)
   })
 
   it("carries the key and where it is as the cause", async () => {
     const text = `{ "output": { "dir": "x", "dir": "y" } }`
-    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
     expect(caught.cause).toEqual({
       kind: "repeated",
       key: "dir",
@@ -184,15 +164,20 @@ describe("C19 — a key named twice in one object", () => {
   })
 
   it("refuses __proto__, which never becomes a key the schema can see", async () => {
-    // Parsed, `output` is reachable through the prototype while `Object.keys` is empty, so the
-    // schema's `additionalProperties` passes it.
     const text = `{ "__proto__": { "output": { "dir": "smuggled-out" } } }`
-    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
     expect(caught.code).toBe("config-invalid")
     expect(caught.message).toBe(
       'Config at inline names "__proto__" as a key in the top-level object (at line 1, column 3); ' +
         "the parser assigns it instead of defining it, so it never becomes a key the schema can see",
     )
+  })
+
+  it("reports the repeat, not the schema failure, when a config has both", async () => {
+    const text = `{ "unknownField": 1, "ignore": ["a/**"], "ignore": ["b/**"] }`
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
+    expect(caught.cause).toMatchObject({ kind: "repeated", key: "ignore" })
+    expect(caught.message).not.toMatch(/does not conform/)
   })
 
   it("lets two objects use the same key", () => {
@@ -202,45 +187,27 @@ describe("C19 — a key named twice in one object", () => {
 })
 
 describe("readConfigFile", () => {
-  let tmp: string
-  beforeAll(async () => {
-    tmp = await mkdtemp(join(tmpdir(), "aburi-config-test-"))
-  })
-  afterAll(async () => {
-    await rm(tmp, { recursive: true, force: true })
+  const scratch = useScratchWorkspace("config")
+
+  it("reads, parses and validates a config from disk", async () => {
+    await scratch.writeSource("aburi.jsonc", VALID_JSONC)
+    const path = join(scratch.root, "aburi.jsonc")
+    expect((await readConfigFile(path)).effects).toEqual(["effects-prisma", "effects-pino"])
   })
 
-  it("reads + parses + validates a config from disk", async () => {
-    const path = join(tmp, "aburi.jsonc")
-    await writeFile(path, VALID_JSONC, "utf8")
-    const config = await readConfigFile(path)
-    expect(config.effects).toEqual(["effects-prisma", "effects-pino"])
-  })
-
-  it("throws config-not-found when the named path holds nothing", async () => {
-    // Separate from `config-read-failed` because the remedy differs: a mistyped name is the
-    // caller's to fix, a file the filesystem refused is not.
-    const caught = await configErrorFrom(() => readConfigFile(join(tmp, "missing.jsonc")))
+  it.each([
+    ["holds nothing", "missing.jsonc"],
+    ["runs through a file", "not-a-dir/aburi.json"],
+  ])("throws config-not-found when the named path %s", async (_, rel) => {
+    await scratch.writeSource("not-a-dir", "x")
+    const caught = await errorFrom(ConfigError, () => readConfigFile(join(scratch.root, rel)))
     expect(caught.code).toBe("config-not-found")
-    expect(caught.message).toContain("No config file at ")
+    expect(caught.message).toBe(`No config file at ${join(scratch.root, rel)}`)
     expect(caught.cause).toBeInstanceOf(Error)
   })
 
-  const onPosix = it.skipIf(process.platform === "win32")
-
-  onPosix("throws config-not-found when a path segment is not a directory", async () => {
-    // ENOTDIR is the same fact through a different errno: `--config out/aburi.json` where
-    // `out` is a file. Windows answers the same path with ENOENT, so only POSIX exercises it.
-    const file = join(tmp, "not-a-dir")
-    await writeFile(file, "x", "utf8")
-    const caught = await configErrorFrom(() => readConfigFile(join(file, "aburi.json")))
-    expect(caught.code).toBe("config-not-found")
-  })
-
   it("throws config-read-failed on EISDIR (path is a directory)", async () => {
-    // Node's SystemError is an Error-derived instance, which a plain-object errno guard
-    // would silently demote to "unknown".
-    const caught = await configErrorFrom(() => readConfigFile(tmp))
+    const caught = await errorFrom(ConfigError, () => readConfigFile(scratch.root))
     expect(caught.code).toBe("config-read-failed")
     expect(caught.message).toMatch(/EISDIR/)
   })

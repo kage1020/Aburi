@@ -1,6 +1,3 @@
-// Builders for the values an effects plugin classifies: CallCandidate, OwnerSummary,
-// ClassifyContext. Every field carries a contract-satisfying default so cases only spell
-// out what they intend to change.
 import type { CallCandidate, ClassifyContext, ImportEdge, OwnerSummary } from "@aburi/types"
 import { symbolId } from "./ir"
 import { noopRegistry } from "./registry"
@@ -16,6 +13,13 @@ export function makeCall(
     literalArgs: [],
     ...overrides,
   }
+}
+
+/** A static import from `source`, binding nothing unless `overrides` say so. */
+export function importEdge(
+  overrides: Partial<ImportEdge> & Pick<ImportEdge, "source">,
+): ImportEdge {
+  return { symbols: [], line: 1, dynamic: false, ...overrides }
 }
 
 export function makeOwner(overrides: Partial<OwnerSummary> = {}): OwnerSummary {

@@ -13,19 +13,13 @@ import {
 /** Nodes above this render as text-only fallback so GitHub mermaid does not choke. */
 export const MERMAID_NODE_LIMIT = 100
 
-/** Top-N effect surface table. Kept at 10 to fit a PR-comment-safe height. */
+/** Ten rows keep the effect surface table short enough for a PR comment. */
 export const EFFECT_SURFACE_TOP_N = 10
 
 export interface ProjectWorkspaceOptions {
-  /** Omit `generatedAt` even if the IR carries it (mirrors CLI `--no-timestamp`). */
   suppressTimestamp?: boolean
 }
 
-/**
- * markdown-projection.md — `workspace.md`: monorepo shape (managers, languages, symbol
- * counts), a Components table, dependencies (mermaid + text fallback), and the top-10 effect
- * surface.
- */
 export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}): string {
   const lines: string[] = []
   lines.push(`# Workspace`)
@@ -69,17 +63,6 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
   return renderDocument(lines)
 }
 
-/**
- * The header line, which has to leave three states apart rather than two.
- *
- * `across N files` alone reads as "all N were analysed", a claim the document is in no
- * position to make whenever `parsedFiles` is lower, so that case takes the second wording.
- * The third state shares that wording and is told apart below it: a document written before
- * `stats.skippedFiles` existed knows files were lost but cannot name them, so
- * `renderSkippedFiles` emits nothing and the header stands alone — where a document that can
- * name them is followed by the list. `aburi diff` warns on stderr in that third state; a pure
- * projection has no stderr, so the distinction has to be in the bytes.
- */
 function renderSymbolCounts(ir: IR): string {
   const { keptSymbols, droppedSymbols, totalFiles, parsedFiles } = ir.stats
   const counts = `${keptSymbols} kept · ${droppedSymbols} dropped`
@@ -87,11 +70,6 @@ function renderSymbolCounts(ir: IR): string {
   return `${counts} (across ${parsedFiles} of ${totalFiles} files; ${totalFiles - parsedFiles} produced no Symbols)`
 }
 
-/**
- * The files the scan gave up on, grouped by why, counts first. Omitted rather than rendered
- * empty for a document written before `stats.skippedFiles` existed: "this run lost nothing"
- * and "this writer could not say" are different answers.
- */
 function renderSkippedFiles(ir: IR): string[] {
   const skipped = ir.stats.skippedFiles ?? []
   if (skipped.length === 0) return []
@@ -149,16 +127,6 @@ function countSymbolsPerComponent(ir: IR): Map<string, number> {
   return counts
 }
 
-/**
- * Mermaid `graph LR` of the workspace: every declared component is a node — isolated ones
- * with no incident edge included, which markdown-projection.md states outright — component →
- * component dependencies are edges, and a text fallback list follows when any edge exists.
- * Above `MERMAID_NODE_LIMIT` the mermaid block is dropped and only the list survives.
- *
- * Symbol-to-symbol call edges are excluded: they would blow past the render limit and drown
- * the L0 overview in method-granularity detail. Assumes ir-schema.md invariant #2 (unique
- * `Component.id`); the projection trusts `assertIRIntegrity` upstream and does not re-check.
- */
 function renderDependencies(ir: IR): string[] {
   const componentDeps = ir.dependencies.filter((d) => !isSymbolEdge(d))
   const sortedComponents = [...ir.components].sort((a, b) => compareStrings(a.id, b.id))
@@ -186,8 +154,6 @@ function renderDependencies(ir: IR): string[] {
     }
     rows.push("```")
   } else {
-    // Isolated components only ever surface inside the mermaid block, so this note is also
-    // the only signal that they exist above the cap.
     rows.push(
       `_Component graph omitted: ${unionNodeCount} nodes exceeds the render limit (${MERMAID_NODE_LIMIT}). See list below._`,
     )
@@ -203,19 +169,10 @@ function renderDependencies(ir: IR): string[] {
   return rows
 }
 
-/**
- * Mermaid ids reject `-`, so it becomes `_`. `ComponentId` is kebab-case with no `_`, so the
- * mapping is injective — the injectivity test breaks first if the schema ever admits `_`.
- */
 function sanitizeMermaidId(id: string): string {
   return id.replace(/-/g, "_")
 }
 
-/**
- * `Component.name` is arbitrary user text inside the label syntax `id["label"]`, where `"`,
- * `]`, `<` / `>` and a newline each break the render. Mermaid accepts HTML entities inside
- * labels; `\n` maps to its native `<br/>`.
- */
 function escapeMermaidLabel(label: string): string {
   return label
     .replace(/&/g, "&amp;")
@@ -226,10 +183,6 @@ function escapeMermaidLabel(label: string): string {
     .replace(/\r?\n/g, "<br/>")
 }
 
-/**
- * Effect surface top-N table, ties broken by effect id. The component column
- * deduplicates the origin list.
- */
 function renderEffectSurface(ir: IR): string[] {
   interface Row {
     effect: string

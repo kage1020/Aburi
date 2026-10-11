@@ -1,18 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { asSyntaxNode, calleeText, type SyntaxNode } from "../src/syntax-node"
+import {
+  anyCallCalleeMatches,
+  asSyntaxNode,
+  calleeLeaf,
+  calleeText,
+  findFirstDescendantOfType,
+  findNamedChildOfType,
+  type SyntaxNode,
+} from "../src/syntax-node"
 
-/**
- * `syntax-node.ts` is the seam every framework plugin walks a tree-sitter node through, so it
- * is tested here rather than through one plugin: `framework-express`, `framework-react` and
- * anything that follows all reach these helpers, and a plugin's own suite would only pin the
- * subset that plugin happens to exercise.
- */
-
-/**
- * A stand-in carrying the whole duck-typed surface. `asSyntaxNode` is a shape check, so an
- * object that merely satisfies the shape is exactly what a plugin hands over — there is no
- * `web-tree-sitter` node to construct and nothing here needs one.
- */
 function node(overrides: Partial<SyntaxNode> = {}): SyntaxNode {
   return {
     type: "call_expression",
@@ -39,13 +35,6 @@ describe("calleeText", () => {
     expect(calleeText(callWith(null))).toBeNull()
   })
 
-  /**
-   * An empty callee answers `null`, not `""`. Every caller asks the result a question about a
-   * name — does its last dotted segment match a hook, is it `express()`, is it `forwardRef` —
-   * and `""` is a callee that matches nothing while still reading as present, so a caller that
-   * checks for absence before matching would be told there is a callee to inspect when there
-   * is not.
-   */
   it("returns null for a `function` field whose text is empty", () => {
     expect(calleeText(callWith(node({ type: "identifier", text: "" })))).toBeNull()
   })
@@ -75,34 +64,88 @@ describe("asSyntaxNode", () => {
   ])("returns null when `%s` is not the shape tree-sitter gives it", (field, value) => {
     expect(asSyntaxNode({ ...node(), [field]: value })).toBeNull()
   })
+})
 
-  /**
-   * `text` is asserted because `calleeText` reads `callee.text.length` unconditionally. A node
-   * that passed the guard without one would fail as a `TypeError` inside the helper the guard
-   * exists to keep non-tree-sitter values out of, which is the failure a plugin gets no
-   * chance to handle.
-   */
-  it("refuses a node missing `text`, which `calleeText` reads without checking", () => {
-    const withoutText = {
-      type: "call_expression",
-      namedChildren: [],
-      children: [],
-      childForFieldName: () => null,
-    }
-    expect(asSyntaxNode(withoutText)).toBeNull()
+describe("calleeLeaf", () => {
+  it.each([
+    ['app.route("/x").get', "get"],
+    ["React.forwardRef", "forwardRef"],
+    ["forwardRef", "forwardRef"],
+  ])("reads %j as %j", (callee, leaf) => {
+    expect(calleeLeaf(callee)).toBe(leaf)
+  })
+})
+
+describe("findNamedChildOfType", () => {
+  it("returns the first direct named child of the type, passing over null slots", () => {
+    const first = node({ type: "identifier", text: "first" })
+    const parent = node({
+      type: "program",
+      namedChildren: [null, node({ type: "comment" }), first, node({ type: "identifier" })],
+    })
+
+    expect(findNamedChildOfType(parent, "identifier")).toBe(first)
   })
 
-  /**
-   * `children` is asserted for the same reason one step further out: nothing in the module
-   * reads it, but `framework-react`'s JSX walk iterates it straight off the narrowed value.
-   */
-  it("refuses a node missing `children` even though no helper here reads it", () => {
-    const withoutChildren = {
-      type: "jsx_element",
-      text: "<div />",
-      namedChildren: [],
-      childForFieldName: () => null,
-    }
-    expect(asSyntaxNode(withoutChildren)).toBeNull()
+  it("does not look below the direct children", () => {
+    const parent = node({
+      type: "program",
+      namedChildren: [node({ type: "block", namedChildren: [node({ type: "identifier" })] })],
+    })
+
+    expect(findNamedChildOfType(parent, "identifier")).toBeNull()
+  })
+})
+
+describe("findFirstDescendantOfType", () => {
+  it("returns the node itself when it has the type", () => {
+    const call = node({ namedChildren: [node()] })
+
+    expect(findFirstDescendantOfType(call, "call_expression")).toBe(call)
+  })
+
+  it("returns the outermost match, searching depth-first in child order", () => {
+    const inner = node({ text: "inner" })
+    const outer = node({ text: "outer", namedChildren: [inner] })
+    const tree = node({
+      type: "program",
+      namedChildren: [
+        null,
+        node({ type: "block", namedChildren: [outer] }),
+        node({ text: "later" }),
+      ],
+    })
+
+    expect(findFirstDescendantOfType(tree, "call_expression")).toBe(outer)
+  })
+
+  it("returns null when nothing in the tree has the type", () => {
+    expect(findFirstDescendantOfType(node({ type: "program" }), "call_expression")).toBeNull()
+  })
+})
+
+describe("anyCallCalleeMatches", () => {
+  const isGet = (leaf: string) => leaf === "get"
+  const call = (callee: string) => callWith(node({ type: "member_expression", text: callee }))
+
+  it("accepts the node itself when it is a call whose callee leaf matches", () => {
+    expect(anyCallCalleeMatches(call('app.route("/x").get'), isGet)).toBe(true)
+  })
+
+  it("accepts a matching call nested below other nodes", () => {
+    const tree = node({
+      type: "program",
+      namedChildren: [null, node({ type: "block", namedChildren: [call("router.get")] })],
+    })
+
+    expect(anyCallCalleeMatches(tree, isGet)).toBe(true)
+  })
+
+  it.each([
+    ["a call whose callee leaf does not match", call("router.post")],
+    ["a call with no callee", callWith(null)],
+    ["a node that is not a call", node({ type: "member_expression", text: "router.get" })],
+  ])("rejects %s", (_case, tree) => {
+    expect(anyCallCalleeMatches(tree, isGet)).toBe(false)
   })
 })
