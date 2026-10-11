@@ -1,8 +1,19 @@
-import type { Config, Symbol as IRSymbol, LspServerConfig } from "@aburi/types"
-import type { EnrichmentInput, ServerFactory } from "../../../src/lsp"
+import { pathToFileURL } from "node:url"
+import type { Config, Symbol as IRSymbol, Logger, LspServerConfig } from "@aburi/types"
+import {
+  type EnrichmentInput,
+  type EnrichmentResult,
+  enrichWithLsp,
+  type ServerFactory,
+} from "../../../src/lsp"
 import { makeSymbol } from "../../fixtures/ir"
 
-export const TEST_WORKSPACE_ROOT = "/workspace"
+const WORKSPACE_ROOT = "/workspace"
+
+/** The URI a file at `fsPath` under the input's workspace root is opened by. */
+export function workspaceUri(fsPath: string): string {
+  return pathToFileURL(`${WORKSPACE_ROOT}/${fsPath}`).toString()
+}
 
 export function makeServerConfig(overrides: Partial<LspServerConfig> = {}): LspServerConfig {
   return {
@@ -25,37 +36,39 @@ export function makeLspConfig(overrides: Partial<NonNullable<Config["lsp"]>> = {
   }
 }
 
-export function makeEnrichmentInput(input: {
+export function tsServer(overrides: Partial<LspServerConfig>): Config["lsp"] {
+  return makeLspConfig({ servers: { ts: makeServerConfig(overrides) } })
+}
+
+export interface EnrichmentCase {
   symbols: IRSymbol[]
   fileContents: Record<string, string>
-  serverFactory: ServerFactory
+  serverFactory?: ServerFactory
   lspConfig?: Config["lsp"]
   now?: () => number
   fsPaths?: Record<string, string>
-}): EnrichmentInput {
-  const base: EnrichmentInput = {
-    symbols: input.symbols,
-    workspaceRoot: TEST_WORKSPACE_ROOT,
-    // Every fixture path here is ASCII by default, where the Document spelling and the
-    // filesystem's are the same string; `fsPaths` overrides one that is not.
-    fileContents: new Map(
-      Object.entries(input.fileContents).map(([path, content]) => [
-        path,
-        { content, fsPath: input.fsPaths?.[path] ?? path },
-      ]),
-    ),
-    lspConfig: input.lspConfig ?? makeLspConfig(),
-    serverFactory: input.serverFactory,
-  }
-  if (input.now !== undefined) base.now = input.now
-  return base
+  logger?: Logger
 }
 
-/**
- * Manually advanced clock for `EnrichmentInput.now`. Budget tests spend it in a
- * mock's side effect instead of sleeping, so the per-file budget assertions are
- * exact rather than timing-dependent.
- */
+export function makeEnrichmentInput(input: EnrichmentCase): EnrichmentInput {
+  const { fileContents, fsPaths, lspConfig, ...rest } = input
+  return {
+    ...rest,
+    workspaceRoot: WORKSPACE_ROOT,
+    fileContents: new Map(
+      Object.entries(fileContents).map(([path, content]) => [
+        path,
+        { content, fsPath: fsPaths?.[path] ?? path },
+      ]),
+    ),
+    lspConfig: lspConfig ?? makeLspConfig(),
+  }
+}
+
+export function enrich(input: EnrichmentCase): Promise<EnrichmentResult> {
+  return enrichWithLsp(makeEnrichmentInput(input))
+}
+
 export function makeManualClock(): { now: () => number; advance: (ms: number) => void } {
   let current = 0
   return {
@@ -75,7 +88,6 @@ export function makeMethodSymbol(
 ): IRSymbol {
   return makeSymbol(`ts:${file}#${className}.${methodName}`, {
     kind: "method",
-    name: `${className}.${methodName}`,
     source: { file, startLine: line, endLine: line, startColumn: null, endColumn: null },
     calls: calls.map((c) => ({ ...c, resolved: null })),
     signature: {
@@ -92,7 +104,20 @@ export function makeMethodSymbol(
 export function makeClassSymbol(file: string, className: string, line: number): IRSymbol {
   return makeSymbol(`ts:${file}#${className}`, {
     kind: "class",
-    name: className,
     source: { file, startLine: line, endLine: line, startColumn: null, endColumn: null },
   })
 }
+
+/** `class C { foo() {} bar() { this.foo() } }` in `src/a.ts`, with `bar` calling `this.foo` on line 4. */
+export function thisFooFile(): Pick<EnrichmentCase, "symbols" | "fileContents"> {
+  return {
+    symbols: [
+      makeClassSymbol("src/a.ts", "C", 1),
+      makeMethodSymbol("src/a.ts", "C", "foo", 2),
+      makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }]),
+    ],
+    fileContents: { "src/a.ts": "class C {\n  foo() {}\n  bar() {\n    this.foo()\n  }\n}" },
+  }
+}
+
+export const THIS_FOO_CALLER = "ts:src/a.ts#C.bar"

@@ -2,18 +2,8 @@ import { visit } from "jsonc-parser"
 
 const PROTOTYPE_KEY = "__proto__"
 
-/**
- * How every JSONC text in Aburi is read: comments and trailing commas allowed. `scanKeys` reads
- * with these, so a caller that parses with them sees the text the scan saw.
- */
 export const JSONC_PARSE_OPTIONS = { allowTrailingComma: true, disallowComments: false } as const
 
-/**
- * A key the parsed value does not faithfully carry: one named twice in an object, or `__proto__`.
- * `line` and `column` are 1-based; with `offset` and `length` they point at the second occurrence
- * of a repeated key, and at the only one of a prototype key. `owner` is the JSON path of the
- * object that holds it.
- */
 export interface RepeatedKey {
   readonly kind: "repeated" | "prototype-key"
   readonly key: string
@@ -27,16 +17,6 @@ export interface RepeatedKey {
 /** What `scanKeys` found: nothing, a text it could not read, or the first conflicting key. */
 export type KeyScan = { readonly kind: "clean" } | { readonly kind: "unreadable" } | RepeatedKey
 
-/**
- * The first key a JSONC text names twice in one object, at any depth. Parsing keeps the last and
- * says nothing, so `{ "name": "a", "name": "b" }` reads as `b` with no sign the file said `a`.
- *
- * `__proto__` counts the first time: `jsonc-parser` assigns it rather than defining it, so it
- * never becomes a key the schema can see.
- *
- * A text that does not parse under `JSONC_PARSE_OPTIONS` is `unreadable` rather than clean, since
- * positions mean nothing until it does.
- */
 export function scanKeys(text: string): KeyScan {
   const open: Set<string>[] = []
   let unreadable = false

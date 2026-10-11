@@ -1,26 +1,4 @@
 #!/usr/bin/env node
-/**
- * Runs `aburi scan` and `aburi diff` against pinned commits of real public repositories
- * and writes the numbers to `results/`.
- *
- * The synthetic corpus described in docs/design/performance.md measures one shape on
- * purpose: many similar small files. Public repositories measure the shapes nobody
- * designs for — a generated file thousands of lines long, a workspace with a hundred
- * packages, a `.d.ts` wall, decorators on everything — and they are also the only way to
- * find out whether Aburi extracts anything sensible from code it has never seen. So each
- * repo yields two kinds of number: cost (wall time, peak RSS) and outcome (files parsed,
- * symbols kept, calls resolved, files lost).
- *
- *   node benchmarks/public-repos/run.mjs                    # every repo in repos.json
- *   node benchmarks/public-repos/run.mjs --only zod,nest    # a subset
- *   node benchmarks/public-repos/run.mjs --runs 5           # more samples per repo
- *   node benchmarks/public-repos/run.mjs --no-diff          # scan only
- *
- * Requires `pnpm build` first: the harness runs the built CLI from `packages/cli/dist`.
- *
- * What each measurement is allowed to claim lives in `report.mjs`, which holds every
- * decision this file makes without touching the disk.
- */
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
@@ -45,20 +23,6 @@ const CHILD = resolve(HERE, "bench-child.mjs")
 /** Enough of a failing run's output to read, taken from the head, where the first error is. */
 const CAPTURED_OUTPUT_BYTES = 4000
 
-/**
- * `aburi init` writes plugin refs as bare package names (`lang-typescript`), which the
- * loader resolves through `node_modules` — the shape a real user installs. A benchmark
- * clone has no `node_modules`, and installing the workspace's dependencies into nine
- * unrelated repositories would both cost more than the measurement and risk measuring a
- * published version instead of the working tree. The loader also accepts a relative path
- * ref, and hands anything containing a `/` to `import()` untouched (plugin-loader.ts
- * `resolveSpecifier`), so the harness rewrites each detected ref to a `file://` URL for the
- * built plugin in this checkout. Same plugin objects, no install.
- *
- * A `file://` URL rather than the relative form the loader also accepts: a relative ref
- * resolves against the *workspace root* Aburi detects for the clone, which is not a path this
- * harness knows before the scan runs.
- */
 function pluginRef(ref) {
   const name = ref.replace(/^@aburi\//, "")
   return pathToFileURL(resolve(REPO_ROOT, "packages", name, "dist/index.mjs")).href
@@ -98,15 +62,6 @@ async function git(args, cwd) {
   return result.stdout.trim()
 }
 
-/**
- * A `--filter=blob:none` clone, not `--depth 1`: `aburi diff` refuses a shallow repository
- * (it needs the base ref's history), while a partial clone keeps every commit and fetches
- * only the blobs a checkout actually touches. Over these nine repos that is ~125 MB of
- * fetch, and ~760 MB of work directory once every tree is materialised.
- *
- * `out` and `aburi.json` survive the clean because they are the harness's own: the rewritten
- * config has to outlive the checkout, and the IR directory is emptied per run instead.
- */
 async function ensureClone(repo, workDir) {
   const dir = resolve(workDir, repo.id)
   if (!existsSync(resolve(dir, ".git"))) {
@@ -137,15 +92,6 @@ async function hashFile(path) {
     .digest("hex")
 }
 
-/**
- * The outcome half of the measurement. Wall time alone cannot tell a fast scan from a
- * scan that gave up on half the workspace, so every timing below is reported next to what
- * the run actually produced.
- *
- * Every field reads as `null` when the IR does not carry it, including the ones the schema
- * marks required. A `?? 0` there would render a renamed field as `Files 0 / Kept 0` — schema
- * drift printed as a catastrophic regression, with nothing to say which it was.
- */
 function readIrMetrics(ir, irBytes) {
   const stats = ir.stats ?? {}
   const calls = stats.callResolution ?? null
@@ -208,11 +154,6 @@ async function measureRepo(repo, options) {
   const irPath = resolve(dir, "out/aburi.ir.json")
   let lastStderr = ""
   for (let i = 0; i < options.warmup + options.runs; i++) {
-    /**
-     * The previous run's IR goes before this one starts. Left in place, a run that dies is
-     * indistinguishable from one that succeeded: the file is there, it hashes to the same
-     * bytes, and the sweep records a fast deterministic scan having measured nothing.
-     */
     await rm(irPath, { force: true })
     const measurement = await bench(dir, ["scan", "--no-timestamp"], 1_800_000)
     const warm = i < options.warmup
@@ -241,8 +182,6 @@ async function measureRepo(repo, options) {
 
   const ir = JSON.parse(await readFile(irPath, "utf8"))
   const metrics = readIrMetrics(ir, (await stat(irPath)).size)
-  // Assigned rather than passed, so the file count the IR reports lands in the slot
-  // `summariseScans` already reserved for it.
   scan.filesPerSecond =
     metrics.totalFiles == null ? null : metrics.totalFiles / (scan.wallMsMedian / 1000)
 
@@ -259,17 +198,6 @@ async function measureRepo(repo, options) {
   }
 
   if (options.diff) {
-    /**
-     * `--config` with an absolute path, because `aburi diff` scans the base ref inside a
-     * throwaway `git worktree`. The harness's `aburi.json` is untracked, so it does not exist
-     * in that worktree, and without it the base scan finds no language plugin and aborts with
-     * `No language plugin is configured` (exit 2).
-     *
-     * The CLI warns on every repo that the config sits outside the workspace root it detected
-     * for the worktree. The rewritten config carries nothing but absolute plugin refs, so
-     * nothing in it resolves against that root — but the warning is real and every diff run
-     * here carries it.
-     */
     await rm(resolve(dir, "out-diff"), { recursive: true, force: true })
     const measurement = await bench(
       dir,
@@ -289,9 +217,6 @@ async function measureRepo(repo, options) {
     result.diff = {
       wallMs: measurement.wallMs,
       peakRssKb: measurement.maxRssKb,
-      // Exit 3 is not only a tripped `--fail-on` gate — no gate is passed here — but any
-      // run that did not earn a clean answer, which is how `zod`'s extraction failure
-      // surfaces. Kept rather than flattened to pass / fail.
       exitCode: measurement.exitCode,
       summary: counts,
       warnings: capture(measurement.stderr),
@@ -302,19 +227,6 @@ async function measureRepo(repo, options) {
   return result
 }
 
-/**
- * The Aburi commit the sweep ran at, and whether the working tree differed from it.
- * `generator` is the package version, which spans many commits, and a sweep run from a
- * working tree has nothing else to say which one. `results/` is left out of the dirty check:
- * the harness writes there, and an earlier sweep's uncommitted files are not the build.
- *
- * This is HEAD when the sweep starts, not the commit `packages/cli/dist` was built from: a
- * build left over from another checkout records the wrong commit. CI checks out, builds and
- * runs on one commit, so there the two agree.
- *
- * No fallback: git is already a hard dependency (`ensureClone`), and a results file that
- * quietly lost its commit is the state this field exists to remove.
- */
 async function aburiCommit() {
   const commit = await git(["rev-parse", "HEAD"], REPO_ROOT)
   const status = await git(
@@ -329,12 +241,6 @@ async function main() {
   if (!existsSync(CLI_ENTRY)) {
     throw new Error(`${relative(REPO_ROOT, CLI_ENTRY)} is missing. Run \`pnpm build\` first.`)
   }
-  /**
-   * A clone below this repository would inherit its workspace: `detectWorkspaceRoot` walks
-   * up from the scan's cwd, finds Aburi's own `pnpm-workspace.yaml`, and roots every Symbol
-   * id there — measuring a workspace nobody asked about. Refuse rather than report the
-   * number that comes out of it.
-   */
   if (containsPath(REPO_ROOT, options.workDir)) {
     throw new Error(
       `--work-dir must sit outside ${REPO_ROOT}; a clone below it is absorbed into this ` +
@@ -373,13 +279,6 @@ async function main() {
     try {
       report.results.push(await measureRepo(repo, options))
     } catch (error) {
-      /**
-       * A clone that will not check out, or an IR the harness cannot parse, costs that
-       * repository and no other. `bench-child` already contains a crash inside one measured
-       * invocation; this contains everything around it, which is the other half of the same
-       * promise — and the report is rewritten per repo so a sweep killed by the job timeout
-       * still leaves every repository it finished.
-       */
       const message = error instanceof Error ? error.message : String(error)
       process.stderr.write(`  harness fault: ${message}\n`)
       report.results.push({

@@ -9,10 +9,6 @@ import type {
 import { classifyNestjsSymbol } from "./classify"
 import { frameworkNestjsManifest } from "./manifest"
 
-/**
- * Pure decorator-table lookup over `SymbolCandidate.decorators` and the file's import
- * edges; the only cache (`./classify`) memoizes on the edge array's identity.
- */
 class NestjsFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkNestjsManifest
 

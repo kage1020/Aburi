@@ -1,4 +1,4 @@
-import type { Logger, VocabRegistry } from "@aburi/types"
+import type { VocabRegistry } from "@aburi/types"
 
 /** A `VocabRegistry` that owns nothing, for suites whose code under test never consults it. */
 export const noopRegistry: VocabRegistry = {
@@ -14,12 +14,4 @@ export const noopRegistry: VocabRegistry = {
   listPlugins: () => [],
   assertEffectDeclared: () => {},
   assertExtKindDeclared: () => {},
-}
-
-/** A `Logger` that discards everything. */
-export const silentLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
 }

@@ -1,23 +1,43 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import {
+  type CandidateOverrides,
+  makeCandidate,
+  noopRegistry,
+  type ScratchWorkspace,
+  silentLogger,
+  spend,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import type {
   BodyExtraction,
-  EffectsManifest,
-  FrameworkManifest,
+  EffectPlugin,
+  ExtractionContext,
+  FrameworkPlugin,
+  ImportEdge,
   LangManifest,
   LanguageCapabilities,
   LanguagePlugin,
-  Logger,
-  OpaqueAstNode,
+  ParsedTree,
+  ParseError,
   ParseResult,
   PluginManifest,
   SourceFile,
   SymbolCandidate,
+  WalkContext,
 } from "@aburi/types"
-import { afterEach, beforeEach } from "vitest"
+import { beforeEach, expect } from "vitest"
+import {
+  buildDropCFilter,
+  type ExtractedFile,
+  type FilePipelineInput,
+  type FilePipelineResult,
+  isStrict,
+  runFilePipeline,
+  type ScanInput,
+  type ScanResult,
+  scan,
+  VocabCheck,
+} from "../../src"
 import { makeLanguageId } from "../../src/id"
-import { symbolId } from "./ir"
 
 const PLUGIN_SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
 
@@ -46,16 +66,7 @@ export function langManifest(name = "lang-stub"): LangManifest {
   return manifest("lang", name)
 }
 
-export function frameworkManifest(name = "framework-stub"): FrameworkManifest {
-  return manifest("framework", name)
-}
-
-export function effectsManifest(name = "effects-stub"): EffectsManifest {
-  return manifest("effects", name)
-}
-
-/** A language that claims nothing. */
-export const NO_CAPABILITIES: LanguageCapabilities = {
+const NO_CAPABILITIES: LanguageCapabilities = {
   hasDecorators: false,
   hasGenerics: false,
   hasAsync: false,
@@ -69,16 +80,11 @@ export const NO_CAPABILITIES: LanguageCapabilities = {
   hasJsDoc: false,
 }
 
-export const EMPTY_BODY: BodyExtraction = { rules: [], calls: [] }
+const EMPTY_BODY: BodyExtraction = { rules: [], calls: [] }
 
 /** The one file a `.stub` plugin is handed when the test is not about the file. */
-export const stubFile: SourceFile = { path: "test.stub", content: "" }
+const stubFile: SourceFile = { path: "test.stub", content: "" }
 
-/**
- * A `.stub` language plugin whose every stage is a no-op (an empty tree, no candidates, an
- * empty body, `"stub-ast"`), with `overrides` layered on top. The plugin is built as a real
- * `LanguagePlugin` rather than cast to one, so a required member the contract gains surfaces here.
- */
 export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): LanguagePlugin {
   return {
     manifest: langManifest(),
@@ -86,11 +92,7 @@ export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): Lan
     fileExtensions: [".stub"],
     capabilities: NO_CAPABILITIES,
     init: async () => {},
-    parseFile: async (): Promise<ParseResult> => ({
-      tree: {} as OpaqueAstNode,
-      errors: [],
-      imports: [],
-    }),
+    parseFile: async (): Promise<ParseResult> => ({ tree: {}, errors: [], imports: [] }),
     extractSymbols: () => [],
     walkBody: () => EMPTY_BODY,
     normalizeAst: () => "stub-ast",
@@ -98,80 +100,214 @@ export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): Lan
   }
 }
 
-/**
- * A function candidate in `file` (default `test.stub`) named `name`, with a schema-satisfying
- * default for everything else. The id is `stub:<file>#<name>` unless overridden.
- */
+/** A `.stub` language yielding `fileCandidate` for every file it parses. */
+export function oneSymbolPerFile(overrides: Partial<LanguagePlugin> = {}): LanguagePlugin {
+  return stubLanguagePlugin({
+    extractSymbols: (_tree, ctx) => [fileCandidate(ctx.file.path)],
+    ...overrides,
+  })
+}
+
+/** A framework plugin that classifies nothing unless `overrides` says otherwise. */
+export function stubFrameworkPlugin(
+  name = "framework-stub",
+  overrides: Partial<FrameworkPlugin> = {},
+): FrameworkPlugin {
+  return {
+    manifest: manifest("framework", name),
+    init: async () => {},
+    classifySymbol: () => null,
+    ...overrides,
+  }
+}
+
+export function stubEffectsPlugin(name: string, classify: EffectPlugin["classify"]): EffectPlugin {
+  return { manifest: manifest("effects", name), init: async () => {}, classify }
+}
+
 export function stubCandidate(
   name: string,
-  overrides: Omit<Partial<SymbolCandidate<OpaqueAstNode>>, "id"> & {
-    id?: string
+  overrides: Omit<CandidateOverrides, "kind"> & {
+    kind?: CandidateOverrides["kind"]
     file?: string
   } = {},
-): SymbolCandidate<OpaqueAstNode> {
+): SymbolCandidate {
   const { id, file = "test.stub", ...rest } = overrides
-  return {
-    id: symbolId(id ?? `stub:${file}#${name}`),
+  const candidate = makeCandidate({
     kind: "function",
-    extKind: null,
+    id: id ?? `stub:${file}#${name}`,
     name,
-    visibility: "public",
-    decorators: [],
-    signature: null,
     source: { file, startLine: 1, endLine: 2, startColumn: null, endColumn: null },
-    derivedBy: [],
-    bodyNode: {} as OpaqueAstNode,
-    fullNode: {} as OpaqueAstNode,
-    ...rest,
+    bodyNode: {},
+    fullNode: {},
+  })
+  return { ...candidate, ...rest }
+}
+
+/** A candidate named after `file`, which is all the workspace suites need to tell files apart. */
+export function fileCandidate(
+  file: string,
+  overrides: Parameters<typeof stubCandidate>[1] = {},
+): SymbolCandidate {
+  return stubCandidate(file.replace(/[^A-Za-z0-9]/g, "_"), { file, ...overrides })
+}
+
+export type ScriptedStage = "extractSymbols" | "walkBody" | "normalizeAst"
+
+export interface Script {
+  /** What `parseFile` hands back as the tree; `null` is a plugin that could not build one. */
+  tree?: ParsedTree | null
+  parseErrors?: readonly ParseError[]
+  /** Deliberately loose, so a test can hand back something no plugin should. */
+  imports?: unknown
+  /** Names of the candidates `extractSymbols` yields; one, `"one"`, by default. */
+  candidates?: readonly string[]
+  body?: BodyExtraction
+  throwFrom?: ScriptedStage
+  releaseThrows?: unknown
+  /** Replaces the `releaseTree` method, for the plugins that break its contract. */
+  releaseTreeOverride?: { value: unknown }
+  parseMs?: number
+  extractMs?: number
+  walkMsPerCandidate?: number
+}
+
+/** A `.stub` language that spends the time it is told to and logs every call it receives. */
+export class ScriptedLanguagePlugin implements LanguagePlugin {
+  readonly manifest = langManifest()
+  readonly languageId = makeLanguageId("stub")
+  readonly fileExtensions = [".stub"]
+  readonly capabilities = NO_CAPABILITIES
+  readonly released: ParsedTree[] = []
+  readonly order: string[] = []
+  handedOut: ParsedTree | null = null
+
+  constructor(private readonly script: Script = {}) {
+    const override = script.releaseTreeOverride
+    if (override !== undefined) {
+      Object.defineProperty(this, "releaseTree", { value: override.value, enumerable: false })
+    }
+  }
+
+  async init(): Promise<void> {}
+
+  async parseFile(_file: SourceFile): Promise<ParseResult> {
+    spend(this.script.parseMs ?? 0)
+    this.handedOut = this.script.tree === undefined ? {} : this.script.tree
+    return {
+      tree: this.handedOut,
+      errors: [...(this.script.parseErrors ?? [])],
+      imports: ("imports" in this.script ? this.script.imports : []) as ImportEdge[],
+    }
+  }
+
+  extractSymbols(_tree: ParsedTree, _ctx: ExtractionContext): SymbolCandidate[] {
+    this.order.push("extractSymbols")
+    spend(this.script.extractMs ?? 0)
+    this.failIfAsked("extractSymbols")
+    return (this.script.candidates ?? ["one"]).map((name) => stubCandidate(name))
+  }
+
+  walkBody(symbol: SymbolCandidate, _ctx: WalkContext): BodyExtraction {
+    this.order.push(`walkBody:${symbol.name}`)
+    spend(this.script.walkMsPerCandidate ?? 0)
+    this.failIfAsked("walkBody")
+    return this.script.body ?? EMPTY_BODY
+  }
+
+  normalizeAst(symbol: SymbolCandidate): string {
+    this.order.push(`normalizeAst:${symbol.name}`)
+    this.failIfAsked("normalizeAst")
+    return "stub-ast"
+  }
+
+  releaseTree(tree: ParsedTree): void {
+    this.order.push("releaseTree")
+    this.released.push(tree)
+    if (this.script.releaseThrows !== undefined) throw this.script.releaseThrows
+  }
+
+  private failIfAsked(stage: ScriptedStage): void {
+    if (this.script.throwFrom === stage) throw new Error(`stub ${stage} exploded`)
   }
 }
 
-export interface CapturedLine {
-  message: string
-  meta: Record<string, unknown> | undefined
-}
-
-/** A `Logger` that records what it is told, one array per level. */
-export function capturingLogger(): {
-  logger: Logger
-  warnings: string[]
-  debugs: CapturedLine[]
-} {
-  const warnings: string[] = []
-  const debugs: CapturedLine[] = []
-  return {
-    warnings,
-    debugs,
-    logger: {
-      debug: (message: string, meta?: Record<string, unknown>) => debugs.push({ message, meta }),
-      info: () => {},
-      warn: (message: string) => warnings.push(message),
-      error: () => {},
-    },
-  }
-}
-
-/**
- * A scratch workspace of three `.stub` files, `a` / `bad` / `c`, torn down after each test.
- *
- * Three rather than one because the tests that use it are about blast radius: a check that
- * withdrew the run rather than the offending file shows up as a missing `a.stub` *and* a
- * missing `c.stub`, one either side of `bad.stub` in discovery order (which is ascending by
- * path). The names are load-bearing for that reason, so the caller does not choose them.
- *
- * Call it at the top of a `describe`; it registers its own `beforeEach` / `afterEach` and
- * hands back an object whose `root` is the current test's directory.
- */
-export function useStubWorkspace(prefix: string): { readonly root: string } {
-  const handle = { root: "" }
+/** A scratch workspace holding `a.stub`, `bad.stub` and `c.stub`, each containing its own base name. */
+export function useStubWorkspace(prefix: string): ScratchWorkspace {
+  const workspace = useScratchWorkspace(prefix)
   beforeEach(async () => {
-    handle.root = await mkdtemp(join(tmpdir(), `aburi-${prefix}-`))
-    await writeFile(join(handle.root, "a.stub"), "a", "utf8")
-    await writeFile(join(handle.root, "bad.stub"), "bad", "utf8")
-    await writeFile(join(handle.root, "c.stub"), "c", "utf8")
+    for (const name of ["a", "bad", "c"]) await workspace.writeSource(`${name}.stub`, name)
   })
-  afterEach(async () => {
-    await rm(handle.root, { recursive: true, force: true })
+  return workspace
+}
+
+/** `runFilePipeline` over `stubFile` with an empty `.stub` language and nothing else loaded. */
+export function runPipeline(
+  overrides: Partial<FilePipelineInput> = {},
+): Promise<FilePipelineResult> {
+  const registry = overrides.registry ?? noopRegistry
+  const config = overrides.config ?? {}
+  return runFilePipeline({
+    file: stubFile,
+    language: stubLanguagePlugin(),
+    frameworks: [],
+    effects: [],
+    registry,
+    vocab: new VocabCheck(registry, isStrict(config)),
+    config,
+    dropCFilter: buildDropCFilter(),
+    component: null,
+    treeReleaseFailures: [],
+    log: silentLogger,
+    ...overrides,
   })
-  return handle
+}
+
+export function expectExtracted(result: FilePipelineResult): ExtractedFile {
+  expect(result.kind).toBe("extracted")
+  if (result.kind !== "extracted") throw new Error(`expected an extracted file, got ${result.kind}`)
+  return result
+}
+
+export interface OneSymbolFile {
+  candidate?: SymbolCandidate
+  body?: BodyExtraction
+  imports?: readonly ImportEdge[]
+  frameworks?: readonly FrameworkPlugin[]
+  effects?: readonly EffectPlugin[]
+  language?: Partial<LanguagePlugin>
+}
+
+/** The pipeline over a file declaring one candidate (`stubCandidate("Fn")` by default). */
+export async function extractOneSymbol(file: OneSymbolFile = {}): Promise<ExtractedFile> {
+  const candidate = file.candidate ?? stubCandidate("Fn")
+  const language = stubLanguagePlugin({
+    parseFile: async () => ({ tree: {}, errors: [], imports: [...(file.imports ?? [])] }),
+    extractSymbols: () => [candidate],
+    walkBody: () => file.body ?? EMPTY_BODY,
+    ...file.language,
+  })
+  const result = await runPipeline({
+    language,
+    frameworks: file.frameworks ?? [],
+    effects: file.effects ?? [],
+  })
+  return expectExtracted(result)
+}
+
+/** `scan` over `workspaceRoot` with an empty `.stub` language and nothing else loaded. */
+export function scanStubs(
+  workspaceRoot: string,
+  overrides: Partial<ScanInput> = {},
+): Promise<ScanResult> {
+  return scan({
+    workspaceRoot,
+    config: {},
+    languages: [stubLanguagePlugin()],
+    frameworks: [],
+    effects: [],
+    registry: noopRegistry,
+    components: [],
+    ...overrides,
+  })
 }

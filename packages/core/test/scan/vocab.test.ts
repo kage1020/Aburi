@@ -1,29 +1,17 @@
-import { noopRegistry } from "@aburi/test-support"
-import type {
-  EffectPlugin,
-  ExtKind,
-  FrameworkPlugin,
-  OpaqueAstNode,
-  SymbolCandidate,
-  VocabRegistry,
-} from "@aburi/types"
+import { makeCall, noopRegistry } from "@aburi/test-support"
+import type { EffectPlugin, ExtKind, FrameworkPlugin, VocabRegistry } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { CoreError, scan, VocabCheck } from "../../src"
+import { CoreError, VocabCheck } from "../../src"
 import {
-  effectsManifest,
-  frameworkManifest,
+  scanStubs,
   stubCandidate,
+  stubEffectsPlugin,
+  stubFrameworkPlugin,
   stubLanguagePlugin,
   useStubWorkspace,
 } from "../fixtures/plugins"
 
-/**
- * `config.strict` (config.md, extension-vocab.md): a value a plugin emits has to be claimed by
- * that plugin's manifest. Strict by default, a run stops at the first one; with strict off it
- * carries on and hands every one back.
- */
-
-/** Owns exactly the pairs listed, as `VocabRegistry` does after loading manifests. */
+/** Owns exactly the pairs listed, as the plugin registry does after loading manifests. */
 function registryOwning(owned: { effects?: [string, string][]; extKinds?: [string, string][] }) {
   const effects = new Map(owned.effects ?? [])
   const extKinds = new Map(owned.extKinds ?? [])
@@ -44,51 +32,30 @@ function registryOwning(owned: { effects?: [string, string][]; extKinds?: [strin
   return registry
 }
 
-/** One Symbol per file, calling `target` on line 4, with `extKind` from the language itself. */
-function language(extKind: string | null = null) {
+/** One Symbol per file calling `acme.ping` on line 4, except `bad.stub`, whose two collide. */
+function language(extKind: string | null) {
   return stubLanguagePlugin({
-    extractSymbols: (_tree, ctx) => [
-      stubCandidate(ctx.file.path === "bad.stub" ? "twin" : "only", {
-        file: ctx.file.path,
-        extKind: extKind as ExtKind,
-      }),
-      ...(ctx.file.path === "bad.stub"
-        ? [stubCandidate("twin", { file: ctx.file.path, extKind: extKind as ExtKind })]
-        : []),
-    ],
-    walkBody: () => ({
-      rules: [],
-      calls: [
-        {
-          target: "acme.ping",
-          line: 4,
-          argumentCount: 0,
-          inAwait: false,
-          inNew: false,
-          literalArgs: [],
-        },
-      ],
-    }),
+    extractSymbols: (_tree, ctx) => {
+      const file = ctx.file.path
+      const one = (name: string) => stubCandidate(name, { file, extKind: extKind as ExtKind })
+      return file === "bad.stub" ? [one("twin"), one("twin")] : [one("only")]
+    },
+    walkBody: () => ({ rules: [], calls: [makeCall({ target: "acme.ping", line: 4 })] }),
   })
 }
 
-function effectPlugin(name: string, effectId: string): EffectPlugin {
-  return {
-    manifest: effectsManifest(name),
-    init: async () => {},
-    classify: () => ({ effectId: effectId as never, confidence: "high", derivedBy: `${name}:x` }),
-  }
+function emitting(name: string, effectId: string): EffectPlugin {
+  return stubEffectsPlugin(name, () => ({
+    effectId: effectId as never,
+    confidence: "high",
+    derivedBy: `${name}:x`,
+  }))
 }
 
-function frameworkPlugin(name: string, extKind: string): FrameworkPlugin {
-  return {
-    manifest: frameworkManifest(name),
-    init: async () => {},
-    classifySymbol: (_symbol: SymbolCandidate<OpaqueAstNode>) => ({
-      extKind: extKind as ExtKind,
-      derivedBy: `${name}:x`,
-    }),
-  }
+function classifying(name: string, extKind: string): FrameworkPlugin {
+  return stubFrameworkPlugin(name, {
+    classifySymbol: () => ({ extKind: extKind as ExtKind, derivedBy: `${name}:x` }),
+  })
 }
 
 const workspace = useStubWorkspace("vocab")
@@ -100,22 +67,20 @@ function run(options: {
   frameworks?: FrameworkPlugin[]
   languageExtKind?: string
 }) {
-  return scan({
-    workspaceRoot: workspace.root,
+  return scanStubs(workspace.root, {
     config: options.strict === undefined ? {} : { strict: options.strict },
     languages: [language(options.languageExtKind ?? null)],
     frameworks: options.frameworks ?? [],
     effects: options.effects ?? [],
     registry: options.registry,
-    components: [],
   })
 }
 
 describe("a strict run (the default)", () => {
-  it("V6: ends at an effect id the emitting plugin does not claim, naming plugin, value and place", async () => {
+  it("ends at an effect id the emitting plugin does not claim, naming plugin, value and place", async () => {
     const outcome = run({
       registry: registryOwning({}),
-      effects: [effectPlugin("effects-acme", "x-acme:ping")],
+      effects: [emitting("effects-acme", "x-acme:ping")],
     })
     await expect(outcome).rejects.toBeInstanceOf(CoreError)
     await expect(outcome).rejects.toMatchObject({
@@ -130,7 +95,7 @@ describe("a strict run (the default)", () => {
   it("ends at an id another plugin owns, since ownership is per plugin", async () => {
     const outcome = run({
       registry: registryOwning({ effects: [["x-acme:ping", "effects-other"]] }),
-      effects: [effectPlugin("effects-acme", "x-acme:ping")],
+      effects: [emitting("effects-acme", "x-acme:ping")],
     })
     await expect(outcome).rejects.toMatchObject({ code: "vocab-undeclared" })
   })
@@ -138,40 +103,38 @@ describe("a strict run (the default)", () => {
   it("passes a core effect id, which no plugin owns", async () => {
     const { ir } = await run({
       registry: registryOwning({}),
-      effects: [effectPlugin("effects-acme", "db.read")],
+      effects: [emitting("effects-acme", "db.read")],
     })
     expect(ir.symbols.flatMap((s) => s.effects.map((e) => e.id))).toContain("db.read")
   })
 
-  it("V10: passes an effect id and an extKind their emitting plugins claim", async () => {
+  it("passes an effect id and an extKind their emitting plugins claim", async () => {
     const result = await run({
       registry: registryOwning({
         effects: [["x-acme:ping", "effects-acme"]],
         extKinds: [["framework:acme:job", "framework-acme"]],
       }),
-      effects: [effectPlugin("effects-acme", "x-acme:ping")],
-      frameworks: [frameworkPlugin("framework-acme", "framework:acme:job")],
+      effects: [emitting("effects-acme", "x-acme:ping")],
+      frameworks: [classifying("framework-acme", "framework:acme:job")],
     })
     expect(result.undeclaredVocab).toEqual([])
   })
 
-  it("V7: ends at an extKind a framework plugin does not claim", async () => {
-    await expect(
-      run({
-        registry: registryOwning({}),
-        frameworks: [frameworkPlugin("framework-acme", "framework:acme:job")],
-      }),
-    ).rejects.toMatchObject({
+  it.each([
+    [
+      "a framework plugin",
+      { frameworks: [classifying("framework-acme", "framework:acme:job")] },
+      "framework-acme",
+    ],
+    [
+      "the language plugin, when no framework replaced it",
+      { languageExtKind: "lang:stub:thing" },
+      "lang-stub",
+    ],
+  ])("ends at an extKind %s set without claiming it", async (_label, options, plugin) => {
+    await expect(run({ registry: registryOwning({}), ...options })).rejects.toMatchObject({
       code: "vocab-undeclared",
-      message: expect.stringContaining('Plugin "framework-acme" emitted extKind'),
-    })
-  })
-
-  it("charges an extKind the language plugin set, and no framework replaced, to the language plugin", async () => {
-    await expect(
-      run({ registry: registryOwning({}), languageExtKind: "lang:stub:thing" }),
-    ).rejects.toMatchObject({
-      message: expect.stringContaining('Plugin "lang-stub" emitted extKind'),
+      message: expect.stringContaining(`Plugin "${plugin}" emitted extKind`),
     })
   })
 })
@@ -181,7 +144,7 @@ describe("a run with strict off", () => {
     const result = await run({
       strict: false,
       registry: registryOwning({}),
-      effects: [effectPlugin("effects-acme", "x-acme:ping")],
+      effects: [emitting("effects-acme", "x-acme:ping")],
     })
     expect(result.ir.symbols.flatMap((s) => s.effects.map((e) => e.id))).toContain("x-acme:ping")
     expect(result.undeclaredVocab).toContainEqual({
@@ -198,7 +161,7 @@ describe("a run with strict off", () => {
     const result = await run({
       strict: false,
       registry: registryOwning({}),
-      frameworks: [frameworkPlugin("framework-acme", "framework:acme:job")],
+      frameworks: [classifying("framework-acme", "framework:acme:job")],
     })
     expect(result.undeclaredVocab).toContainEqual({
       kind: "extKind",
@@ -214,7 +177,7 @@ describe("a run with strict off", () => {
     const result = await run({
       strict: false,
       registry: registryOwning({}),
-      effects: [effectPlugin("effects-acme", "x-acme:ping")],
+      effects: [emitting("effects-acme", "x-acme:ping")],
     })
     expect(result.skipped.map((s) => s.path)).toEqual(["bad.stub"])
     expect(result.undeclaredVocab.map((o) => o.file)).toEqual(["a.stub", "c.stub"])
@@ -222,25 +185,26 @@ describe("a run with strict off", () => {
 })
 
 describe("VocabCheck", () => {
-  it("lets a registry failure that is not about vocabulary through, strict or not", () => {
+  it.each([
+    true,
+    false,
+  ])("lets a registry failure that is not about vocabulary through when strict is %s", (strict) => {
     const registry: VocabRegistry = {
       ...noopRegistry,
       assertEffectDeclared: () => {
         throw new Error("registry broke")
       },
     }
-    for (const strict of [true, false]) {
-      const check = new VocabCheck(registry, strict)
-      expect(() =>
-        check.effect({
-          value: "x-acme:ping",
-          plugin: "effects-acme",
-          file: "a.stub",
-          line: 4,
-          symbol: "s",
-        }),
-      ).toThrow("registry broke")
-      expect(check.occurrences).toEqual([])
-    }
+    const check = new VocabCheck(registry, strict)
+    expect(() =>
+      check.effect({
+        value: "x-acme:ping",
+        plugin: "effects-acme",
+        file: "a.stub",
+        line: 4,
+        symbol: "s",
+      }),
+    ).toThrow("registry broke")
+    expect(check.occurrences).toEqual([])
   })
 })
