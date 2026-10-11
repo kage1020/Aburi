@@ -8,5 +8,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["dist", "node_modules", "test/e2e/projects"]
 }

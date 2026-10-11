@@ -1,51 +1,44 @@
-import { makeExtractionCtx } from "@aburi/test-support"
-import type { Decorator, FrameworkClassifyContext, ImportEdge } from "@aburi/types"
+import { decorator, importEdge, makeCandidate, makeExtractionCtx } from "@aburi/test-support"
+import type {
+  Decorator,
+  FrameworkClassifyContext,
+  ImportEdge,
+  SymbolClassification,
+  SymbolKind,
+} from "@aburi/types"
+import { classifyNestjsSymbol } from "../../src/index"
 
-export { makeCandidate } from "@aburi/test-support"
+export const NEST = "@nestjs/common"
 
-export interface CtxOverrides {
-  path?: string
-  content?: string
-  imports?: readonly ImportEdge[]
-}
-
-export function makeCtx(overrides: CtxOverrides = {}): FrameworkClassifyContext {
-  return {
-    ...makeExtractionCtx(overrides.path ?? "src/a.ts", overrides.content ?? ""),
-    imports: overrides.imports ?? [],
-  }
-}
-
-/**
- * A static named-import edge, the shape `@aburi/lang-typescript` emits. `symbols` entries
- * follow the `ImportEdge.symbols` wire format, so an aliased import is written the way the
- * source wrote it: `"Controller as Ctrl"`.
- */
 export function makeImport(source: string, symbols: string[] | "*", line = 1): ImportEdge {
-  return { source, symbols, line, dynamic: false }
+  return importEdge({ source, symbols, line })
 }
 
-export function makeDecorator(name: string, args: string[] = [], line = 1): Decorator {
-  const argList = args.join(", ")
-  return {
-    name,
-    raw: args.length > 0 ? `${name}(${argList})` : name,
-    arguments: args,
-    boundary: false,
-    line,
-  }
+export function makeNamespaceImport(source: string, binding: string, line = 1): ImportEdge {
+  return { ...makeImport(source, "*", line), namespaceBinding: binding }
 }
 
-/**
- * A decorator written through a receiver — `@nest.Controller("/x")` — which is what the
- * language plugin emits with `qualifier` set. `name` stays the leaf, as it does in the IR.
- */
-export function makeQualifiedDecorator(
-  qualifier: string,
-  name: string,
-  args: string[] = [],
-  line = 1,
-): Decorator {
-  const bare = makeDecorator(name, args, line)
-  return { ...bare, qualifier, raw: `${qualifier}.${bare.raw}` }
+export function makeCtx({
+  path = "src/a.ts",
+  imports = [],
+}: {
+  path?: string
+  imports?: readonly ImportEdge[]
+} = {}): FrameworkClassifyContext {
+  return { ...makeExtractionCtx(path, ""), imports }
+}
+
+/** A bare name stands for that decorator written unqualified, in list order. */
+export function classifyDecorated(
+  kind: SymbolKind,
+  decorators: readonly (string | Decorator)[],
+  imports: readonly ImportEdge[] = [],
+): SymbolClassification | null {
+  const written = decorators.map((d, i) =>
+    typeof d === "string" ? decorator({ name: d, line: i + 1 }) : d,
+  )
+  return classifyNestjsSymbol(
+    makeCandidate({ kind, name: kind === "method" ? "C.m" : "C", decorators: written }),
+    makeCtx({ imports }),
+  )
 }

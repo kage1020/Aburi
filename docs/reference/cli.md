@@ -301,7 +301,9 @@ const code = await runCli({ argv, stdout, stderr, env, cwd })
 ```
 
 `runCli` returns the code rather than calling `process.exit`, leaving the
-decision to you.
+decision to you. A CLI entry point should assign `process.exitCode`, as the
+`aburi` bin does: `process.exit()` can truncate output still being written to a
+pipe (`aburi scan … | head`).
 
 ---
 
