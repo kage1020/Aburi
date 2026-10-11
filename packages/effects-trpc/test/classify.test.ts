@@ -1,148 +1,85 @@
+import { classifyInputsAround } from "@aburi/test-harness"
 import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { classifyTrpcCall, EFFECTS_TRPC_DERIVED_BY_PREFIX } from "../src/index"
+import { classifyTrpcCall } from "../src/index"
 import { makeTrpcClientImport, makeTrpcServerImport } from "./fixtures/context"
 
-const clientCtx = () => makeCtx({ imports: [makeTrpcClientImport()] })
-const reactCtx = () => makeCtx({ imports: [makeTrpcClientImport("@trpc/react-query")] })
-const bothCtx = () => makeCtx({ imports: [makeTrpcClientImport(), makeTrpcServerImport()] })
-const serverCtx = () => makeCtx({ imports: [makeTrpcServerImport()] })
+const clientCtx = makeCtx({ imports: [makeTrpcClientImport()] })
+const bothCtx = makeCtx({ imports: [makeTrpcClientImport(), makeTrpcServerImport()] })
 
-describe("classifyTrpcCall — recognized client shapes", () => {
-  it("classifies a nested procedure query as network.rpc with the procedure path in derivedBy", () => {
-    const result = classifyTrpcCall(makeCall({ target: "client.user.byId.query" }), clientCtx())
-    expect(result).toEqual({
+describe("classifyTrpcCall — client procedure calls", () => {
+  it.each([
+    ["client.user.byId.query", "query:user.byId"],
+    ["client.getUser.query", "query:getUser"],
+    ["client.admin.billing.invoice.byId.query", "query:admin.billing.invoice.byId"],
+    ["this.trpc.user.byId.query", "query:user.byId"],
+    ["trpc.post.list.useQuery", "query:post.list"],
+    ["trpc.post.list.useInfiniteQuery", "query:post.list"],
+    ["trpc.post.list.useSuspenseQuery", "query:post.list"],
+    ["trpc.post.list.useSuspenseInfiniteQuery", "query:post.list"],
+    ["trpc.post.list.usePrefetchQuery", "query:post.list"],
+    ["trpc.post.list.usePrefetchInfiniteQuery", "query:post.list"],
+    ["client.user.create.mutate", "mutation:user.create"],
+    ["trpc.user.create.useMutation", "mutation:user.create"],
+    ["client.onAdd.subscribe", "subscription:onAdd"],
+    ["trpc.onAdd.useSubscription", "subscription:onAdd"],
+  ])("classifies %s as network.rpc, tagged %s", (target, tag) => {
+    expect(classifyTrpcCall(makeCall({ target }), clientCtx)).toEqual({
       effectId: "network.rpc",
       confidence: "high",
-      derivedBy: `${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:user.byId`,
+      derivedBy: `effects-plugin:trpc:${tag}`,
     })
   })
 
-  it("classifies a top-level procedure (exactly 3 segments) and records the bare procedure name", () => {
-    const result = classifyTrpcCall(makeCall({ target: "client.getUser.query" }), clientCtx())
-    expect(result?.effectId).toBe("network.rpc")
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:getUser`)
-  })
-
-  it("classifies the vanilla mutate terminal under the mutation family", () => {
-    const result = classifyTrpcCall(
-      makeCall({ target: "client.user.create.mutate", argumentCount: 1 }),
-      clientCtx(),
-    )
-    expect(result?.effectId).toBe("network.rpc")
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:mutation:user.create`)
-  })
-
-  it("classifies the React Query useMutation hook under the mutation family", () => {
-    const result = classifyTrpcCall(
-      makeCall({ target: "trpc.user.create.useMutation" }),
-      reactCtx(),
-    )
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:mutation:user.create`)
-  })
-
-  it("classifies the vanilla subscribe terminal under the subscription family", () => {
-    const result = classifyTrpcCall(
-      makeCall({ target: "client.onAdd.subscribe", argumentCount: 2 }),
-      clientCtx(),
-    )
-    expect(result?.effectId).toBe("network.rpc")
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:subscription:onAdd`)
-  })
-
-  it("classifies useSubscription under the subscription family", () => {
-    const result = classifyTrpcCall(makeCall({ target: "trpc.onAdd.useSubscription" }), reactCtx())
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:subscription:onAdd`)
+  it("over-qualifies the path when the client sits behind a multi-segment receiver", () => {
+    expect(
+      classifyTrpcCall(makeCall({ target: "api.trpc.user.byId.query" }), clientCtx)?.derivedBy,
+    ).toBe("effects-plugin:trpc:query:trpc.user.byId")
   })
 
   it.each([
-    "query",
-    "useQuery",
-    "useInfiniteQuery",
-    "useSuspenseQuery",
-    "useSuspenseInfiniteQuery",
-    "usePrefetchQuery",
-    "usePrefetchInfiniteQuery",
-  ])("maps the read terminal %s onto the query derivedBy family", (terminal) => {
-    const result = classifyTrpcCall(makeCall({ target: `trpc.post.list.${terminal}` }), reactCtx())
-    expect(result?.effectId).toBe("network.rpc")
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:post.list`)
-  })
-
-  it("strips a leading `this` receiver before computing the procedure path", () => {
-    // `this.trpc.user.byId.query()` inside a class method. Without the strip the path
-    // would carry the field name (`trpc.user.byId`) and no longer match the router path
-    // the same procedure produces when called through a local binding.
-    const result = classifyTrpcCall(makeCall({ target: "this.trpc.user.byId.query" }), clientCtx())
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:user.byId`)
-  })
-
-  it("over-qualifies the path when the client sits behind a multi-segment receiver", () => {
-    // Documented limitation rather than a goal: only the FIRST segment is treated as the
-    // client binding, so `api.trpc.user.byId.query()` records `trpc.user.byId`. The
-    // effect id and target stay correct; nothing in the target string marks where the
-    // binding ends and the router path begins. Pinned so the behaviour is a decision
-    // rather than an accident.
-    const result = classifyTrpcCall(makeCall({ target: "api.trpc.user.byId.query" }), clientCtx())
-    expect(result?.effectId).toBe("network.rpc")
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:trpc.user.byId`)
-  })
-
-  it("keeps deeply nested router paths intact in derivedBy", () => {
-    const result = classifyTrpcCall(
-      makeCall({ target: "client.admin.billing.invoice.byId.query" }),
-      clientCtx(),
-    )
-    expect(result?.derivedBy).toBe(
-      `${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:admin.billing.invoice.byId`,
-    )
-  })
-
-  it("emits confidence high for every recognized shape (import gate + shape are two joined signals)", () => {
-    for (const target of [
-      "client.a.b.query",
-      "client.a.b.mutate",
-      "client.a.b.subscribe",
-      "trpc.a.b.useQuery",
-    ]) {
-      expect(classifyTrpcCall(makeCall({ target }), clientCtx())?.confidence).toBe("high")
-    }
+    ["handlers.<computed>.query", "query:<computed>"],
+    ["getClient.user.byId.query", "query:user.byId"],
+  ])("records %s, reached through an expression, at medium", (target, tag) => {
+    expect(classifyTrpcCall(makeCall({ target, dynamicReceiver: true }), clientCtx)).toEqual({
+      effectId: "network.rpc",
+      confidence: "medium",
+      derivedBy: `effects-plugin:trpc:${tag}`,
+    })
   })
 })
 
-// A receiver written through brackets reaches the proxy's segment count without the proxy:
-// `handlers[key].query()` is `handlers.<computed>.query`, three segments of which one names
-// nothing. `dynamicReceiver` is the only thing that separates it from a real client call.
-describe("classifyTrpcCall — a receiver the language plugin could not read as a name", () => {
-  it("records the shape at medium rather than high", () => {
-    const result = classifyTrpcCall(
-      makeCall({ target: "handlers.<computed>.query", dynamicReceiver: true }),
-      clientCtx(),
-    )
-    expect(result?.effectId).toBe("network.rpc")
-    expect(result?.confidence).toBe("medium")
+describe("classifyTrpcCall — a file that imports @trpc/server too", () => {
+  it.each([
+    "client.user.byId.query",
+    "publicProcedure.input.query",
+    "t.procedure.query",
+  ])("returns null for %s — `query` is the router's own builder verb there", (target) => {
+    expect(classifyTrpcCall(makeCall({ target }), bothCtx)).toBeNull()
   })
 
-  it("caps a genuine client call reached through an expression too", () => {
-    // `getClient().user.byId.query()` — the path is a real one, the binding is not a name.
-    const result = classifyTrpcCall(
-      makeCall({ target: "getClient.user.byId.query", dynamicReceiver: true }),
-      clientCtx(),
-    )
-    expect(result?.confidence).toBe("medium")
-    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:user.byId`)
-  })
-
-  it("leaves a literal index at high — it is the call the dotted spelling is", () => {
-    // `client["user"].byId.query()` folds to `client.user.byId.query` and sets no flag.
-    const result = classifyTrpcCall(makeCall({ target: "client.user.byId.query" }), clientCtx())
-    expect(result?.confidence).toBe("high")
+  it.each([
+    "client.user.create.mutate",
+    "client.onAdd.subscribe",
+    "trpc.post.list.useQuery",
+  ])("still classifies %s, which the router does not spell", (target) => {
+    expect(classifyTrpcCall(makeCall({ target }), bothCtx)?.effectId).toBe("network.rpc")
   })
 })
 
-describe("classifyTrpcCall — import gate", () => {
-  it("returns null for every recognized terminal when no tRPC client module is imported", () => {
-    const ctx = makeCtx({ imports: [] })
+describe("classifyTrpcCall — calls that are not a procedure call", () => {
+  it.each([
+    ["no import at all", []],
+    ["only @trpc/server", [makeTrpcServerImport()]],
+    [
+      "unrelated libraries",
+      [
+        { source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false },
+        { source: "rxjs", symbols: ["Observable"], line: 2, dynamic: false },
+      ],
+    ],
+  ])("returns null in a file that imports %s instead of a tRPC client", (_label, imports) => {
+    const ctx = makeCtx({ imports })
     for (const target of [
       "client.user.byId.query",
       "client.user.create.mutate",
@@ -153,190 +90,60 @@ describe("classifyTrpcCall — import gate", () => {
     }
   })
 
-  it("returns null when only unrelated libraries are imported", () => {
-    const ctx = makeCtx({
-      imports: [
-        { source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false },
-        { source: "rxjs", symbols: ["Observable"], line: 2, dynamic: false },
-      ],
-    })
-    expect(classifyTrpcCall(makeCall({ target: "store.select.pipe.subscribe" }), ctx)).toBeNull()
-  })
-})
-
-describe("classifyTrpcCall — server-side shapes are not effects", () => {
-  it("returns null for the procedure builder chain publicProcedure.input.query", () => {
-    // Normalizes to the same 3-segment / `query`-terminal shape as a client call. The
-    // `@trpc/server` import is the only available discriminator.
-    expect(
-      classifyTrpcCall(makeCall({ target: "publicProcedure.input.query" }), serverCtx()),
-    ).toBeNull()
-  })
-
-  it("returns null for t.router and initTRPC.create", () => {
-    for (const target of ["t.router", "initTRPC.create", "t.procedure.query"]) {
-      expect(classifyTrpcCall(makeCall({ target }), serverCtx())).toBeNull()
-    }
-  })
-
-  it("suppresses the query terminal even for a client-shaped target when @trpc/server is imported", () => {
-    // Conservative: in a file that defines routers we cannot tell `client.user.byId.query`
-    // apart from `someProcedure.input.query`, so nothing with a `query` terminal is
-    // classified. Missing an effect beats inventing one on a router definition.
-    expect(classifyTrpcCall(makeCall({ target: "client.user.byId.query" }), bothCtx())).toBeNull()
-  })
-
-  it("still classifies mutate / subscribe / hooks when @trpc/server is imported", () => {
-    // The suppression is scoped to `query` alone: the server vocabulary spells its
-    // counterparts `mutation` / `subscription`, so there is no collision to defend against.
-    expect(
-      classifyTrpcCall(makeCall({ target: "client.user.create.mutate" }), bothCtx())?.effectId,
-    ).toBe("network.rpc")
-    expect(
-      classifyTrpcCall(makeCall({ target: "client.onAdd.subscribe" }), bothCtx())?.effectId,
-    ).toBe("network.rpc")
-    expect(
-      classifyTrpcCall(makeCall({ target: "trpc.post.list.useQuery" }), bothCtx())?.effectId,
-    ).toBe("network.rpc")
-  })
-})
-
-describe("classifyTrpcCall — shapes outside the vocabulary", () => {
   it.each([
-    "trpc.useUtils",
-    "client.query",
-    "query.foo",
-    "subscribe.now",
-  ])("returns null for the two-segment target %s", (target) => {
-    // A tRPC client call is always `<client>.<procedure path…>.<terminal>` — at least
-    // three segments. Two-segment shapes are proxy accessors or unrelated calls.
-    expect(classifyTrpcCall(makeCall({ target }), clientCtx())).toBeNull()
-  })
-
-  it("returns null for a bare single-segment call", () => {
-    expect(classifyTrpcCall(makeCall({ target: "query" }), clientCtx())).toBeNull()
-  })
-
-  it("returns null for `this.client.query` — the `this` strip leaves only two segments", () => {
-    expect(classifyTrpcCall(makeCall({ target: "this.client.query" }), clientCtx())).toBeNull()
-  })
-
-  it("returns null for a lone `this` — the strip leaves nothing to address", () => {
-    // Degenerate edge of the strip: `clientPath` becomes empty while `terminal` still holds
-    // the pre-strip last segment. The length gate is what keeps the two from disagreeing,
-    // so pin the shortest input that exercises it. It must return null, not throw.
-    expect(classifyTrpcCall(makeCall({ target: "this" }), clientCtx())).toBeNull()
-  })
-
-  it.each([
-    "utils.user.byId.invalidate",
-    "utils.user.byId.fetch",
-    "utils.post.all.ensureData",
-  ])("returns null for the useUtils cache surface %s", (target) => {
-    // The receiver is a local binding produced by `trpc.useUtils()`; nothing in the
-    // target string proves it is tRPC-derived, and `fetch` / `prefetch` are far too
-    // generic to claim.
-    expect(classifyTrpcCall(makeCall({ target }), reactCtx())).toBeNull()
-  })
-
-  it.each([
-    "trpc.post.list.queryOptions",
-    "trpc.post.list.infiniteQueryOptions",
-    "trpc.post.add.mutationOptions",
-    "trpc.onAdd.subscriptionOptions",
-  ])("returns null for the @trpc/tanstack-react-query options surface %s", (target) => {
-    // `queryOptions()` builds an options object; the request happens in the `useQuery`
-    // that consumes it. Classifying here would attach an effect to code that never
-    // reaches the network.
-    expect(classifyTrpcCall(makeCall({ target }), reactCtx())).toBeNull()
-  })
-
-  it("returns null for a promise continuation on a classified call", () => {
-    // `await client.user.byId.query().then(cb)` normalizes to a `then` terminal. The
-    // root `client.user.byId.query` is emitted as its own candidate and classifies
-    // there, so dropping this one keeps it at one effect per call site.
-    expect(
-      classifyTrpcCall(makeCall({ target: "client.user.byId.query.then" }), clientCtx()),
-    ).toBeNull()
-  })
-
-  it("returns null for the server-side caller shape caller.user.byId", () => {
-    // `createCaller` procedures are invoked by their own name — there is no terminal to
-    // match against the vocabulary.
-    expect(classifyTrpcCall(makeCall({ target: "caller.user.byId" }), clientCtx())).toBeNull()
+    ["trpc.useUtils", "two segments"],
+    ["client.query", "two segments"],
+    ["query.foo", "two segments"],
+    ["subscribe.now", "two segments"],
+    ["query", "one segment"],
+    ["this.client.query", "two segments once `this` is stripped"],
+    ["this", "nothing once `this` is stripped"],
+    ["utils.user.byId.invalidate", "the useUtils cache surface"],
+    ["utils.user.byId.fetch", "the useUtils cache surface"],
+    ["utils.post.all.ensureData", "the useUtils cache surface"],
+    ["trpc.post.list.queryOptions", "the @trpc/tanstack-react-query options surface"],
+    ["trpc.post.list.infiniteQueryOptions", "the @trpc/tanstack-react-query options surface"],
+    ["trpc.post.add.mutationOptions", "the @trpc/tanstack-react-query options surface"],
+    ["trpc.onAdd.subscriptionOptions", "the @trpc/tanstack-react-query options surface"],
+    ["client.user.byId.query.then", "a promise continuation"],
+    ["caller.user.byId", "a server-side caller, which has no terminal"],
+  ])("returns null for %s — %s", (target) => {
+    expect(classifyTrpcCall(makeCall({ target }), clientCtx)).toBeNull()
   })
 })
 
 describe("classifyTrpcCall — upstream contract violations", () => {
-  it("throws on an empty target, including the file path in the message", () => {
-    const ctx = makeCtx({ imports: [makeTrpcClientImport()], path: "src/pages/index.tsx" })
-    expect(() => classifyTrpcCall(makeCall({ target: "" }), ctx)).toThrow(
-      /CallCandidate\.target is empty/,
-    )
-    expect(() => classifyTrpcCall(makeCall({ target: "" }), ctx)).toThrow(/src\/pages\/index\.tsx/)
-  })
+  const path = "src/pages/index.tsx"
 
-  it("throws on adjacent / leading / trailing dots, quoting the offending target", () => {
-    const ctx = makeCtx({ imports: [makeTrpcClientImport()] })
-    for (const target of ["client..user.query", ".client.user.query", "client.user.query."]) {
-      expect(() => classifyTrpcCall(makeCall({ target }), ctx)).toThrow(/has empty segment/)
-      expect(() => classifyTrpcCall(makeCall({ target }), ctx)).toThrow(
-        new RegExp(target.replace(/\./g, "\\.")),
+  it.each([
+    ["", "CallCandidate.target is empty"],
+    ["client..user.query", 'CallCandidate.target "client..user.query" has empty segment(s)'],
+    [".client.user.query", 'CallCandidate.target ".client.user.query" has empty segment(s)'],
+    ["client.user.query.", 'CallCandidate.target "client.user.query." has empty segment(s)'],
+  ])("throws on the malformed target %j, naming itself and the file, before the import gate", (target, message) => {
+    for (const imports of [[makeTrpcClientImport()], []]) {
+      expect(() => classifyTrpcCall(makeCall({ target }), makeCtx({ imports, path }))).toThrow(
+        `effects-trpc (${path}): ${message}`,
       )
     }
   })
 
-  it("throws on a malformed target even when the file is not a tRPC consumer", () => {
-    // Fail-fast runs before the import gate so an upstream normalization bug surfaces on
-    // every file rather than only in the small share that import tRPC.
-    expect(() => classifyTrpcCall(makeCall({ target: "" }), makeCtx({ imports: [] }))).toThrow(
-      /CallCandidate\.target is empty/,
-    )
-  })
-
-  it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
-    // The name is now an importable const shared by four packages rather than a literal in
-    // this file, so nothing but this assertion catches `EFFECTS_NEST_PLUGIN_NAME` here.
-    const ctx = makeCtx({ imports: [makeTrpcClientImport()] })
-    expect(() => classifyTrpcCall(makeCall({ target: "" }), ctx)).toThrow(/^effects-trpc \(/)
+  it("throws on an import edge with an empty source rather than skipping it", () => {
     const brokenEdge = makeCtx({
       imports: [{ source: "", symbols: ["createTRPCClient"], line: 2, dynamic: false }],
+      path,
     })
     expect(() =>
       classifyTrpcCall(makeCall({ target: "client.user.byId.query" }), brokenEdge),
-    ).toThrow(/^effects-trpc \(/)
+    ).toThrow(`effects-trpc (${path}, line 2): ImportEdge.source is empty`)
   })
 
-  it("throws when an ImportEdge carries an empty source", () => {
-    const ctx = makeCtx({
-      imports: [{ source: "", symbols: ["createTRPCClient"], line: 2, dynamic: false }],
-    })
-    expect(() => classifyTrpcCall(makeCall({ target: "client.user.byId.query" }), ctx)).toThrow(
-      /ImportEdge\.source is empty/,
+  it("leaves the CallCandidate and the ClassifyContext as it found them", () => {
+    const { before, after } = classifyInputsAround(
+      classifyTrpcCall,
+      makeCall({ target: "client.user.create.mutate", argumentCount: 1 }),
+      clientCtx,
     )
-  })
-})
-
-describe("classifyTrpcCall — purity", () => {
-  it("returns an identical result across repeated invocations (effect-plugin.md EP2)", () => {
-    // Idempotence and non-mutation are two claims, not one: a classifier that memoized on
-    // a module-level cache keyed by something it read wrong would leave both arguments
-    // untouched and still answer differently on the second call. The plugin's own test
-    // makes the same assertion through `trpcEffectsPlugin.classify`, but only because that
-    // method happens to be a one-line delegation today — pin the pure function directly.
-    const ctx = clientCtx()
-    const call = makeCall({ target: "client.user.byId.query" })
-    const runs = Array.from({ length: 5 }, () => classifyTrpcCall(call, ctx))
-    for (const run of runs) expect(run).toEqual(runs[0])
-  })
-
-  it("does not mutate the CallCandidate or the ClassifyContext", () => {
-    const ctx = clientCtx()
-    const call = makeCall({ target: "client.user.create.mutate", argumentCount: 1 })
-    const callSnapshot = structuredClone(call)
-    const importsSnapshot = structuredClone(ctx.file.imports)
-    classifyTrpcCall(call, ctx)
-    expect(call).toEqual(callSnapshot)
-    expect(ctx.file.imports).toEqual(importsSnapshot)
+    expect(after).toEqual(before)
   })
 })

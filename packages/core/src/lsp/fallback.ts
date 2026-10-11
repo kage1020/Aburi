@@ -1,23 +1,6 @@
-/**
- * Three-tier fallback state machine (lsp-enrichment.md):
- *   per-request  → 3 consecutive fails on the same file  → per-file fallback
- *   per-file     → 5 consecutive fails on the same lang  → per-language fallback
- *   per-language → server disabled for the rest of the run + 1 CLI warning
- *
- * All transitions are pure functions of the outcomes recorded so far, so given
- * identical LSP responses the same files/languages fall back on rerun (a determinism
- * guarantee).
- */
-
 export interface FallbackState {
-  /** Called after a single request completes (success OR failure). */
   onRequest(file: string, ok: boolean): { escalate: boolean }
-  /** Called at the end of a file OR when a per-file fallback fires. */
   onFileClose(file: string, language: string, fellBack: boolean): { escalate: boolean }
-  /** Called after per-language fallback fires — any of the three fallback-tier conditions. */
-  onLanguageDisabled(language: string): void
-  isLanguageDisabled(language: string): boolean
-  isFileFellBack(file: string): boolean
 }
 
 export interface FallbackConfig {
@@ -35,8 +18,6 @@ export function createFallbackState(
 ): FallbackState {
   const perFileFailStreak = new Map<string, number>()
   const perLanguageFailStreak = new Map<string, number>()
-  const fellBackFiles = new Set<string>()
-  const disabledLanguages = new Set<string>()
 
   return {
     onRequest(file, ok) {
@@ -49,7 +30,6 @@ export function createFallbackState(
       return { escalate: next >= config.requestsToFile }
     },
     onFileClose(file, language, fellBack) {
-      if (fellBack) fellBackFiles.add(file)
       perFileFailStreak.set(file, 0)
       if (!fellBack) {
         perLanguageFailStreak.set(language, 0)
@@ -58,15 +38,6 @@ export function createFallbackState(
       const next = (perLanguageFailStreak.get(language) ?? 0) + 1
       perLanguageFailStreak.set(language, next)
       return { escalate: next >= config.filesToLanguage }
-    },
-    onLanguageDisabled(language) {
-      disabledLanguages.add(language)
-    },
-    isLanguageDisabled(language) {
-      return disabledLanguages.has(language)
-    },
-    isFileFellBack(file) {
-      return fellBackFiles.has(file)
     },
   }
 }

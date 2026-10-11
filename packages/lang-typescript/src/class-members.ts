@@ -3,45 +3,12 @@ import type { Node } from "web-tree-sitter"
 import { functionValueOf, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
 import { decodeStringLiteral } from "./string-escape"
 
-/**
- * The member segment reserved for what `new C()` runs. A field never holds it: `class C {
- * constructor = () => {} }` is a SyntaxError in an engine, the grammar parses it anyway, and
- * admitting it would either put a field on `#C.constructor` or fold it into the real
- * constructor written beside it. `#constructor` is not this segment, so neither risk applies
- * to it and a field holding a function under that name is a member like any other.
- */
 const CONSTRUCTION_SEGMENT = "constructor"
 
-/**
- * The qualified-name segment a class-body member's written name maps to, or null when the
- * member has no name the grammar can record.
- *
- * Null rather than a throw: `ir-schema.md` answers a computed name with no Symbol and no
- * diagnostic, and handing the name's source text to the id builder instead would cost the
- * file every Symbol it had at the per-file boundary.
- *
- * A **quoted** name that spells an identifier is that identifier — `"ok"() {}` and `ok() {}`
- * declare the same property (TS2393), so both map onto `ok` and fold in `addClassMembers`.
- * The literal is *decoded* rather than unquoted (`a-quoted-member-name.test.ts`), and a name
- * the parser guessed at is refused on both halves: a partial decode answers `whole: false`,
- * and a literal that did not parse at all leaves a bare `property_identifier` beside an ERROR
- * — see `hasErrorChild` for why the member's own children are read rather than `hasError`.
- *
- * A `number` has no segment at all (`1() {}` is `C[1]`, and the grammar's first character
- * class excludes digits). A `#`-private member keeps its `#`, so `#v` and a `v` written beside
- * it are two members. Only the private name node asks for that segment: `"#v"() {}` is a
- * public property, so its decoded key is held to the default and has none.
- */
 export function memberNameSegment(member: Node): string | null {
   return writtenNameSegment(member, member.childForFieldName("name"))
 }
 
-/**
- * The segment `name` maps to, `name` being the node `owner` is named by — the rule
- * `memberNameSegment` states, for a caller whose name sits in another field: an object
- * literal's `pair` carries its name in `key` (`object-members.ts`). `owner` is where an ERROR
- * beside a recovered name is looked for, which is why it is passed rather than read off `name`.
- */
 export function writtenNameSegment(owner: Node, name: Node | null): string | null {
   if (hasErrorChild(owner)) return null
   if (name === null) return null
@@ -56,43 +23,6 @@ function admitSegment(candidate: string, privateName = false): string | null {
   return isQnameSegment(candidate, { privateName }) ? candidate : null
 }
 
-/**
- * The qualified-name segment of the member Symbol this class-body node declares, or null when
- * it declares none.
- *
- * **One reader, one answer.** Extraction asks this to decide what to emit and `walkBody` asks
- * it to decide whose body a member's calls and rules belong to; the moment they disagree a
- * body is recorded twice or not at all. It answers with the segment rather than a boolean so
- * extraction does not re-derive what admission already computed — and so a builder cannot be
- * handed a name the id builder then refuses. The *arguments* have to agree too: `classNode` is
- * the class the member is written in, which the walk reads off `body.parent` — a Symbol's
- * `fullNode` is its **leading** declaration and need not be the class at all (`const C = 1`
- * beside `class C {}` folds into one Symbol whose `fullNode` is the `lexical_declaration`).
- *
- * Only a **named** class has member Symbols: the only unnamed form the statement walk reaches
- * is an anonymous default export, where `<default>` is reserved for the class itself and
- * `<default>.m` is not a qualified name the id builder accepts (`ir-schema.md`).
- *
- * Four member shapes qualify. A `method_definition` is a member when `memberNameSegment` gives
- * it one. A field holding a function is a member because calling it is what runs the body
- * (`functionValuedField`). The other two are the shapes a member with **no body of its own**
- * is written in:
- *
- * - `abstract_method_signature` is a member. The language forbids an implementation beside it,
- *   so nothing else in the class declares `doIt`, and skipping it left an abstract class
- *   reporting only the methods it happened to implement.
- * - `method_signature` declares the member wherever it is written. In an ambient class it is
- *   the member's whole declaration: there are no implementations to defer to, and skipping it
- *   left `export declare class` with no methods at all. In an ordinary class body it is an
- *   overload, and folds into the implementation beside it, which leads (LP8q) — as a top-level
- *   `function_signature` does.
- *
- * So this answers which member a node declares, not whether that member gets a Symbol: which
- * declaration leads is extraction's question (`foldMemberGroup`), and a class body of overload
- * signatures with no implementation has none to lead and no member Symbol, which is what `tsc`
- * calls TS2391 anyway. The walk's answer does not depend on that: a signature has no body for
- * a member Symbol to carry, so `walkBody` reads it whole on the class either way.
- */
 export function memberSymbolSegment(classNode: Node, member: Node): string | null {
   if (nameFieldText(classNode) === null) return null
   const segment = memberNameSegment(member)
@@ -103,19 +33,6 @@ export function memberSymbolSegment(classNode: Node, member: Node): string | nul
   return functionValuedField(member) === null ? null : segment
 }
 
-/**
- * The function a class field holds, when the field is a member of its own — otherwise null.
- *
- * `create = async (d) => { … }` declares a member the same way `create(d) { … }` does. What
- * separates the two from `seed = makeSeed()` is *when the body runs*: constructing the class
- * creates the closure and does not enter it, so the body is what calling the member runs and
- * belongs to the member's Symbol, while `makeSeed()` runs on construction and belongs to the
- * class (`lang-plugin.md` LP20a).
- *
- * The name gate is the one a method gets, which it can be because a refused name is `null`
- * rather than a throw. `public_field_definition` is the only field shape this plugin sees —
- * every extension it claims, `.js` included, is parsed with the TypeScript or TSX grammar.
- */
 export function functionValuedField(member: Node): Node | null {
   if (member.type !== "public_field_definition") return null
   const segment = memberNameSegment(member)
@@ -123,31 +40,11 @@ export function functionValuedField(member: Node): Node | null {
   return functionValueOf(member)
 }
 
-/**
- * True for the member `new C()` runs. Read by extraction for the Symbol's `kind` and by the
- * walk for whether the body stays on the class — one decision seen from two sides, as
- * `memberSymbolSegment` is.
- *
- * The **segment** is compared, not the source text, so `"constructor"() {}` is one too. A
- * `static` member carries the segment and is refused: it is legal JavaScript, which this
- * plugin also parses, and not on the construction path. Reading it as the constructor puts its
- * body on the class and gives it the instance qname, where it collides with the real
- * constructor's. `#constructor` (TS18012) has a segment of its own, `#constructor`, which is
- * never this one, so nothing has to be refused for it here.
- */
 export function isConstructorMember(member: Node): boolean {
   if (hasChildOfType(member, "static")) return false
   return memberNameSegment(member) === CONSTRUCTION_SEGMENT
 }
 
-/**
- * How a member's name declares its visibility, from the shape it is written in.
- *
- * The node type is read rather than the segment's leading `#`, although the two agree today.
- * The node is the language's own evidence; the segment carries a `#` only because
- * `memberNameSegment` refuses one on a quoted key, and reading visibility off it would tie
- * this answer to that refusal.
- */
 export function hasPrivateName(member: Node): boolean {
   return member.childForFieldName("name")?.type === "private_property_identifier"
 }

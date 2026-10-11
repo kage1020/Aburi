@@ -1,12 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanUpOnFatalSignal, FATAL_SIGNALS } from "../src/signal-cleanup"
 
-/**
- * Driven with `process.emit`, which calls the listeners without delivering a signal, and with
- * the re-raise replaced: a real one would end the test runner. That a real interrupt of
- * `aburi diff` leaves no worktree is asserted end to end in `e2e-integration`.
- */
-
 const releases: (() => void)[] = []
 
 afterEach(() => {
@@ -20,13 +14,17 @@ function listenerCounts(): number[] {
 describe("cleanUpOnFatalSignal", () => {
   it.each(
     FATAL_SIGNALS,
-  )("cleans up on %s, stops listening, then re-raises the same signal", (signal) => {
+  )("stops listening on %s, cleans up, then re-raises the same signal", (signal) => {
     const before = listenerCounts()
     const events: string[] = []
+    let atCleanup: number[] = []
     let atReraise: number[] = []
     releases.push(
       cleanUpOnFatalSignal(
-        () => events.push("cleanup"),
+        () => {
+          events.push("cleanup")
+          atCleanup = listenerCounts()
+        },
         (raised) => {
           events.push(`reraise:${raised}`)
           atReraise = listenerCounts()
@@ -38,8 +36,7 @@ describe("cleanUpOnFatalSignal", () => {
     process.emit(signal)
 
     expect(events).toEqual(["cleanup", `reraise:${signal}`])
-    // Removed before the re-raise, or the re-raised signal would land on this listener again
-    // instead of taking the default action and ending the process with 128+N.
+    expect(atCleanup).toEqual(before)
     expect(atReraise).toEqual(before)
     expect(listenerCounts()).toEqual(before)
   })

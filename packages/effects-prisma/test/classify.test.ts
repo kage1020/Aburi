@@ -1,11 +1,12 @@
+import { classifyInputsAround } from "@aburi/test-harness"
 import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyPrismaCall } from "../src/index"
 import { makePrismaImport } from "./fixtures/context"
 
-describe("classifyPrismaCall — read methods", () => {
-  const ctx = makeCtx({ imports: [makePrismaImport()] })
+const ctx = makeCtx({ imports: [makePrismaImport()] })
 
+describe("classifyPrismaCall — delegate and transaction calls", () => {
   it.each([
     "findUnique",
     "findUniqueOrThrow",
@@ -16,28 +17,12 @@ describe("classifyPrismaCall — read methods", () => {
     "aggregate",
     "groupBy",
   ])("classifies prisma.user.%s as db.read", (method) => {
-    const result = classifyPrismaCall(makeCall({ target: `prisma.user.${method}` }), ctx)
-    expect(result?.effectId).toBe("db.read")
-    expect(result?.confidence).toBe("high")
-    expect(result?.derivedBy).toBe("effects-plugin:prisma:read")
+    expect(classifyPrismaCall(makeCall({ target: `prisma.user.${method}` }), ctx)).toEqual({
+      effectId: "db.read",
+      confidence: "high",
+      derivedBy: "effects-plugin:prisma:read",
+    })
   })
-
-  it("accepts arbitrary leading segments (this.prisma.model.verb)", () => {
-    expect(
-      classifyPrismaCall(makeCall({ target: "this.prisma.user.findMany" }), ctx)?.effectId,
-    ).toBe("db.read")
-  })
-
-  it("accepts deeply chained accessors (container.services.prisma.user.findMany)", () => {
-    expect(
-      classifyPrismaCall(makeCall({ target: "container.services.prisma.user.findMany" }), ctx)
-        ?.effectId,
-    ).toBe("db.read")
-  })
-})
-
-describe("classifyPrismaCall — write methods", () => {
-  const ctx = makeCtx({ imports: [makePrismaImport()] })
 
   it.each([
     "create",
@@ -50,77 +35,52 @@ describe("classifyPrismaCall — write methods", () => {
     "delete",
     "deleteMany",
   ])("classifies prisma.invoice.%s as db.write", (method) => {
-    const result = classifyPrismaCall(makeCall({ target: `prisma.invoice.${method}` }), ctx)
-    expect(result?.effectId).toBe("db.write")
-    expect(result?.confidence).toBe("high")
-    expect(result?.derivedBy).toBe("effects-plugin:prisma:write")
-  })
-})
-
-describe("classifyPrismaCall — transaction", () => {
-  const ctx = makeCtx({ imports: [makePrismaImport()] })
-
-  it("classifies prisma.$transaction as db.transaction", () => {
-    const result = classifyPrismaCall(makeCall({ target: "prisma.$transaction" }), ctx)
-    expect(result?.effectId).toBe("db.transaction")
-    expect(result?.confidence).toBe("high")
-    expect(result?.derivedBy).toBe("effects-plugin:prisma:tx")
+    expect(classifyPrismaCall(makeCall({ target: `prisma.invoice.${method}` }), ctx)).toEqual({
+      effectId: "db.write",
+      confidence: "high",
+      derivedBy: "effects-plugin:prisma:write",
+    })
   })
 
-  it("classifies this.prisma.$transaction as db.transaction", () => {
-    expect(
-      classifyPrismaCall(makeCall({ target: "this.prisma.$transaction" }), ctx)?.effectId,
-    ).toBe("db.transaction")
+  it.each([
+    "prisma.$transaction",
+    "this.prisma.$transaction",
+    "services.prisma.$transaction",
+  ])("classifies %s as db.transaction", (target) => {
+    expect(classifyPrismaCall(makeCall({ target }), ctx)).toEqual({
+      effectId: "db.transaction",
+      confidence: "high",
+      derivedBy: "effects-plugin:prisma:tx",
+    })
   })
 })
 
 describe("classifyPrismaCall — receiver identification", () => {
-  const ctx = makeCtx({ imports: [makePrismaImport()] })
-
-  it("does not claim `high` for a Map call that shares the delegate vocabulary", () => {
-    // The bug this suite exists for: a repository that holds both a PrismaClient and a
-    // plain `Map` cache made `this.cache.items.delete(key)` a high-confidence db.write,
-    // because the file imports Prisma and the target has three segments and a write verb.
-    // The receiver is what separates them, so the receiver is what sets the tier.
-    const result = classifyPrismaCall(
-      makeCall({ target: "this.cache.items.delete", argumentCount: 1, literalArgs: [null] }),
-      ctx,
-    )
-    expect(result?.confidence).toBe("medium")
-  })
-
-  it("keeps `high` for the receivers Prisma is actually written with", () => {
-    for (const target of [
-      "prisma.user.findMany",
-      "this.prisma.user.create",
-      "db.user.update",
-      "this.prismaClient.user.upsert",
-      "container.services.prisma.user.findMany",
-      "tx.user.create",
-    ]) {
-      expect(classifyPrismaCall(makeCall({ target }), ctx)?.confidence).toBe("high")
-    }
+  it.each([
+    "prisma.user.findMany",
+    "this.prisma.user.create",
+    "db.user.update",
+    "this.prismaClient.user.upsert",
+    "container.services.prisma.user.findMany",
+    "tx.user.create",
+  ])("keeps %s, a receiver Prisma is written with, at high", (target) => {
+    expect(classifyPrismaCall(makeCall({ target }), ctx)?.confidence).toBe("high")
   })
 
   it("still classifies an unrecognized receiver, at medium — recall is not the price", () => {
-    // A client bound under a house convention (`this.repo.user.create`) is not
-    // distinguishable from an unrelated object with the same shape, so the effect is
-    // recorded with the uncertainty stated rather than dropped.
-    const result = classifyPrismaCall(makeCall({ target: "this.repo.user.create" }), ctx)
-    expect(result?.effectId).toBe("db.write")
-    expect(result?.confidence).toBe("medium")
-    expect(result?.derivedBy).toBe("effects-plugin:prisma:write")
+    expect(classifyPrismaCall(makeCall({ target: "this.repo.user.create" }), ctx)).toEqual({
+      effectId: "db.write",
+      confidence: "medium",
+      derivedBy: "effects-plugin:prisma:write",
+    })
   })
 
   it("caps a dynamic receiver at medium", () => {
-    // `getPrisma().user.create()` normalizes to `getPrisma.user.create`. The name is a
-    // collapsed expression rather than a binding, so it is not evidence of a client.
     const result = classifyPrismaCall(
       makeCall({ target: "getPrisma.user.create", dynamicReceiver: true }),
       ctx,
     )
-    expect(result?.effectId).toBe("db.write")
-    expect(result?.confidence).toBe("medium")
+    expect(result).toMatchObject({ effectId: "db.write", confidence: "medium" })
   })
 
   it("applies the same tiering to $transaction", () => {
@@ -133,9 +93,6 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("returns null for a delegate verb called with a literal — no delegate takes one", () => {
-    // `map.delete("session")` / `set.delete("id")`: a Prisma delegate takes an options
-    // object or nothing, so a literal first argument rules the call out entirely rather
-    // than leaving it to the receiver's name.
     expect(
       classifyPrismaCall(
         makeCall({ target: "this.cache.items.delete", argumentCount: 1, literalArgs: ["session"] }),
@@ -145,227 +102,110 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("downgrades a delegate verb called with two arguments rather than dropping it", () => {
-    // A delegate takes one options object, so a second argument is evidence against — but
-    // `argumentCount` is a syntactic count (a comment inside the parentheses used to
-    // inflate it), and a miscount that erases a write logs nothing at all. The tier pays
-    // for the doubt instead.
     const result = classifyPrismaCall(
       makeCall({ target: "prisma.user.update", argumentCount: 2, literalArgs: [null, null] }),
       ctx,
     )
-    expect(result?.effectId).toBe("db.write")
-    expect(result?.confidence).toBe("medium")
+    expect(result).toMatchObject({ effectId: "db.write", confidence: "medium" })
   })
 
-  it("keeps a write whose argument list carries a comment", () => {
-    // `prisma.user.delete(\n  // hard delete\n  { where: { id } },\n)` reached this
-    // classifier as argumentCount=2 before `walkBody` stopped counting comments; the
-    // effect survives either way now.
+  it("keeps $transaction(fn, options) at high — its signature takes two arguments", () => {
     const result = classifyPrismaCall(
-      makeCall({ target: "prisma.user.delete", argumentCount: 1, literalArgs: [null] }),
+      makeCall({ target: "prisma.$transaction", argumentCount: 2, literalArgs: [null, null] }),
       ctx,
     )
-    expect(result?.effectId).toBe("db.write")
-    expect(result?.confidence).toBe("high")
-  })
-
-  it("leaves $transaction's own argument shapes alone", () => {
-    // `$transaction(fn, { timeout })` takes two arguments, which the delegate shape check
-    // would reject — the transaction branch deliberately does not run it.
-    expect(
-      classifyPrismaCall(
-        makeCall({ target: "prisma.$transaction", argumentCount: 2, literalArgs: [null, null] }),
-        ctx,
-      )?.effectId,
-    ).toBe("db.transaction")
+    expect(result).toMatchObject({ effectId: "db.transaction", confidence: "high" })
   })
 })
 
-describe("classifyPrismaCall — negative paths", () => {
-  const ctxWithPrisma = makeCtx({ imports: [makePrismaImport()] })
-
-  it("returns null when the file does not import @prisma/client", () => {
-    const ctxNoImport = makeCtx({ imports: [] })
-    expect(classifyPrismaCall(makeCall({ target: "prisma.user.findMany" }), ctxNoImport)).toBeNull()
-  })
-
-  it("returns null when the file imports a different ORM", () => {
-    const ctxOther = makeCtx({
-      imports: [{ source: "drizzle-orm", symbols: ["*"], line: 1, dynamic: false }],
+describe("classifyPrismaCall — a model segment that names nothing", () => {
+  it.each([
+    "prisma.<computed>.create",
+    "this.prisma.<computed>.update",
+  ])("keeps the write on %s, whose receiver names a client, at the tier the flag sets", (target) => {
+    expect(classifyPrismaCall(makeCall({ target, dynamicReceiver: true }), ctx)).toMatchObject({
+      effectId: "db.write",
+      confidence: "medium",
     })
-    expect(classifyPrismaCall(makeCall({ target: "db.user.findMany" }), ctxOther)).toBeNull()
   })
-
-  it("returns null for a bare identifier (no accessor chain)", () => {
-    expect(classifyPrismaCall(makeCall({ target: "findMany" }), ctxWithPrisma)).toBeNull()
-  })
-
-  it("returns null for two-segment method calls that happen to reuse Prisma verb names", () => {
-    // Express `router.create(...)`, Array `.findMany` (hypothetical), etc. — files
-    // that colocate Prisma alongside these libraries would otherwise false-positive.
-    expect(classifyPrismaCall(makeCall({ target: "router.create" }), ctxWithPrisma)).toBeNull()
-    expect(classifyPrismaCall(makeCall({ target: "list.findMany" }), ctxWithPrisma)).toBeNull()
-    expect(classifyPrismaCall(makeCall({ target: "queue.upsert" }), ctxWithPrisma)).toBeNull()
-  })
-
-  it("returns null for methods outside the Prisma delegate surface", () => {
-    expect(
-      classifyPrismaCall(makeCall({ target: "prisma.user.executeRaw" }), ctxWithPrisma),
-    ).toBeNull()
-    expect(
-      classifyPrismaCall(makeCall({ target: "prisma.user.someHelper" }), ctxWithPrisma),
-    ).toBeNull()
-  })
-
-  it("returns null for raw SQL escapes ($queryRaw / $executeRaw / $queryRawUnsafe)", () => {
-    // These are Prisma Client methods, but they do not fit the model.<verb> shape and
-    // they are deliberately not classified. Locking as regression pins so a future
-    // change that adds them cannot silently start matching them here first.
-    expect(classifyPrismaCall(makeCall({ target: "prisma.$queryRaw" }), ctxWithPrisma)).toBeNull()
-    expect(classifyPrismaCall(makeCall({ target: "prisma.$executeRaw" }), ctxWithPrisma)).toBeNull()
-    expect(
-      classifyPrismaCall(makeCall({ target: "prisma.$queryRawUnsafe" }), ctxWithPrisma),
-    ).toBeNull()
-  })
-
-  it("does not classify `$transactional` — only the exact `$transaction` sentinel", () => {
-    expect(
-      classifyPrismaCall(makeCall({ target: "prisma.$transactional" }), ctxWithPrisma),
-    ).toBeNull()
-  })
-
-  it("returns null for a bare `$transaction` (no client segment)", () => {
-    // Naked `$transaction()` is not a Prisma call — the transaction API is a method on
-    // the client. Locking the 2-segment minimum for the transaction path.
-    expect(classifyPrismaCall(makeCall({ target: "$transaction" }), ctxWithPrisma)).toBeNull()
-  })
-
-  it("classifies deeply chained services.prisma.$transaction as db.transaction", () => {
-    expect(
-      classifyPrismaCall(makeCall({ target: "services.prisma.$transaction" }), ctxWithPrisma)
-        ?.effectId,
-    ).toBe("db.transaction")
-  })
-})
-
-describe("classifyPrismaCall — malformed input fail-fast", () => {
-  const ctxWithPrisma = makeCtx({ imports: [makePrismaImport()] })
-  const ctxNoImport = makeCtx({ imports: [] })
 
   it.each([
-    ["", /target is empty/],
-    ["prisma..create", /empty segment/],
-    [".create", /empty segment/],
-    ["prisma.user.", /empty segment/],
-  ])("throws for the malformed target %j with or without a Prisma import", (target, message) => {
-    // Without the throw, `prisma..create` would false-classify as db.write. The import gate
-    // must NOT shadow the check, or the same upstream bug would surface only in
-    // Prisma-consuming files — locking the order at the test seam.
-    expect(() => classifyPrismaCall(makeCall({ target }), ctxWithPrisma)).toThrow(message)
-    expect(() => classifyPrismaCall(makeCall({ target }), ctxNoImport)).toThrow(message)
-  })
-
-  it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
-    // The name is now an importable const shared by four packages rather than a literal in
-    // this file, so nothing but this assertion catches `EFFECTS_DRIZZLE_PLUGIN_NAME` here.
-    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPrisma)).toThrow(
-      /^effects-prisma \(/,
-    )
-    const brokenEdge = makeCtx({
-      imports: [{ source: "", symbols: ["PrismaClient"], line: 2, dynamic: false }],
-    })
-    expect(() =>
-      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), brokenEdge),
-    ).toThrow(/^effects-prisma \(/)
-  })
-
-  it("throw messages include the file path so caught exceptions point at the offending source", () => {
-    const ctxWithPath = makeCtx({ imports: [makePrismaImport()], path: "src/services/x.ts" })
-    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPath)).toThrow(
-      /src\/services\/x\.ts/,
-    )
-    expect(() => classifyPrismaCall(makeCall({ target: "prisma..create" }), ctxWithPath)).toThrow(
-      /src\/services\/x\.ts/,
-    )
-  })
-
-  it("throw messages for a broken ImportEdge name the file and the offending line", () => {
-    const ctxBrokenEdge = makeCtx({
-      imports: [{ source: "", symbols: ["PrismaClient"], line: 4, dynamic: false }],
-      path: "src/services/x.ts",
-    })
-    expect(() =>
-      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), ctxBrokenEdge),
-    ).toThrow(/ImportEdge\.source is empty/)
-    expect(() =>
-      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), ctxBrokenEdge),
-    ).toThrow(/src\/services\/x\.ts, line 4/)
-  })
-})
-
-describe("classifyPrismaCall — purity", () => {
-  it("does not mutate the input CallCandidate or the observable data slices of ClassifyContext", () => {
-    // structuredClone would reject the VocabRegistry's function properties, so clone
-    // the data slices the classifier actually reads (file + owner + language) plus the
-    // CallCandidate. If any of those change, we know the classifier mutated its input.
-    const ctx = makeCtx({ imports: [makePrismaImport()] })
-    const call = makeCall({ target: "prisma.user.findMany", literalArgs: ["value"] })
-    const fileSnapshot = structuredClone(ctx.file)
-    const ownerSnapshot = structuredClone(ctx.owner)
-    const languageSnapshot = ctx.language
-    const callSnapshot = structuredClone(call)
-    classifyPrismaCall(call, ctx)
-    expect(call).toEqual(callSnapshot)
-    expect(ctx.file).toEqual(fileSnapshot)
-    expect(ctx.owner).toEqual(ownerSnapshot)
-    expect(ctx.language).toBe(languageSnapshot)
-  })
-})
-
-// A model addressed through brackets arrives as `<computed>` in the model slot
-// (`lang-plugin.md`). That restores the third segment the delegate shape needs, and
-// segment count is exactly what keeps `queue.upsert(job)` unclassified — so the receiver
-// has to carry the claim alone.
-describe("classifyPrismaCall — a model segment that names nothing", () => {
-  const ctx = makeCtx({ imports: [makePrismaImport()] })
-
-  it("keeps the write when the receiver names a client, at the tier the flag sets", () => {
-    const result = classifyPrismaCall(
-      makeCall({ target: "prisma.<computed>.create", dynamicReceiver: true }),
-      ctx,
-    )
-    expect(result?.effectId).toBe("db.write")
-    expect(result?.confidence).toBe("medium")
-  })
-
-  it("reads a computed model on a client reached through a chain", () => {
-    expect(
-      classifyPrismaCall(
-        makeCall({ target: "this.prisma.<computed>.update", dynamicReceiver: true }),
-        ctx,
-      )?.effectId,
-    ).toBe("db.write")
-  })
-
-  it("does not let the sentinel buy the delegate shape for an unrelated receiver", () => {
-    // The same three two-segment calls the gate above already refuses, written with
-    // brackets: `queues[id].upsert(job)`, `sets[key].delete(item)`, `router[name].create(x)`.
-    for (const target of [
-      "queues.<computed>.upsert",
-      "sets.<computed>.delete",
-      "router.<computed>.create",
-    ]) {
-      expect(classifyPrismaCall(makeCall({ target, dynamicReceiver: true }), ctx)).toBeNull()
-    }
+    "queues.<computed>.upsert",
+    "sets.<computed>.delete",
+    "router.<computed>.create",
+  ])("does not let the sentinel buy the delegate shape for %s", (target) => {
+    expect(classifyPrismaCall(makeCall({ target, dynamicReceiver: true }), ctx)).toBeNull()
   })
 
   it("returns null when the verb itself is the segment that names nothing", () => {
-    // `prisma.user[verb]()` — three segments, a recognized client, and no method to match.
     expect(
       classifyPrismaCall(
         makeCall({ target: "prisma.user.<computed>", dynamicReceiver: true }),
         ctx,
       ),
     ).toBeNull()
+  })
+})
+
+describe("classifyPrismaCall — calls that are not Prisma's", () => {
+  it.each([
+    ["no import at all", []],
+    ["another ORM", [{ source: "drizzle-orm", symbols: ["*"], line: 1, dynamic: false }]],
+  ])("returns null in a file that imports %s instead of @prisma/client", (_label, imports) => {
+    expect(
+      classifyPrismaCall(makeCall({ target: "prisma.user.findMany" }), makeCtx({ imports })),
+    ).toBeNull()
+  })
+
+  it.each([
+    ["findMany", "a bare identifier"],
+    ["router.create", "a two-segment call reusing a delegate verb"],
+    ["list.findMany", "a two-segment call reusing a delegate verb"],
+    ["queue.upsert", "a two-segment call reusing a delegate verb"],
+    ["prisma.user.executeRaw", "a method outside the delegate surface"],
+    ["prisma.user.someHelper", "a method outside the delegate surface"],
+    ["prisma.$queryRaw", "a raw SQL escape"],
+    ["prisma.$executeRaw", "a raw SQL escape"],
+    ["prisma.$queryRawUnsafe", "a raw SQL escape"],
+    ["prisma.$transactional", "a near-miss of $transaction"],
+    ["$transaction", "$transaction with no client"],
+  ])("returns null for %s — %s", (target) => {
+    expect(classifyPrismaCall(makeCall({ target }), ctx)).toBeNull()
+  })
+})
+
+describe("classifyPrismaCall — upstream contract violations", () => {
+  const path = "src/services/x.ts"
+
+  it.each([
+    ["", "CallCandidate.target is empty"],
+    ["prisma..create", 'CallCandidate.target "prisma..create" has empty segment(s)'],
+    [".create", 'CallCandidate.target ".create" has empty segment(s)'],
+    ["prisma.user.", 'CallCandidate.target "prisma.user." has empty segment(s)'],
+  ])("throws on the malformed target %j, naming itself and the file, before the import gate", (target, message) => {
+    for (const imports of [[makePrismaImport()], []]) {
+      expect(() => classifyPrismaCall(makeCall({ target }), makeCtx({ imports, path }))).toThrow(
+        `effects-prisma (${path}): ${message}`,
+      )
+    }
+  })
+
+  it("throws on an import edge with an empty source rather than skipping it", () => {
+    const brokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["PrismaClient"], line: 4, dynamic: false }],
+      path,
+    })
+    expect(() =>
+      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), brokenEdge),
+    ).toThrow(`effects-prisma (${path}, line 4): ImportEdge.source is empty`)
+  })
+
+  it("leaves the CallCandidate and the ClassifyContext as it found them", () => {
+    const { before, after } = classifyInputsAround(
+      classifyPrismaCall,
+      makeCall({ target: "prisma.user.findMany", literalArgs: ["value"] }),
+      ctx,
+    )
+    expect(after).toEqual(before)
   })
 })

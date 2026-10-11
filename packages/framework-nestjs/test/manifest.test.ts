@@ -2,41 +2,27 @@ import { describe, expect, it } from "vitest"
 import { frameworkNestjsManifest } from "../src/index"
 
 describe("frameworkNestjsManifest", () => {
-  it("declares the framework-nestjs name and framework type", () => {
-    expect(frameworkNestjsManifest.name).toBe("framework-nestjs")
-    expect(frameworkNestjsManifest.type).toBe("framework")
+  it("declares the nestjs framework, owning the framework:nestjs prefixes and no effects", () => {
+    expect(frameworkNestjsManifest).toMatchObject({
+      name: "framework-nestjs",
+      type: "framework",
+      provides: {
+        effects: [],
+        effectPrefixes: [],
+        extKindPrefixes: ["framework:nestjs"],
+        derivedByPrefixes: ["framework:nestjs"],
+        frameworks: ["nestjs"],
+      },
+    })
   })
 
-  it("owns the framework:nestjs extKind prefix + individual entries for baseKind fallback", () => {
-    // Prefix ownership keeps the manifest open to future decorator support without a
-    // manifest bump; individual enumeration gives VocabRegistry.findExtKind() a baseKind
-    // fallback so consumers that only understand core SymbolKind can still render the
-    // Symbol as class / method.
-    expect(frameworkNestjsManifest.provides.extKindPrefixes).toEqual(["framework:nestjs"])
-    const ids = frameworkNestjsManifest.provides.extKinds.map((e) => e.id).sort()
-    expect(ids).toEqual([
-      "framework:nestjs:controller",
-      "framework:nestjs:filter",
-      "framework:nestjs:module",
-      "framework:nestjs:provider",
-      "framework:nestjs:route",
+  it("declares each extKind with the base kind it falls back to", () => {
+    expect(frameworkNestjsManifest.provides.extKinds.map((e) => [e.id, e.baseKind])).toEqual([
+      ["framework:nestjs:module", "class"],
+      ["framework:nestjs:controller", "class"],
+      ["framework:nestjs:provider", "class"],
+      ["framework:nestjs:filter", "class"],
+      ["framework:nestjs:route", "method"],
     ])
-    const routeEntry = frameworkNestjsManifest.provides.extKinds.find(
-      (e) => e.id === "framework:nestjs:route",
-    )
-    expect(routeEntry?.baseKind).toBe("method")
-  })
-
-  it("owns the framework:nestjs derivedBy prefix", () => {
-    expect(frameworkNestjsManifest.provides.derivedByPrefixes).toEqual(["framework:nestjs"])
-  })
-
-  it("declares nestjs as the framework name", () => {
-    expect(frameworkNestjsManifest.provides.frameworks).toEqual(["nestjs"])
-  })
-
-  it("declares no effect vocabulary — that is the effects plugin's job", () => {
-    expect(frameworkNestjsManifest.provides.effects).toEqual([])
-    expect(frameworkNestjsManifest.provides.effectPrefixes).toEqual([])
   })
 })
