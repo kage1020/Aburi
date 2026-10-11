@@ -1,0 +1,8 @@
+{
+  "name": "order-api",
+  "private": true,
+  "dependencies": {
+    "@prisma/client": "^6.0.0",
+    "next": "^15.0.0"
+  }
+}

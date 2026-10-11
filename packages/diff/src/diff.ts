@@ -1,7 +1,5 @@
 import {
-  checkDocumentShape,
   compareCodeUnit,
-  DOCUMENT_SUBJECT,
   reconstructCallEdgesFromIR,
   type SerializeOptions,
   serializeCanonical,
@@ -19,8 +17,6 @@ import type {
 } from "@aburi/types"
 import {
   type AbsentSide,
-  DEPENDENCY_IDENTITY_FIELDS,
-  dependencyIdentity,
   dependencySideView,
   diffComponents,
   diffDependencies,
@@ -30,7 +26,7 @@ import {
   renameDirections,
 } from "./components"
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
-import { DiffError } from "./errors"
+import { assertDiffable, ensureSchemasAgree } from "./input-gate"
 import {
   type GitRenameMap,
   matchStageDroppedWeak,
@@ -45,11 +41,6 @@ import { classifyStatus, dropDirection, representativeSymbol } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
-/**
- * The two counters `buildDiff` always writes. They are optional on `Summary` only so a diff
- * written before they existed stays valid; a caller holding a freshly built value should not
- * have to re-decide what "absent" means.
- */
 interface UnknownCounters {
   unknown: number
   depsUnknown: number
@@ -58,32 +49,15 @@ interface UnknownCounters {
 export interface DiffInput {
   baseIR: IR
   headIR: IR
-  /** IR reference metadata (git ref / file path) for provenance. */
   base: IRRef
   head: IRRef
-  /** Generator record for the diff output. Defaults to `{name: "aburi", version: "0.0.0"}`. */
   generator?: { name: string; version: string }
-  /**
-   * The files git renamed between the revisions, base path to head path. Stage 2 pairs Symbols
-   * through it, and every loss lookup reads it too: a file one scan skipped is recorded under
-   * that scan's name for it, so without the map a renamed file one side skipped leaves its
-   * Symbols and edges as confident `removed` / `added` instead of `unknown`, and a renamed file
-   * both sides skipped is missing from `notCompared` (diff-algorithm.md §3.5.1, §6.2.1, §6.3).
-   * Null or absent means no rename information — `--base` / `--head` IR files have none.
-   */
   gitRenames?: GitRenameMap | null
-  /** Passed through to computeSymbolDelta (line fuzz, diff-algorithm.md). */
   delta?: DeltaOptions
 }
 
 const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
 
-/**
- * Top-level entry: run the 5-stage matcher, classify each pair, produce array deltas,
- * fold in Component / Dependency diffs, and assemble the `aburi.diff.v1` JSON projection.
- * Pure; `writeCanonicalDiff` serialises, so callers can run the Markdown projection or the
- * `--fail-on` gate over the result first.
- */
 export function buildDiff(
   input: DiffInput,
 ): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & UnknownCounters } {
@@ -175,13 +149,6 @@ export function buildDiff(
     })
   }
 
-  // Read after the matching stages: a Symbol that crossed files is paired by stage 2–4 and
-  // comes out `moved`, so only a leftover is an absence, and only one in a file the other
-  // document never analysed is unexplained. The Symbol loops and `diffDependencies` read the
-  // same two side views, so a Symbol reported unknown and the edges it took with it cannot
-  // disagree about which file went missing.
-  // A leftover names its file as its own document does; after a git rename the other document
-  // recorded the same file under the other name, so the lookup goes through the rename map too.
   const sides: LossSides = {
     base: dependencySideView(input.baseIR),
     head: dependencySideView(input.headIR),
@@ -225,16 +192,11 @@ export function buildDiff(
   const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, sides)
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
-  // No `?? 0`: `diffDependencies` declares `unknown` present when it is given side views, so
-  // absorbing an absence here would launder a mis-wiring into a confident `depsUnknown: 0`.
   summary.depsUnknown = dependencies.unknown.length
   summary.unknown = unknown
 
   symbols.sort(compareSymbolChange)
 
-  // Slice View clustering (docs/design/slice-view.md), over the resolved call edges only —
-  // never `Symbol.calls[]` directly. `slices[]` is emitted even when empty; the Markdown side
-  // is what omits the section.
   const slices = computeSlices({
     changes: symbols,
     baseCallEdges: reconstructCallEdgesFromIR(input.baseIR),
@@ -255,12 +217,6 @@ export function buildDiff(
   }
 }
 
-/**
- * A leftover the other document could not have seen. `lostPath` only when that document
- * recorded the file under another name — after a git rename — because otherwise it is the
- * Symbol's own `source.file`, and a writer that predates the field could never have meant
- * anything else: it did not look across a rename at all (diff-algorithm.md §3.5.1, §10.1).
- */
 function unknownSymbol(
   symbol: IRSymbol,
   absentFrom: AbsentSide,
@@ -275,21 +231,6 @@ function unknownSymbol(
   }
 }
 
-/**
- * Files both documents record as never analysed, with each side's reason. A file skipped on
- * both sides contributes Symbols to neither, so it leaves no leftover for `unknown` to
- * classify and the diff would otherwise fall silent about it — which is what a diff that
- * compared it and found it unchanged looks like. Only files both lost: a one-sided loss is
- * already reported as `unknown` on the other side. A file git renamed is one file under two
- * names, so it is one entry, under the head path, with the base path alongside. Always an
- * array, empty included (docs/design/diff-algorithm.md §6.3).
- *
- * One entry per pair of records, never one per head path: a rename map handed to `buildDiff`
- * directly can send two base paths onto one head path, which git never does, and keeping only
- * one of them would drop a skip record on the strength of whichever the map listed first. The
- * sort is total for the same reason — by path, then by the base's name for the file, and no two
- * entries share both — so the output does not depend on the order of either skip list.
- */
 function filesNeitherSideRead(sides: LossSides): NotComparedFile[] {
   const both: NotComparedFile[] = []
   for (const [basePath, baseReason] of sides.base.lostFiles) {
@@ -308,155 +249,6 @@ function filesNeitherSideRead(sides: LossSides): NotComparedFile[] {
 const compareNotCompared = (a: NotComparedFile, b: NotComparedFile): number =>
   compareCodeUnit(a.path, b.path) || compareCodeUnit(a.basePath ?? a.path, b.basePath ?? b.path)
 
-/** Refuse to diff across schema versions (diff-algorithm.md). */
-function ensureSchemasAgree(base: IR, head: IR): void {
-  if (base.$schema !== head.$schema) {
-    throw new DiffError(
-      `Base IR schema "${base.$schema}" does not match head IR schema "${head.$schema}"; a diff across schema versions is not supported.`,
-      { code: "schema-mismatch", value: base.$schema },
-    )
-  }
-}
-
-/** Which of the two inputs a message is about. */
-type IRSide = "baseIR" | "headIR"
-
-/**
- * A collection `buildDiff` keys by identity, and refuses a repeat in. Reporting order is the
- * order of `IDENTIFIED_COLLECTIONS`, base side before head side. The shape gate has already
- * established that every entry is an object whose identity fields are strings.
- *
- * This pass used to re-establish that itself, with an array check, an object check and a
- * string check on every entry, kept on the argument that a fourth collection added here and
- * not to `aburi.ir.v1` would silently put them back on the live path. That argument was about
- * a version of `identityFields` that named its fields as strings and read them off an
- * `unknown` entry. It does not survive `identities`: a collection now supplies a typed
- * projection out of `IR`, so a field the schema does not declare is a field `IR` does not
- * have, and one that is not a string is not a `readonly string[]`. Both are compile errors at
- * the entry that introduces them rather than runtime guards waiting for one — which is why
- * the guards are gone and this note is here instead.
- */
-interface IdentifiedCollection {
-  readonly field: "symbols" | "components" | "dependencies"
-  /** The identity fields of every entry, in the order `keyOf` receives them. */
-  readonly identities: (ir: IR) => readonly (readonly string[])[]
-  /** Join them the way the diff itself keys on them, or the check guards nothing. */
-  readonly keyOf: (parts: readonly string[]) => string
-  /** How a message names the repeated value. */
-  readonly noun: string
-  /** The repeated value as the IR spells it; also what `DiffError.value` carries. */
-  readonly show: (parts: readonly string[]) => string
-  /** What the diff does with a repeat, and the invariant that forbids it. */
-  readonly consequence: string
-}
-
-/** Identity is a single field, so joining the one-member tuple is joining nothing. */
-const soleField = (parts: readonly string[]): string => parts.join("")
-
-const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
-  {
-    field: "symbols",
-    identities: (ir) => ir.symbols.map((symbol) => [symbol.id]),
-    keyOf: soleField,
-    noun: "id",
-    show: soleField,
-    consequence:
-      "stage 1 pairs Symbols by id and every later stage tracks the base Symbols it has " +
-      "consumed by id, so a repeat leaves one entry out of the diff entirely or classifies " +
-      "its counterpart twice (ir-schema.md #1)",
-  },
-  {
-    field: "components",
-    identities: (ir) => ir.components.map((component) => [component.id]),
-    keyOf: soleField,
-    noun: "id",
-    show: soleField,
-    consequence:
-      "Component identity is the id, so a repeat hides one entry and can report a change " +
-      "the two revisions do not contain (ir-schema.md #2)",
-  },
-  {
-    field: "dependencies",
-    identities: (ir) =>
-      ir.dependencies.map((dependency) =>
-        DEPENDENCY_IDENTITY_FIELDS.map((field) => dependency[field]),
-      ),
-    keyOf: dependencyIdentity,
-    noun: "(from, to, via) triple",
-    show: (parts) => `(${parts.join(", ")})`,
-    consequence:
-      "direction and effect are deliberately outside Dependency identity " +
-      "(diff-algorithm.md), so a " +
-      "repeat surfaces as an added + removed pair no reader can tell from a real flip " +
-      "(ir-schema.md #13)",
-  },
-]
-
-/**
- * What `buildDiff` needs before stage 1 runs: a Document of the shape the schema requires
- * (`checkDocumentShape`, invariant #20 — `buildDiff` is public API, so an IR assembled in
- * memory arrives having passed nothing), a `$schema` that names something (two Documents
- * that both say `""` would agree with each other), and identities it can key on
- * (diff-algorithm.md). Deliberately not the semantic invariants: an unsorted
- * `symbols[]` diffs correctly, so refusing it would withhold an answer the matcher can give.
- */
-function assertDiffable(ir: IR, name: IRSide): void {
-  const violations = checkDocumentShape(ir)
-  const first = violations[0]
-  if (first !== undefined) {
-    // The message quotes the first breach and counts the rest; `violations` carries all of
-    // them so a caller repairing a hand-assembled Document does not run the diff once per field.
-    const subject = sidedSubject(name, first.subject)
-    const rest = violations.length - 1
-    const more = rest > 0 ? ` (and ${rest} more)` : ""
-    throw new DiffError(`${subject}: ${first.message}${more}.`, {
-      code: "ir-shape-invalid",
-      value: subject,
-      violations: violations.map((v) => ({ ...v, subject: sidedSubject(name, v.subject) })),
-    })
-  }
-  if (ir.$schema.length === 0) {
-    throw new DiffError(`${name}: "$schema" is empty, not a schema URL.`, {
-      code: "ir-shape-invalid",
-      value: name,
-    })
-  }
-  for (const collection of IDENTIFIED_COLLECTIONS) {
-    assertUniqueIdentity(collection.identities(ir), `${name}.${collection.field}`, collection)
-  }
-}
-
-/** A shape violation's subject prefixed with its side, so a two-sided failure is readable. */
-function sidedSubject(name: IRSide, subject: string): string {
-  return subject === DOCUMENT_SUBJECT ? name : `${name}.${subject}`
-}
-
-function assertUniqueIdentity(
-  identities: readonly (readonly string[])[],
-  subject: string,
-  collection: IdentifiedCollection,
-): void {
-  const firstSeen = new Map<string, number>()
-  for (const [index, parts] of identities.entries()) {
-    const key = collection.keyOf(parts)
-    const first = firstSeen.get(key)
-    if (first === undefined) {
-      firstSeen.set(key, index)
-      continue
-    }
-    const shown = collection.show(parts)
-    throw new DiffError(
-      `${subject}[${index}] repeats the ${collection.noun} "${shown}" first seen at index ` +
-        `${first}; ${collection.consequence}.`,
-      { code: "ir-identity-collision", value: shown },
-    )
-  }
-}
-
-/**
- * Deterministic ordering of `symbols[]`: by status, then by the representative Symbol's id.
- * Byte-stable for equal inputs, which the canonical `out/diff.json` relies on.
- */
 function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
   return (
     compareCodeUnit(a.status, b.status) ||
@@ -464,10 +256,6 @@ function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
   )
 }
 
-/**
- * Byte-deterministic serialiser for a DiffResult, sharing `@aburi/core`'s canonical sort
- * order, NFC normalisation and key sort with the IR side.
- */
 export function writeCanonicalDiff(diff: DiffResult, options: SerializeOptions = {}): string {
   return serializeCanonical(diff, options)
 }

@@ -25,9 +25,6 @@
     "useUnknownInCatchVariables": true,
 
     "declaration": true,
-    // Enabling `declarationMap` makes rolldown-plugin-dts turn on rolldown's shared
-    // output.sourcemap, which overrides `sourcemap: false` in every tsdown.config.ts and
-    // brings ~1.6 MB of .map files back into dist. `dts: { sourcemap }` is the direct lever.
     "declarationMap": false,
     "removeComments": false,
     "newLine": "lf",

@@ -1,23 +1,10 @@
-/**
- * Drizzle ORM method vocabulary. Each `_LIST` is the single source of truth for its union
- * type and runtime `Set`.
- *
- * Chained builder steps (`.from`, `.where`, `.set`, `.values`, `.returning`, ...) are
- * deliberately absent: they surface as internal segments in the classifier's chain-collapse
- * pass so exactly one classification is emitted per query. Raw SQL (`.execute()`) is absent
- * because a raw statement can be a read or a write, and telling them apart needs SQL parsing.
- */
 const DRIZZLE_READ_METHODS_LIST = ["select", "selectDistinct", "selectDistinctOn"] as const
 
 const DRIZZLE_WRITE_METHODS_LIST = ["insert", "update", "delete"] as const
 
-/**
- * `transaction` is the interactive-transaction API on every driver; `batch` is the atomic
- * multi-statement API on Neon and Cloudflare D1, so it maps to `db.transaction` too.
- */
 const DRIZZLE_TRANSACTION_METHODS_LIST = ["transaction", "batch"] as const
 
-/** Relational query API terminals (`db.query.<table>.findMany`). No `findUnique` — that is Prisma. */
+/** `findUnique` is Prisma's, not Drizzle's. */
 const DRIZZLE_QUERY_METHODS_LIST = ["findMany", "findFirst"] as const
 
 export type DrizzleReadMethod = (typeof DRIZZLE_READ_METHODS_LIST)[number]
@@ -54,11 +41,6 @@ export function isDrizzleQueryMethod(name: string): name is DrizzleQueryMethod {
   return (DRIZZLE_QUERY_METHODS as ReadonlySet<string>).has(name)
 }
 
-/**
- * Terminals that take more than one argument: Postgres' `selectDistinctOn(columns,
- * projection)` and `transaction(callback, config)`. Everything else takes at most one.
- * Keyed on the vocabulary unions so dropping a terminal breaks the build here too.
- */
 const DRIZZLE_MULTI_ARGUMENT_TERMINALS: ReadonlyMap<
   DrizzleReadMethod | DrizzleTransactionMethod,
   number
@@ -69,7 +51,6 @@ const DRIZZLE_MULTI_ARGUMENT_TERMINALS: ReadonlyMap<
 
 const DEFAULT_MAX_ARGUMENTS = 1
 
-/** The most arguments `method` takes before the call stops looking like Drizzle's own API. */
 export function maxArgumentsFor(method: string): number {
   return (
     (DRIZZLE_MULTI_ARGUMENT_TERMINALS as ReadonlyMap<string, number>).get(method) ??
@@ -77,17 +58,6 @@ export function maxArgumentsFor(method: string): number {
   )
 }
 
-/**
- * Terminals that require an argument: `insert(table)`, `update(table)`, `delete(table)`,
- * `transaction(callback)` and `batch(statements)`. No Drizzle signature reaches a zero-argument
- * call to one, so that call is someone else's (effect-plugin.md §5.4, EP12). Everything else
- * may be called bare.
- *
- * Built from the write and transaction lists, so a terminal added to either takes the floor
- * with it. A hand-written table keyed on the same unions would break the build only when a
- * terminal is dropped; one added later would silently get no floor. A terminal Drizzle lets
- * you call bare would have to be left out here by name.
- */
 const DRIZZLE_REQUIRED_ARGUMENT_TERMINALS: ReadonlySet<
   DrizzleWriteMethod | DrizzleTransactionMethod
 > = new Set<DrizzleWriteMethod | DrizzleTransactionMethod>([
@@ -95,16 +65,10 @@ const DRIZZLE_REQUIRED_ARGUMENT_TERMINALS: ReadonlySet<
   ...DRIZZLE_TRANSACTION_METHODS_LIST,
 ])
 
-/** The fewest arguments `method` takes as Drizzle's own API: one for those terminals, else 0. */
 export function minArgumentsFor(method: string): number {
   return (DRIZZLE_REQUIRED_ARGUMENT_TERMINALS as ReadonlySet<string>).has(method) ? 1 : 0
 }
 
-/**
- * Verbs that anchor a fluent chain at its root. A target carrying one of these in an
- * internal segment is a downstream link (`db.select.from`) whose root already classified.
- * Internal to `classifyDrizzleCall`; not in the public barrel.
- */
 export const DRIZZLE_FLUENT_ROOT_METHODS: ReadonlySet<DrizzleReadMethod | DrizzleWriteMethod> =
   new Set<DrizzleReadMethod | DrizzleWriteMethod>([
     ...DRIZZLE_READ_METHODS_LIST,

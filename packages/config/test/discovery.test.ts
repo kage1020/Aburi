@@ -1,72 +1,77 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { chmod, mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { findConfig } from "../src/index"
+import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
+import { ConfigError, findConfig } from "../src/index"
 
 describe("findConfig", () => {
-  let tmp: string
-  beforeEach(async () => {
-    // On macOS `os.tmpdir()` is a symlink (`/tmp` → `/private/tmp`), and `process.cwd()`
-    // after `chdir` returns the resolved path; `realpath` keeps the string-equal assertion
-    // below true.
-    tmp = await realpath(await mkdtemp(join(tmpdir(), "aburi-discovery-test-")))
-  })
-  afterEach(async () => {
-    await rm(tmp, { recursive: true, force: true })
+  const scratch = useScratchWorkspace("discovery")
+
+  it.each([
+    ["aburi.jsonc", ["aburi.jsonc"]],
+    ["aburi.json", ["aburi.json"]],
+    ["aburi.jsonc", ["aburi.jsonc", "aburi.json"]],
+  ])("finds %s in the starting directory when it holds %j", async (found, names) => {
+    for (const name of names) await scratch.writeSource(name, "{}")
+    expect(await findConfig({ cwd: scratch.root })).toBe(join(scratch.root, found))
   })
 
-  it("finds aburi.jsonc in the starting directory", async () => {
-    const path = join(tmp, "aburi.jsonc")
-    await writeFile(path, "{}", "utf8")
-    expect(await findConfig({ cwd: tmp })).toBe(path)
+  it("walks up past a package root to an ancestor's config", async () => {
+    await scratch.writeSource("aburi.json", "{}")
+    const path = join(scratch.root, "aburi.json")
+    await scratch.writeSource("apps/billing/package.json", "{}")
+    expect(await findConfig({ cwd: join(scratch.root, "apps", "billing") })).toBe(path)
   })
 
-  it("finds aburi.json when jsonc is absent", async () => {
-    const path = join(tmp, "aburi.json")
-    await writeFile(path, "{}", "utf8")
-    expect(await findConfig({ cwd: tmp })).toBe(path)
-  })
-
-  it("prefers aburi.jsonc over aburi.json when both exist", async () => {
-    const jsonc = join(tmp, "aburi.jsonc")
-    await writeFile(jsonc, "{}", "utf8")
-    await writeFile(join(tmp, "aburi.json"), "{}", "utf8")
-    expect(await findConfig({ cwd: tmp })).toBe(jsonc)
-  })
-
-  it("walks up to a parent directory", async () => {
-    const path = join(tmp, "aburi.json")
-    await writeFile(path, "{}", "utf8")
-    const nested = join(tmp, "apps", "billing")
-    await mkdir(nested, { recursive: true })
-    expect(await findConfig({ cwd: nested })).toBe(path)
-  })
-
-  it("prefers the nearest config when multiple ancestors have one", async () => {
-    await writeFile(join(tmp, "aburi.json"), "{}", "utf8")
-    const inner = join(tmp, "apps", "billing")
-    await mkdir(inner, { recursive: true })
-    const innerConfig = join(inner, "aburi.json")
-    await writeFile(innerConfig, "{}", "utf8")
-    expect(await findConfig({ cwd: inner })).toBe(innerConfig)
+  it("prefers the nearest config when several ancestors have one", async () => {
+    await scratch.writeSource("aburi.json", "{}")
+    await scratch.writeSource("apps/billing/aburi.json", "{}")
+    const inner = join(scratch.root, "apps/billing/aburi.json")
+    expect(await findConfig({ cwd: join(scratch.root, "apps", "billing") })).toBe(inner)
   })
 
   it("returns null when no ancestor has a config", async () => {
-    const nested = join(tmp, "empty")
-    await mkdir(nested, { recursive: true })
-    expect(await findConfig({ cwd: nested })).toBe(null)
+    const nested = join(scratch.root, "empty")
+    await mkdir(nested)
+    expect(await findConfig({ cwd: nested })).toBeNull()
   })
 
   it("resolves a relative cwd against process.cwd()", async () => {
-    const path = join(tmp, "aburi.json")
-    await writeFile(path, "{}", "utf8")
+    await scratch.writeSource("aburi.json", "{}")
+    const path = join(scratch.root, "aburi.json")
     const prev = process.cwd()
-    process.chdir(tmp)
+    process.chdir(scratch.root)
     try {
       expect(await findConfig({ cwd: "." })).toBe(path)
     } finally {
       process.chdir(prev)
     }
   })
+
+  it("refuses a candidate it cannot probe rather than answering that there is none", async () => {
+    const cwd = join(scratch.root, "nul\0byte")
+
+    const error = await errorFrom(ConfigError, () => findConfig({ cwd }))
+
+    expect(error.code).toBe("config-read-failed")
+    expect(error.message).toContain(join(cwd, "aburi.jsonc"))
+  })
+
+  // Windows has no search bit to take away, and root searches a directory whatever its mode.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses a candidate in a directory it may not search",
+    async () => {
+      const locked = join(scratch.root, "locked")
+      await mkdir(locked)
+      await chmod(locked, 0o000)
+      try {
+        const error = await errorFrom(ConfigError, () => findConfig({ cwd: locked }))
+
+        expect(error.code).toBe("config-read-failed")
+        expect(error.message).toContain("EACCES")
+      } finally {
+        await chmod(locked, 0o755)
+      }
+    },
+  )
 })
