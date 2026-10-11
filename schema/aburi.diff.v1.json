@@ -32,7 +32,7 @@
     "dependencies": { "$ref": "#/$defs/DependencyDiff" },
     "slices": {
       "type": "array",
-      "description": "Weakly-connected components of changed Symbols over the call graph (see docs/design/slice-view.md).",
+      "description": "Weakly-connected components of changed Symbols over the call graph.",
       "items": { "$ref": "#/$defs/SliceRecord" }
     },
     "notCompared": {

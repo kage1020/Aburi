@@ -83,7 +83,9 @@ tests can drive the CLI without spawning a subprocess.
 calls `process.exit` itself — the caller decides whether to `process.exit(code)`,
 assign `process.exitCode`, or ignore it entirely. That is what lets the
 integration suite drive the CLI with captured streams and assert on the exit
-code without terminating the test process.
+code without terminating the test process. A CLI entry point should assign
+`process.exitCode`, as the `aburi` bin does: `process.exit()` can truncate
+output still being written to a pipe (`aburi scan … | head`).
 
 ## See also
 

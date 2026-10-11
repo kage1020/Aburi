@@ -1,11 +1,6 @@
-import { writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { noopRegistry } from "@aburi/test-support"
-import type { OpaqueAstNode, ParseResult, SourceFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { scan } from "../../src"
-import { normalizeLineTerminators } from "../../src/scan/scan"
-import { stubLanguagePlugin, useStubWorkspace } from "../fixtures/plugins"
+import { normalizeLineTerminators } from "../../src/scan/extract-files"
+import { scanStubs, stubLanguagePlugin, useStubWorkspace } from "../fixtures/plugins"
 
 describe("normalizeLineTerminators", () => {
   it("turns CRLF and a lone CR into LF, and leaves LF alone", () => {
@@ -18,11 +13,6 @@ describe("normalizeLineTerminators", () => {
   })
 })
 
-/**
- * The promise the Document depends on is what a plugin is handed, not what the function above
- * returns: a scan that read the file and skipped the conversion would leave that function's
- * tests green. So this reads the content back from `parseFile`, the first place a plugin sees it.
- */
 describe("scan hands a language plugin LF-only content", () => {
   const workspace = useStubWorkspace("line-terminators")
 
@@ -30,24 +20,16 @@ describe("scan hands a language plugin LF-only content", () => {
     ["CRLF", "\r\n"],
     ["a lone CR", "\r"],
   ])("reads a file saved with %s as LF", async (_name, terminator) => {
-    await writeFile(join(workspace.root, "a.stub"), ["one", "two", ""].join(terminator), "utf8")
+    await workspace.writeSource("a.stub", ["one", "two", ""].join(terminator))
     const handed = new Map<string, string>()
     const language = stubLanguagePlugin({
-      parseFile: async (file: SourceFile): Promise<ParseResult> => {
+      parseFile: async (file) => {
         handed.set(file.path, file.content)
-        return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+        return { tree: {}, errors: [], imports: [] }
       },
     })
 
-    await scan({
-      workspaceRoot: workspace.root,
-      config: {},
-      languages: [language],
-      frameworks: [],
-      effects: [],
-      registry: noopRegistry,
-      components: [],
-    })
+    await scanStubs(workspace.root, { languages: [language] })
 
     expect(handed.get("a.stub")).toBe("one\ntwo\n")
   })

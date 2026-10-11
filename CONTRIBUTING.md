@@ -30,7 +30,7 @@ macOS, and Windows.
 
 ## Workflow
 
-1. Branch from `main` (`main` is protected; changes always land via PR).
+1. Branch from `main`; changes always land via PR.
 2. Follow a test-first flow: define acceptance criteria from the relevant
    design doc under [`docs/design/`](docs/design/), write the tests, then the
    implementation.
@@ -94,7 +94,10 @@ for the plugin contracts and a walkthrough.
 [`docs/`](docs/), served by a Cloudflare Worker configured in
 [`docs/wrangler.jsonc`](docs/wrangler.jsonc). Production is deployed from
 [`.github/workflows/docs.yml`](.github/workflows/docs.yml); previews still come
-from Cloudflare's git integration, which watches the repository directly.
+from Cloudflare's git integration, which watches the repository directly. The
+site's `build` script first builds the workspace packages it renders — the
+Showcase runs the CLI over `examples/` — so whatever runs `pnpm --filter
+@aburi/docs build` gets a complete site.
 
 **Production ships with the release, not with the merge.**
 [`release.yml`](.github/workflows/release.yml) calls the docs workflow only on
@@ -149,3 +152,8 @@ triggers a preview build. **Build → Build watch paths** can narrow that to
 Releases are cut from `main` via [changesets](https://github.com/changesets/changesets):
 merging the release PR created by the release workflow publishes the packages
 to npm, and that same run deploys the docs site (see above).
+
+Publishing uses npm Trusted Publishing (OIDC), so no npm token exists anywhere. On npmjs.com every
+`@aburi/*` package needs a trusted publisher entry for repository `kage1020/Aburi` and workflow
+`.github/workflows/release.yml`, with no environment restriction. Renaming that workflow, or adding
+an `environment:` to its job, breaks publishing until every entry is updated to match.

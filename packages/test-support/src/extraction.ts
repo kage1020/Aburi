@@ -43,6 +43,9 @@ export function makeCandidate(
     },
     derivedBy: overrides.derivedBy ?? [],
     bodyNode: overrides.bodyNode ?? null,
+    ...(overrides.mergedDeclarations === undefined
+      ? {}
+      : { mergedDeclarations: overrides.mergedDeclarations }),
     fullNode: overrides.fullNode ?? { placeholder: true },
   }
 }

@@ -1,5 +1,5 @@
 import type {
-  ExtractionContext,
+  FrameworkClassifyContext,
   FrameworkPlugin,
   OpaqueAstNode,
   PluginContext,
@@ -9,7 +9,6 @@ import type {
 import { classifyExpressSymbol } from "./classify"
 import { frameworkExpressManifest } from "./manifest"
 
-/** Pure classifier over module-level Router consts and chained-call registrations; no lazy resources. */
 class ExpressFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkExpressManifest
 
@@ -17,7 +16,7 @@ class ExpressFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 
   classifySymbol(
     symbol: SymbolCandidate<OpaqueAstNode>,
-    ctx: ExtractionContext,
+    ctx: FrameworkClassifyContext,
   ): SymbolClassification | null {
     return classifyExpressSymbol(symbol, ctx)
   }

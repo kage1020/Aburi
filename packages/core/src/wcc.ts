@@ -1,35 +1,5 @@
 import { compareCodeUnit } from "./order"
 
-/**
- * Weakly-connected components (WCC) via Union-Find with union-by-rank and
- * path compression. Language-independent primitive used by Slice View
- * (docs/design/slice-view.md) to group changed Symbols by call-graph
- * connectivity, but the algorithm is agnostic to what a "node" is — the
- * `keyOf` callback provides a stable string identity per node.
- *
- * Complexity: `O((V + E)·α(V))`, effectively linear.
- *
- * Guarantees (see slice-view.md):
- * - Deterministic: same `(nodes, edges)` always yields the same output.
- * - Input-order insensitive: shuffling `nodes` or `edges` yields the same
- *   output.
- * - Locality: adding a disjoint node/component elsewhere never permutes
- *   existing components.
- * - Each returned component is sorted by ascending `keyOf`, so `component[0]`
- *   is always its smallest key.
- * - The components themselves are sorted by ascending `keyOf(component[0])`.
- *
- * The two ordering guarantees are part of the contract, not an accident of the
- * implementation: Slice View derives a cluster's identity from `component[0]`
- * (slice-view.md) and asserts that derivation on every record it emits,
- * so weakening either sort turns into a loud failure there rather than a
- * silently mislabelled Slice.
- *
- * Edges are treated as undirected. Edges whose endpoints are not both in
- * `nodes` are silently dropped — the caller is responsible for building the
- * Node set (slice-view.md forbids bridging via non-Node Symbols, which the
- * caller enforces by omitting non-Node endpoints from the input).
- */
 export function computeWeaklyConnectedComponents<TNode>(
   nodes: readonly TNode[],
   edges: readonly [TNode, TNode][],
@@ -37,11 +7,6 @@ export function computeWeaklyConnectedComponents<TNode>(
 ): TNode[][] {
   if (nodes.length === 0) return []
 
-  // Map keys → deterministic slot index, and slot index → original node.
-  // `nodes[]` is iterated in its input order to pick the first-seen instance
-  // per key so equal keys never fork the Union-Find into two roots (edges may
-  // reference a different object instance for the same key — see the
-  // "same key, different object" test).
   const indexByKey = new Map<string, number>()
   const nodesByIndex: TNode[] = []
   for (const node of nodes) {
@@ -80,18 +45,6 @@ export function computeWeaklyConnectedComponents<TNode>(
     }
   }
 
-  // Canonicalise every edge into (u, v) with u < v, keyed by index. Edges
-  // referencing keys outside the node set are dropped. Self-loops (u === v)
-  // are dropped — they add no cross-node connectivity. Multi-edges collapse
-  // naturally because `union` is a no-op on already-merged roots.
-  //
-  // The final connected-component partition is a property of the graph and
-  // does not depend on the order `union` sees the edges — Union-Find over
-  // any permutation of a fixed edge set yields the same partition. Sorting
-  // is a defence-in-depth choice: the internal parent-tree shape becomes a
-  // function of the sorted stream, which keeps traces reproducible and
-  // simplifies debugging without changing the visible output. Output
-  // ordering is enforced separately by the `compareCodeUnit` sorts below.
   interface CanonEdge {
     lo: number
     hi: number
@@ -109,10 +62,6 @@ export function computeWeaklyConnectedComponents<TNode>(
   canonEdges.sort((x, y) => (x.lo !== y.lo ? x.lo - y.lo : x.hi - y.hi))
   for (const edge of canonEdges) union(edge.lo, edge.hi)
 
-  // Bucket indices by their final root. Sorted iteration over index i =
-  // 0..n-1 combined with `nodesByIndex` being built in the *first-seen*
-  // order per key (also the sorted-input assumption below) gives us
-  // deterministic within-component ordering after the sort step.
   const bucketsByRoot = new Map<number, number[]>()
   for (let i = 0; i < n; i++) {
     const root = find(i)

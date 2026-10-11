@@ -1,0 +1,6 @@
+export { matchStageDroppedWeak } from "./dropped-weak"
+export { type GitRenameMap, matchStageGitRename } from "./git-rename"
+export { matchStageId } from "./id"
+export { matchStageLogicFingerprint } from "./logic-fingerprint"
+export { matchStageNameSignature } from "./name-signature"
+export type { SymbolPair } from "./pairing"

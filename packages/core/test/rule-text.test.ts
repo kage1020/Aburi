@@ -1,20 +1,20 @@
-import type { Rule } from "@aburi/types"
+import { rule } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { normalizeRuleStrings, normalizeRuleText, RULE_TEXT_LIMIT } from "../src/rule-text"
 
-describe("normalizeRuleText (ir-schema.md §8.2)", () => {
+describe("normalizeRuleText", () => {
   it("collapses every run of whitespace, newlines included, and trims", () => {
     expect(normalizeRuleText("  a <\n\t  b  ||\r\n c ")).toBe("a < b || c")
   })
 
-  it("leaves a string of exactly the limit whole", () => {
-    const exact = "x".repeat(RULE_TEXT_LIMIT)
+  it("leaves a string of exactly 120 characters whole", () => {
+    expect(RULE_TEXT_LIMIT).toBe(120)
+    const exact = "x".repeat(120)
     expect(normalizeRuleText(exact)).toBe(exact)
   })
 
   it("cuts a longer one to the first 120 characters plus `...`", () => {
-    const text = `${"x".repeat(RULE_TEXT_LIMIT)}yz`
-    expect(normalizeRuleText(text)).toBe(`${"x".repeat(RULE_TEXT_LIMIT)}...`)
+    expect(normalizeRuleText(`${"x".repeat(120)}yz`)).toBe(`${"x".repeat(120)}...`)
   })
 
   it("collapses before it counts, so indentation does not push a rule over", () => {
@@ -36,27 +36,17 @@ describe("normalizeRuleText (ir-schema.md §8.2)", () => {
 })
 
 describe("normalizeRuleStrings", () => {
-  const rule = (overrides: Partial<Rule>): Rule => ({
-    type: "guard",
-    line: 1,
-    condition: null,
-    what: null,
-    expr: null,
-    loopKind: null,
-    ...overrides,
-  })
-
   it("normalizes condition, what and expr, and leaves null alone", () => {
-    expect(normalizeRuleStrings(rule({ condition: "a\n  || b", expr: " c " }))).toEqual(
-      rule({ condition: "a || b", expr: "c" }),
-    )
+    expect(
+      normalizeRuleStrings(rule({ type: "guard", condition: "a\n  || b", expr: " c " })),
+    ).toEqual(rule({ type: "guard", condition: "a || b", expr: "c" }))
     expect(normalizeRuleStrings(rule({ type: "throw", what: "make(\n  x)" }))).toEqual(
       rule({ type: "throw", what: "make( x)" }),
     )
   })
 
   it("returns the same rule when nothing differs", () => {
-    const written = rule({ condition: "a || b" })
+    const written = rule({ type: "guard", condition: "a || b" })
     expect(normalizeRuleStrings(written)).toBe(written)
   })
 })

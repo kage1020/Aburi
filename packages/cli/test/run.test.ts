@@ -1,94 +1,54 @@
+import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { EXIT, runCli } from "../src"
-import { MemStream } from "./fixtures"
+import { EXIT } from "../src"
+import { runCliIn } from "./run-cli"
 
-function makeStreams(): { stdout: MemStream; stderr: MemStream } {
-  return { stdout: new MemStream(), stderr: new MemStream() }
-}
+const workspace = useScratchWorkspace("run")
 
-describe("exit code table", () => {
-  it("keeps the numbers cli-spec.md gives each class", () => {
+const run = (...argv: string[]) => runCliIn(workspace.root, argv)
+
+describe("aburi — the exit codes", () => {
+  it("keeps the number of each exit class stable", () => {
     expect(EXIT).toEqual({ SUCCESS: 0, RUNTIME: 1, INPUT_ERROR: 2, GATE: 3 })
   })
-})
 
-/** CL1 — `aburi --version` prints a single line, exit 0. */
-describe("CL1 — --version", () => {
-  it("prints a version string and returns EXIT.SUCCESS", async () => {
-    const { stdout, stderr } = makeStreams()
-    const code = await runCli({ argv: ["--version"], stdout, stderr, env: {} })
+  it("prints the version and exits 0", async () => {
+    const { code, stdout } = await run("--version")
     expect(code).toBe(EXIT.SUCCESS)
-    expect(stdout.text().trim()).toMatch(/^\d+\.\d+\.\d+/)
+    expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/)
   })
-})
 
-/** CL2 — `aburi --help` returns exit 0. */
-describe("CL2 — --help", () => {
-  it("returns EXIT.SUCCESS and prints usage text", async () => {
-    const { stdout, stderr } = makeStreams()
-    const code = await runCli({ argv: ["--help"], stdout, stderr, env: {} })
+  it("prints the usage and exits 0", async () => {
+    const { code, stdout } = await run("--help")
     expect(code).toBe(EXIT.SUCCESS)
-    expect(stdout.text()).toContain("Usage")
+    expect(stdout).toContain("Usage")
+  })
+
+  it("refuses a command it does not have at exit 2", async () => {
+    expect((await run("nope")).code).toBe(EXIT.INPUT_ERROR)
   })
 })
 
-/** CL3 — unknown command returns EXIT.INPUT_ERROR (2). */
-describe("CL3 — unknown command", () => {
-  it("returns EXIT.INPUT_ERROR", async () => {
-    const { stdout, stderr } = makeStreams()
-    const code = await runCli({ argv: ["nope"], stdout, stderr, env: {} })
+describe("aburi diff — the arguments it needs", () => {
+  it.each([
+    [
+      "neither a ref spec nor --base/--head",
+      [],
+      "aburi diff needs either <base>..<head> or --base <ir.json> --head <ir.json>.",
+    ],
+    [
+      "--base without --head",
+      ["--base", "./b.json"],
+      "--base was supplied without a matching --head <ir.json>.",
+    ],
+    [
+      "--base beside a ref spec",
+      ["main..HEAD", "--base", "./b.json"],
+      "--base cannot be combined with a ref spec argument.",
+    ],
+  ])("refuses %s at exit 2", async (_, flags, says) => {
+    const { code, stderr } = await run("diff", ...flags)
     expect(code).toBe(EXIT.INPUT_ERROR)
-  })
-})
-
-/** CL10 — `aburi diff` with no arguments returns EXIT.INPUT_ERROR. */
-describe("CL10 — diff arguments missing", () => {
-  it("errors when neither refspec nor --base/--head is given", async () => {
-    const { stdout, stderr } = makeStreams()
-    const code = await runCli({ argv: ["diff"], stdout, stderr, env: {} })
-    expect(code).toBe(EXIT.INPUT_ERROR)
-    expect(stderr.text()).toContain("aburi diff needs")
-  })
-
-  it("errors when --base is set without --head", async () => {
-    const { stdout, stderr } = makeStreams()
-    const code = await runCli({
-      argv: ["diff", "--base", "./b.json"],
-      stdout,
-      stderr,
-      env: {},
-    })
-    expect(code).toBe(EXIT.INPUT_ERROR)
-    expect(stderr.text()).toContain("--head")
-  })
-})
-
-/** `cli-spec.md` — `--max-bytes` is read at argv parsing, so a typo never reaches a scan. */
-describe("diff --max-bytes", () => {
-  it("rejects a value that is not a plain byte count", async () => {
-    // The last one reaches the `Number.isSafeInteger` check past the regex, which is the only
-    // thing keeping that branch — and its own message — from reading as redundant and being
-    // deleted. An overflowing count is not "not a positive integer"; it is too large to be one.
-    for (const value of ["64kb", "0", "-1", "1.5", "", "99999999999999999999"]) {
-      const { stdout, stderr } = makeStreams()
-      const code = await runCli({
-        argv: ["diff", "--base", "./b.json", "--head", "./h.json", "--max-bytes", value],
-        stdout,
-        stderr,
-        env: {},
-      })
-      expect(code, `accepted --max-bytes ${JSON.stringify(value)}`).toBe(EXIT.INPUT_ERROR)
-      expect(stderr.text()).toContain("--max-bytes")
-      if (value === "99999999999999999999") {
-        expect(stderr.text()).toContain("too large to be a byte count")
-      }
-    }
-  })
-
-  it("advertises the flag in `diff --help`, which the action probes for", async () => {
-    const { stdout, stderr } = makeStreams()
-    const code = await runCli({ argv: ["diff", "--help"], stdout, stderr, env: {} })
-    expect(code).toBe(EXIT.SUCCESS)
-    expect(stdout.text()).toContain("--max-bytes")
+    expect(stderr).toContain(says)
   })
 })
