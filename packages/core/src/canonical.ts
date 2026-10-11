@@ -3,51 +3,23 @@ import { CoreError } from "./errors"
 import { compareCodeUnit } from "./order"
 
 export interface SerializeOptions {
-  /**
-   * "pretty" emits 2-space indent + LF (the IR default; matches `aburi scan` output).
-   * "compact" emits no whitespace (the `--compact` CLI mode and fingerprint input).
-   */
   format?: "pretty" | "compact"
 }
 
-/**
- * Serialize any plain-JSON value into a byte-deterministic UTF-8 string.
- *
- * Three rules together guarantee bit-identical output for equal inputs:
- * 1. Every string is normalized to Unicode NFC (ir-schema.md, which states why the
- *    form matters and where the rest of the pipeline establishes it). Keys are normalized
- *    *before* rule 2 orders them: ordering the input spelling and writing the normalized
- *    one yields a document whose key order does not match the bytes it contains.
- * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md. Rule 1 is what lets
- *    that comparator agree with the rest of the codebase: this function orders normalized
- *    keys while every other ordering decision compares the string held in memory, so the
- *    two stay in step only because Unicode normalization puts both in the same form.
- * 3. Array order is preserved; the caller is responsible for sorting arrays per the IR
- *    schema's per-collection ordering rules (this serializer is not in the business of
- *    interpreting which collection is which).
- *
- * Two failure modes, both loud rather than lossy. Non-JSON values (functions, symbols,
- * bigint, Map/Set, Date, class instances) throw `non-plain-json`, so silent coercion to
- * "{}" or "null" cannot leak into the IR and corrupt fingerprints downstream. Keys that
- * collide under NFC throw `canonical-key-collision`, since a parser reading the result
- * would keep only one of them.
- */
-export function serializeCanonical(value: unknown, options: SerializeOptions = {}): string {
-  const format = options.format ?? "pretty"
-  const indent = format === "pretty" ? "  " : ""
-  const newline = format === "pretty" ? "\n" : ""
-  const colon = format === "pretty" ? ": " : ":"
-  return write(value, "$", 0, indent, newline, colon)
+interface Layout {
+  indent: string
+  newline: string
+  colon: string
 }
 
-function write(
-  value: unknown,
-  path: string,
-  depth: number,
-  indent: string,
-  newline: string,
-  colon: string,
-): string {
+const PRETTY: Layout = { indent: "  ", newline: "\n", colon: ": " }
+const COMPACT: Layout = { indent: "", newline: "", colon: ":" }
+
+export function serializeCanonical(value: unknown, options: SerializeOptions = {}): string {
+  return write(value, "$", 0, options.format === "compact" ? COMPACT : PRETTY)
+}
+
+function write(value: unknown, path: string, depth: number, layout: Layout): string {
   if (value === null) return "null"
   switch (typeof value) {
     case "boolean":
@@ -64,26 +36,33 @@ function write(
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]"
-    const childIndent = indent.repeat(depth + 1)
-    const closeIndent = indent.repeat(depth)
-    const items = value.map((v, i) => write(v, `${path}[${i}]`, depth + 1, indent, newline, colon))
-    return `[${newline}${items.map((s) => `${childIndent}${s}`).join(`,${newline}`)}${newline}${closeIndent}]`
+    const items = value.map((v, i) => write(v, `${path}[${i}]`, depth + 1, layout))
+    return enclose("[", items, "]", depth, layout)
   }
   if (typeof value === "object") {
     assertPlainObject(value, path)
     const entries = normalizedEntries(value as Record<string, unknown>, path)
     if (entries.length === 0) return "{}"
     entries.sort(([a], [b]) => compareCodeUnit(a, b))
-    const childIndent = indent.repeat(depth + 1)
-    const closeIndent = indent.repeat(depth)
-    const rendered = entries.map(([k, v]) => {
-      const keyJson = JSON.stringify(k)
-      const valueJson = write(v, `${path}.${k}`, depth + 1, indent, newline, colon)
-      return `${childIndent}${keyJson}${colon}${valueJson}`
-    })
-    return `{${newline}${rendered.join(`,${newline}`)}${newline}${closeIndent}}`
+    const members = entries.map(
+      ([k, v]) =>
+        `${JSON.stringify(k)}${layout.colon}${write(v, `${path}.${k}`, depth + 1, layout)}`,
+    )
+    return enclose("{", members, "}", depth, layout)
   }
   throw rejectNonJson(typeof value, path)
+}
+
+function enclose(
+  open: string,
+  items: readonly string[],
+  close: string,
+  depth: number,
+  { indent, newline }: Layout,
+): string {
+  const childIndent = indent.repeat(depth + 1)
+  const body = items.map((item) => `${childIndent}${item}`).join(`,${newline}`)
+  return `${open}${newline}${body}${newline}${indent.repeat(depth)}${close}`
 }
 
 function writeNumber(value: number, path: string): string {
@@ -113,21 +92,10 @@ function rejectNonJson(type: string, path: string): CoreError {
   )
 }
 
-/**
- * Own enumerable entries with `undefined` values dropped and every key normalized to NFC.
- *
- * Two keys can be distinct in JavaScript and identical once normalized — `"é"` written as
- * one code point versus `e` plus a combining acute. Emitting both yields
- * `{"é":1,"é":2}`: JSON a parser accepts and silently collapses, losing an entry. That is
- * the same class of lossy coercion the non-JSON-value rejection exists to prevent, so it
- * fails the same way rather than quietly.
- */
 function normalizedEntries(value: Record<string, unknown>, path: string): [string, unknown][] {
   const out: [string, unknown][] = []
   const seen = new Map<string, string>()
   for (const [rawKey, entry] of Object.entries(value)) {
-    // Skipped before the collision check on purpose: `{ [NFD]: 1, [NFC]: undefined }` writes
-    // one key and loses nothing, so it is not a collision. A key with no value is not a key.
     if (entry === undefined) continue
     const key = toNfc(rawKey)
     const prior = seen.get(key)

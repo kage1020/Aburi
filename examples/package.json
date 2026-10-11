@@ -1,0 +1,32 @@
+{
+  "name": "@aburi/examples",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Example changes for the documentation's showcase. Each example is a small project written twice, before and after a change; the build commits both to a scratch repository, runs `aburi diff` over them and renders the page the docs site serves.",
+  "type": "module",
+  "exports": {
+    "./showcase/*": "./dist/*"
+  },
+  "scripts": {
+    "build": "tsx src/build.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@aburi/cli": "workspace:*",
+    "@aburi/effects-drizzle": "workspace:*",
+    "@aburi/effects-nest": "workspace:*",
+    "@aburi/effects-prisma": "workspace:*",
+    "@aburi/framework-express": "workspace:*",
+    "@aburi/framework-nestjs": "workspace:*",
+    "@aburi/framework-next": "workspace:*",
+    "@aburi/framework-react": "workspace:*",
+    "@aburi/lang-typescript": "workspace:*",
+    "@aburi/test-support": "workspace:*",
+    "@aburi/types": "workspace:*",
+    "@types/node": "^26.0.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

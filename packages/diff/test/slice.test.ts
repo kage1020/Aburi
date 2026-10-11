@@ -1,39 +1,16 @@
 import type { CallEdge } from "@aburi/core"
-import { fp, makeSymbol, sliceId, symbolId, zeroFp } from "@aburi/test-support"
-import type { Confidence, Effect, SliceRecord, SymbolChange } from "@aburi/types"
+import { delta, fp, makeSymbol, symbolId, zeroFp } from "@aburi/test-support"
+import type { SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { DiffError } from "../src/errors"
-import {
-  assertSliceRecordInvariant,
-  computeSlices,
-  type SliceViolationKind,
-  sliceAnchor,
-  sliceRecordViolation,
-} from "../src/slice"
+import { computeSlices } from "../src"
 
-/**
- * Slice View pass acceptance tests. These map to SV1–SV21 and SV23 / SV25 in
- * docs/design/slice-view.md; SV22 and SV24 (schema validation) live in
- * schema.test.ts, and the cross-package SV21 shape is additionally exercised
- * end-to-end in @aburi/e2e-integration. The SliceRecord rejections below overlap
- * schema.test.ts on purpose: this layer checks the pass's own guard, that one the schema.
- *
- * Helpers below build the three pass inputs — a `SymbolChange[]`, plus base
- * and head `CallEdge[]` — as compactly as possible so each test spells out
- * only the fact under scrutiny.
- */
+const LOGIC_ONLY = delta({ logicChanged: true })
 
 const changed = (id: string): SymbolChange => ({
   status: "changed",
   before: makeSymbol({ id, name: id }),
   after: makeSymbol({ id, name: id, fingerprint: fp(id) }),
-  delta: {
-    apiChanged: false,
-    logicChanged: true,
-    syntaxChanged: false,
-    componentChanged: false,
-    visibilityChanged: false,
-  },
+  delta: LOGIC_ONLY,
 })
 
 const added = (id: string): SymbolChange => ({
@@ -44,6 +21,13 @@ const added = (id: string): SymbolChange => ({
 const removed = (id: string): SymbolChange => ({
   status: "removed",
   symbol: makeSymbol({ id, name: id }),
+})
+
+const unknown = (id: string): SymbolChange => ({
+  status: "unknown",
+  symbol: makeSymbol({ id, name: id }),
+  absentFrom: "head",
+  reason: "parse-failed",
 })
 
 const moved = (before: string, after: string): SymbolChange => ({
@@ -58,679 +42,219 @@ const movedChanged = (before: string, after: string): SymbolChange => ({
   before: makeSymbol({ id: before, name: before }),
   after: makeSymbol({ id: after, name: after, fingerprint: fp(after) }),
   rationale: "logic-fingerprint",
-  delta: {
-    apiChanged: false,
-    logicChanged: true,
-    syntaxChanged: false,
-    componentChanged: false,
-    visibilityChanged: false,
-  },
+  delta: LOGIC_ONLY,
 })
 
-const droppedToggled = (
-  before: string,
-  after: string,
-  direction: "to-dropped" | "to-kept",
-): SymbolChange => ({
+const toDropped = (before: string, after: string): SymbolChange => ({
   status: "dropped-toggled",
-  before: makeSymbol({ id: before, name: before, dropped: direction !== "to-dropped" }),
-  after: makeSymbol({
-    id: after,
-    name: after,
-    dropped: direction === "to-dropped",
-    fingerprint: direction === "to-dropped" ? zeroFp() : fp(after),
-  }),
-  direction,
+  before: makeSymbol({ id: before, name: before }),
+  after: makeSymbol({ id: after, name: after, dropped: true, fingerprint: zeroFp() }),
+  direction: "to-dropped",
 })
 
-function edge(from: string, to: string, line = 1, confidence: Confidence = "high"): CallEdge {
-  return { from: symbolId(from), to: symbolId(to), via: "call", confidence, line }
+function edge(from: string, to: string, line = 1): CallEdge {
+  return { from: symbolId(from), to: symbolId(to), via: "call", confidence: "high", line }
 }
 
-describe("computeSlices — Node selection (SV1–SV5)", () => {
-  it("SV1: two changed symbols connected by an edge form one Slice", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const slices = computeSlices({
-      changes: [changed(A), changed(B)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, B)],
-    })
-    expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B] }])
+function slicesOf(
+  changes: SymbolChange[],
+  baseCallEdges: CallEdge[] = [],
+  headCallEdges: CallEdge[] = [],
+) {
+  return computeSlices({ changes, baseCallEdges, headCallEdges })
+}
+
+const A = "ts:src/a.ts#A"
+const B = "ts:src/b.ts#B"
+const C = "ts:src/c.ts#C"
+const D = "ts:src/d.ts#D"
+
+describe("which changes are Slice Nodes", () => {
+  it.each([
+    ["a changed Symbol", changed(A), A],
+    ["an added Symbol", added(A), A],
+    ["a removed Symbol", removed(A), A],
+    ["an unknown Symbol", unknown(A), A],
+    ["a moved+changed Symbol, under its head id", movedChanged("ts:src/old.ts#A", A), A],
+    ["a dropped-toggled Symbol, under its head id", toDropped("ts:src/old.ts#A", A), A],
+  ])("makes %s a Node", (_, change, nodeId) => {
+    expect(slicesOf([change])).toEqual([{ id: `slice:${nodeId}`, members: [nodeId] }])
   })
 
-  it("SV2: two changed symbols with no edge form two singletons", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const slices = computeSlices({
-      changes: [changed(A), changed(B)],
-      baseCallEdges: [],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([
+  it("leaves a pure move out of slices[] entirely, even with edges into it", () => {
+    const oldId = "ts:src/old.ts#moved"
+    const newId = "ts:src/new.ts#moved"
+    expect(
+      slicesOf([changed(A), moved(oldId, newId)], [], [edge(A, newId), edge(A, oldId)]),
+    ).toEqual([{ id: `slice:${A}`, members: [A] }])
+  })
+
+  it("yields no Slice when no change is a Node", () => {
+    expect(slicesOf([moved("ts:src/a.ts#a", "ts:src/b.ts#a")])).toEqual([])
+  })
+})
+
+describe("which edges join Nodes into one Slice", () => {
+  it("joins two Nodes a head edge connects", () => {
+    expect(slicesOf([changed(A), changed(B)], [], [edge(A, B)])).toEqual([
+      { id: `slice:${A}`, members: [A, B] },
+    ])
+  })
+
+  it("keeps two unconnected Nodes in Slices of their own", () => {
+    expect(slicesOf([changed(A), changed(B)])).toEqual([
       { id: `slice:${A}`, members: [A] },
       { id: `slice:${B}`, members: [B] },
     ])
   })
 
-  it("SV3: no bridging through an unchanged Symbol M (A→M→B does NOT unify A,B)", () => {
-    // M is unchanged → not a Node → the edges [A,M] and [M,B] are dropped
-    // because their non-A/B endpoint is not in the Node set.
-    const A = "ts:src/a.ts#A"
+  it("does not bridge two Nodes through an unchanged Symbol between them", () => {
     const M = "ts:src/mid.ts#M"
-    const B = "ts:src/b.ts#B"
-    const slices = computeSlices({
-      changes: [changed(A), changed(B)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, M), edge(M, B)],
-    })
-    expect(slices).toEqual([
+    expect(slicesOf([changed(A), changed(B)], [], [edge(A, M), edge(M, B)])).toEqual([
       { id: `slice:${A}`, members: [A] },
       { id: `slice:${B}`, members: [B] },
     ])
   })
 
-  it("SV4: pure moved symbol is NOT a Node and is absent from slices[] entirely", () => {
-    const A = "ts:src/a.ts#A"
-    const OldMoved = "ts:src/old.ts#moved"
-    const NewMoved = "ts:src/new.ts#moved"
-    const slices = computeSlices({
-      changes: [changed(A), moved(OldMoved, NewMoved)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, NewMoved), edge(A, OldMoved)],
-    })
-    expect(slices).toEqual([{ id: `slice:${A}`, members: [A] }])
+  it("drops an edge whose other end is not a Node, and a self-loop", () => {
+    const External = "ts:src/ext.ts#external"
+    expect(
+      slicesOf([changed(A)], [edge(A, A)], [edge(A, External), edge(External, A), edge(A, A)]),
+    ).toEqual([{ id: `slice:${A}`, members: [A] }])
   })
 
-  it("SV5a: a Symbol changed only in confidence is a Node and clusters with its callee", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const unsure: SymbolChange = {
-      status: "changed",
-      before: makeSymbol({ id: A, name: A }),
-      after: makeSymbol({ id: A, name: A, confidence: "medium" }),
-      delta: {
-        apiChanged: false,
-        logicChanged: false,
-        syntaxChanged: false,
-        componentChanged: false,
-        visibilityChanged: false,
-        confidenceChanged: true,
-      },
-    }
-    const slices = computeSlices({
-      changes: [unsure, changed(B)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, B)],
-    })
-    expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B] }])
+  it("collapses repeated edges between one pair into one connection", () => {
+    expect(
+      slicesOf(
+        [changed(A), changed(B)],
+        [edge(A, B, 1), edge(A, B, 2)],
+        [edge(A, B, 3), edge(B, A, 4)],
+      ),
+    ).toEqual([{ id: `slice:${A}`, members: [A, B] }])
   })
 
-  it("SV5: propagated-only changed callers (status: changed) are Nodes and cluster with their downstream callee", () => {
-    // The Boundary controller's body is byte-identical between base
-    // and head; the *only* semantic change is that effect propagation has
-    // now attached a `db.write` entry with `propagated: true` because the
-    // downstream service `Svc.op` began invoking a repository write. The
-    // controller therefore appears as `status: changed` even though its
-    // own source is unchanged.
-    //
-    // The Slice View pass MUST NOT reach into `delta.effects` to distinguish
-    // this from a "real" body change — "any status: changed is a Node" is
-    // the whole rule (slice-view.md). This test constructs the propagated-only case
-    // faithfully so a future refactor that added such a distinction would
-    // silently break here.
-    const Ctl = "ts:src/ctl.ts#Ctl.route"
-    const Svc = "ts:src/svc.ts#Svc.op"
-    const propagatedWrite: Effect = {
-      id: "db.write",
-      target: "prisma.record.create",
-      plugin: "effects-prisma",
-      confidence: "high",
-      derivedBy: "propagation:svc.op",
-      propagated: true,
-      derivedFrom: [symbolId(Svc)],
-    }
-    const ctlPropagatedOnly: SymbolChange = {
-      status: "changed",
-      before: makeSymbol({ id: Ctl, name: Ctl }),
-      after: makeSymbol({ id: Ctl, name: Ctl, effects: [propagatedWrite] }),
-      delta: {
-        apiChanged: false,
-        logicChanged: true,
-        syntaxChanged: false,
-        componentChanged: false,
-        visibilityChanged: false,
-        effects: { added: [propagatedWrite], removed: [], modified: [] },
-      },
-    }
-    const slices = computeSlices({
-      changes: [ctlPropagatedOnly, changed(Svc)],
-      baseCallEdges: [],
-      headCallEdges: [edge(Ctl, Svc)],
-    })
-    expect(slices).toEqual([{ id: `slice:${Ctl}`, members: [Ctl, Svc] }])
+  it("joins a directed cycle into one Slice", () => {
+    expect(
+      slicesOf([changed(A), changed(B), changed(C)], [], [edge(A, B), edge(B, C), edge(C, A)]),
+    ).toEqual([{ id: `slice:${A}`, members: [A, B, C] }])
+  })
+
+  it("joins a caller to the old callee through a base edge and the new one through a head edge", () => {
+    const ctl = "ts:src/c.ts#Ctl.route"
+    const oldSvc = "ts:src/svc.ts#Svc.old"
+    const newSvc = "ts:src/svc.ts#Svc.new"
+    expect(
+      slicesOf(
+        [changed(ctl), removed(oldSvc), added(newSvc)],
+        [edge(ctl, oldSvc)],
+        [edge(ctl, newSvc)],
+      ),
+    ).toEqual([{ id: `slice:${ctl}`, members: [ctl, newSvc, oldSvc] }])
+  })
+
+  it("does not split Slices by language", () => {
+    const tsA = "ts:src/a.ts#a"
+    const pyB = "py:app/b.py#b"
+    expect(slicesOf([changed(tsA), changed(pyB)], [], [edge(tsA, pyB)])).toEqual([
+      { id: `slice:${pyB}`, members: [pyB, tsA] },
+    ])
   })
 })
 
-describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
-  it("SV6: {C, oldS(removed), newS(added)} — rename with edge in base only for old, head only for new", () => {
-    const C = "ts:src/c.ts#Ctl.route"
-    const oldS = "ts:src/svc.ts#Svc.old"
-    const newS = "ts:src/svc.ts#Svc.new"
-    const slices = computeSlices({
-      changes: [changed(C), removed(oldS), added(newS)],
-      baseCallEdges: [edge(C, oldS)],
-      headCallEdges: [edge(C, newS)],
-    })
-    expect(slices).toEqual([
-      // Anchor is the lex-smallest of the three ids. ts:src/c.ts#... sorts
-      // before ts:src/svc.ts#..., so C is the anchor.
-      { id: `slice:${C}`, members: [C, newS, oldS].sort() },
+describe("a base edge into a Symbol that changed id", () => {
+  it("reads a relocated caller under its head id", () => {
+    const oldCtl = "ts:src/ctl.ts#handleRefund"
+    const ctl = "ts:src/controller.ts#handleRefund"
+    const oldSvc = "ts:src/refund.ts#refund"
+    const newSvc = "ts:src/refund2.ts#refundV2"
+    expect(
+      slicesOf(
+        [movedChanged(oldCtl, ctl), removed(oldSvc), added(newSvc)],
+        [edge(oldCtl, oldSvc)],
+        [edge(ctl, newSvc)],
+      ),
+    ).toEqual([{ id: `slice:${ctl}`, members: [ctl, oldSvc, newSvc].sort() }])
+  })
+
+  it("reads a callee under a new id under its head id", () => {
+    const ctl = "ts:src/checkout.ts#submitCheckoutOrder"
+    const oldSvc = "ts:src/helpers.ts#normalizeAmount"
+    const svc = "ts:src/money/helpers.ts#normalizeAmount"
+    expect(slicesOf([changed(ctl), movedChanged(oldSvc, svc)], [edge(ctl, oldSvc)])).toEqual([
+      { id: `slice:${ctl}`, members: [ctl, svc].sort() },
     ])
   })
 
-  it("SV6a: SV6 with the controller relocated to another file reads its base edge under the head id", () => {
-    const oldC = "ts:src/ctl.ts#handleRefund"
-    const C = "ts:src/controller.ts#handleRefund"
-    const oldS = "ts:src/refund.ts#refund"
-    const newS = "ts:src/refund2.ts#refundV2"
-    const slices = computeSlices({
-      changes: [movedChanged(oldC, C), removed(oldS), added(newS)],
-      baseCallEdges: [edge(oldC, oldS)],
-      headCallEdges: [edge(C, newS)],
-    })
-    expect(slices).toEqual([{ id: `slice:${C}`, members: [C, oldS, newS].sort() }])
-  })
-
-  it("SV6b: an inlined call keeps its base edge, and a newcomer at the old id stays out", () => {
-    const oldC = "ts:src/checkout.ts#submitCheckoutOrder"
-    const C = "ts:src/orders/checkout.ts#submitCheckoutOrder"
-    const S = "ts:src/helpers.ts#legacyNormalizeAmount"
-    // A different Symbol sits at the controller's old id. `buildDiff` cannot produce this:
-    // stage 1 would pair the old id with it, leaving no `moved+changed` from that id. This pins
-    // `computeSlices` as public API: the base edge names the controller, not the newcomer.
-    const slices = computeSlices({
-      changes: [movedChanged(oldC, C), removed(S), added(oldC)],
-      baseCallEdges: [edge(oldC, S)],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([
-      { id: `slice:${oldC}`, members: [oldC] },
-      { id: `slice:${S}`, members: [S, C].sort() },
+  it("reads a caller renamed within its own file under its new name", () => {
+    const oldCtl = "ts:src/a.ts#oldName"
+    const ctl = "ts:src/a.ts#newName"
+    const svc = "ts:src/b.ts#S"
+    expect(slicesOf([movedChanged(oldCtl, ctl), removed(svc)], [edge(oldCtl, svc)])).toEqual([
+      { id: `slice:${ctl}`, members: [ctl, svc] },
     ])
   })
 
-  it("SV6c: a base edge into a callee under a new id reads the callee under its head id", () => {
-    const C = "ts:src/checkout.ts#submitCheckoutOrder"
-    const oldS = "ts:src/helpers.ts#normalizeAmount"
-    const S = "ts:src/money/helpers.ts#normalizeAmount"
-    const slices = computeSlices({
-      changes: [changed(C), movedChanged(oldS, S)],
-      baseCallEdges: [edge(C, oldS)],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([{ id: `slice:${C}`, members: [C, S].sort() }])
-  })
-
-  it("SV6d: a caller renamed within its own file reads its base edge under the new name", () => {
-    const oldC = "ts:src/a.ts#oldName"
-    const C = "ts:src/a.ts#newName"
-    const S = "ts:src/b.ts#S"
-    const slices = computeSlices({
-      changes: [movedChanged(oldC, C), removed(S)],
-      baseCallEdges: [edge(oldC, S)],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([{ id: `slice:${C}`, members: [C, S] }])
-  })
-
-  it("SV7: edge only in headCallEdges still unifies its Nodes", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const slices = computeSlices({
-      changes: [changed(A), added(B)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, B)],
-    })
-    expect(slices).toHaveLength(1)
-    expect(slices[0]?.members).toEqual([A, B])
-  })
-
-  it("SV8: edge only in baseCallEdges still unifies its Nodes", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const slices = computeSlices({
-      changes: [changed(A), removed(B)],
-      baseCallEdges: [edge(A, B)],
-      headCallEdges: [],
-    })
-    expect(slices).toHaveLength(1)
-    expect(slices[0]?.members).toEqual([A, B])
-  })
-})
-
-describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
-  it("SV9: directed cycle A→B→C→A → one Slice with all three, no SCC pre-condense", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const C = "ts:src/c.ts#C"
-    const slices = computeSlices({
-      changes: [changed(A), changed(B), changed(C)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, B), edge(B, C), edge(C, A)],
-    })
-    expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B, C] }])
-  })
-
-  it("SV10: dropped-toggled Symbol with no in-Node edges becomes a singleton", () => {
-    const X = "ts:src/x.ts#X"
-    const slices = computeSlices({
-      changes: [droppedToggled(X, X, "to-dropped")],
-      baseCallEdges: [],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([{ id: `slice:${X}`, members: [X] }])
-  })
-
-  it("SV11: dropped-toggled Symbol with a kept-side edge to another Node clusters", () => {
-    const X = "ts:src/x.ts#X"
-    const K = "ts:src/k.ts#K"
-    const slices = computeSlices({
-      changes: [droppedToggled(X, X, "to-dropped"), changed(K)],
-      baseCallEdges: [edge(X, K)], // kept-side (base) edge from X to a still-changed Symbol
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([{ id: `slice:${K}`, members: [K, X] }])
-  })
-
-  it("SV11a: SV11 with the dropped-toggled Symbol under a new id clusters under its head id", () => {
+  it("reads a dropped-toggled Symbol under its head id", () => {
     const oldX = "ts:src/x.ts#X"
     const X = "ts:src/y.ts#X"
     const K = "ts:src/k.ts#K"
-    const slices = computeSlices({
-      changes: [droppedToggled(oldX, X, "to-dropped"), changed(K)],
-      baseCallEdges: [edge(oldX, K)],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([{ id: `slice:${K}`, members: [K, X] }])
-  })
-})
-
-describe("computeSlices — Cluster identity and ordering (SV12–SV14)", () => {
-  it("SV12: sliceId = 'slice:' + smallest member id (verbatim, no sanitisation)", () => {
-    const X = "ts:src/a.ts#X"
-    const Y = "ts:src/a.ts#Y"
-    const Z = "ts:src/a.ts#Z"
-    const slices = computeSlices({
-      changes: [changed(Z), changed(Y), changed(X)],
-      baseCallEdges: [],
-      headCallEdges: [edge(Y, Z), edge(X, Y)],
-    })
-    expect(slices).toEqual([{ id: `slice:${X}`, members: [X, Y, Z] }])
-  })
-
-  it("SV13: slices[] is sorted by ascending anchor id", () => {
-    const M = "ts:src/m.ts#M"
-    const X = "ts:src/x.ts#X"
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const slices = computeSlices({
-      changes: [changed(M), changed(X), changed(A), changed(B)],
-      baseCallEdges: [],
-      headCallEdges: [edge(M, X), edge(A, B)],
-    })
-    expect(slices.map((s) => s.id)).toEqual([`slice:${A}`, `slice:${M}`])
-  })
-
-  it("SV14: members[] within a Slice is sorted ascending", () => {
-    const A = "ts:src/a.ts#Aa"
-    const C = "ts:src/a.ts#Cc"
-    const B = "ts:src/a.ts#Bb"
-    const slices = computeSlices({
-      changes: [changed(A), changed(B), changed(C)],
-      baseCallEdges: [],
-      headCallEdges: [edge(C, A), edge(B, C)],
-    })
-    expect(slices[0]?.members).toEqual([A, B, C])
-  })
-})
-
-describe("computeSlices — Determinism (SV15–SV18)", () => {
-  const buildInputs = () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const C = "ts:src/c.ts#C"
-    const D = "ts:src/d.ts#D"
-    return {
-      A,
-      B,
-      C,
-      D,
-      changes: [changed(A), changed(B), changed(C), changed(D)],
-      edges: [edge(A, B), edge(C, D)],
-    }
-  }
-
-  it("SV15: idempotence — two runs produce byte-identical JSON", () => {
-    const { changes, edges } = buildInputs()
-    const one = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
-    const two = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
-    expect(JSON.stringify(two)).toBe(JSON.stringify(one))
-  })
-
-  it("SV16: input-order insensitivity — shuffled inputs produce identical output", () => {
-    const { changes, edges } = buildInputs()
-    const canonical = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
-    const shuffled = computeSlices({
-      changes: [...changes].reverse(),
-      baseCallEdges: [...edges].reverse().map((e) => ({ ...e, from: e.to, to: e.from })),
-      headCallEdges: [],
-    })
-    expect(JSON.stringify(shuffled)).toBe(JSON.stringify(canonical))
-  })
-
-  it("SV17: locality — adding an unchanged Symbol elsewhere does not change any slice", () => {
-    // Unchanged symbols never reach `changes[]` (slice-view.md precondition 1: unchanged
-    // is dropped upstream). So passing the same `changes[]` twice is the
-    // faithful representation of "adding an unchanged symbol elsewhere".
-    const { changes, edges } = buildInputs()
-    const before = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
-    const after = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
-    expect(after).toEqual(before)
-  })
-
-  it("SV18: adding a new Node in a disjoint component leaves existing slices unchanged", () => {
-    const { A, B, C, D, changes, edges } = buildInputs()
-    const before = computeSlices({ changes, baseCallEdges: [], headCallEdges: edges })
-
-    const Z = "ts:src/z.ts#Z"
-    const after = computeSlices({
-      changes: [...changes, changed(Z)],
-      baseCallEdges: [],
-      headCallEdges: edges,
-    })
-    // The A-B and C-D slices should appear identical to `before`; only a
-    // new `{Z}` singleton is added (appended in sorted-anchor order).
-    expect(after.find((s) => s.id === `slice:${A}`)?.members).toEqual([A, B])
-    expect(after.find((s) => s.id === `slice:${C}`)?.members).toEqual([C, D])
-    expect(after.find((s) => s.id === `slice:${Z}`)?.members).toEqual([Z])
-    expect(after).toHaveLength(before.length + 1)
-  })
-})
-
-describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + robustness)", () => {
-  it("SV19 (JSON side): a Node-less change set yields slices: []", () => {
-    // Only pure `moved` — not a Node per slice-view.md.
-    const slices = computeSlices({
-      changes: [moved("ts:src/a.ts#a", "ts:src/b.ts#a")],
-      baseCallEdges: [],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([])
-  })
-
-  it("moved+changed IS a Node (uses head-side id)", () => {
-    const before = "ts:src/old.ts#foo"
-    const after = "ts:src/new.ts#foo"
-    const slices = computeSlices({
-      changes: [movedChanged(before, after)],
-      baseCallEdges: [],
-      headCallEdges: [],
-    })
-    expect(slices).toEqual([{ id: `slice:${after}`, members: [after] }])
-  })
-
-  it("multi-edges between same pair (base + head, plus multiple lines) do not create phantom members", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const slices = computeSlices({
-      changes: [changed(A), changed(B)],
-      baseCallEdges: [edge(A, B, 1), edge(A, B, 2)],
-      headCallEdges: [edge(A, B, 3), edge(B, A, 4)],
-    })
-    expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B] }])
-  })
-
-  it("self-loops (direct recursion) do not fabricate connectivity", () => {
-    const A = "ts:src/a.ts#A"
-    const slices = computeSlices({
-      changes: [changed(A)],
-      baseCallEdges: [edge(A, A)],
-      headCallEdges: [edge(A, A)],
-    })
-    expect(slices).toEqual([{ id: `slice:${A}`, members: [A] }])
-  })
-
-  it("edges whose endpoints are outside the Node set are dropped silently", () => {
-    const A = "ts:src/a.ts#A"
-    const External = "ts:src/ext.ts#external"
-    const slices = computeSlices({
-      changes: [changed(A)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, External), edge(External, A)],
-    })
-    expect(slices).toEqual([{ id: `slice:${A}`, members: [A] }])
-  })
-})
-
-describe("computeSlices — SV21: cross-language partition", () => {
-  it("partitions Nodes by language when the changes span multiple languages", () => {
-    // slice-view.md: cross-language edges do not exist yet, so
-    // a PR touching TypeScript and Python files produces disjoint slices per
-    // language. The e2e fixture only covers a single language; this unit
-    // test enforces the partition property at the pass boundary — even when
-    // Node ids from different languages are interleaved in the input.
-    const tsCtl = "ts:src/ctl.ts#Ctl.route"
-    const tsSvc = "ts:src/svc.ts#Svc.op"
-    const pyCtl = "py:app/ctl.py#route"
-    const pySvc = "py:app/svc.py#op"
-    const slices = computeSlices({
-      changes: [changed(tsCtl), changed(tsSvc), changed(pyCtl), changed(pySvc)],
-      baseCallEdges: [],
-      headCallEdges: [edge(tsCtl, tsSvc), edge(pyCtl, pySvc)],
-    })
-    expect(slices).toEqual([
-      { id: `slice:${pyCtl}`, members: [pyCtl, pySvc] },
-      { id: `slice:${tsCtl}`, members: [tsCtl, tsSvc] },
+    expect(slicesOf([toDropped(oldX, X), changed(K)], [edge(oldX, K)])).toEqual([
+      { id: `slice:${K}`, members: [K, X] },
     ])
   })
 
-  it("a cross-language edge that reaches the pass anyway still unifies (defensive: no language-aware short-circuit)", () => {
-    // If a future resolver produces a genuine cross-language edge (planned in
-    // multi-language-id.md), the WCC pass MUST cluster the two Symbols —
-    // Slice View has no language-aware filter of its own. This test guards
-    // against a well-meaning "only same-language edges" filter being added
-    // here, which would violate its promise ("Slice View will then
-    // automatically produce cross-language clusters via the same WCC rule
-    // with no code change").
-    const tsA = "ts:src/a.ts#a"
-    const pyB = "py:app/b.py#b"
-    const slices = computeSlices({
-      changes: [changed(tsA), changed(pyB)],
-      baseCallEdges: [],
-      headCallEdges: [edge(tsA, pyB)],
-    })
-    expect(slices).toEqual([{ id: `slice:${pyB}`, members: [pyB, tsA] }])
-  })
-})
-
-/**
- * slice-view.md — the strictly-ascending `members[]` order and the derivation
- * `id === "slice:" + members[0]` compare one property against another, which no
- * JSON Schema can express. The pass validates them itself and consumers
- * read the anchor through a helper that answers from `members[0]`.
- */
-describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
-  /** Assert the non-throwing and the throwing form agree on which clause broke. */
-  function expectViolation(record: unknown, kind: SliceViolationKind, subject: string): void {
-    const violation = sliceRecordViolation(record)
-    expect(violation?.kind).toBe(kind)
-    expect(violation?.subject).toBe(subject)
-
-    // `assertSliceRecordInvariant` takes a well-typed record; the shape cases
-    // below are only reachable through the validator entry point.
-    if (violation?.kind === "malformed-shape") return
-    expect(() => assertSliceRecordInvariant(record as SliceRecord)).toThrow(DiffError)
-    try {
-      assertSliceRecordInvariant(record as SliceRecord)
-    } catch (e) {
-      expect(e).toBeInstanceOf(DiffError)
-      if (e instanceof DiffError) {
-        expect(e.code).toBe("slice-invariant-violated")
-        expect(e.value).toBe(subject)
-        expect(e.message).toBe(violation?.message)
-      }
-    }
-  }
-
-  it("SV23: every SliceRecord the pass emits satisfies the invariant", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const C = "ts:src/c.ts#C"
-    const Z = "ts:src/z.ts#Z"
-    // The changes are listed in DESCENDING id order on purpose. `collectNodeIds`
-    // preserves input order and the WCC utility buckets nodes in first-seen
-    // order, so an ascending input would still come out ascending even if the
-    // utility stopped sorting each component — this test would then pass while
-    // the very guarantee it exists to pin was gone. Descending input makes the
-    // sort load-bearing here.
-    const slices = computeSlices({
-      changes: [droppedToggled(Z, Z, "to-dropped"), removed(C), added(B), changed(A)],
-      baseCallEdges: [edge(C, A)],
-      headCallEdges: [edge(A, B)],
-    })
-    expect(slices.length).toBeGreaterThan(1)
-    for (const slice of slices) {
-      expect(sliceRecordViolation(slice)).toBeNull()
-      expect(() => assertSliceRecordInvariant(slice)).not.toThrow()
-      expect(slice.id).toBe(`slice:${slice.members[0]}`)
-      for (let i = 1; i < slice.members.length; i++) {
-        // Strictly ascending — `[...members].sort()` would also accept duplicates.
-        expect((slice.members[i - 1] as string) < (slice.members[i] as string)).toBe(true)
-      }
-    }
-  })
-
-  it("SV25: sliceAnchor returns members[0] without deriving it from the id", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const [slice] = computeSlices({
-      changes: [changed(A), changed(B)],
-      baseCallEdges: [],
-      headCallEdges: [edge(A, B)],
-    })
-    if (slice === undefined) throw new Error("unreachable: one Slice expected")
-    expect(sliceAnchor(slice)).toBe(A)
-
-    // A record whose id disagrees with its members is malformed, but the helper
-    // still answers from members[0] — proof it never strips the `slice:` prefix.
-    expect(sliceAnchor({ id: sliceId(`slice:${B}`), members: [symbolId(A), symbolId(B)] })).toBe(A)
-  })
-
-  it("SV23: rejects a correct `slice:` prefix whose id is not the anchor", () => {
-    expectViolation(
-      { id: "slice:ts:src/foo.ts#foo", members: ["ts:src/bar.ts#bar", "ts:src/baz.ts#baz"] },
-      "id-not-derived",
-      "slice:ts:src/foo.ts#foo",
-    )
-  })
-
-  it("SV23: rejects members[] that are not in strictly ascending order", () => {
-    expectViolation(
-      { id: "slice:ts:src/b.ts#B", members: ["ts:src/b.ts#B", "ts:src/a.ts#A"] },
-      "members-unordered",
-      "slice:ts:src/b.ts#B",
-    )
-  })
-
-  it("SV23: rejects duplicated members (a non-strict ascending run)", () => {
-    expectViolation(
-      { id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A", "ts:src/a.ts#A"] },
-      "members-unordered",
-      "slice:ts:src/a.ts#A",
-    )
-  })
-
-  it("SV23: rejects an empty members[]", () => {
-    expectViolation(
-      { id: "slice:ts:src/a.ts#A", members: [] },
-      "members-empty",
-      "slice:ts:src/a.ts#A",
-    )
-  })
-
-  it("SV23: rejects a missing `slice:` prefix through the same derivation check", () => {
-    expectViolation(
-      { id: "ts:src/a.ts#A", members: ["ts:src/a.ts#A"] },
-      "id-not-derived",
-      "ts:src/a.ts#A",
-    )
-  })
-
-  it("SV25: sliceAnchor throws rather than returning undefined for an empty members[]", () => {
-    expect(() => sliceAnchor({ id: sliceId("slice:ts:src/a.ts#A"), members: [] })).toThrow(
-      DiffError,
-    )
-  })
-})
-
-/**
- * Enforcement layer 2 (slice-view.md) points `sliceRecordViolation` at documents written by
- * third-party or older producers, so its input is untyped by definition. Every
- * case here reaches it through a shape TypeScript would have rejected, which is
- * exactly what a validator receives.
- */
-describe("sliceRecordViolation — untyped input (SV24)", () => {
-  it("reports a missing members[] instead of throwing", () => {
-    const violation = sliceRecordViolation({ id: "slice:ts:src/a.ts#A" })
-    expect(violation?.kind).toBe("malformed-shape")
-    expect(violation?.subject).toBe("slice:ts:src/a.ts#A")
-  })
-
-  it("reports a members[] that is not an array instead of scanning its characters", () => {
-    // A string is indexable and iterable, so a naive scan would happily compare
-    // its characters and report a bogus "unordered at index 3".
-    const violation = sliceRecordViolation({ id: "slice:ts:src/a.ts#A", members: "nope" })
-    expect(violation?.kind).toBe("malformed-shape")
-    expect(violation?.message).toMatch(/array of strings/)
-  })
-
-  it("reports a members[] holding non-strings", () => {
-    expect(sliceRecordViolation({ id: "slice:a", members: ["a", 7] })?.kind).toBe("malformed-shape")
-    expect(sliceRecordViolation({ id: "slice:a", members: 5 })?.kind).toBe("malformed-shape")
-  })
-
-  it("reports a missing or non-string id instead of stringifying `undefined` into the message", () => {
-    const violation = sliceRecordViolation({ members: ["ts:src/a.ts#A"] })
-    expect(violation?.kind).toBe("malformed-shape")
-    expect(violation?.subject).toBe("<missing id>")
-    expect(violation?.message).not.toMatch(/"undefined"/)
-  })
-
-  it("reports non-objects", () => {
-    for (const value of [null, undefined, 42, "slice:a", []]) {
-      expect(sliceRecordViolation(value)?.kind).toBe("malformed-shape")
-    }
-  })
-})
-
-describe("SV29: a Slice id cannot be built on an anchor from a reserved namespace", () => {
-  it("rejects an anchor in the `slice:` namespace even though the derivation is self-consistent", () => {
-    // "slice:slice:…" satisfies every other clause: the prefix matches, members[] is a
-    // one-element ascending list, and the id IS "slice:" + members[0]. Only the namespace
-    // rule catches it. makeSymbolId refuses to build such a Symbol id and checkIRIntegrity
-    // #16 rejects one read from disk, but buildDiff is public API and runs neither.
-    const violation = sliceRecordViolation({
-      id: "slice:slice:src/a.ts#A",
-      members: ["slice:src/a.ts#A"],
-    })
-    expect(violation?.kind).toBe("anchor-in-reserved-namespace")
-    expect(violation?.message).toContain("slice")
-  })
-
-  it("leaves an anchor whose language token merely starts with the reserved one alone", () => {
+  it("keeps the pair's edge when a newcomer takes the old id, and leaves the newcomer out", () => {
+    const oldCtl = "ts:src/checkout.ts#submitCheckoutOrder"
+    const ctl = "ts:src/orders/checkout.ts#submitCheckoutOrder"
+    const helper = "ts:src/helpers.ts#legacyNormalizeAmount"
     expect(
-      sliceRecordViolation({ id: "slice:slicer:src/a.ts#A", members: ["slicer:src/a.ts#A"] }),
-    ).toBeNull()
+      slicesOf([movedChanged(oldCtl, ctl), removed(helper), added(oldCtl)], [edge(oldCtl, helper)]),
+    ).toEqual([
+      { id: `slice:${oldCtl}`, members: [oldCtl] },
+      { id: `slice:${helper}`, members: [helper, ctl].sort() },
+    ])
+  })
+})
+
+describe("Slice identity and order", () => {
+  it("names a Slice after its smallest member, verbatim", () => {
+    const X = "ts:src/a.ts#X"
+    const Y = "ts:src/a.ts#Y"
+    const Z = "ts:src/a.ts#Z"
+    expect(slicesOf([changed(Z), changed(Y), changed(X)], [], [edge(Y, Z), edge(X, Y)])).toEqual([
+      { id: `slice:${X}`, members: [X, Y, Z] },
+    ])
+  })
+
+  it("sorts slices[] by anchor and each members[] ascending", () => {
+    const M = "ts:src/m.ts#M"
+    const X = "ts:src/x.ts#X"
+    expect(
+      slicesOf([changed(M), changed(X), changed(B), changed(A)], [], [edge(X, M), edge(B, A)]),
+    ).toEqual([
+      { id: `slice:${A}`, members: [A, B] },
+      { id: `slice:${M}`, members: [M, X] },
+    ])
+  })
+
+  it("answers the same however its inputs are ordered or edges are directed", () => {
+    const changes = [changed(A), changed(B), changed(C), changed(D)]
+    const edges = [edge(A, B), edge(C, D)]
+    expect(
+      slicesOf(
+        [...changes].reverse(),
+        [...edges].reverse().map((e) => ({ ...e, from: e.to, to: e.from })),
+      ),
+    ).toEqual(slicesOf(changes, [], edges))
+  })
+
+  it("leaves existing Slices alone when a Node joins in a disjoint component", () => {
+    const changes = [changed(A), changed(B), changed(C), changed(D)]
+    const edges = [edge(A, B), edge(C, D)]
+    const Z = "ts:src/z.ts#Z"
+    expect(slicesOf([...changes, changed(Z)], [], edges)).toEqual([
+      ...slicesOf(changes, [], edges),
+      { id: `slice:${Z}`, members: [Z] },
+    ])
   })
 })

@@ -17,7 +17,7 @@ jobs:
   aburi:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - uses: kage1020/Aburi/packages/github-action@v0
         with:
@@ -79,11 +79,11 @@ through. Install the workspace first; `version` then has nothing to pin, because
 lockfile already pinned it.
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with: { fetch-depth: 0 }
-- uses: pnpm/action-setup@v4
+- uses: pnpm/action-setup@v6
   with: { version: 10 }
-- uses: actions/setup-node@v4
+- uses: actions/setup-node@v7
   with:
     node-version: 24
     cache: pnpm

@@ -1,52 +1,29 @@
 import { describe, expect, it } from "vitest"
+import type { Position } from "vscode-languageserver-protocol"
 import { resolveCallGraph } from "../../src/callgraph"
-import { enrichWithLsp } from "../../src/lsp"
-import { makeClassSymbol, makeEnrichmentInput, makeMethodSymbol } from "./fixtures/enrichment-ctx"
-import { mockServerFactory } from "./fixtures/mock-server"
-
-const HOVER_METHOD = "textDocument/hover"
-const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
-
-type HoverPosition = { line: number; character: number }
+import { enrich, makeClassSymbol, makeMethodSymbol } from "./fixtures/enrichment-ctx"
+import { hoverPosition, hoverServer } from "./fixtures/mock-server"
 
 /** 0-based line of `callLine` in the fixture `hoveredPositions` builds. */
 const CALL_LINE = 2
 
-/**
- * Where the pass hovers for the calls to `targets` on `callLine`, one position per hover. It has
- * only the line's text to go on, and an occurrence of the needle that is not the call — inside a
- * longer member, after another receiver ending in the head, in a string or a comment — would draw
- * the hover to a different member. That member's owner would then become the class the callee's
- * name is looked up in, and the call would resolve to that class's member of the name.
- */
-async function hoveredPositions(callLine: string, ...targets: string[]): Promise<HoverPosition[]> {
-  const cls = makeClassSymbol("src/a.ts", "C", 1)
+async function hoveredPositions(callLine: string, ...targets: string[]): Promise<Position[]> {
   const calls = targets.map((target) => ({ target, line: CALL_LINE + 1 }))
-  const caller = makeMethodSymbol("src/a.ts", "C", "run", 2, calls)
-  const seen: HoverPosition[] = []
-  const factory = mockServerFactory((_lang, client) => {
-    client.installHandler(DOC_SYMBOL_METHOD, () => [])
-    client.installHandler(HOVER_METHOD, (params) => {
-      const { line, character } = (params as { position: HoverPosition }).position
-      seen.push({ line, character })
+  const seen: Position[] = []
+  await enrich({
+    symbols: [
+      makeClassSymbol("src/a.ts", "C", 1),
+      makeMethodSymbol("src/a.ts", "C", "run", 2, calls),
+    ],
+    fileContents: { "src/a.ts": `class C {\n  run() {\n${callLine}\n  }\n}` },
+    serverFactory: hoverServer((params) => {
+      seen.push(hoverPosition(params))
       return null
-    })
-  })
-  await enrichWithLsp(
-    makeEnrichmentInput({
-      symbols: [cls, caller],
-      fileContents: { "src/a.ts": `class C {\n  run() {\n${callLine}\n  }\n}` },
-      serverFactory: factory,
     }),
-  )
+  })
   return seen
 }
 
-/**
- * Where `target`'s method name starts in the occurrence `anchor` picks out, read off the line
- * rather than searched for the way the pass does. `anchor` ends at the call's method name, and
- * has to occur once on the line, or it would pick out another occurrence.
- */
 function expectedColumn(line: string, anchor: string, target: string): number {
   const at = line.indexOf(anchor)
   if (at === -1 || at !== line.lastIndexOf(anchor)) {
@@ -200,8 +177,6 @@ describe("the hover lands on the call's own method", () => {
   })
 
   it("hovers the first of two calls to one target on a line, for both", async () => {
-    // The two jobs share every component of their identity, which `compareRequestJob` relies on
-    // being harmless: both ask about the same position, so they get the same answer.
     const line = "    this.save(); this.save()"
     const first = { line: CALL_LINE, character: expectedColumn(line, "    this.save", "this.save") }
 
@@ -209,9 +184,6 @@ describe("the hover lands on the call's own method", () => {
   })
 
   it("reads a regex literal as code, so an occurrence inside one draws the hover", async () => {
-    // A known gap, not a goal: telling a regex literal from a division takes more than a line of
-    // text. It costs this call its hint and files no wrong one, because typescript-language-server
-    // answers a hover inside a regex literal with nothing.
     const line = "    if (/this.save/.test(s)) this.save()"
 
     expect(await hoveredPositions(line, "this.save")).toEqual([
@@ -248,29 +220,21 @@ describe("the hint names the call's own method", () => {
       makeMethodSymbol("src/a.ts", "UserStore", "save", 6),
       run,
     ]
-    // Answer the way the server would, and only at the two places it would say anything: the
-    // `saveAll` that `BaseStore` declares, and the `save` that `UserStore` overrides.
     const at = (anchor: string, target: string) =>
       `${callIndex}:${expectedColumn(callLine, anchor, target)}`
     const answers = new Map([
       [at("    this.saveAll", "this.saveAll"), "BaseStore.saveAll"],
       [at("return this.save", "this.save"), "UserStore.save"],
     ])
-    const factory = mockServerFactory((_lang, client) => {
-      client.installHandler(DOC_SYMBOL_METHOD, () => [])
-      client.installHandler(HOVER_METHOD, (params) => {
-        const { line, character } = (params as { position: HoverPosition }).position
+    const enrichment = await enrich({
+      symbols,
+      fileContents: { "src/a.ts": lines.join("\n") },
+      serverFactory: hoverServer((params) => {
+        const { line, character } = hoverPosition(params)
         const member = answers.get(`${line}:${character}`)
         return member === undefined ? null : { contents: `(method) ${member}(): void` }
-      })
-    })
-    const enrichment = await enrichWithLsp(
-      makeEnrichmentInput({
-        symbols,
-        fileContents: { "src/a.ts": lines.join("\n") },
-        serverFactory: factory,
       }),
-    )
+    })
     const result = resolveCallGraph({
       symbols: enrichment.symbols,
       importsByFile: new Map(),

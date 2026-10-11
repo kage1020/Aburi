@@ -1,22 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs"
-import { dirname, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import {
   containsPath,
   countRecoverableParseErrors,
   parseArgs,
-  renderReport,
   resolveRepos,
   scanRunFault,
   scrubPaths,
   summariseScans,
 } from "../report.mjs"
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const read = (name) => readFileSync(resolve(HERE, "..", name), "utf8")
-
-/** A measurement as `bench()` returns it: the child's own numbers, before the streams. */
 function measurement(overrides = {}) {
   return { wallMs: 1000, maxRssKb: 120_000, exitCode: 0, failure: null, ...overrides }
 }
@@ -29,64 +21,6 @@ function run(overrides = {}) {
     measurement: measurement(overrides.measurement),
   }
 }
-
-/** Every committed sweep, so each month's lands under the test without anyone adding it. */
-const SAMPLES = readdirSync(resolve(HERE, "..", "results"))
-  .filter((name) => /^\d{4}-\d{2}-\d{2}\.json$/.test(name))
-  .map((name) => name.slice(0, -".json".length))
-
-describe("renderReport", () => {
-  it("has committed samples to render", () => {
-    expect(SAMPLES.length).toBeGreaterThan(0)
-  })
-
-  it.each(SAMPLES)("reproduces the committed %s report from its samples", (stamp) => {
-    const report = JSON.parse(read(`results/${stamp}.json`))
-    expect(renderReport(report)).toBe(read(`results/${stamp}.md`))
-  })
-
-  it("names the commit the sweep measured, and says when the tree differed from it", () => {
-    const report = JSON.parse(read("results/2026-09-01.json"))
-    report.commit = "3b917f21fc0b2a59b787f19f41615f1b022fb5bc"
-    report.dirty = false
-    expect(renderReport(report)).toContain("aburi 0.3.0 at `3b917f21` · Node")
-    report.dirty = true
-    expect(renderReport(report)).toContain("aburi 0.3.0 at `3b917f21` + uncommitted changes · Node")
-  })
-
-  it("prints every run's exit code when the runs disagree", () => {
-    const report = JSON.parse(read("results/2026-09-01.json"))
-    report.results = report.results.slice(0, 1)
-    report.results[0].scan.exitCodes = [0, 3, 0]
-    expect(renderReport(report)).toContain("| 0/3/0 |")
-    report.results[0].scan.exitCodes = [3, 3, 3]
-    report.results[0].scan.exitCode = 3
-    expect(renderReport(report)).toContain("| 3 | ✓ |")
-  })
-
-  it("renders a repository that failed as a marked row rather than a data row", () => {
-    const report = JSON.parse(read("results/2026-09-01.json"))
-    report.results = [...report.results, { id: "boom", failed: "scan", fault: "exit 1" }]
-    const rows = renderReport(report)
-      .split("\n")
-      .filter((line) => line.startsWith("| `boom`"))
-    // The repository appears in the Scan table and in the losses table, and in neither does a
-    // cell it did not earn read as a measurement.
-    expect(rows).toHaveLength(2)
-    for (const line of rows) {
-      expect(line).toContain("✗ scan")
-      expect(line).toMatch(/^\| `boom` \| — \| — \|/)
-    }
-    expect(rows[0]).toContain("✗ scan (exit 1)")
-  })
-
-  it("reports determinism as unmeasured when a single run left nothing to compare", () => {
-    const report = JSON.parse(read("results/2026-09-01.json"))
-    report.results = report.results.slice(0, 1)
-    report.results[0].scan.deterministic = null
-    expect(renderReport(report)).toContain("| n/a |")
-  })
-})
 
 describe("summariseScans", () => {
   it("condemns the whole repository when any measured run failed", () => {

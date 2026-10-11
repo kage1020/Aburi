@@ -1,8 +1,3 @@
-/**
- * Errnos that mean there is nothing at that path, as opposed to something the filesystem
- * would not hand over. Shared so discovery ("keep walking") and an explicitly named path
- * (`config-not-found`) agree on which failures are an absence.
- */
 export const MISSING_FILE_ERRNOS: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"])
 
 /** Failures whose source path / `cause` already carry the context: no `value`. */
@@ -13,11 +8,6 @@ export type ContextFreeConfigErrorCode =
   | "config-not-found"
   /** Config file is not valid JSONC. */
   | "config-parse-failed"
-  /**
-   * Config does not conform to aburi.config.v1.json, contains non-JSON values, or names one
-   * key twice in an object (or `__proto__` at all). `cause` is ajv's `ErrorObject[]` for a
-   * schema failure and a `RepeatedKey` for a key, so `Array.isArray` tells them apart.
-   */
   | "config-invalid"
 
 /** Failures attributable to a specific user-written string: `value` is required. */
@@ -36,10 +26,6 @@ export type ConfigErrorDetail =
   | { code: ContextFreeConfigErrorCode; value?: undefined }
   | { code: ValuedConfigErrorCode; value: string }
 
-/**
- * Coded error for every config failure. Consumers branch on `code` rather than message
- * text; `cause` carries the structured diagnostic (JSONC parse errors, ajv errors, errno).
- */
 export class ConfigError extends Error {
   readonly code: ConfigErrorCode
   readonly value: string | undefined

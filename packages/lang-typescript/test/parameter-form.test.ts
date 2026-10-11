@@ -1,13 +1,7 @@
 import type { Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import { normalizeAst } from "../src/index"
 import { symbolOf } from "./fixtures/ctx"
-
-/**
- * What a caller sees of a parameter's form is recorded in fields of its own: `optional` for an
- * optional or defaulted parameter, `rest` for a rest one, each written only when true. `name`
- * is the bare binding and `type` the annotation alone (LP11b). A binding that destructures
- * also lists the names it binds, in `bindings` (LP11d).
- */
 
 type Input = Signature["inputs"][number]
 
@@ -84,6 +78,10 @@ describe("readParameters — the form of a parameter", () => {
     expect(await inputsOf("a?: string")).toStrictEqual(await inputsOf('a: string = "x"'))
   })
 
+  it("records a defaulted parameter the same whatever its default", async () => {
+    expect(await inputsOf("limit = 20")).toStrictEqual(await inputsOf("limit = 10"))
+  })
+
   it("reads an abstract method's parameters", async () => {
     const source = "export abstract class A {\n  abstract m(a?: string, ...ids: string[]): void\n}"
     const symbol = await symbolOf(source, "ts:src/a.ts#A.m")
@@ -103,12 +101,28 @@ describe("readParameters — the form of a parameter", () => {
   })
 })
 
-/**
- * A recovered parse can leave a parameter with no binding the source wrote: a zero-width
- * MISSING identifier, or an ERROR node where the binding would be. A MISSING node is not
- * written (fingerprint.md §5.1(6)), so the name is the nearest text that was — and never the
- * empty string the schema's `minLength: 1` refuses (LP11c).
- */
+describe("readParameters — a parenthesis-free arrow's parameter", () => {
+  it.each([
+    ["a const's arrow", "export const f = x => x + 1", "ts:src/a.ts#f"],
+    ["an async arrow", "export const f = async x => x + 1", "ts:src/a.ts#f"],
+    ["a class field's arrow", "export class C { f = x => x }", "ts:src/a.ts#C.f"],
+  ])("is recorded for %s", async (_label, source, id) => {
+    expect((await symbolOf(source, id)).signature?.inputs).toStrictEqual([{ name: "x", type: "" }])
+  })
+
+  it("reads as its parenthesised spelling does, in the signature and the normalized string", async () => {
+    const bare = await symbolOf("export const f = x => x + 1", "ts:src/a.ts#f")
+    const parenthesised = await symbolOf("export const f = (x) => x + 1", "ts:src/a.ts#f")
+
+    expect(bare.signature).toStrictEqual(parenthesised.signature)
+    expect(normalizeAst(bare)).toBe(normalizeAst(parenthesised))
+  })
+
+  it("is not invented for an arrow with none", async () => {
+    expect(await inputsOf("", inArrow)).toStrictEqual([])
+  })
+})
+
 const REPAIRED: Array<[source: string, id: string, expected: Input]> = [
   ["function f(...: string[]) {}", "ts:src/a.ts#f", { name: "...", type: "string[]", rest: true }],
   ["function f(...,) {}", "ts:src/a.ts#f", { name: "...", type: "", rest: true }],

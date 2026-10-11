@@ -1,30 +1,5 @@
-import type { WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { extractSymbols, walkBody } from "../src/index"
-import {
-  callsOf,
-  classOf,
-  makeExtractionCtx,
-  parseSource,
-  requireTree,
-  walkOf,
-} from "./fixtures/ctx"
-
-/**
- * A class Symbol's `bodyNode` is the whole `class_body`, and the walk descended into every
- * member — so each method's calls and rules were recorded a second time on the class. `new C()`
- * resolves to the class Symbol (`call-resolution.md` CR15), so the duplicates then propagated
- * to callers that touch nothing.
- *
- * What a class Symbol's body is, is what **defining and constructing** the class runs: field
- * initialisers, static blocks, and the constructor. A method body belongs to the method's own
- * Symbol, and is skipped here — but only when there *is* one, because a member with no Symbol
- * has nowhere else to be recorded.
- *
- * A member written as a field holding a function is a member too (`functionValuedField`), so
- * every behaviour below is pinned for both spellings where both exist.
- */
+import { callsOf, classOf, walkOf, walksOf } from "./fixtures/ctx"
 
 const MERGED_METHODS = [
   "export class C {",
@@ -105,8 +80,6 @@ describe("a member's body belongs to the member's own Symbol", () => {
   })
 
   it("moves a concrete method's body off an abstract class", async () => {
-    // `abstract_class_declaration` is its own node type, and its concrete members are Symbols
-    // like any other class's.
     const source = [
       "export abstract class C {",
       "  abstract m(): void",
@@ -129,19 +102,10 @@ describe("a member's body belongs to the member's own Symbol", () => {
       { "ts:src/a.ts#C": [], "ts:src/a.ts#C.first": ["one"], "ts:src/a.ts#C.second": ["two"] },
     ],
   ])("applies the skip to every body a merged class was written with — %s", async (_l, source, expected) => {
-    // `tsc` calls this TS2300; tree-sitter accepts it, and the second `class_body` arrives on
-    // `mergedDeclarations`. A skip that only looked at `bodyNode` would leave half the
-    // duplication in place — and one that walked neither would lose the second member
-    // entirely, so both members are asserted as well as the class.
     await expectCalls(source, expected)
   })
 
   it("reads the class off the body, not off the Symbol that leads it", async () => {
-    // `const C = 1` is written first, so it heads the folded Symbol and `fullNode` is a
-    // `lexical_declaration` — which has no `name` field, so a predicate asked about *that* node
-    // answers "this class has no member Symbols" and skips nothing. `inner` then landed on the
-    // class as well as on `#C.m`, which is the state this whole change removes. The class node
-    // is a `class_body`'s parent by construction, so that is where it is read from.
     const source = ["const C = 1", "class C { m() { inner() } }"].join("\n")
 
     await expectCalls(source, { "ts:src/a.ts#C": [], "ts:src/a.ts#C.m": ["inner"] })
@@ -153,8 +117,6 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
     ["a method", classOf("  m(x = f()) { g() }")],
     ["a field holding a function", classOf("  m = (x = f()) => { g() }")],
   ])("gives %s's parameter default to the member, not the class", async (_label, source) => {
-    // A default runs on every call that omits its argument (LP20d), so it is the member's, and
-    // the class skips the parameter list the member walks rather than counting it twice.
     await expectCalls(source, { "ts:src/a.ts#C": [], "ts:src/a.ts#C.m": ["f", "g"] })
   })
 
@@ -168,8 +130,6 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
     ["a method", classOf("  m(@Body(pipe()) x = f()) { g() }")],
     ["a field holding a function", classOf("  m = (@Body(pipe()) x = f()) => { g() }")],
   ])("keeps a parameter decorator on the class for %s", async (_label, source) => {
-    // A parameter's decorator runs when the class is defined, as a member's does. `tsc` refuses
-    // one on an arrow held in a field, but the grammar accepts it, and both spellings are pinned.
     await expectCalls(source, {
       "ts:src/a.ts#C": ["Body", "pipe"],
       "ts:src/a.ts#C.m": ["f", "g"],
@@ -177,8 +137,6 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
   })
 
   it("gives a constructor's parameter default to both, as it does the constructor's body", async () => {
-    // `new C()` runs the constructor and resolves to the class (LP20b), so the class keeps the
-    // whole constructor, and `#C.constructor` walks its own parameters like any member.
     await expectCalls(classOf("  constructor(private p = makeP()) { init() }"), {
       "ts:src/a.ts#C": ["makeP", "init"],
       "ts:src/a.ts#C.constructor": ["makeP", "init"],
@@ -193,10 +151,6 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
   })
 
   it("does not treat a static member named constructor as the construction path", async () => {
-    // `new C()` never runs a static method, so a `static constructor` is not on the path LP20b
-    // is about. `tsc` refuses it, but this plugin also claims `.js`, where it is legal — and
-    // reading it as the constructor both put its body on the class and gave it the instance
-    // qname, where it collided with the real constructor's.
     const source = classOf("  constructor() { real() }", "  static constructor() { boom() }")
 
     await expectCalls(source, {
@@ -210,9 +164,6 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
     ["a method", classOf("  @Inject(makeToken())", "  m() { inner() }")],
     ["a field holding a function", classOf("  @Inject(makeToken())", "  m = () => { inner() }")],
   ])("keeps a call written in %s's decorator arguments", async (_label, source) => {
-    // A method's decorator is a **sibling** of its `method_definition` inside `class_body`, and
-    // a field's is a child of the field outside the arrow — so neither is inside the body the
-    // skip removes. `@Inject(...)` is itself a call, hence two.
     await expectCalls(source, {
       "ts:src/a.ts#C": ["Inject", "makeToken"],
       "ts:src/a.ts#C.m": ["inner"],
@@ -222,8 +173,6 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
 
 describe("a member with no Symbol keeps its body on the class", () => {
   it("keeps an anonymous default class's member bodies", async () => {
-    // `<default>` is reserved for the class itself and `<default>.m` is not a qualified name
-    // the id builder accepts, so an anonymous default class's members are not Symbols either.
     const source = ["export default class {", "  m() { hidden() }", "}"].join("\n")
 
     expect(await callsOf(source, "ts:src/a.ts#<default>")).toEqual(["hidden"])
@@ -238,9 +187,6 @@ describe("a member with no Symbol keeps its body on the class", () => {
 
 describe("the skip reaches the Symbol's own body and no other", () => {
   it("keeps a class written inside a function's body whole", async () => {
-    // `Inner` is not extracted — nested classes are not module-level declarations — so every
-    // call in it belongs to `f`. A skip applied to any `class_body` the walk meets would drop
-    // `x` from the only Symbol that could carry it.
     const source = [
       "export function f() {",
       "  class Inner {",
@@ -270,10 +216,6 @@ describe("the skip reaches the Symbol's own body and no other", () => {
 })
 
 describe("the two readers of “does this member have a Symbol?” agree", () => {
-  // The property the whole change rests on: a member body is walked by exactly one Symbol.
-  // Every call below is written once in the source, so a target on two Symbols is a body
-  // counted twice, and one on none is a body lost. The constructor is the documented exception
-  // — `new C()` runs it and resolves to the class (LP20b) — so it is on exactly two.
   const EVERY_MEMBER_SHAPE = [
     "export class Shapes {",
     "  seed = fieldInit()",
@@ -312,16 +254,9 @@ describe("the two readers of “does this member have a Symbol?” agree", () =>
   ].join("\n")
 
   it("walks every member body exactly once, and the constructor's on the class as well", async () => {
-    const result = await parseSource(EVERY_MEMBER_SHAPE)
-    const ctx = makeExtractionCtx("src/a.ts", EVERY_MEMBER_SHAPE)
-    const symbols = extractSymbols(requireTree(result.tree), ctx)
-
     const owners = new Map<string, string[]>()
-    for (const symbol of symbols) {
-      const walkCtx: WalkContext<Node> = { ...ctx, symbol }
-      for (const call of walkBody(symbol, walkCtx).calls) {
-        owners.set(call.target, [...(owners.get(call.target) ?? []), symbol.id])
-      }
+    for (const [id, { calls }] of await walksOf(EVERY_MEMBER_SHAPE)) {
+      for (const { target } of calls) owners.set(target, [...(owners.get(target) ?? []), id])
     }
 
     const written = [

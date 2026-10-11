@@ -5,11 +5,13 @@
   "type": "module",
   "description": "Documentation site for Aburi, deployed to https://aburi.kage1020.com",
   "scripts": {
-    "dev": "node scripts/copy-schema.mjs && vitepress dev",
-    "build": "node scripts/copy-schema.mjs && vitepress build",
+    "dev": "turbo run build \"--filter=@aburi/docs^...\" && node scripts/copy-schema.mjs && vitepress dev",
+    "build": "turbo run build \"--filter=@aburi/docs^...\" && node scripts/copy-schema.mjs && vitepress build",
     "preview": "vitepress preview"
   },
   "devDependencies": {
+    "@aburi/examples": "workspace:*",
+    "@aburi/schema": "workspace:*",
     "vitepress": "2.0.0-alpha.19",
     "vue": "^3.5.41"
   }
