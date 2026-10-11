@@ -1,52 +1,15 @@
-import { execFile } from "node:child_process"
 import { mkdir, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { promisify } from "node:util"
-import { useScratchWorkspace } from "@aburi/test-support"
+import {
+  commitAll,
+  git,
+  gitTestEnv,
+  initRepository,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { type RunResult, runScript } from "./fixtures/scripts"
-
-const execFileAsync = promisify(execFile)
-
-const HOOK_AND_REPOSITORY_ENV: readonly string[] = [
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_IMPLICIT_WORK_TREE",
-  "GIT_INDEX_FILE",
-  "GIT_PREFIX",
-  "GIT_COMMON_DIR",
-  "GIT_OBJECT_DIRECTORY",
-]
-
-/** An environment that keeps the developer's git config and any enclosing hook out of a fixture. */
-function gitTestEnv(anchor: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    GIT_CONFIG_GLOBAL: resolve(anchor, "absent-gitconfig"),
-    GIT_CONFIG_SYSTEM: resolve(anchor, "absent-gitconfig"),
-    GIT_AUTHOR_NAME: "Aburi Test",
-    GIT_AUTHOR_EMAIL: "test@example.invalid",
-    GIT_COMMITTER_NAME: "Aburi Test",
-    GIT_COMMITTER_EMAIL: "test@example.invalid",
-  }
-  for (const name of HOOK_AND_REPOSITORY_ENV) delete env[name]
-  return Object.assign(env, extra)
-}
-
-async function git(args: readonly string[], cwd: string): Promise<string> {
-  return (await execFileAsync("git", args, { cwd, env: gitTestEnv(cwd) })).stdout
-}
-
-async function initRepository(directory: string): Promise<void> {
-  await mkdir(directory, { recursive: true })
-  await git(["init", "-q", "-b", "main"], directory)
-}
-
-async function commitAll(directory: string, message: string): Promise<void> {
-  await git(["add", "-A"], directory)
-  await git(["commit", "-q", "-m", message], directory)
-}
 
 const scratch = useScratchWorkspace("resolve-refspec")
 

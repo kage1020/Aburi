@@ -1,5 +1,11 @@
 import { resolve } from "node:path"
-import { errorFrom, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import {
+  commitAll,
+  errorFrom,
+  initRepository,
+  recordingLogger,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   CliError,
@@ -13,7 +19,7 @@ import {
   runScan,
 } from "../src"
 import { pathExists } from "../src/fs-probe"
-import { commitAll, fakeGit, initRepository } from "./git"
+import { fakeGit } from "./git"
 import { documentWith } from "./ir-documents"
 import { TYPESCRIPT, writeConfig, writeFileAt, writeIRs, writeMonorepo } from "./workspace"
 

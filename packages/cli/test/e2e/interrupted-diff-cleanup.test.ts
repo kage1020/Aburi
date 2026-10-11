@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { gitTestEnv } from "@aburi/test-support"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { gitTestEnv } from "../git"
 
 const CLI_BIN = fileURLToPath(new URL("../../dist/bin/aburi.mjs", import.meta.url))
 
