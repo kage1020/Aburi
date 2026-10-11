@@ -1,78 +1,56 @@
-import { parseTypescriptFile } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
 import { extractWrapperCall, isContextCall, isForwardRefCall, isMemoCall } from "../src/index"
+import { candidateNamed } from "./fixtures/symbol"
 
-async function parseRoot(source: string): Promise<unknown> {
-  const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
-  if (result.tree === null) throw new Error("parse returned null")
-  return result.tree.rootNode
+async function wrapperOf(declaration: string) {
+  return extractWrapperCall((await candidateNamed(`export ${declaration}`, "X")).fullNode)
 }
 
 describe("extractWrapperCall", () => {
-  it("returns null for a non-tree-sitter value", () => {
-    expect(extractWrapperCall(null)).toBeNull()
-    expect(extractWrapperCall({ placeholder: true } as unknown)).toBeNull()
+  it("finds the outer wrapping call, not one inside its argument", async () => {
+    expect(
+      await wrapperOf("const X = forwardRef((p, r) => { useState(0); return <button ref={r} /> })"),
+    ).toEqual({ callee: "forwardRef", leaf: "forwardRef" })
   })
 
-  it("returns null when the const initializer is not a call", async () => {
-    const root = await parseRoot("const x = 42")
-    expect(extractWrapperCall(root)).toBeNull()
+  it("keeps a member callee verbatim beside its leaf", async () => {
+    expect(await wrapperOf("const X = React.forwardRef((p, r) => null)")).toEqual({
+      callee: "React.forwardRef",
+      leaf: "forwardRef",
+    })
   })
 
-  it("finds the outer wrapping call, not an inner one inside the argument body", async () => {
-    // forwardRef(fn) — the inner fn body calls useState; the outer call should still win.
-    const root = await parseRoot(
-      "const Btn = forwardRef((p, r) => { useState(0); return <button ref={r} /> })",
-    )
-    const call = extractWrapperCall(root)
-    expect(call?.callee).toBe("forwardRef")
-    expect(call?.leaf).toBe("forwardRef")
+  it("returns null for a const no call initializes", async () => {
+    expect(await wrapperOf("const X = 42")).toBeNull()
   })
 
-  it("keeps the callee text verbatim for member-expression callees", async () => {
-    const root = await parseRoot("const Btn = React.forwardRef((p, r) => null)")
-    const call = extractWrapperCall(root)
-    expect(call?.callee).toBe("React.forwardRef")
-    expect(call?.leaf).toBe("forwardRef")
+  it.each([
+    null,
+    { placeholder: true },
+  ])("returns null for %o, which is not a syntax node", (node) => {
+    expect(extractWrapperCall(node)).toBeNull()
   })
 })
 
 describe("isContextCall / isForwardRefCall / isMemoCall", () => {
-  it("recognizes createContext and React.createContext as context calls", async () => {
-    for (const source of ["const C = createContext(null)", "const C = React.createContext(null)"]) {
-      const root = await parseRoot(source)
-      expect(isContextCall(extractWrapperCall(root))).toBe(true)
-    }
+  it.each([
+    ["const X = createContext(null)", [true, false, false]],
+    ["const X = React.createContext(null)", [true, false, false]],
+    ["const X = forwardRef((p, r) => null)", [false, true, false]],
+    ["const X = React.forwardRef((p, r) => null)", [false, true, false]],
+    ["const X = memo(Inner)", [false, false, true]],
+    ["const X = React.memo(Inner)", [false, false, true]],
+    ["const X = someOtherFactory()", [false, false, false]],
+  ])("reads `%s` as [context, forwardRef, memo] = %j", async (declaration, expected) => {
+    const call = await wrapperOf(declaration)
+    expect([isContextCall(call), isForwardRefCall(call), isMemoCall(call)]).toEqual(expected)
   })
 
-  it("recognizes forwardRef and React.forwardRef as forwardRef calls", async () => {
-    for (const source of [
-      "const Btn = forwardRef((p, r) => null)",
-      "const Btn = React.forwardRef((p, r) => null)",
-    ]) {
-      const root = await parseRoot(source)
-      expect(isForwardRefCall(extractWrapperCall(root))).toBe(true)
-    }
-  })
-
-  it("recognizes memo and React.memo as memo calls", async () => {
-    for (const source of ["const M = memo(Inner)", "const M = React.memo(Inner)"]) {
-      const root = await parseRoot(source)
-      expect(isMemoCall(extractWrapperCall(root))).toBe(true)
-    }
-  })
-
-  it("does not cross-classify unrelated calls", async () => {
-    const root = await parseRoot("const V = someOtherFactory()")
-    const call = extractWrapperCall(root)
-    expect(isContextCall(call)).toBe(false)
-    expect(isForwardRefCall(call)).toBe(false)
-    expect(isMemoCall(call)).toBe(false)
-  })
-
-  it("returns false when the input is null", () => {
-    expect(isContextCall(null)).toBe(false)
-    expect(isForwardRefCall(null)).toBe(false)
-    expect(isMemoCall(null)).toBe(false)
+  it("returns false for no call at all", () => {
+    expect([isContextCall(null), isForwardRefCall(null), isMemoCall(null)]).toEqual([
+      false,
+      false,
+      false,
+    ])
   })
 })

@@ -2,45 +2,46 @@
   "$schema": "https://turborepo.com/schema.json",
   "ui": "stream",
   "tasks": {
+    "codegen": {
+      "inputs": ["scripts/**", "$TURBO_ROOT$/schema/**"],
+      "outputs": ["src/generated/**"],
+      "outputLogs": "errors-only"
+    },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "codegen"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "outputLogs": "errors-only"
     },
     "@aburi/lang-typescript#build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
-      "outputs": ["dist/**", "wasm/**"]
+      "outputs": ["dist/**", "wasm/**"],
+      "outputLogs": "errors-only"
     },
     "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**"],
-      "outputs": []
+      "dependsOn": ["^build", "codegen"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**", "$TURBO_ROOT$/vitest.shared.ts"],
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
-    "@aburi/github-action#test": {
-      "dependsOn": ["^build"],
-      // `test/uses-refs.test.ts` reads every documented `uses:` in the repository, so the
-      // files it asserts about have to be part of this task's hash. Without them a local run
-      // after editing the root README or the CI guide serves a cached pass and the guard
-      // never executes. CI is cold every time, so this only ever bit locally.
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/schema/**",
-        "$TURBO_ROOT$/README.md",
-        "$TURBO_ROOT$/docs/**/*.md",
-        "$TURBO_ROOT$/.github/workflows/*.yml"
-      ],
-      "outputs": []
+    "@aburi/cli#test": {
+      "dependsOn": ["^build", "codegen", "build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**", "$TURBO_ROOT$/vitest.shared.ts"],
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
     "@aburi/lang-typescript#test": {
       "dependsOn": ["^build", "@aburi/lang-typescript#build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**"],
-      "outputs": []
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**", "$TURBO_ROOT$/vitest.shared.ts"],
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
     "typecheck": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "codegen"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
-      "outputs": []
+      "outputs": [],
+      "outputLogs": "errors-only"
     }
   }
 }

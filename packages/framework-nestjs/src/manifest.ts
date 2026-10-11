@@ -1,6 +1,5 @@
 import type { FrameworkManifest } from "@aburi/types"
 
-/** Plugin ref; also the attribution prefix on errors about values a language plugin handed over. */
 export const FRAMEWORK_NESTJS_PLUGIN_NAME = "framework-nestjs"
 
 export const NESTJS_DERIVED_BY_PREFIX = "framework:nestjs"

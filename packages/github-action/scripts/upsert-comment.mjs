@@ -1,40 +1,7 @@
-// Upsert one Aburi report comment on a pull request: find the comment carrying the hidden marker,
-// rewrite it in place, or create it when there is none.
-//
-// This is the step `comment: true` runs, and it is also what the `workflow_run` companion runs for
-// a pull request whose own token could not post — see `docs/design/github-action.md`. Those
-// two callers are the reason this is a file rather than an inline script: the second one has no
-// action to call, only a checkout, and a second copy of the upsert would be a second marker string
-// to keep in step.
-//
-// Plain `.mjs`, committed rather than built, because a consumer references the action by path
-// (`uses: kage1020/Aburi/packages/github-action@main`) and nothing builds this repository for them.
-// `src/comment.ts` is the same flow as a library, for callers importing the package;
-// `test/upsert-comment.test.ts` pins the two to the same marker.
-//
-// Input is environment only, never argv: the Markdown is attacker-influenced on a fork's pull
-// request (it names the symbols that pull request declares), and a path or a body on a command
-// line is one shell quoting mistake away from being run.
-//
-// Exit codes: 0 done, 2 the caller's setup is wrong, 1 the GitHub API said no. Both failures write
-// a one-line `::error::` annotation, so a caller needs no wrapper around this.
-
 import { appendFileSync, readFileSync } from "node:fs"
 
-/**
- * Must equal `ABURI_COMMENT_MARKER` in `src/comment.ts`; `test/upsert-comment.test.ts` asserts it.
- * Stable across releases: comments already posted carry this exact string, and changing it orphans
- * every one of them.
- */
 const MARKER = "<!-- aburi:diff-comment -->"
 
-/**
- * GitHub's ceiling on a comment body; anything larger comes back as a 422 with nothing posted.
- * Must equal `GITHUB_COMMENT_MAX_BYTES` in `src/comment.ts`, which `test/upsert-comment.test.ts`
- * asserts. The report is rendered to fit by `aburi diff --max-bytes` (`action.yml` passes it) —
- * this end only measures, because a script holding a finished document cannot re-render it and
- * cutting the string would post half a `<details>` block.
- */
 const MAX_BYTES = 65536
 
 const INPUT_ERROR = 2
@@ -47,12 +14,6 @@ function fail(code, message) {
   process.exitCode = code
 }
 
-/**
- * Node's `fetch` reports every network-layer failure as a bare `TypeError: fetch failed` and puts
- * the reason — `ENOTFOUND`, `ECONNREFUSED`, a self-signed certificate on an Enterprise Server —
- * one or two links down the `cause` chain. Without it the whole annotation is "fetch failed",
- * which says only that something went wrong, on one line, to someone who cannot see the rest.
- */
 function reasonOf(error, depth = 2) {
   if (!(error instanceof Error)) return String(error)
   const code = typeof error.code === "string" ? `${error.code}: ` : ""
@@ -72,10 +33,6 @@ function headers(token) {
   }
 }
 
-/**
- * Preserve any base path the host mounts the API under: GitHub Enterprise Server serves it from
- * `/api/v3`, and `new URL("/repos/…", base)` would throw that segment away.
- */
 function apiUrl(apiBase, relativePath) {
   const normalised = apiBase.endsWith("/") ? apiBase : `${apiBase}/`
   return new URL(relativePath, normalised)
@@ -91,10 +48,6 @@ async function githubError(operation, response) {
   )
 }
 
-/**
- * A comment row, or null when a field this script reads is missing. `listed` rows must name their
- * author, which decides whose comment it is; the comment a write returns is ours by construction.
- */
 function parseComment(row, { listed }) {
   if (typeof row !== "object" || row === null) return null
   if (typeof row.id !== "number") return null
@@ -102,19 +55,11 @@ function parseComment(row, { listed }) {
   if (typeof row.html_url !== "string") return null
   const comment = { id: row.id, body: row.body, htmlUrl: row.html_url }
   if (!listed) return comment
-  // An author that cannot be read is an unreadable row, not a stranger's comment: passed over as
-  // someone else's, Aburi's own comment would be replaced by a second one with nothing in the log.
   if (typeof row.user !== "object" || row.user === null) return null
   if (typeof row.user.login !== "string") return null
   return { ...comment, author: { login: row.user.login, isBot: row.user.type === "Bot" } }
 }
 
-/**
- * The refusal an installation token gets from `GET /user`, and only that one. A 403 also comes
- * back for a secondary rate limit or a personal token an organisation's SSO has not authorised,
- * and reading those as "an installation token" would give up the login match for a personal
- * token: a duplicate report, or another bot's comment rewritten.
- */
 const INTEGRATION_REFUSAL = "Resource not accessible by integration"
 
 async function isIntegrationRefusal(response) {
@@ -126,13 +71,6 @@ async function isIntegrationRefusal(response) {
   return body?.message === INTEGRATION_REFUSAL
 }
 
-/**
- * Who this token posts as. A personal token answers `GET /user` with its login. An installation
- * token — the default `github.token`, or a GitHub App's — is refused there with a 403 that says so
- * (`INTEGRATION_REFUSAL`) and posts as a `[bot]` account, so the answer is "a bot" without a name:
- * an installation token cannot read its own app's slug. Any other refusal — a 401 for a bad token,
- * a rate limit, an SSO block — is an error naming this request, not a guess.
- */
 async function poster(context) {
   const response = await fetch(apiUrl(context.apiBase, "user"), {
     method: "GET",
@@ -147,25 +85,13 @@ async function poster(context) {
   return { login: user.login }
 }
 
-/**
- * Aburi's comment is one this token wrote, opening with the marker. A comment that merely quotes
- * the marker — in a code span, a question about the action, or planted on a fork's pull request
- * before the `workflow_run` companion posts — is someone else's and is never rewritten.
- */
 function isOwnComment(comment, self) {
   if (!comment.body.startsWith(MARKER)) return false
   return self.login === null ? comment.author.isBot : comment.author.login === self.login
 }
 
-/**
- * Returns the marker comment and how many rows were unreadable. The count is reported rather than
- * swallowed: if the rejected row *was* Aburi's comment, this returns null and the caller creates a
- * second one — the in-place update the whole design rests on, failing silently.
- */
 async function findMarkerComment(context) {
   let skipped = 0
-  // Asked once, and only when a comment opens with the marker: a pull request with no report yet
-  // costs no extra request.
   let self
   for (let page = 1; ; page++) {
     const url = apiUrl(
@@ -211,14 +137,6 @@ async function writeComment(context, { method, path, body }) {
   return written
 }
 
-/**
- * Step outputs, when a step is what we are running in. Absent outside Actions, which is fine.
- *
- * A failure here is a warning and not a failure of the run: by this point the comment is posted,
- * and exiting non-zero would leave the one state a reader cannot interpret — a red step next to
- * the comment it says it could not write. Unwrapped, it would also escape `main` as an unhandled
- * rejection, which is the one path out of this script with no `::error::` line on it.
- */
 function setOutputs(outcome) {
   const target = process.env.GITHUB_OUTPUT
   if (!target) return
@@ -243,8 +161,6 @@ function readContext() {
   if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) {
     return { error: `GITHUB_REPOSITORY must be "owner/repo" (got "${repository}").` }
   }
-  // Parsed strictly, not with `Number()`: on the `workflow_run` path this number decides which pull
-  // request the report lands on, and a "12abc" that reads as 12 would put it on someone else's.
   if (!/^[1-9][0-9]*$/.test(rawNumber)) {
     return {
       error: `PR_NUMBER must be a positive integer (got "${rawNumber}"). An event that carries no pull request in its payload has to be given the number explicitly.`,
@@ -256,9 +172,6 @@ function readContext() {
 }
 
 async function main() {
-  // Under `cli: workspace` this runs on whatever Node the caller installed the workspace with, and
-  // a global `fetch` is Node 18 and up. Saying so is worth three lines: the alternative is a
-  // `fetch is not defined` on the last step of a job that has already done all the work.
   if (typeof fetch !== "function") {
     fail(
       INPUT_ERROR,
@@ -280,14 +193,12 @@ async function main() {
     fail(INPUT_ERROR, `${context.markdownPath} could not be read (${reasonOf(error)}).`)
     return
   }
-  // The marker goes first even when the report quotes it further down: only a comment that opens
-  // with it is recognised as Aburi's on the next run.
   const body = raw.startsWith(MARKER) ? raw : `${MARKER}\n\n${raw}`
   const size = Buffer.byteLength(body, "utf8")
   if (size > MAX_BYTES) {
     fail(
       INPUT_ERROR,
-      `${context.markdownPath} is ${size} bytes with the marker, over GitHub's ${MAX_BYTES}-byte comment limit; posting it would fail with a 422. Re-run the diff with a smaller --max-bytes (markdown-projection.md) and post that.`,
+      `${context.markdownPath} is ${size} bytes with the marker, over GitHub's ${MAX_BYTES}-byte comment limit; posting it would fail with a 422. Re-run the diff with a smaller --max-bytes and post that.`,
     )
     return
   }
@@ -301,8 +212,6 @@ async function main() {
       )
     }
     if (existing !== null && existing.body === body) {
-      // The same bytes as last time: a PATCH here would bump `updated_at` and notify every
-      // subscriber to say nothing had changed.
       outcome = { action: "unchanged", commentId: existing.id, url: existing.htmlUrl }
     } else if (existing !== null) {
       const updated = await writeComment(context, {

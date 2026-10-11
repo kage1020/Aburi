@@ -28,12 +28,6 @@ export interface ProjectComponentInput {
   dependencies: readonly Dependency[]
 }
 
-/**
- * markdown-projection.md — `components/<id>.md` for one Component. `symbols[]` is expected
- * to be the subset that belongs to `component.id`; filtering belongs to the caller, which
- * keeps the projection pure. Newlines are always `\n`; a caller that needs CRLF must
- * post-process.
- */
 export function projectComponent(input: ProjectComponentInput): string {
   const { component, symbols, dependencies } = input
   const keptSymbols = symbols.filter((s) => !s.dropped)
@@ -64,8 +58,6 @@ export function projectComponent(input: ProjectComponentInput): string {
       !isSymbolIdEndpoint(d.from) &&
       !isSymbolIdEndpoint(d.to),
   )
-  // Keyed by `string`: `isSymbolIdEndpoint` answers about an endpoint's silhouette, not
-  // its well-formedness, so the membership test must accept whatever the document holds.
   const symbolIdsInComponent = new Set<string>(keptSymbols.map((s) => s.id))
   const symbolLevelDeps = dependencies.filter(
     (d) =>
@@ -113,13 +105,6 @@ function joinCode(items: readonly string[]): string {
   return items.map((item) => inlineCode(item)).join(", ")
 }
 
-/**
- * Effects of the Boundary Symbols (a `boundary: true` decorator or a `framework:` extKind).
- * effect-propagation.md puts this rollup in the projection layer: propagation runs to
- * full closure regardless of boundary status; the view chooses what to surface. Every effect
- * (local + propagated) per boundary Symbol, sorted by `(id, target)`; the section is omitted
- * when no boundary Symbol has an effect.
- */
 function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {
   const boundaries = symbols
     .filter(
@@ -165,12 +150,6 @@ function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
   return lines
 }
 
-/**
- * markdown-projection.md — one Symbol block, with its omit rules: empty `decorators` → no row,
- * `signature: null` → no row, empty `rules` / `effects` / `calls` → no section, dropped
- * fingerprint → no `<sub>` line.
- * A blank line follows each list section that something comes after (§5.2, MP14).
- */
 export function renderSymbolBlock(symbol: IRSymbol): string[] {
   const rows: string[] = []
   let afterList = false

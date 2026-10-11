@@ -1,12 +1,3 @@
-/**
- * Styles for the git-diff / aburi-diff comparison under the home hero. Every
- * rule stays inside `.home-example`, since this file is global rather than
- * scoped to a component.
- *
- * The hero gives back the padding it would otherwise spend below its buttons,
- * so the comparison reaches the first view on a laptop screen.
- */
-
 @media (min-width: 960px) {
   .VPHome .VPHero {
     padding-top: calc(var(--vp-nav-height) + var(--vp-layout-top-height, 0px) + 32px);
@@ -108,7 +99,6 @@
   padding: 0 14px;
 }
 
-/* A line with no text still has to take a line's height. */
 .home-example .pane-body .blank::after {
   content: " ";
 }

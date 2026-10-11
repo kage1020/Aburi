@@ -1,7 +1,7 @@
 import { asSyntaxNode, calleeLeaf, calleeText } from "@aburi/core"
 import type {
   Confidence,
-  ExtractionContext,
+  FrameworkClassifyContext,
   OpaqueAstNode,
   SymbolCandidate,
   SymbolClassification,
@@ -21,13 +21,9 @@ interface ExpressClassification {
   confidence: Confidence
 }
 
-/**
- * First-match-wins over `const` symbols (router instances) and `call` symbols (module-level
- * chained-call registrations); every other kind abstains with `null`.
- */
 export function classifyExpressSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): SymbolClassification | null {
   const result = classifyBySymbolKind(symbol, ctx)
   if (result === null) return null
@@ -40,7 +36,7 @@ export function classifyExpressSymbol(
 
 function classifyBySymbolKind(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): ExpressClassification | null {
   if (symbol.kind === "const") return classifyConstSymbol(symbol, ctx)
   if (symbol.kind === "call") return classifyCallSymbol(symbol, ctx)
@@ -49,9 +45,9 @@ function classifyBySymbolKind(
 
 function classifyConstSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): ExpressClassification | null {
-  const routerCall = extractRouterCall(symbol.fullNode)
+  const routerCall = extractRouterCall(symbol.fullNode, symbol.name)
   if (routerCall === null) return null
   // An `express` import is what separates "definitely Express" (high) from "matches the pattern" (medium).
   const confidence: Confidence = hasExpressImport(ctx) ? "high" : "medium"
@@ -64,7 +60,7 @@ function classifyConstSymbol(
 
 function classifyCallSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): ExpressClassification | null {
   const call = asSyntaxNode(symbol.fullNode)
   if (call === null) return null
@@ -98,8 +94,6 @@ function classifyUseCall(
   const shape = analyzeUseArguments(symbol.fullNode)
   if (shape === null) return null
 
-  // Priority: arity-4 error middleware (unambiguous) > `use(pathLiteral, identifier)` mount
-  // > anything else fitting the arity-3 or identifier shape.
   if (shape.hasErrorHandler) {
     return {
       extKind: "framework:express:error-middleware",
@@ -130,11 +124,6 @@ function classifyUseCall(
   return null
 }
 
-/**
- * `app.use('/api', router)`: a path literal, a bare identifier, and no handler-shaped argument.
- * The path may be written in backticks with no substitution (`` app.use(`/api`, router) ``),
- * which is the same value and is the path the registration's id is named by.
- */
 function isMountShape(shape: UseArgumentShape): boolean {
   return (
     shape.argCount === 2 &&
