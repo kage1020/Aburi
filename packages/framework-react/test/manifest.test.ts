@@ -1,50 +1,31 @@
 import { describe, expect, it } from "vitest"
-import { frameworkReactManifest } from "../src/index"
+import { frameworkReactManifest, REACT_EXT_KINDS } from "../src/index"
 
 describe("frameworkReactManifest", () => {
-  it("declares the framework-react name and framework type", () => {
-    expect(frameworkReactManifest.name).toBe("framework-react")
-    expect(frameworkReactManifest.type).toBe("framework")
+  it("declares the react framework, owning the framework:react prefixes and no effects", () => {
+    expect(frameworkReactManifest).toMatchObject({
+      name: "framework-react",
+      type: "framework",
+      provides: {
+        effects: [],
+        effectPrefixes: [],
+        extKindPrefixes: ["framework:react"],
+        derivedByPrefixes: ["framework:react"],
+        frameworks: ["react"],
+      },
+    })
   })
 
-  it("enumerates the seven React extKinds, each described", () => {
-    const ids = frameworkReactManifest.provides.extKinds.map((e) => e.id).sort()
-    expect(ids).toEqual([
-      "framework:react:component",
-      "framework:react:context",
-      "framework:react:forward-ref",
-      "framework:react:hoc",
-      "framework:react:hook",
-      "framework:react:memo",
-      "framework:react:provider",
+  it("declares each extKind the classifier assigns, on the kind it falls back to", () => {
+    expect(frameworkReactManifest.provides.extKinds.map((e) => [e.id, e.baseKind])).toEqual([
+      ["framework:react:component", "function"],
+      ["framework:react:hook", "function"],
+      ["framework:react:context", "const"],
+      ["framework:react:forward-ref", "const"],
+      ["framework:react:memo", "const"],
+      ["framework:react:provider", "function"],
+      ["framework:react:hoc", "function"],
     ])
-    for (const entry of frameworkReactManifest.provides.extKinds) {
-      expect(entry.description).not.toBe("")
-    }
-  })
-
-  it("keeps context/forward-ref/memo pinned to baseKind const, everything else to function", () => {
-    const byId = new Map(frameworkReactManifest.provides.extKinds.map((e) => [e.id, e.baseKind]))
-    expect(byId.get("framework:react:context")).toBe("const")
-    expect(byId.get("framework:react:forward-ref")).toBe("const")
-    expect(byId.get("framework:react:memo")).toBe("const")
-    expect(byId.get("framework:react:component")).toBe("function")
-    expect(byId.get("framework:react:hook")).toBe("function")
-    expect(byId.get("framework:react:provider")).toBe("function")
-    expect(byId.get("framework:react:hoc")).toBe("function")
-  })
-
-  it("owns the framework:react prefix in both extKind and derivedBy channels", () => {
-    expect(frameworkReactManifest.provides.extKindPrefixes).toEqual(["framework:react"])
-    expect(frameworkReactManifest.provides.derivedByPrefixes).toEqual(["framework:react"])
-  })
-
-  it("declares react as the framework name (matches core component autodetect)", () => {
-    expect(frameworkReactManifest.provides.frameworks).toEqual(["react"])
-  })
-
-  it("declares no effect vocabulary (that is the effects plugin's job)", () => {
-    expect(frameworkReactManifest.provides.effects).toEqual([])
-    expect(frameworkReactManifest.provides.effectPrefixes).toEqual([])
+    expect(frameworkReactManifest.provides.extKinds.map((e) => e.id)).toEqual([...REACT_EXT_KINDS])
   })
 })

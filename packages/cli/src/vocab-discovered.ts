@@ -1,26 +1,18 @@
 import type { UndeclaredVocabOccurrence } from "@aburi/core"
 
-/** Written beside the IR by a scan with strict off (`extension-vocab.md`, `config.md`). */
 export const VOCAB_DISCOVERED_FILENAME = "aburi-vocab-discovered.json"
 
-/** How many occurrences of one value the record quotes; the rest are counted. */
 const SAMPLE_LIMIT = 3
 
 export interface DiscoveredVocabItem {
   kind: UndeclaredVocabOccurrence["kind"]
   value: string
-  /** The plugin whose manifest the value belongs in: the first to emit it in this run. */
   firstSeenBy: string
-  /** Every other plugin that emitted it, in the order they first did. */
   alsoSeenBy: string[]
   occurrences: number
   samples: { file: string; line?: number; symbol: string }[]
 }
 
-/**
- * One item per (kind, value), in the order the scan first met each. Scan order is path order,
- * so the record is the same for the same workspace.
- */
 export function summarizeUndeclaredVocab(
   occurrences: readonly UndeclaredVocabOccurrence[],
 ): DiscoveredVocabItem[] {
@@ -56,7 +48,6 @@ export function summarizeUndeclaredVocab(
   return [...items.values()]
 }
 
-/** The file's text. `discoveredAt` is left out when the run suppresses timestamps. */
 export function renderVocabDiscovered(
   items: readonly DiscoveredVocabItem[],
   discoveredAt: string | null,

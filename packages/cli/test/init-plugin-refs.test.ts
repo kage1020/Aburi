@@ -1,141 +1,70 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { readFile } from "node:fs/promises"
+import { useScratchWorkspace } from "@aburi/test-support"
+import { describe, expect, it } from "vitest"
 import { runInit } from "../src"
+import { writePackageJson } from "./workspace"
 
-/**
- * `aburi.json` uses two different vocabularies under the same key name:
- *
- * - top-level `languages` / `frameworks` hold **plugin refs** (`PluginRef`), which the
- *   plugin loader resolves as module specifiers;
- * - `components[].languages` holds **language ids** (`LanguageId`, `^[a-z][a-z0-9]*$`),
- *   which cannot express a hyphenated manifest name.
- *
- * A detector id in the top-level array is refused by the loader (exit 2), and a
- * manifest name inside `components[]` fails the `LanguageId` pattern, so neither field
- * tolerates the other's vocabulary. These tests pin the split at both ends.
- */
+const workspace = useScratchWorkspace("init-plugin-refs")
 
-let scratch = ""
-
-async function makeWorkspace(dependencies: Record<string, string>): Promise<void> {
-  await writeFile(
-    resolve(scratch, "package.json"),
-    JSON.stringify({ name: "app", private: true, dependencies }),
-    "utf8",
-  )
-  await mkdir(resolve(scratch, "src"), { recursive: true })
-  await writeFile(resolve(scratch, "src/a.ts"), "export function alpha() {}\n", "utf8")
-}
-
-async function readConfig(path: string): Promise<{
+interface WrittenConfig {
   languages: string[]
   frameworks: string[]
   components: { languages: string[]; frameworks: string[] }[]
-}> {
-  const raw = await readFile(path, "utf8")
-  return JSON.parse(raw) as {
-    languages: string[]
-    frameworks: string[]
-    components: { languages: string[]; frameworks: string[] }[]
-  }
 }
 
-beforeEach(async () => {
-  scratch = await mkdtemp(resolve(tmpdir(), "aburi-init-refs-"))
-})
+async function writeApp(dependencies: Record<string, string>): Promise<void> {
+  await writePackageJson(workspace.root, { name: "app", private: true, dependencies })
+  await workspace.writeSource("src/a.ts", "export function alpha() {}\n")
+}
 
-afterEach(async () => {
-  await rm(scratch, { recursive: true, force: true })
-})
+async function initWithDependencies(dependencies: Record<string, string>) {
+  await writeApp(dependencies)
+  const report = await runInit({ cwd: workspace.root })
+  const config = JSON.parse(await readFile(report.outputPath, "utf8")) as WrittenConfig
+  return { report, config }
+}
 
-describe("runInit — top-level plugin refs", () => {
-  it("writes manifest names, not language ids, under `languages`", async () => {
-    await makeWorkspace({})
-    const report = await runInit({ cwd: scratch })
-    const config = await readConfig(report.outputPath)
+describe("aburi init — the plugins it writes", () => {
+  it("writes plugin refs at the top level and detector ids inside components[]", async () => {
+    const { report, config } = await initWithDependencies({ "@nestjs/core": "^10.0.0" })
 
     expect(config.languages).toEqual(["lang-typescript"])
-  })
-
-  it("writes framework plugin names for every framework it has a plugin for", async () => {
-    await makeWorkspace({ "@nestjs/core": "^10.0.0" })
-    const report = await runInit({ cwd: scratch })
-    const config = await readConfig(report.outputPath)
-
     expect(config.frameworks).toEqual(["framework-nestjs"])
+    expect(config.components).toEqual([
+      expect.objectContaining({ languages: ["ts"], frameworks: ["nestjs"] }),
+    ])
+    expect(report.detectedLanguages).toEqual(["ts"])
+    expect(report.detectedFrameworks).toEqual(["nestjs"])
   })
 
-  it("keeps the LanguageId vocabulary inside components[]", async () => {
-    await makeWorkspace({ "@nestjs/core": "^10.0.0" })
-    const report = await runInit({ cwd: scratch })
-    const config = await readConfig(report.outputPath)
+  it("suggests the language plugin ahead of the framework plugins", async () => {
+    await writeApp({ "@nestjs/core": "^10.0.0" })
 
-    const [component] = config.components
-    expect(component).toBeDefined()
-    expect(component?.languages).toContain("ts")
-    expect(component?.frameworks).toContain("nestjs")
-    for (const id of component?.languages ?? []) expect(id).toMatch(/^[a-z][a-z0-9]*$/)
+    const report = await runInit({ cwd: workspace.root, withSuggestions: true })
+
+    expect(report.suggestedPlugins).toEqual(["@aburi/lang-typescript", "@aburi/framework-nestjs"])
   })
 
-  it("omits detected frameworks that have no plugin instead of emitting an unresolvable ref", async () => {
-    await makeWorkspace({ svelte: "^4.0.0" })
-    const report = await runInit({ cwd: scratch })
-    const config = await readConfig(report.outputPath)
+  it("reports a framework it has no plugin for instead of writing a ref nothing resolves", async () => {
+    const { report, config } = await initWithDependencies({ svelte: "^4.0.0" })
 
     expect(config.frameworks).toEqual([])
     expect(report.detectedFrameworks).toContain("svelte")
-  })
-
-  it("reports the detector vocabulary unchanged so the CLI summary stays human-facing", async () => {
-    await makeWorkspace({ "@nestjs/core": "^10.0.0" })
-    const report = await runInit({ cwd: scratch })
-
-    expect(report.detectedLanguages).toContain("ts")
-    expect(report.detectedFrameworks).toContain("nestjs")
-  })
-})
-
-describe("runInit — detected ids with no first-party plugin", () => {
-  it("reports an unmapped framework without emitting an unresolvable ref", async () => {
-    await makeWorkspace({ svelte: "^4.0.0" })
-    const report = await runInit({ cwd: scratch })
-
     expect(report.unmappedFrameworks).toEqual(["svelte"])
     expect(report.unmappedLanguages).toEqual([])
   })
 
-  it("reports an unmapped language, which is what leaves `languages` empty", async () => {
-    // Ten-plus files of one extension is what the detector needs before it records the
-    // language at all (`LANGUAGE_MIN_FILES`), so a smaller sample would fall back to `ts`
-    // and never exercise this branch.
-    await writeFile(
-      resolve(scratch, "package.json"),
-      JSON.stringify({ name: "app", private: true }),
-      "utf8",
-    )
-    await mkdir(resolve(scratch, "src"), { recursive: true })
+  it("reports a language it has no plugin for, which leaves `languages` empty", async () => {
+    await writePackageJson(workspace.root, { name: "app", private: true })
     for (let i = 0; i < 15; i++) {
-      await writeFile(resolve(scratch, `src/m${i}.py`), "def f():\n    return 1\n", "utf8")
+      await workspace.writeSource(`src/m${i}.py`, "def f():\n    return 1\n")
     }
 
-    const report = await runInit({ cwd: scratch })
-    const config = await readConfig(report.outputPath)
+    const report = await runInit({ cwd: workspace.root })
+    const config = JSON.parse(await readFile(report.outputPath, "utf8")) as WrittenConfig
 
-    expect(report.detectedLanguages).toContain("py")
     expect(report.unmappedLanguages).toEqual(["py"])
     expect(config.languages).toEqual([])
-    // The detector's own vocabulary stays accurate; only the plugin-ref array is empty.
     expect(config.components[0]?.languages).toContain("py")
-  })
-})
-
-describe("runInit --with-suggestions", () => {
-  it("lists the language plugin before framework plugins", async () => {
-    await makeWorkspace({ "@nestjs/core": "^10.0.0" })
-    const report = await runInit({ cwd: scratch, withSuggestions: true })
-
-    expect(report.suggestedPlugins).toEqual(["@aburi/lang-typescript", "@aburi/framework-nestjs"])
   })
 })
