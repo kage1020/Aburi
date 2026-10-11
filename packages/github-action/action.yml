@@ -16,9 +16,6 @@ inputs:
       lockfile decides the version.
     required: false
     default: "latest"
-  # The context paths below are written as prose on purpose. The runner parses a description as a
-  # template, with a context set that has no `github` in it, so an expression here fails the whole
-  # manifest to load. `test/action-yml.test.ts` holds the line.
   refspec:
     description: >-
       `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls back to the
@@ -29,8 +26,8 @@ inputs:
     default: ""
   fail-on:
     description: >-
-      Value passed to `aburi diff --fail-on`. Follows the CI gate grammar defined in
-      `docs/design/cli-spec.md` (e.g. `changed`, `removed:>10`, `dropped-toggled:to-dropped`).
+      Value passed to `aburi diff --fail-on`, in the CLI's gate grammar (e.g. `changed`,
+      `removed:>10`, `dropped-toggled:to-dropped`); see https://aburi.kage1020.com/reference/cli.
       Leave empty to run in report-only mode.
     required: false
     default: ""
@@ -69,7 +66,7 @@ inputs:
   max-bytes:
     description: >-
       Size cap for `diff.md`, in UTF-8 bytes, forwarded as `--max-bytes`. The report meets it
-      least-important-first (`docs/design/markdown-projection.md`) rather than being cut
+      least-important-first rather than being cut
       mid-block: sections of whole symbols are cut to names and locations before a section is
       dropped, and the report says at the top which sections are short and which went, pointing
       at `diff.full.md` for the rest. Left empty it is 65507:
@@ -138,23 +135,14 @@ runs:
           dlx|workspace) : ;;
           *) echo "::error::cli must be one of: dlx | workspace (got '$CLI')." >&2; exit 2 ;;
         esac
-        # Checked rather than compared: every other value of `comment` reads as false further down,
-        # so `comment: yes` would run green, post nothing, and slip past the format check above
-        # without ever saying why.
         case "$COMMENT" in
           true|false) : ;;
           *) echo "::error::comment must be true or false (got '$COMMENT')." >&2; exit 2 ;;
         esac
-        # `scripts/resolve-max-bytes.mjs` rejects the same values, and is where the rule is
-        # tested. Repeated here so a typo is caught before the toolchain is installed and, under
-        # `cli: dlx`, before a package is fetched — not because the later check might miss it.
-        # `0` is the documented "no cap" spelling, so it passes.
         if [ -n "$MAX_BYTES" ] && ! printf '%s' "$MAX_BYTES" | grep -Eq '^(0|[1-9][0-9]*)$'; then
           echo "::error::max-bytes must be a non-negative integer, or empty (got '$MAX_BYTES')." >&2
           exit 2
         fi
-        # The CLI reads `--output-dir ""` as the directory it runs in, while the report paths
-        # would be looked for elsewhere; an empty value has no one meaning, so it is refused.
         if [ -z "$OUTPUT_DIR" ]; then
           echo "::error::output-dir must not be empty." >&2
           exit 2
@@ -184,19 +172,15 @@ runs:
         fi
         echo "value=${PR_BASE_SHA}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
-    # Only the dlx path needs a toolchain of its own. Under `cli: workspace` the caller
-    # has already installed the workspace, which they could not have done without Node and
-    # pnpm; re-running these would swap that toolchain out from under the install and run
-    # the CLI on a Node it was never built against.
     - name: "Setup pnpm"
       if: inputs.cli == 'dlx'
-      uses: "pnpm/action-setup@v4"
+      uses: "pnpm/action-setup@v6"
       with:
         version: ${{ inputs.pnpm-version }}
 
     - name: "Setup Node.js"
       if: inputs.cli == 'dlx'
-      uses: "actions/setup-node@v4"
+      uses: "actions/setup-node@v7"
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -219,23 +203,13 @@ runs:
         if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
         if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
 
-        # `workspace` runs the CLI the project installed, which is the only way a config naming a
-        # plugin by package can work: the CLI resolves that plugin from its own location, and under
-        # `pnpm dlx` that location is the pnpm store, not the checkout. The resolver is a script
-        # rather than an inline heredoc so it can be tested; `docs/design/github-action.md` is
-        # the contract it implements, and `test/resolve-cli-bin.test.ts` runs it.
         if [ "$CLI" = "workspace" ]; then
-          # stderr goes to a file, never merged into the captured stdout: a Node warning on the
-          # success path (an `ExperimentalWarning` from the caller's NODE_OPTIONS, say) would
-          # otherwise be prepended to the path and run as one.
           resolve_error="${RUNNER_TEMP:-/tmp}/aburi-resolve-cli-bin.err"
           set +e
           cli_bin=$(node "$GITHUB_ACTION_PATH/scripts/resolve-cli-bin.mjs" 2>"$resolve_error")
           resolve_status=$?
           set -e
           if [ "$resolve_status" != "0" ]; then
-            # Written before the exit so a caller reading `cli-exit-code` gets the 2 this is,
-            # rather than the empty string an early exit would leave behind.
             echo "diff-json-path=" >> "$GITHUB_OUTPUT"
             echo "diff-md-path=" >> "$GITHUB_OUTPUT"
             echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"
@@ -247,28 +221,11 @@ runs:
           runner=(pnpm dlx "@aburi/cli@$VERSION")
         fi
 
-        # The size cap. 65536 is GitHub's comment-body limit and the upsert prepends a 29-byte
-        # marker line, which leaves 65507 for the report — the default the script below holds,
-        # against `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`. Applied even under
-        # `comment: false`, and deliberately: that is the mode a fork's pull request runs in,
-        # where the Markdown goes up as an artefact for the `workflow_run` companion to post
-        # (`docs/design/github-action.md`) — a file capped only when this job was the one posting would be rejected there
-        # instead, which is the same 422 on the one pull request whose author cannot see the
-        # companion's log. `diff.json` is uncapped, and so is `diff.md` under `max-bytes: 0`.
-        #
-        # A script rather than a branch here, for the reason the CLI resolver above is one: this
-        # decision has four outcomes and a subprocess in the middle of it, and a `run:` block
-        # cannot be tested. `test/resolve-max-bytes.test.ts` runs it.
-        #
-        # stderr is left alone so its `::warning::` annotations reach the log; only stdout, which
-        # carries the budget, is captured.
         set +e
         budget=$(node "$GITHUB_ACTION_PATH/scripts/resolve-max-bytes.mjs" "${runner[@]}")
         budget_status=$?
         set -e
         if [ "$budget_status" != "0" ]; then
-          # Same shape as the resolver's failure above: the outputs are written before the exit,
-          # so a caller reading `cli-exit-code` gets the 2 this is rather than an empty string.
           echo "diff-json-path=" >> "$GITHUB_OUTPUT"
           echo "diff-md-path=" >> "$GITHUB_OUTPUT"
           echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"
@@ -281,20 +238,8 @@ runs:
         status=$?
         set -e
 
-        # Preserve the CLI's own exit code:
-        #   0 = success, 1 = runtime error, 2 = input error, 3 = --fail-on gate or plugin error.
-        # See `packages/cli/src/exit-codes.ts` for the canonical mapping.
-        # We propagate `status` instead of failing here so the subsequent comment step
-        # can still post the diff (which is especially valuable when status=3 — a
-        # triggered gate is precisely what reviewers need to see on the PR). Written before the
-        # report paths are worked out, so a failure there cannot lose the gate's verdict.
         echo "cli-exit-code=$status" >> "$GITHUB_OUTPUT"
 
-        # Absolute, and only for a file this run wrote: `scripts/report-paths.mjs` says why, and
-        # `test/report-paths.test.ts` runs it. An empty `diff-md-path` is what keeps the comment
-        # step from posting after a plugin error, which exits 3 like a tripped gate. Same shape as
-        # the two scripts above: captured, and both paths written empty if the script fails, so
-        # `$GITHUB_OUTPUT` never holds half of its answer.
         set +e
         paths=$(node "$GITHUB_ACTION_PATH/scripts/report-paths.mjs")
         paths_status=$?
@@ -308,15 +253,6 @@ runs:
 
     - name: "Aburi: upsert PR comment"
       id: post-comment
-      # Only post when the CLI actually produced the Markdown file. That means:
-      #   - `comment: true` (opt-in),
-      #   - this run wrote `diff.md` (diff-md-path is non-empty: `format` included markdown,
-      #     and the CLI got as far as writing it — a plugin error's exit 3 does not),
-      #   - the CLI exited either clean (0) or with a --fail-on gate trip (3).
-      # We deliberately skip on exit=1 (runtime error) and exit=2 (input error)
-      # because the diff artefact will be missing or partial, and running the
-      # comment step against a non-existent file would surface as an ENOENT that
-      # obscures the CLI's real failure in the workflow log.
       if: >-
         ${{ inputs.comment == 'true'
             && steps.diff.outputs.diff-md-path != ''
@@ -325,26 +261,11 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-        # The upsert is a committed script, not a heredoc, because a second caller runs the same
-        # one: the `workflow_run` companion that posts for a pull request whose own token is
-        # read-only (`docs/design/github-action.md`). It runs on the caller's Node — the same
-        # one that just ran the CLI — and needs nothing installed.
-        # Absolute already (`scripts/report-paths.mjs`), so it reads the same from this step's
-        # directory as from the one the CLI ran in.
         MARKDOWN_PATH: ${{ steps.diff.outputs.diff-md-path }}
-        # The same pair `actions/github-script` calls `context.issue.number`, spelled out because a
-        # manifest has no such helper: the pull request on a `pull_request` / `pull_request_target`
-        # event, and the issue on an `issue_comment` one, which is how a slash-command workflow
-        # passing its own `refspec` used to reach its pull request. Empty on any other event, and
-        # the script exits 2 saying so.
         PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
       run: node "$GITHUB_ACTION_PATH/scripts/upsert-comment.mjs"
 
     - name: "Aburi: propagate CLI exit code"
-      # `always()` because a composite action stops at its first failing step: without it, a 403 or
-      # a rate limit in the comment step would end the job on a GitHub API error and never say that
-      # the gate had fired, which is the one fact that run existed to report. An empty CLI_EXIT
-      # (an earlier step failed on its own terms) reads as 0 here and leaves that failure standing.
       if: always()
       shell: bash
       env:

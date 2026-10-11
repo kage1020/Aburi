@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import pluginSchema from "@aburi/schema/aburi.plugin.v1.json" with { type: "json" }
 import type { PluginManifest } from "@aburi/types"
 import Ajv2020, {
   type ErrorObject,
@@ -6,14 +7,9 @@ import Ajv2020, {
   type ValidateFunction,
 } from "ajv/dist/2020.js"
 import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
-import pluginSchema from "../../../schema/aburi.plugin.v1.json" with { type: "json" }
 import { RegistryError } from "./errors"
 import { describeRepeatedKey, JSONC_PARSE_OPTIONS, scanKeys } from "./repeated-keys"
 
-// strictTypes: false because aburi.plugin.v1.json uses if/then sub-schemas that constrain
-// already-typed array fields via `maxItems` without re-stating `"type": "array"`. ajv's
-// strictTypes rejects that pattern even though it's well-formed JSON Schema. All other
-// strict checks (strictTuples, strictRequired, etc.) remain on.
 const ajv = new Ajv2020({
   strict: true,
   strictTypes: false,
@@ -31,11 +27,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null
 }
 
-/**
- * Extract a string `code` property from any thrown value. Accepts both plain objects
- * (`{ code: "X" }`) and class instances (Node's SystemError, which Error.prototype-inherits
- * so a plain-object check would reject it). Falls back to "unknown" when no string code exists.
- */
 function getErrno(value: unknown): string {
   if (value === null || typeof value !== "object") return "unknown"
   const code = (value as { code?: unknown }).code
@@ -50,11 +41,6 @@ function tryGetName(parsed: unknown): string[] {
   return []
 }
 
-/**
- * Pure JSONC → PluginManifest. Useful for in-memory manifests (tests). A key the text names twice
- * in one object, or `__proto__` at all, is refused before the schema runs, since the parsed value
- * has already kept one.
- */
 export function parsePluginManifest(text: string, sourcePath: string): PluginManifest {
   const errors: ParseError[] = []
   const parsed: unknown = parse(text, errors, JSONC_PARSE_OPTIONS)
@@ -73,8 +59,6 @@ export function parsePluginManifest(text: string, sourcePath: string): PluginMan
     throw new Error("jsonc invariant violation: parse accepted a text scanKeys could not read")
   }
   if (scan.kind !== "clean") {
-    // plugins stays empty: the scan stops at its first hit, so whether "name" also repeats is
-    // unknown, and the name `parse` kept may be the one the file did not mean.
     throw new RegistryError(
       describeRepeatedKey(scan, `Plugin manifest at ${sourcePath}`),
       { code: "manifest-invalid", plugins: [] },
@@ -94,14 +78,11 @@ export function parsePluginManifest(text: string, sourcePath: string): PluginMan
   return parsed
 }
 
-/** Read + parse + ajv-validate a manifest file on disk. */
 export async function loadPluginManifest(path: string): Promise<PluginManifest> {
   let text: string
   try {
     text = await readFile(path, "utf8")
   } catch (err: unknown) {
-    // Include the errno in the message so log shippers that strip `cause` still
-    // surface why the read failed (ENOENT vs EACCES vs EISDIR, …).
     const errno = getErrno(err)
     throw new RegistryError(
       `Failed to read plugin manifest at ${path} (${errno})`,

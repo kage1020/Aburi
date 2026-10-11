@@ -1,25 +1,19 @@
-import { extractSymbols, parseTypescriptFile } from "@aburi/lang-typescript"
-import type { SymbolCandidate } from "@aburi/types"
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
+import { extractFile } from "@aburi/test-harness"
 import { describe, expect, it } from "vitest"
 import { hasRouteArguments } from "../src/routes"
-import { makeCtx } from "./fixtures/symbol"
 
-async function firstCallNode(source: string): Promise<unknown> {
-  const parsed = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  if (parsed.tree === null) throw new Error("parse failed")
-  const symbols = extractSymbols(
-    parsed.tree,
-    makeCtx("src/a.ts", source),
-  ) as SymbolCandidate<unknown>[]
-  const found = symbols.find((s) => s.kind === "call")
-  if (found === undefined) throw new Error("no call symbol found")
-  return found.fullNode
+async function callNode(line: string): Promise<unknown> {
+  const { candidates } = await extractFile(langTypescriptPlugin, "src/a.ts", `${line}\n`)
+  const call = candidates.find((candidate) => candidate.kind === "call")
+  if (call === undefined) throw new Error(`no call Symbol in ${line}`)
+  return call.fullNode
 }
 
 describe("hasRouteArguments", () => {
   it("answers for a call node", async () => {
-    expect(hasRouteArguments(await firstCallNode(`app.get("/users", listUsers)\n`))).toBe(true)
-    expect(hasRouteArguments(await firstCallNode(`app.get("env")\n`))).toBe(false)
+    expect(hasRouteArguments(await callNode(`app.get("/users", listUsers)`))).toBe(true)
+    expect(hasRouteArguments(await callNode(`app.get("env")`))).toBe(false)
   })
 
   it.each([

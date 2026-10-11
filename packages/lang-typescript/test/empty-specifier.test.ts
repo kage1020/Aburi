@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { BACKSLASH, emptySpecifierErrors, importsOf, parseSource } from "./fixtures/ctx"
 
-/**
- * An empty module specifier names no module, so it cannot become an `ImportEdge` — the
- * contract in `lang-plugin.md` says `source` is non-empty, and the shared guards in
- * `@aburi/plugin-registry/plugin-input` throw when it is not.
- *
- * The grammar accepts every form below and `tsc` rejects them at resolution (TS2307, or
- * TS2882 for the bare side-effect import), so they arrive here from a half-edited file
- * rather than from anything exotic. Withdrawing the edge is therefore not enough on its own:
- * a silent drop is the failure mode this repository keeps finding, so each one is reported
- * through the recoverable-parse-error channel the file already uses for syntax errors.
- */
-
 describe("an empty module specifier produces no edge and one recoverable error", () => {
   it.each([
     ["default import", 'import a from ""', 15, "import"],
@@ -23,9 +11,6 @@ describe("an empty module specifier produces no edge and one recoverable error",
     ["require-equals", "import x = require('')", 20, "import"],
     ["dynamic import", 'const p = import("")', 18, "dynamic import"],
     ["dynamic import of an empty template", "const m = import(``)", 18, "dynamic import"],
-    // What the gate sees is the *decoded* value. A line continuation joins two source lines
-    // and contributes no character, so a literal that is only one names no module — where it
-    // used to be an edge whose source was a backslash and a newline.
     ["import of a line continuation", `import x from "${BACKSLASH}\n"`, 15, "import"],
     ["re-export of a line continuation", `export { a } from "${BACKSLASH}\n"`, 19, "re-export"],
     ["require-equals of a line continuation", `import x = require("${BACKSLASH}\n")`, 20, "import"],
@@ -35,25 +20,21 @@ describe("an empty module specifier produces no edge and one recoverable error",
       18,
       "dynamic import",
     ],
-  ])("LP26a: %s", async (_label, source, column, site) => {
+  ])("%s", async (_label, source, column, site) => {
     const { imports, errors, tree } = await parseSource(source)
     expect(imports).toEqual([])
     expect(emptySpecifierErrors(errors)).toEqual([
       {
-        // The construct is named, because `export * from ""` is not an import and being told
-        // it is sends the author looking at the wrong line.
         message: `empty module specifier: this ${site} names no module — write one, or remove the ${site}`,
         line: 1,
         column,
         recoverable: true,
       },
     ])
-    // The file is kept. What withdraws one is a parse that returned no tree at all, and one
-    // mid-edit import line is not a reason to discard everything else in the file.
     expect(tree).not.toBeNull()
   })
 
-  it("LP26b: withdraws only the broken edge, not the file's other imports", async () => {
+  it("withdraws only the broken edge, not the file's other imports", async () => {
     const { imports, errors } = await importsOf(
       ['import { A } from "./a"', 'import b from ""', 'import { C } from "./c"'].join("\n"),
     )
@@ -65,21 +46,7 @@ describe("an empty module specifier produces no edge and one recoverable error",
     expect(emptySpecifierErrors(errors)[0]?.line).toBe(2)
   })
 
-  it("LP26c: reports each occurrence, including the two an edge dedupe would have merged", async () => {
-    // `dedupeEdges` keys on the line among other things, so the only pair it can collapse is
-    // two writings on one line — which is exactly this input, and which is still two places
-    // for the author to go and fix. Columns rather than lines are what tell them apart.
-    const { imports, errors } = await importsOf('import a from ""; import a from ""')
-    expect(imports).toEqual([])
-    expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([15, 33])
-  })
-
-  it("LP26c: reports an occurrence per line as well", async () => {
-    const { errors } = await importsOf(['import a from ""', 'import b from ""'].join("\n"))
-    expect(emptySpecifierErrors(errors).map((e) => e.line)).toEqual([1, 2])
-  })
-
-  it("LP26d: keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
+  it("keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
     const { imports, errors } = await importsOf('import a from " "')
     expect(imports).toEqual([{ source: " ", symbols: ["default as a"], line: 1, dynamic: false }])
     expect(emptySpecifierErrors(errors)).toEqual([])
@@ -93,27 +60,53 @@ describe("an empty module specifier produces no edge and one recoverable error",
   })
 })
 
-describe("the diagnostics come out in source order", () => {
-  // The dynamic-import pass runs after the statement pass, so its findings have to be merged
-  // into the file's order rather than appended: three broken dynamic imports on one line
-  // once handed the reader their columns counting down.
-  it("orders several dynamic specifiers on one line by column", async () => {
-    const { errors } = await importsOf(
+describe("each empty specifier is reported where it is written", () => {
+  it.each([
+    [
+      "two on one line, which an edge dedupe would merge",
+      'import a from ""; import a from ""',
+      [
+        [1, 15],
+        [1, 33],
+      ],
+    ],
+    [
+      "one per line",
+      'import a from ""\nimport b from ""',
+      [
+        [1, 15],
+        [2, 15],
+      ],
+    ],
+    [
+      "dynamic ones on one line, by column",
       'const a = import(""); const b = import(""); const c = import("")',
-    )
-    expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([18, 40, 62])
-  })
+      [
+        [1, 18],
+        [1, 40],
+        [1, 62],
+      ],
+    ],
+    [
+      "a static one before a dynamic one",
+      'import a from ""\nconst q = import("")',
+      [
+        [1, 15],
+        [2, 18],
+      ],
+    ],
+    [
+      "a dynamic one before a static one",
+      'const q = import("")\nimport a from ""',
+      [
+        [1, 18],
+        [2, 15],
+      ],
+    ],
+  ])("in source order, for %s", async (_label, source, positions) => {
+    const { imports, errors } = await importsOf(source)
 
-  it("interleaves the dynamic pass with the statement pass by line", async () => {
-    const { errors } = await importsOf(['import a from ""', 'const q = import("")'].join("\n"))
-    expect(emptySpecifierErrors(errors).map((e) => [e.line, e.column])).toEqual([
-      [1, 15],
-      [2, 18],
-    ])
-  })
-
-  it("orders a dynamic specifier written before a static one", async () => {
-    const { errors } = await importsOf(['const q = import("")', 'import a from ""'].join("\n"))
-    expect(emptySpecifierErrors(errors).map((e) => e.line)).toEqual([1, 2])
+    expect(imports).toEqual([])
+    expect(emptySpecifierErrors(errors).map((e) => [e.line, e.column])).toEqual(positions)
   })
 })

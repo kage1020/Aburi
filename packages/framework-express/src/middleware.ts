@@ -1,40 +1,20 @@
 import { asSyntaxNode, type SyntaxNode } from "@aburi/core"
 import { isPathLiteral, unwrapValue, writtenChildren } from "./ast-helpers"
 
-/** Method name that registers middleware / error-middleware / mount points. */
 export const EXPRESS_MIDDLEWARE_METHOD = "use"
 
-/** Number of parameters an Express error-handling middleware must expose. */
 export const ERROR_MIDDLEWARE_ARITY = 4
-/** Number of parameters a plain Express middleware / route handler exposes. */
 export const REGULAR_HANDLER_ARITY = 3
 
 export interface UseArgumentShape {
-  /** True when at least one argument is a function expression / arrow with arity 4. */
   readonly hasErrorHandler: boolean
-  /** True when at least one argument is a function expression / arrow with arity 3. */
   readonly hasRegularHandler: boolean
-  /**
-   * True when the first argument is a literal string (path): quoted, or a backtick with no
-   * substitution, read through the wrappers a value is read through (`isPathLiteral`).
-   */
   readonly firstArgIsPathLiteral: boolean
-  /** True when the second argument is an identifier (router / imported handler). */
   readonly secondArgIsIdentifier: boolean
-  /** Argument count from the AST. */
   readonly argCount: number
-  /** True when some argument is an identifier, i.e. a handler reference that cannot be arity-checked here. */
   readonly hasIdentifierArg: boolean
 }
 
-/**
- * Shape of a `.use(...)` call's arguments; `null` when the node or its arguments are missing.
- *
- * Each argument is read through the wrappers a value is read through (`unwrapValue`), as
- * `@aburi/lang-typescript` reads it for the registration's body and name: read bare, the
- * handler in `app.use(logger as RequestHandler)` was no identifier and the call no middleware,
- * and `app.use("/api", apiRouter as Router)`, named by its path, was no mount.
- */
 export function analyzeUseArguments(callExpression: unknown): UseArgumentShape | null {
   const node = asSyntaxNode(callExpression)
   if (node === null) return null

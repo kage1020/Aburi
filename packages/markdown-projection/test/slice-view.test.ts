@@ -1,344 +1,208 @@
-import { fp, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
-import type { SliceRecord, SymbolChange } from "@aburi/types"
+import { changed, errorFrom, makeDiff, makeSymbol, sliceId } from "@aburi/test-support"
+import type { Symbol as IRSymbol, SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { projectDiff } from "../src/diff"
-import { makeDiff } from "./fixtures"
+import { ProjectionInvariantError, projectDiff } from "../src"
+import { sectionOf } from "./markdown"
 
-/**
- * Slice View rendering acceptance tests. Backs the rendering conventions of
- * docs/design/slice-view.md, and its SV19–SV20 test criteria. The pass-side
- * clustering itself is exercised in `packages/diff/test/slice.test.ts`; here we
- * only assert the Markdown projection: section placement, per-Slice bullet
- * shape, singleton fold, empty-section omission.
- */
+const HEADING = "## 🧵 Slice View"
 
-const changedSym = (id: string, name: string, file: string, line = 10): SymbolChange => ({
-  status: "changed",
-  before: makeSymbol({ id, name, source: baseSource(file, line) }),
-  after: makeSymbol({
-    id,
+function at(name: string, file: string, startLine: number, unresolvedCalls = 0): IRSymbol {
+  const symbol = makeSymbol({
+    id: `ts:${file}#${name}`,
     name,
-    source: baseSource(file, line),
-    fingerprint: fp(id),
-  }),
-  delta: {
-    apiChanged: false,
-    logicChanged: true,
-    syntaxChanged: false,
-    componentChanged: false,
-    visibilityChanged: false,
-  },
-})
-
-const addedSym = (id: string, name: string, file: string, line = 15): SymbolChange => ({
-  status: "added",
-  symbol: makeSymbol({ id, name, source: baseSource(file, line) }),
-})
-
-const baseSource = (file: string, startLine: number) => ({
-  file,
-  startLine,
-  endLine: startLine + 5,
-  startColumn: null,
-  endColumn: null,
-})
-
-const slice = (id: string, members: string[]): SliceRecord => ({
-  id: sliceId(id),
-  members: members.map(symbolId),
-})
-
-describe("Slice View Markdown projection", () => {
-  it("SV19: an empty slices[] omits the entire section from diff.md", () => {
-    const md = projectDiff(makeDiff({ slices: [] }))
-    expect(md).not.toContain("Slice View")
-    expect(md).not.toContain("🧵")
-  })
-
-  it("Slice View section appears between Logic changes and Added", () => {
-    const ctlId = "ts:src/ctl.ts#Ctl.route"
-    const svcId = "ts:src/svc.ts#Svc.op"
-    const addedId = "ts:src/add.ts#addedFn"
-    const md = projectDiff(
-      makeDiff({
-        summary: {
-          added: 1,
-          removed: 0,
-          moved: 0,
-          movedChanged: 0,
-          changed: 2,
-          droppedToggled: 0,
-          unchanged: 0,
-          droppedAdded: 0,
-          droppedRemoved: 0,
-          componentsAdded: 0,
-          componentsRemoved: 0,
-          componentsChanged: 0,
-          depsAdded: 0,
-          depsRemoved: 0,
-        },
-        symbols: [
-          changedSym(ctlId, "Ctl.route", "src/ctl.ts"),
-          changedSym(svcId, "Svc.op", "src/svc.ts"),
-          addedSym(addedId, "addedFn", "src/add.ts"),
-        ],
-        slices: [slice(`slice:${ctlId}`, [ctlId, svcId])],
-      }),
-    )
-    const logicIdx = md.indexOf("🔧 Logic changes")
-    const sliceIdx = md.indexOf("🧵 Slice View")
-    const addedIdx = md.indexOf("➕ Added")
-    expect(logicIdx).toBeGreaterThan(0)
-    expect(sliceIdx).toBeGreaterThan(logicIdx)
-    expect(addedIdx).toBeGreaterThan(sliceIdx)
-  })
-
-  it("multi-member Slice heading includes full sliceId and member count", () => {
-    const ctlId = "ts:src/ctl.ts#Ctl.route"
-    const svcId = "ts:src/svc.ts#Svc.op"
-    const repoId = "ts:src/repo.ts#Repo.save"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [
-          changedSym(ctlId, "Ctl.route", "src/ctl.ts", 42),
-          changedSym(svcId, "Svc.op", "src/svc.ts", 88),
-          addedSym(repoId, "Repo.save", "src/repo.ts", 15),
-        ],
-        slices: [slice(`slice:${ctlId}`, [ctlId, repoId, svcId])],
-      }),
-    )
-    expect(md).toContain(`### \`slice:${ctlId}\` (3 members)`)
-    // Each member appears with short qname, file:line, and status label.
-    expect(md).toContain("`Ctl.route`")
-    expect(md).toContain("`src/ctl.ts:42`")
-    expect(md).toContain("*(changed)*")
-    expect(md).toContain("*(added)*")
-    expect(md).toContain("`Repo.save`")
-  })
-
-  it("names a confidence change on the member's follow-up line", () => {
-    const ctlId = "ts:src/ctl.ts#Ctl.route"
-    const svcId = "ts:src/svc.ts#Svc.op"
-    const unsure = changedSym(ctlId, "Ctl.route", "src/ctl.ts", 42)
-    if (unsure.status !== "changed") throw new Error("expected a changed entry")
-    const md = projectDiff(
-      makeDiff({
-        symbols: [
-          {
-            ...unsure,
-            after: { ...unsure.after, confidence: "medium" },
-            delta: { ...unsure.delta, logicChanged: false, confidenceChanged: true },
-          },
-          changedSym(svcId, "Svc.op", "src/svc.ts", 88),
-        ],
-        slices: [slice(`slice:${ctlId}`, [ctlId, svcId])],
-      }),
-    )
-    expect(md).toContain("  ↳ delta.confidenceChanged\n")
-    expect(md).toContain("  ↳ delta.logicChanged\n")
-  })
-
-  it("Slices are separated by a --- thematic break", () => {
-    const A = "ts:src/a.ts#A"
-    const B = "ts:src/b.ts#B"
-    const C = "ts:src/m.ts#Cx"
-    const D = "ts:src/m.ts#Dx"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [
-          changedSym(A, "A", "src/a.ts"),
-          changedSym(B, "B", "src/b.ts"),
-          changedSym(C, "Cx", "src/m.ts"),
-          changedSym(D, "Dx", "src/m.ts"),
-        ],
-        slices: [slice(`slice:${A}`, [A, B]), slice(`slice:${C}`, [C, D])],
-      }),
-    )
-    // Two multi-member slices → at least one thematic break between them.
-    expect(md.split(/\n---\n/).length).toBeGreaterThanOrEqual(2)
-    // And SV13: slices[] order preserved — slice:ts:src/a.ts#A must render
-    // before slice:ts:src/m.ts#Cx.
-    expect(md.indexOf(`slice:${A}`)).toBeLessThan(md.indexOf(`slice:${C}`))
-  })
-
-  it("SV20: singleton slices collapse into one <details> block after multi-member slices", () => {
-    const ctlId = "ts:src/ctl.ts#Ctl.route"
-    const svcId = "ts:src/svc.ts#Svc.op"
-    const solo1 = "ts:src/util.ts#formatMoney"
-    const solo2 = "ts:src/log.ts#log"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [
-          changedSym(ctlId, "Ctl.route", "src/ctl.ts"),
-          changedSym(svcId, "Svc.op", "src/svc.ts"),
-          changedSym(solo1, "formatMoney", "src/util.ts"),
-          changedSym(solo2, "log", "src/log.ts"),
-        ],
-        slices: [
-          slice(`slice:${ctlId}`, [ctlId, svcId]),
-          slice(`slice:${solo1}`, [solo1]),
-          slice(`slice:${solo2}`, [solo2]),
-        ],
-      }),
-    )
-    // Multi-member slice comes first.
-    const multiIdx = md.indexOf(`slice:${ctlId}`)
-    const standaloneIdx = md.indexOf("### Standalone changes")
-    expect(multiIdx).toBeGreaterThan(0)
-    expect(standaloneIdx).toBeGreaterThan(multiIdx)
-    // Details block declares the singleton count.
-    expect(md).toContain("<details>")
-    expect(md).toContain("<summary>2 singleton slices")
-    // Both singleton ids appear inside the fold body.
-    expect(md).toContain(`slice:${solo1}`)
-    expect(md).toContain(`slice:${solo2}`)
-  })
-
-  it("all-singleton case still emits Slice View section with just the Standalone fold", () => {
-    const a = "ts:src/a.ts#a"
-    const b = "ts:src/b.ts#b"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [changedSym(a, "a", "src/a.ts"), changedSym(b, "b", "src/b.ts")],
-        slices: [slice(`slice:${a}`, [a]), slice(`slice:${b}`, [b])],
-      }),
-    )
-    expect(md).toContain("🧵 Slice View")
-    expect(md).toContain("### Standalone changes")
-    expect(md).toContain("<summary>2 singleton slices")
-    // No thematic break should appear when there are zero multi-member slices —
-    // the fold body has none because singletons are one-line bullets.
-  })
-
-  it("only-multi-member case emits no Standalone Changes heading", () => {
-    const a = "ts:src/a.ts#a"
-    const b = "ts:src/b.ts#b"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [changedSym(a, "a", "src/a.ts"), changedSym(b, "b", "src/b.ts")],
-        slices: [slice(`slice:${a}`, [a, b])],
-      }),
-    )
-    expect(md).toContain("🧵 Slice View")
-    expect(md).not.toContain("Standalone changes")
-  })
-})
-
-// call-resolution.md + slice-view.md — the drop stays silent in the
-// data, but the projection tells the reviewer it happened.
-describe("Slice View — unresolved-call markers", () => {
-  const withUnresolved = (
-    id: string,
-    name: string,
-    file: string,
-    unresolved: number,
-  ): SymbolChange => {
-    const calls = Array.from({ length: unresolved }, (_, i) => ({
+    calls: Array.from({ length: unresolvedCalls }, (_, i) => ({
       target: `mystery${i}`,
       line: 20 + i,
       resolved: null,
-    }))
-    return {
-      status: "changed",
-      before: makeSymbol({ id, name, source: baseSource(file, 10), calls }),
-      after: makeSymbol({ id, name, source: baseSource(file, 10), calls, fingerprint: fp(id) }),
-      delta: {
-        apiChanged: false,
-        logicChanged: true,
-        syntaxChanged: false,
-        componentChanged: false,
-        visibilityChanged: false,
+    })),
+  })
+  return { ...symbol, source: { ...symbol.source, startLine } }
+}
+
+const logicChange = (symbol: IRSymbol): SymbolChange => changed(symbol, { logicChanged: true })
+
+function slice(...members: IRSymbol[]): SliceRecord {
+  return { id: sliceId(`slice:${members[0]?.id}`), members: members.map((m) => m.id) }
+}
+
+function sliceView(symbols: SymbolChange[], slices: SliceRecord[]): string[] {
+  return sectionOf(projectDiff(makeDiff({ symbols, slices })), HEADING)
+}
+
+const ctl = at("Ctl.route", "src/ctl.ts", 42)
+const svc = at("Svc.op", "src/svc.ts", 88)
+const repo = at("Repo.save", "src/repo.ts", 15)
+
+describe("projectDiff — the Slice View", () => {
+  it("is left out when there are no Slices", () => {
+    expect(projectDiff(makeDiff({ symbols: [logicChange(ctl)] }))).not.toContain("Slice View")
+  })
+
+  it("lists each member of a Slice by name, status, location and what changed", () => {
+    expect(
+      sliceView(
+        [logicChange(ctl), logicChange(svc), { status: "added", symbol: repo }],
+        [slice(ctl, repo, svc)],
+      ),
+    ).toEqual([
+      HEADING,
+      "",
+      "### `slice:ts:src/ctl.ts#Ctl.route` (3 members)",
+      "",
+      "- `Ctl.route` — *(changed)*",
+      "  **File**: `src/ctl.ts:42`",
+      "  ↳ delta.logicChanged",
+      "- `Repo.save` — *(added)*",
+      "  **File**: `src/repo.ts:15`",
+      "  ↳ new symbol",
+      "- `Svc.op` — *(changed)*",
+      "  **File**: `src/svc.ts:88`",
+      "  ↳ delta.logicChanged",
+      "",
+      "---",
+      "",
+    ])
+  })
+
+  it.each<[string, SymbolChange, string]>([
+    ["a removed Symbol", { status: "removed", symbol: repo }, "removed symbol"],
+    [
+      "a Symbol whose dropped flag flipped",
+      {
+        status: "dropped-toggled",
+        before: repo,
+        after: { ...repo, dropped: true, dropReason: "DTO" },
+        direction: "to-dropped",
       },
-    }
-  }
-
-  it("notes the totals under the section heading when any member has unresolved calls", () => {
-    const ctlId = "ts:src/ctl.ts#Ctl.route"
-    const svcId = "ts:src/svc.ts#Svc.op"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [
-          withUnresolved(ctlId, "Ctl.route", "src/ctl.ts", 3),
-          changedSym(svcId, "Svc.op", "src/svc.ts"),
-        ],
-        slices: [slice(`slice:${ctlId}`, [ctlId, svcId])],
+      "dropped-toggled: to-dropped",
+    ],
+    [
+      "every axis that moved",
+      changed(repo, {
+        apiChanged: true,
+        syntaxChanged: true,
+        componentChanged: true,
+        visibilityChanged: true,
       }),
-    )
-    expect(md).toContain("1 of the changed symbols below makes 3 calls the resolver could not")
+      "delta.apiChanged, delta.syntaxChanged, delta.componentChanged, delta.visibilityChanged",
+    ],
+    [
+      "a confidence change",
+      changed(repo, { confidenceChanged: true }, { confidence: "medium" }),
+      "delta.confidenceChanged",
+    ],
+    ["a change with no axis set", changed(repo), "no delta axes"],
+  ])("follows up %s", (_, change, followUp) => {
+    expect(sliceView([change, logicChange(ctl)], [slice(ctl, repo)])).toContain(`  ↳ ${followUp}`)
   })
 
-  it("pluralizes the note when several members are affected", () => {
-    const a = "ts:src/a.ts#a"
-    const b = "ts:src/b.ts#b"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [withUnresolved(a, "a", "src/a.ts", 1), withUnresolved(b, "b", "src/b.ts", 2)],
-        slices: [slice(`slice:${a}`, [a, b])],
-      }),
+  it("separates Slices by a thematic break, in the order given", () => {
+    const a = at("a", "src/a.ts", 1)
+    const b = at("b", "src/b.ts", 1)
+    const lines = sliceView(
+      [logicChange(svc), logicChange(ctl), logicChange(a), logicChange(b)],
+      [slice(svc, ctl), slice(a, b)],
     )
-    expect(md).toContain("2 of the changed symbols below make 3 calls the resolver could not")
+    expect(lines.filter((line) => line.startsWith("### ") || line === "---")).toEqual([
+      "### `slice:ts:src/svc.ts#Svc.op` (2 members)",
+      "---",
+      "### `slice:ts:src/a.ts#a` (2 members)",
+      "---",
+    ])
   })
 
-  it("marks the affected member inside a multi-member slice", () => {
-    const ctlId = "ts:src/ctl.ts#Ctl.route"
-    const svcId = "ts:src/svc.ts#Svc.op"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [
-          withUnresolved(ctlId, "Ctl.route", "src/ctl.ts", 3),
-          changedSym(svcId, "Svc.op", "src/svc.ts"),
-        ],
-        slices: [slice(`slice:${ctlId}`, [ctlId, svcId])],
-      }),
+  it("folds the singleton Slices into one block after the others, each labelled by its member", () => {
+    const solo = at("formatMoney", "src/util.ts", 3)
+    const lines = sliceView(
+      [logicChange(ctl), logicChange(svc), logicChange(solo), logicChange(repo)],
+      [
+        slice(ctl, svc),
+        slice(solo),
+        { id: sliceId("slice:ts:src/elsewhere.ts#other"), members: [repo.id] },
+      ],
     )
-    expect(md).toContain("⚠ 3 unresolved calls")
-    expect(md).not.toContain("⚠ 0 unresolved")
+    expect(lines.slice(lines.indexOf("### Standalone changes"))).toEqual([
+      "### Standalone changes",
+      "",
+      "<details>",
+      "<summary>2 singleton slices (no in-Node call-graph neighbours)</summary>",
+      "",
+      "- `slice:ts:src/util.ts#formatMoney` — `formatMoney` *(changed)*",
+      "- `slice:ts:src/elsewhere.ts#other` — `Repo.save` *(changed)*",
+      "",
+      "</details>",
+      "",
+    ])
   })
 
-  it("marks an affected singleton — the case the reviewer actually needs", () => {
-    const solo = "ts:src/ctl.ts#Ctl.route"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [withUnresolved(solo, "Ctl.route", "src/ctl.ts", 1)],
-        slices: [slice(`slice:${solo}`, [solo])],
-      }),
-    )
-    expect(md).toContain("### Standalone changes")
-    expect(md).toContain("⚠ 1 unresolved call")
-    expect(md).not.toContain("1 unresolved calls")
+  it("writes only the fold when every Slice is a singleton", () => {
+    const lines = sliceView([logicChange(ctl), logicChange(svc)], [slice(ctl), slice(svc)])
+    expect(lines.slice(0, 4)).toEqual([HEADING, "", "### Standalone changes", ""])
   })
 
-  it("stays completely silent when every member resolved cleanly", () => {
-    const a = "ts:src/a.ts#a"
-    const b = "ts:src/b.ts#b"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [changedSym(a, "a", "src/a.ts"), changedSym(b, "b", "src/b.ts")],
-        slices: [slice(`slice:${a}`, [a, b])],
-      }),
+  it.each<[string, SliceRecord, string, string]>([
+    [
+      "a member that has no change in the diff",
+      slice(ctl, svc),
+      `a diff.symbols[] entry for member ${svc.id}`,
+      `Slice(id=slice:${ctl.id})`,
+    ],
+    [
+      "no members",
+      { id: sliceId("slice:empty"), members: [] },
+      "members[0]",
+      "Slice(id=slice:empty)",
+    ],
+  ])("refuses a Slice with %s, naming what it lacks and the Slice", async (_label, invalid, field, subject) => {
+    const error = await errorFrom(ProjectionInvariantError, () =>
+      sliceView([logicChange(ctl)], [invalid]),
     )
-    expect(md).not.toContain("unresolved call")
-    expect(md).not.toContain("⚠")
+    expect(error).toMatchObject({ field, subject })
+  })
+})
+
+describe("projectDiff — unresolved calls in the Slice View", () => {
+  it.each<[string, number[], string]>([
+    [
+      "one member",
+      [3, 0],
+      "> ⚠ 1 of the changed symbols below makes 3 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.",
+    ],
+    [
+      "several members",
+      [1, 2],
+      "> ⚠ 2 of the changed symbols below make 3 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.",
+    ],
+    [
+      "one call",
+      [1, 0],
+      "> ⚠ 1 of the changed symbols below makes 1 call the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.",
+    ],
+  ])("totals them under the heading for %s", (_, counts, note) => {
+    const [first = 0, second = 0] = counts
+    const a = at("a", "src/a.ts", 1, first)
+    const b = at("b", "src/b.ts", 1, second)
+    expect(sliceView([logicChange(a), logicChange(b)], [slice(a, b)])[2]).toBe(note)
   })
 
-  it("counts an added member's own calls", () => {
-    const addedId = "ts:src/add.ts#addedFn"
-    const md = projectDiff(
-      makeDiff({
-        symbols: [
-          {
-            status: "added",
-            symbol: makeSymbol({
-              id: addedId,
-              name: "addedFn",
-              source: baseSource("src/add.ts", 15),
-              calls: [{ target: "mystery", line: 16, resolved: null }],
-            }),
-          },
-        ],
-        slices: [slice(`slice:${addedId}`, [addedId])],
-      }),
+  it("marks the affected member of a Slice", () => {
+    const lines = sliceView(
+      [logicChange(at("Ctl.route", "src/ctl.ts", 42, 3)), logicChange(svc)],
+      [slice(ctl, svc)],
     )
-    expect(md).toContain("⚠ 1 unresolved call")
+    expect(lines).toContain("  ↳ delta.logicChanged · ⚠ 3 unresolved calls")
+    expect(lines).toContain("  ↳ delta.logicChanged")
+  })
+
+  it("marks an affected singleton, counting an added member's own calls", () => {
+    const added = at("addedFn", "src/add.ts", 15, 1)
+    expect(sliceView([{ status: "added", symbol: added }], [slice(added)])).toContain(
+      "- `slice:ts:src/add.ts#addedFn` — `addedFn` *(added)* · ⚠ 1 unresolved call",
+    )
+  })
+
+  it("says nothing when every member resolved cleanly", () => {
+    const lines = sliceView([logicChange(ctl), logicChange(svc)], [slice(ctl, svc)])
+    expect(lines.join("\n")).not.toContain("⚠")
   })
 })
