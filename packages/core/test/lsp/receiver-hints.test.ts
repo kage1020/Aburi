@@ -145,6 +145,23 @@ describe("receiver hints", () => {
     ).toBe(expected)
   })
 
+  it("tells a static caller by its id, not its name", async () => {
+    const enrichment = await enrich({
+      symbols: [
+        makeClassSymbol("src/a.ts", "F", 1),
+        makeMethodSymbol("src/a.ts", "F", "foo", 2),
+        staticMethodSymbol("F", "foo", 3),
+        { ...staticMethodSymbol("F", "bar", 4, [{ target: "this.foo", line: 5 }]), name: "bar" },
+      ],
+      fileContents: { "src/a.ts": STATIC_FOO_SOURCE },
+      serverFactory: hoverServer(() => ({ contents: "(method) F.foo(): void" })),
+    })
+
+    expect(
+      enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", 5, "this.foo"))?.targetSymbolId,
+    ).toBe("ts:src/a.ts#F::foo")
+  })
+
   it("finds the hovered class and its member in another file of the caller's language", async () => {
     const enrichment = await enrich({
       symbols: [

@@ -1,4 +1,4 @@
-import { makeCall, noopRegistry } from "@aburi/test-support"
+import { makeCall, noopRegistry, spend } from "@aburi/test-support"
 import type { EffectPlugin, ExtKind, FrameworkPlugin, VocabRegistry } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CoreError, VocabCheck } from "../../src"
@@ -44,12 +44,11 @@ function language(extKind: string | null) {
   })
 }
 
-function emitting(name: string, effectId: string): EffectPlugin {
-  return stubEffectsPlugin(name, () => ({
-    effectId: effectId as never,
-    confidence: "high",
-    derivedBy: `${name}:x`,
-  }))
+function emitting(name: string, effectId: string, ms = 0): EffectPlugin {
+  return stubEffectsPlugin(name, () => {
+    spend(ms)
+    return { effectId: effectId as never, confidence: "high", derivedBy: `${name}:x` }
+  })
 }
 
 function classifying(name: string, extKind: string): FrameworkPlugin {
@@ -62,13 +61,18 @@ const workspace = useStubWorkspace("vocab")
 
 function run(options: {
   strict?: boolean
+  classifyTimeoutMs?: number
   registry: VocabRegistry
   effects?: EffectPlugin[]
   frameworks?: FrameworkPlugin[]
   languageExtKind?: string
 }) {
+  const { strict, classifyTimeoutMs } = options
   return scanStubs(workspace.root, {
-    config: options.strict === undefined ? {} : { strict: options.strict },
+    config: {
+      ...(strict === undefined ? {} : { strict }),
+      ...(classifyTimeoutMs === undefined ? {} : { classifyTimeoutMs }),
+    },
     languages: [language(options.languageExtKind ?? null)],
     frameworks: options.frameworks ?? [],
     effects: options.effects ?? [],
@@ -90,6 +94,16 @@ describe("a strict run (the default)", () => {
         'Plugin "effects-acme" emitted effect "x-acme:ping" at a.stub:4',
       ),
     })
+  })
+
+  it("ends at an undeclared effect id whose call ran past its budget too", async () => {
+    // 30 ms against the 10 ms floor overruns on any machine.
+    const outcome = run({
+      classifyTimeoutMs: 10,
+      registry: registryOwning({}),
+      effects: [emitting("effects-acme", "x-acme:ping", 30)],
+    })
+    await expect(outcome).rejects.toMatchObject({ code: "vocab-undeclared", value: "x-acme:ping" })
   })
 
   it("ends at an id another plugin owns, since ownership is per plugin", async () => {

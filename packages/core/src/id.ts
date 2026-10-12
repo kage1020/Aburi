@@ -85,6 +85,12 @@ export function symbolIdFile(value: string): string | null {
   return parts.file
 }
 
+export function symbolIdParts(value: string): SymbolIdParts | null {
+  const parts = splitSymbolId(value)
+  if (parts === null || symbolIdViolation(parts) !== null) return null
+  return parts
+}
+
 export function isComponentId(value: string): value is ComponentId {
   return COMPONENT_ID_PATTERN.test(value)
 }

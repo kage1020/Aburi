@@ -1,6 +1,6 @@
 import type { Symbol as IRSymbol, SymbolId } from "@aburi/types"
 import { makeCallSiteKey } from "../call-site"
-import { trySymbolId } from "../id"
+import { symbolIdParts, trySymbolId } from "../id"
 import { compareCodeUnit } from "../order"
 import type { LspClient, LspFailure } from "./client"
 import type { ReceiverHint } from "./enrich"
@@ -79,15 +79,13 @@ export function applyHover(
     return
   }
   const ownerClassName = extractOwnerClassName(hover.text)
-  const isClass = (symbol: IRSymbol): boolean => symbol.kind === "class"
-  if (
-    ownerClassName === null ||
-    findSymbolId(caller, ownerClassName, workingById, isClass) === null
-  ) {
+  const ownerClass =
+    ownerClassName === null ? null : findOwnerClass(caller, ownerClassName, job.method, workingById)
+  if (ownerClass === null) {
     countProducerRejection(stats, "ownerClassNotFound")
     return
   }
-  const memberId = findMemberSymbolId(caller, ownerClassName, job.method, workingById)
+  const memberId = findMemberSymbolId(caller, ownerClass, job.method, workingById)
   if (memberId === null) {
     countProducerRejection(stats, "memberNotFound")
     return
@@ -104,44 +102,59 @@ export function applyHover(
   }
 }
 
-// The hover reads `(method) Factory.create()` for a static too, and `this` in a static member is
-// the class, so the caller's own kind of member is tried first.
-function findMemberSymbolId(
+// A hover names the class without its file, so a name several files declare is declined, not
+// guessed. A dropped class holding the member can still be meant: a framework hint keeps methods.
+function findOwnerClass(
   caller: IRSymbol,
   className: string,
   methodName: string,
   workingById: Map<SymbolId, IRSymbol>,
-): SymbolId | null {
-  const instance = `${className}.${methodName}`
-  const statik = `${className}::${methodName}`
-  const qualifiedNames = isStaticMember(caller.name) ? [statik, instance] : [instance, statik]
-  for (const qualifiedName of qualifiedNames) {
-    const found = findSymbolId(caller, qualifiedName, workingById)
-    if (found !== null) return found
-  }
-  return null
-}
-
-function isStaticMember(qualifiedName: string): boolean {
-  return qualifiedName.lastIndexOf("::") > qualifiedName.lastIndexOf(".")
-}
-
-function findSymbolId(
-  caller: IRSymbol,
-  qualifiedName: string,
-  workingById: Map<SymbolId, IRSymbol>,
-  accept: (symbol: IRSymbol) => boolean = () => true,
-): SymbolId | null {
-  const sameFile = trySymbolId({
-    language: caller.language,
-    file: caller.source.file,
-    qualifiedName,
-  })
-  if (sameFile !== null && workingById.has(sameFile)) return sameFile
+): IRSymbol | null {
+  const callerId = symbolIdParts(caller.id)
+  const ownId = callerId === null ? null : trySymbolId({ ...callerId, qualifiedName: className })
+  const own = ownId === null ? undefined : workingById.get(ownId)
+  if (own?.kind === "class") return own
+  const named: IRSymbol[] = []
   for (const symbol of workingById.values()) {
-    if (symbol.language === caller.language && symbol.name === qualifiedName && accept(symbol)) {
-      return symbol.id
+    if (
+      symbol.language === caller.language &&
+      symbol.name === className &&
+      symbol.kind === "class"
+    ) {
+      named.push(symbol)
     }
   }
+  if (named.length === 1) return named[0] ?? null
+  const owners = named.filter(
+    (symbol) =>
+      symbol.dropped !== true ||
+      findMemberSymbolId(caller, symbol, methodName, workingById) !== null,
+  )
+  return owners.length === 1 ? (owners[0] ?? null) : null
+}
+
+// Built from the class's id, as nothing binds `name` or `source.file` to it. A hover reads
+// `Class.m` for a static too, and `this` in a static is the class: the caller's kind goes first.
+function findMemberSymbolId(
+  caller: IRSymbol,
+  ownerClass: IRSymbol,
+  methodName: string,
+  workingById: Map<SymbolId, IRSymbol>,
+): SymbolId | null {
+  const owner = symbolIdParts(ownerClass.id)
+  if (owner === null) return null
+  const instance = `${owner.qualifiedName}.${methodName}`
+  const statik = `${owner.qualifiedName}::${methodName}`
+  for (const qualifiedName of isStaticMember(caller) ? [statik, instance] : [instance, statik]) {
+    const id = trySymbolId({ ...owner, qualifiedName })
+    if (id !== null && workingById.has(id)) return id
+  }
   return null
+}
+
+function isStaticMember(caller: IRSymbol): boolean {
+  const qualifiedName = symbolIdParts(caller.id)?.qualifiedName
+  return (
+    qualifiedName !== undefined && qualifiedName.lastIndexOf("::") > qualifiedName.lastIndexOf(".")
+  )
 }
