@@ -183,7 +183,7 @@ describe("scanWith — a classifier slower than the scan's default budget", () =
     },
   }
 
-  it("keeps its effect when the suite sets no budget of its own", async () => {
+  it("records no overrun when the suite sets no budget of its own", async () => {
     await workspace.writeSource(
       "src/invoices.ts",
       [
