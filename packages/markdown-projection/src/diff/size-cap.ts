@@ -94,50 +94,57 @@ export function assemble(
   )
 }
 
+type Row = { readonly section: Section; shown: Shown }
+
 /** Sizes are the whole document's, note included: naming a section there costs bytes too. */
 export function arrangeWithin(
   sections: readonly Section[],
   size: (arrangement: Arrangement) => number,
   maxBytes: number,
 ): Arrangement {
-  const rows = sections.map((section): { section: Section; shown: Shown } => ({
-    section,
-    shown: OMITTED,
-  }))
-  const place = (row: { section: Section; shown: Shown }): void => {
-    let best: { shown: Shown; bytes: number } | null = null
+  const rows = sections.map((section): Row => ({ section, shown: OMITTED }))
+  const formsShown = (): Shown[] => rows.map(({ shown }) => shown)
+  const showAs = (forms: readonly Shown[]): void => {
+    for (const [index, row] of rows.entries()) row.shown = forms[index] ?? OMITTED
+  }
+  const place = (row: Row, index: number): void => {
+    const before = formsShown()
+    let best: { forms: Shown[]; bytes: number } | null = null
     for (const shown of formsOf(row.section)) {
       row.shown = shown
       const bytes = size(rows)
-      if (bytes > maxBytes || (best !== null && bytes >= best.bytes)) continue
-      if (keepsOrder(rows, size)) best = { shown, bytes }
+      if (best === null || bytes < best.bytes) {
+        const ordered = orderBelow(rows, index, size, bytes)
+        if (ordered !== null && ordered <= maxBytes) {
+          best = { forms: formsShown(), bytes }
+        }
+      }
+      showAs(before)
     }
-    row.shown = best?.shown ?? OMITTED
+    showAs(best?.forms ?? before)
   }
-  const wholeFromTop = (): boolean => {
-    let changed = false
+  const wholeFromTop = (): void => {
     for (const row of rows) {
       const shown = row.shown
       if (shown.kind !== "short") continue
       row.shown = FULL
       if (size(rows) > maxBytes) {
         row.shown = shown
-        break
+        return
       }
-      changed = true
     }
-    return changed
   }
 
-  for (const row of rows) place(row)
-  // A list made whole leaves the note and can free room for a section omitted earlier. Sections
-  // only move from omitted to shown and from names-only to whole, so the loop ends.
-  for (let changed = true; changed; ) {
-    changed = wholeFromTop()
-    for (const row of rows) {
+  for (const [index, row] of rows.entries()) place(row, index)
+  // A section placed or made whole later leaves the note, which can free room for one omitted
+  // earlier. A section once shown is never omitted again, so the loop ends.
+  for (let putBack = true; putBack; ) {
+    wholeFromTop()
+    putBack = false
+    for (const [index, row] of rows.entries()) {
       if (row.shown.kind !== "omitted") continue
-      place(row)
-      if (row.shown.kind !== "omitted") changed = true
+      place(row, index)
+      if (row.shown.kind !== "omitted") putBack = true
     }
   }
   return rows
@@ -148,24 +155,42 @@ function formsOf(section: Section): Shown[] {
   return section.short === undefined ? [FULL] : [FULL, { kind: "short", lines: section.short }]
 }
 
-/** A list stays whole below a names-only one only where names-only would not be smaller. */
-function keepsOrder(
-  rows: Array<{ section: Section; shown: Shown }>,
+/** A less important list gives way rather than cost the section at `index` its place. */
+function orderBelow(
+  rows: readonly Row[],
+  index: number,
   size: (arrangement: Arrangement) => number,
-): boolean {
-  const bytes = size(rows)
+  bytes: number,
+): number | null {
+  let current = bytes
+  for (;;) {
+    const next = firstOutOfOrder(rows, size, current)
+    if (next === null) return current
+    if (next.index <= index) return null
+    next.row.shown = next.short
+    current = next.bytes
+  }
+}
+
+/** On a tie a list stays whole below a names-only one: whole shows more for the same bytes. */
+function firstOutOfOrder(
+  rows: readonly Row[],
+  size: (arrangement: Arrangement) => number,
+  bytes: number,
+): { index: number; row: Row; short: Shown; bytes: number } | null {
   let shortAbove = false
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const { section, shown } = row
     if (section.short === undefined) continue
     if (shown.kind === "short") shortAbove = true
     if (shown.kind !== "full" || !shortAbove) continue
-    row.shown = { kind: "short", lines: section.short }
-    const smaller = size(rows) < bytes
+    const short: Shown = { kind: "short", lines: section.short }
+    row.shown = short
+    const shorter = size(rows)
     row.shown = shown
-    if (smaller) return false
+    if (shorter < bytes) return { index, row, short, bytes: shorter }
   }
-  return true
+  return null
 }
 
 function linesIn(section: Section, shown: Shown): readonly string[] {

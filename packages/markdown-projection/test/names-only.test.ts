@@ -175,16 +175,16 @@ describe("projectDiff — maxBytes weighs a names-only form with its name in the
         changed: [],
       },
     })
-    const removedOnly = projectDiff(diff, { maxBytes: 500 })
-    expect(headings(removedOnly)).toEqual(["## ➖ Removed"])
-    expect(removedOnly).not.toContain("_Names and locations only")
-    const both = bytes(projectDiff(diff, { maxBytes: 540 }))
-    for (const budget of [both, 540, 567]) {
+    const whole = bytes(projectDiff(diff))
+    const both = bytes(projectDiff(diff, { maxBytes: whole - 1 }))
+    for (let budget = both; budget < whole; budget++) {
       const md = projectDiff(diff, { maxBytes: budget })
       expect(headings(md), `at ${budget}`).toEqual(["## ➖ Removed", "## 🧱 Component changes"])
       expect(bytes(md)).toBeLessThanOrEqual(budget)
     }
-    expect(headings(projectDiff(diff, { maxBytes: both - 1 }))).toEqual(["## ➖ Removed"])
+    const removedOnly = projectDiff(diff, { maxBytes: both - 1 })
+    expect(headings(removedOnly)).toEqual(["## ➖ Removed"])
+    expect(removedOnly).not.toContain("_Names and locations only")
   })
 
   it("keeps a thin section whole below a names-only one", () => {
@@ -296,7 +296,7 @@ describe("projectDiff — maxBytes over a 302-removal diff", () => {
     )
   })
 
-  it("shows whole only a top run of the lists it names, at every budget", () => {
+  it("shows a list whole below a names-only one only where names-only is no smaller", () => {
     const shortenable = [
       "⚠ API changes",
       "🔧 Logic changes",
@@ -304,19 +304,34 @@ describe("projectDiff — maxBytes over a 302-removal diff", () => {
       "➖ Removed",
       "🔀 Moved + Changed",
     ]
+    const listsIn = (md: string) =>
+      md
+        .split("\n## ")
+        .slice(1)
+        .flatMap((text) => {
+          const title = shortenable.find((candidate) => text.startsWith(`${candidate}\n`))
+          const short = text.includes("_Names and locations only")
+          return title === undefined ? [] : [{ title, size: bytes(text), short }]
+        })
+    const atCommentBudget = listsIn(projectDiff(diff, { maxBytes: COMMENT_BUDGET }))
+    expect(atCommentBudget.filter(({ short }) => short).map(({ title }) => title)).toEqual(
+      shortenable,
+    )
+    const namesOnly = new Map(atCommentBudget.map(({ title, size }) => [title, size]))
+
     let sawShort = false
     for (let budget = bytes(projectDiff(diff)); budget > 2000; budget = Math.floor(budget * 0.8)) {
       const md = projectDiff(diff, { maxBytes: budget })
       expect(bytes(md)).toBeLessThanOrEqual(budget)
-      const lists = md
-        .split("\n## ")
-        .slice(1)
-        .filter((section) => shortenable.some((title) => section.startsWith(`${title}\n`)))
-      const isShort = (section: string) => section.includes("_Names and locations only")
-      const firstShort = lists.findIndex(isShort)
-      if (firstShort >= 0) {
-        sawShort = true
-        expect(lists.slice(firstShort).every(isShort)).toBe(true)
+      const lists = listsIn(md)
+      const firstShort = lists.findIndex(({ short }) => short)
+      if (firstShort < 0) continue
+      sawShort = true
+      for (const { title, size, short } of lists.slice(firstShort)) {
+        if (short) continue
+        // Naming one more section in the note costs its title and a separator.
+        const asNamesOnly = (namesOnly.get(title) ?? 0) + bytes(`, ${title}`)
+        expect(asNamesOnly, `${title} at ${budget}`).toBeGreaterThanOrEqual(size)
       }
     }
     expect(sawShort).toBe(true)

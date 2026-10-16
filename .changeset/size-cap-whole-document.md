@@ -2,4 +2,4 @@
 "@aburi/markdown-projection": patch
 ---
 
-The size cap now weighs each section's forms by the whole document, note included. A section whose names-only form costs more in the note than it saves is kept whole, below a names-only section too, where it used to be named only in a larger document or omitted although it fit whole. A section omitted early is put back once there is room for it.
+`projectDiff` with `maxBytes` (and `aburi diff --max-bytes`) now counts the size-cap note when choosing between a section's full and names-only forms. A section with one or two thin entries stays whole where that makes the report no larger, also below a names-only section, where it used to be named only in a longer report or omitted although it fit. A section is no longer left out while the finished report has room for it.
