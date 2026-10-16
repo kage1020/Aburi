@@ -61,60 +61,71 @@ uses, which works because `github.token` is in scope there:
 ### 2.1 The refs a pull request means
 
 `aburi diff` scans the working tree as the head, whatever the ref spec calls it
-([`cli-spec.md`](./cli-spec.md) §6.4, step 4): the `<head>` it is given only labels the report.
-So with no `refspec`, the base has to be the tree the checkout grew from, and the action reads the
-checkout to find it rather than taking the event's word for it.
+([`cli-spec.md`](./cli-spec.md) §6.4, step 4): the `<head>` it is given labels the report and
+collects the rename map (`git diff --find-renames <base>..<head>`); it does not decide which tree is
+scanned. So with no `refspec`, the base has to be the tree the checkout grew from, and the action
+reads the checkout to find it rather than taking the event's word for it.
 
 The event's `pull_request.base.sha` is not that tree. A plain `actions/checkout` on `pull_request`
-checks out `refs/pull/<n>/merge`, the pull request's head merged into the base branch as it stands
-when the run starts, and `base.sha` does not follow the base branch. Once the base branch moves
-past it, `base.sha..head.sha` compares a tree without the base branch's newer commits against one
-that has them: everything the base branch added, changed or removed since is reported as the pull
-request's own, `--fail-on removed` fails a pull request that deleted nothing, and the header names
-`head.sha` for a tree that is the merge.
+checks out `refs/pull/<n>/merge`, the pull request's head merged into the base branch as it stood
+when GitHub last computed that merge, and `base.sha` does not follow the base branch. Once the base
+branch moves past it, `base.sha..head.sha` compares a tree without the base branch's newer commits
+against one that has them: everything the base branch added, changed or removed since is reported
+as the pull request's own, `--fail-on removed` fails a pull request that deleted nothing, and the
+header names `head.sha` for a tree that is the merge.
 
 The fallback, [`scripts/resolve-refspec.mjs`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/resolve-refspec.mjs),
-reads `git rev-parse HEAD` in `working-directory`, where the CLI will run:
+reads the commit checked out in `working-directory`, where the CLI will run:
 
 | Checked out | Ref spec | Reports |
 |---|---|---|
-| A merge whose second parent is `head.sha`, which is what the merge ref is | `HEAD^1..HEAD` | What merging the pull request changes on the base branch's tip |
+| A merge whose second parent is `head.sha` and whose first parent is on `origin/<base.ref>`, which is what the merge ref is | `HEAD^1..HEAD` | What merging the pull request changes on the base branch commit it was merged into |
 | `head.sha` itself | `<merge base>..head.sha`, the merge base of `head.sha` with `origin/<base.ref>` and `base.sha` | The pull request's own commits, without the base branch's commits it has not merged |
 | Anything else | — | Exit 2 |
 
-Both sides are written as full SHAs, so the report's header names the trees that were compared.
+Both sides are written as full SHAs, so the report's header names the trees that were compared and
+the rename map is collected between them.
 
 The head row reads the base branch as the clone fetched it, `origin/<base.ref>`, beside `base.sha`.
 `base.sha` alone is not enough: a pull request that merged the base branch after the event recorded
 it has `base.sha` as an ancestor, so the merge base would be `base.sha` itself, and the comparison
-would take in every base-branch commit up to the one merged, which is this section's defect again.
-The merge base with the tracking ref is the last base-branch commit the head contains. Giving
-`git merge-base` both keeps `base.sha` in play when the clone has no tracking ref, or when the base
-branch was rewritten past it; a `base.sha` the clone does not have is left out when the tracking
-ref is there.
+would take in every base-branch commit up to the one merged. The merge base with the tracking ref is
+the last base-branch commit the head contains. `git merge-base` compares the head with a merge of
+both, so `base.sha` can only move the base forward: it decides when the base branch was rewritten
+past it, and the step's log names whichever of the two decided. A `base.sha` the clone does not
+have is left out. A clone with no tracking ref falls back to `base.sha` alone, with a `::warning::`
+naming `origin/<base.ref>`, because the base branch's changes may then be charged to the pull
+request; a tracking ref that is there but cannot be read stops the step instead.
 
-Anything else is refused rather than guessed at, as an event without both SHAs always was: the
-base branch, which is what a `pull_request_target` checks out by default, an earlier push's merge
-ref, a commit the workflow made itself. The report would name one tree and describe another. A
-`refspec` input skips the check and is used as given, which is how a workflow names both sides for
-any of those. A shallow clone has no parents or merge base to read, and the refusal says so; the
-`fetch-depth: 0` the CLI already needs for the base worktree covers this too.
+The merge row checks the first parent against the same tracking ref: a merge of the head into
+anything not on the base branch would report on a base the pull request does not have, and is
+refused. A clone with no tracking ref skips that check, and the log says so.
+
+Anything else is refused rather than guessed at, as a malformed event always was (both SHAs must be
+full commit SHAs, and `base.ref` present). The report would name one tree and describe another. When
+the checkout is a commit on the base branch, which is what a `pull_request_target` checks out by
+default, no ref spec can help: the checkout holds none of the pull request's code, and `aburi diff`
+scans it as the head whatever the ref spec says, so the only way out is to check out the pull
+request's head or merge ref. A `refspec` input skips the check and is used as given: that is how a
+workflow names both sides when the checkout does hold the tree it wants compared (an earlier push's
+merge ref, a commit the workflow made itself). A shallow clone is refused too, and the refusal names
+what is checked out before it says the clone is shallow: `aburi diff` refuses one anyway, and the
+`fetch-depth: 0` it needs for the base worktree also gives this step the parents and merge bases it
+reads.
 
 The base branch under `pull_request_target` is refused, not given a fallback, because there is no
-right one. That checkout holds none of the pull request's code, so every ref spec describes
-something else. The one this step used to build, `base.sha..head.sha`, compared `base.sha` with the
-base branch's tip and labelled that as the pull request: the base branch's own recent changes went
-through the gate, the pull request's went unexamined, and the check passed or failed on that. A
-warning with an empty report would turn the same misconfiguration into a green check. Checking out
-the pull request's code is the fix, and it is the workflow's decision, not this action's: under
-`pull_request_target` that code runs next to a writable token (§5.1). So the refusal says why the
-checkout is the base branch and names the two ways out, a ref for `actions/checkout` or the
-`refspec` input.
+right one. A warning with an empty report would turn the misconfiguration into a green check.
+Checking out the pull request's code is the fix, and it is the workflow's decision, not this
+action's: under `pull_request_target` that code runs next to a writable token (§5.1). So the refusal
+says the checkout is the base branch and points at a ref for `actions/checkout`.
 
-The step runs after the toolchain, because the script runs on Node, and from `working-directory`,
-because the commit it reads has to be the one the CLI scans. `test/resolve-refspec.test.ts` runs it
-against real repositories in each of those shapes, including a base branch that has moved past
-`base.sha` and deleted a function on the way.
+The step runs after the toolchain setup, so the resolver uses the pinned Node when there is one, and
+from `working-directory`, because the commit it reads has to be the one the CLI scans. Its body is
+[`scripts/refspec-step.sh`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/refspec-step.sh),
+a committed script for the reason the resolvers are (§3.2). A step output ends at a newline and
+`$(...)` strips only the last one, so it writes `value` only for a one-line answer, and the resolver
+refuses a `refspec` input that spans lines. Any other outcome records its exit code as
+`cli-exit-code` and stops the step (§4).
 
 ## 3. CLI resolution
 
@@ -195,14 +206,22 @@ trees, and not by CI here.
 ## 4. Exit codes and the check
 
 The CLI's code is preserved end to end: 0 clean, 1 runtime error, 2 input error, 3 a `--fail-on`
-gate or a plugin error. The action's own input errors and a failed CLI resolution are 2, the same
-code for the same reason — the caller has to change something.
+gate or a plugin error. The action's own input errors, a ref spec it cannot read from the checkout
+(§2.1) and a failed CLI resolution are 2, the same code for the same reason — the caller has to
+change something.
 
 The step that runs the diff does not fail on a non-zero code; it records it and lets the comment
 step run first, because a tripped gate is precisely what the reviewer needs to read. The final step
 propagates it, and runs under `if: always()`: a composite action stops at its first failing step,
 so without that a 403 in the comment step would end the job on an API error and never report the
 gate.
+
+That final step also sets the `cli-exit-code` output, so a failure always surfaces as a number,
+including to a caller that runs the action under `continue-on-error` and gates on the output. Each
+step that can stop the action before the diff records its own code, and the final step passes on
+the diff's or, failing that, the stopping step's. None recorded means a setup step failed: that is
+1, with an annotation, rather than an empty output that reads as a pass. Its body is
+[`scripts/exit-code-step.sh`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/exit-code-step.sh).
 
 The comment step is skipped for exit 1 and 2, where `diff.md` is missing or partial and an ENOENT
 from the upsert would bury the real failure. Exit 3 alone does not say a report exists, since a
