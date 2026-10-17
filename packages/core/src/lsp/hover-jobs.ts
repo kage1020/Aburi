@@ -134,7 +134,7 @@ function findOwnerClass(
 }
 
 // Built from the class's id, as nothing binds `name` or `source.file` to it. A hover reads
-// `Class.m` for a static too, and `this` in a static is the class: the caller's kind goes first.
+// `Class.m` for either kind, and the other kind is never what a member's `this.m` reaches.
 function findMemberSymbolId(
   caller: IRSymbol,
   ownerClass: IRSymbol,
@@ -143,18 +143,20 @@ function findMemberSymbolId(
 ): SymbolId | null {
   const owner = symbolIdParts(ownerClass.id)
   if (owner === null) return null
-  const instance = `${owner.qualifiedName}.${methodName}`
-  const statik = `${owner.qualifiedName}::${methodName}`
-  for (const qualifiedName of isStaticMember(caller) ? [statik, instance] : [instance, statik]) {
-    const id = trySymbolId({ ...owner, qualifiedName })
-    if (id !== null && workingById.has(id)) return id
-  }
-  return null
+  const found = memberSeparators(caller).flatMap((separator) => {
+    const id = trySymbolId({
+      ...owner,
+      qualifiedName: `${owner.qualifiedName}${separator}${methodName}`,
+    })
+    return id !== null && workingById.has(id) ? [id] : []
+  })
+  return found.length === 1 ? (found[0] ?? null) : null
 }
 
-function isStaticMember(caller: IRSymbol): boolean {
-  const qualifiedName = symbolIdParts(caller.id)?.qualifiedName
-  return (
-    qualifiedName !== undefined && qualifiedName.lastIndexOf("::") > qualifiedName.lastIndexOf(".")
-  )
+// A class's own calls come from static blocks, computed members and field initializers of either
+// kind, so its `this` may be either side.
+function memberSeparators(caller: IRSymbol): readonly string[] {
+  if (caller.kind === "class") return [".", "::"]
+  const qualifiedName = symbolIdParts(caller.id)?.qualifiedName ?? ""
+  return qualifiedName.lastIndexOf("::") > qualifiedName.lastIndexOf(".") ? ["::"] : ["."]
 }

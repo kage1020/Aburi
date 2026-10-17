@@ -120,11 +120,16 @@ describe("receiver hints", () => {
     ])
   })
 
-  it.each<[string, number, readonly string[], string]>([
+  it.each<[string, number, readonly string[], string | undefined]>([
     ["a static member to the static", 5, [], "ts:src/a.ts#F::foo"],
     ["an instance member to the instance one", 8, [], "ts:src/a.ts#F.foo"],
-    ["a static member to the instance one the class alone has", 5, ["F::foo"], "ts:src/a.ts#F.foo"],
-    ["an instance member to the static the class alone has", 8, ["F.foo"], "ts:src/a.ts#F::foo"],
+    [
+      "a static member to nothing when the class has only an instance one",
+      5,
+      ["F::foo"],
+      undefined,
+    ],
+    ["an instance member to nothing when the class has only a static", 8, ["F.foo"], undefined],
   ])("resolves `this.foo()` in %s", async (_, line, missing, expected) => {
     const symbols = [
       makeClassSymbol("src/a.ts", "F", 1),
@@ -143,6 +148,35 @@ describe("receiver hints", () => {
     expect(
       enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", line, "this.foo"))?.targetSymbolId,
     ).toBe(expected)
+    expect(enrichment.stats?.hintsRejected.memberNotFound).toBe(expected === undefined ? 1 : 0)
+  })
+
+  it.each<[string, readonly string[], string | undefined]>([
+    ["to the static when the class declares only that", ["F.foo"], "ts:src/a.ts#F::foo"],
+    ["to the instance member when the class declares only that", ["F::foo"], "ts:src/a.ts#F.foo"],
+    ["to nothing when the class declares both", [], undefined],
+  ])("resolves the class's own `this.foo()` %s", async (_, missing, expected) => {
+    const symbols = [
+      {
+        ...makeClassSymbol("src/a.ts", "F", 1),
+        calls: [{ target: "this.foo", line: 5, resolved: null }],
+      },
+      makeMethodSymbol("src/a.ts", "F", "foo", 2),
+      staticMethodSymbol("F", "foo", 3),
+    ].filter((symbol) => !missing.includes(symbol.name))
+
+    const enrichment = await enrich({
+      symbols,
+      fileContents: {
+        "src/a.ts": "class F {\n  foo() {}\n  static foo() {}\n  static {\n    this.foo()\n  }\n}",
+      },
+      serverFactory: hoverServer(() => ({ contents: "(method) F.foo(): void" })),
+    })
+
+    expect(
+      enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", 5, "this.foo"))?.targetSymbolId,
+    ).toBe(expected)
+    expect(enrichment.stats?.hintsRejected.memberNotFound).toBe(expected === undefined ? 1 : 0)
   })
 
   it("tells a static caller by its id, not its name", async () => {
