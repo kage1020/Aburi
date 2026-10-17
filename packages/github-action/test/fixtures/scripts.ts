@@ -20,8 +20,11 @@ export interface RunOptions {
   readonly env?: Readonly<Record<string, string | undefined>>
 }
 
-/** Run one of the committed `scripts/*.mjs` the way a step does; a non-zero exit is a result. */
-export async function runScript(name: string, options: RunOptions = {}): Promise<RunResult> {
+async function execute(
+  file: string,
+  args: readonly string[],
+  options: RunOptions,
+): Promise<RunResult> {
   const env =
     options.env === undefined
       ? undefined
@@ -31,11 +34,7 @@ export async function runScript(name: string, options: RunOptions = {}): Promise
           ),
         )
   try {
-    const done = await execFileAsync(
-      process.execPath,
-      [join(SCRIPTS, name), ...(options.args ?? [])],
-      { cwd: options.cwd, env },
-    )
+    const done = await execFileAsync(file, args, { cwd: options.cwd, env })
     return { status: 0, stdout: done.stdout, stderr: done.stderr }
   } catch (error) {
     const failure = error as { code?: number; stdout?: string; stderr?: string }
@@ -45,6 +44,16 @@ export async function runScript(name: string, options: RunOptions = {}): Promise
       stderr: failure.stderr ?? "",
     }
   }
+}
+
+/** Run one of the committed `scripts/*.mjs` the way a step does; a non-zero exit is a result. */
+export function runScript(name: string, options: RunOptions = {}): Promise<RunResult> {
+  return execute(process.execPath, [join(SCRIPTS, name), ...(options.args ?? [])], options)
+}
+
+/** Run one of the committed `scripts/*.sh` step bodies under bash, as the step's `run:` does. */
+export function runStep(name: string, options: RunOptions = {}): Promise<RunResult> {
+  return execute("bash", [join(SCRIPTS, name), ...(options.args ?? [])], options)
 }
 
 /** The `key=value` lines a step writes to `$GITHUB_OUTPUT`, as the runner reads them back. */

@@ -1,6 +1,6 @@
 import { rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { commitAll, initRepository } from "./git"
+import { commitAll, initRepository } from "@aburi/test-support"
 import { writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 /**

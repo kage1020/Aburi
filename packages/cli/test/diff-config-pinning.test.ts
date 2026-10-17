@@ -1,10 +1,14 @@
 import { readFile, rm } from "node:fs/promises"
 import { resolve } from "node:path"
-import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import {
+  commitAll,
+  initRepository,
+  recordingLogger,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import type { Summary } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { type DiffOptions, EXIT, runDiff, runScan } from "../src"
-import { commitAll, initRepository } from "./git"
 import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-config-pinning")

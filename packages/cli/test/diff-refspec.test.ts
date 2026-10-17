@@ -1,8 +1,8 @@
 import { resolve } from "node:path"
-import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { commitAll, errorFrom, git, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { CliError, runDiff } from "../src"
-import { commitAll, fakeGit, git, initRepository } from "./git"
+import { fakeGit } from "./git"
 import { TYPESCRIPT, writeConfig, writeFileAt } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-refspec")
