@@ -1,5 +1,22 @@
 # @aburi/effects-trpc
 
+## 0.3.2
+
+### Patch Changes
+
+- b7a7148: The declaration files carry less JSDoc: comments that restated the code, and citations of design documents in the IR, diff, config and plugin schemas' descriptions, are gone. No behaviour changes.
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [b7a7148]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [36fd72f]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+  - @aburi/plugin-registry@0.5.1
+
 ## 0.3.1
 
 ### Patch Changes

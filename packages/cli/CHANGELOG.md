@@ -1,5 +1,72 @@
 # @aburi/cli
 
+## 0.5.1
+
+### Patch Changes
+
+- c6ce311: An effect classification that runs past `classifyTimeoutMs` is now kept rather than dropped. `classify()` is synchronous, so its answer has already been computed by the time the clock is read. Dropping it saved no time and made the IR depend on how busy the machine was: the first classification in a process, on a loaded runner, could lose a real `db.write`, and with it the `logic` of its Symbol and of every caller it propagates to. The call is now classified, or handed to the next plugin when the answer was `null`, exactly as a fast call would be. The overrun is still recorded in `stats.effectClassifyTimeouts`, and the scan's warning now reads `N effect classification(s) ran past the per-call budget; their results were kept.` An overrun now changes that record and nothing else in the IR.
+
+  An IR whose stats list no overrun keeps every fingerprint. One that lists overruns gains the effect of each one no later plugin claimed, so those Symbols and their callers get a new `logic` value once. For a plugin that overran on every call, that means effects it never contributed before. An IR scanned before this release, compared with one scanned after, reports those Symbols as logic changes, and there is no `grammarRevision` counterpart for `logic` to warn you that a stored IR predates this release. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed version and is unaffected.
+
+  A kept classification also meets the vocabulary check, which a dropped one skipped. With `strict` on (the default), an effects plugin that emits an effect id its manifest does not declare now fails the scan with `vocab-undeclared` even when that call overran, and with `strict: false` the id is listed in `aburi-vocab-discovered.json`. Before, a slow enough call let such a scan pass. Core effect ids such as `db.write` are exempt, so only plugins with their own vocabulary can meet this.
+
+- b7a7148: Warnings and refusals no longer cite design-doc files: the call-resolution warning of `aburi diff`, the two strict-vocabulary messages of `aburi scan`, and the two refusals of `aburi explain --debug-resolution`, which now say the IR does not keep the per-call buckets.
+
+  The README now says a CLI entry point should assign `process.exitCode`, as the `aburi` bin does, because `process.exit()` can truncate output still being written to a pipe.
+
+- e4487a5: `aburi diff <base>..<head>` leaves submodules out of the file scans and refuses a sparse checkout
+
+  Submodules are now left out of both file scans, with the warning `Submodules detected: <list>. Submodule-aware diff is not yet supported, so their files are left out of both file scans. Component detection still walks them, so a workspace package inside one can still be reported as a Component added or removed.` The base worktree has no submodules checked out while the head working tree does, so every Symbol of an unchanged submodule used to be reported as added, tripping `--fail-on added` on every pull request from a clone with initialised submodules.
+
+  A sparse checkout (`core.sparseCheckout` set to `true`, `1`, `yes` or `on`) now stops the run with exit 1 and `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable`, as `cli-spec.md` §6.4.1 already required, instead of diffing a partial tree whose missing files read as removed.
+
+- 8c2ad99: Interrupting `aburi diff` with Ctrl-C, a cancelled CI job or a closed terminal (`SIGINT`, `SIGTERM`, `SIGHUP`) now removes the base worktree and its temporary checkout before the process exits. It used to end without running that cleanup, so every interrupted run left a `(detached HEAD)` entry in `git worktree list` and a full checkout of the base revision under the temp directory. The run still ends on the signal rather than reporting success: on POSIX with the signal's own 128+N status, and on Windows with an exit code of that same 128+N. Collecting git renames now happens before the temporary directory is created, so a failure there no longer leaves that directory behind either.
+- f9d300c: LSP enrichment opens each file under the language id its extension names: `.tsx` as `typescriptreact`, `.jsx` as `javascriptreact`, `.js`, `.mjs` and `.cjs` as `javascript`, and `.ts`, `.mts` and `.cts` as `typescript` as before. All eight used to be opened as `typescript`, so the server read the JSX in a `.tsx`, `.jsx` or `.js` file as type assertions, and a `this.<method>()` call inside a JSX expression hovered as `any` and landed in `hintsRejected.ownerClassNotFound`. Such a call can now resolve like the same call outside JSX, provided the server answers for the document type it is now told. A file whose extension has no known id is still opened under its language's id, and each language and extension that has to be guessed this way is now reported once.
+
+  A configuration that leaves the pass nothing to do is now reported instead of passing in silence: an `lsp.servers` key that names no loaded language plugin, such as `typescript` where the plugin id is `ts`, and a configuration in which no key matches at all, `"servers": {}` and `aburi scan --lsp` over a config with no `lsp` block included. `stats.lspEnrichment.enabled` now keeps its schema's promise: it is `false` when no language the scan found Symbols in has a server configured, and `aburi scan` says so. These lines arrive with the scan's other incidents, labelled with the side under `aburi diff`, rather than through the log. The docs and config schema now give `ts` as the key, and the `@aburi/types` patch carries the regenerated `lsp.servers` descriptions.
+
+  `EnrichmentInput` takes the loaded plugins' language ids as a required `languageIds`, which `scan` fills in; a direct caller of `enrichWithLsp` passes them, or `null` to check no key. The lines come back as `EnrichmentResult.warnings` and `ScanResult.lspWarnings`, and as `ScanReport.lspWarnings` in the CLI.
+
+  Without `lsp.enabled`, which is off by default, or without an effect plugin, no fingerprint moves. With both, a caller in a `.tsx`, `.jsx`, `.js`, `.mjs` or `.cjs` file whose `this.*` call now resolves inherits that callee's effects, which moves its `logic` fingerprint, so an IR scanned before this release, compared with one scanned after, can report such a caller as changed. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed version and is unaffected.
+
+- cf6aeb1: `aburi diff` now removes the `diff.json` and `diff.md` an earlier run left in the output directory before it compares anything, as it already did `diff.full.md`. A run that stops first — a plugin that fails to load, a strict scan's undeclared value — leaves no report behind, instead of one describing some other diff.
+
+  The GitHub Action sets `diff-json-path` and `diff-md-path` only for a file this run wrote, and as absolute paths. The comment step used to run on every exit 3, including a plugin error's, and then failed on a missing `diff.md` or posted the one an earlier run left; it also prefixed the path with `working-directory`, so an absolute `output-dir` failed the upsert with ENOENT on a diff that had succeeded. An empty `output-dir` is now refused with exit 2, since the CLI would read it as the directory it runs in.
+
+- 47f8ef9: A file git renamed between the revisions and skipped by one scan now leaves its Symbols `unknown` instead of confidently `removed` or `added`. The skip was looked up only under the leftover's own path, while the other scan had recorded the file under its other name, so `src/big.ts → src/billing.ts` with `src/billing.ts` over the size cap at head reported every Symbol of `src/big.ts` as removed and tripped `--fail-on removed`.
+
+  - Such an entry carries the new optional `SymbolUnknown.lostPath` (`aburi.diff.v1`), the path the skipping scan recorded. `diff.md` names that path as this file's head (or base) name, where it used to name the other revision's path as the one skipped.
+  - Dependency edges get the same lookup, and their `lostFiles[].path` is the path the skipping scan recorded, not the holder's.
+  - A renamed file both scans skipped appears in `notCompared[]` under the head path, with the base path in the new optional `NotComparedFile.basePath`. `diff.md` and the stderr line name it as `base → head`.
+  - `diffDependencies` now requires `renames`. `RenameDirections` and `renameDirections` are exported to build it, and a caller with no rename information passes `renameDirections(null)`.
+
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [b7a7148]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [b7a7148]
+- Updated dependencies [f32e45b]
+- Updated dependencies [b7a7148]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [b7a7148]
+- Updated dependencies [36fd72f]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [463d616]
+- Updated dependencies [1739845]
+- Updated dependencies [ad101d5]
+- Updated dependencies [47f8ef9]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+  - @aburi/config@0.4.1
+  - @aburi/diff@0.6.0
+  - @aburi/plugin-registry@0.5.1
+  - @aburi/markdown-projection@0.5.0
+
 ## 0.5.0
 
 ### Minor Changes
