@@ -1,7 +1,8 @@
 import { changed } from "@aburi/test-support"
 import type { ArrayDelta, SignatureDelta, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { LONG_CONDITION, namedSymbol, projectChanges } from "./fixtures"
+import { LONG_CONDITION, namedSymbol, projectChanges, renamedPair } from "./fixtures"
+import { sectionOf } from "./markdown"
 
 function none(): ArrayDelta {
   return { added: [], removed: [], modified: [] }
@@ -267,6 +268,30 @@ describe("a changed Symbol's component, visibility and confidence rows", () => {
     ])
     expect(md).toContain(
       "- component: changed\n- visibility: changed\n- confidence: `high` → `low`\n",
+    )
+  })
+})
+
+describe("the name row of a pair whose name changed", () => {
+  it.each([
+    ["between files", "parseAmount", "src/parse.ts", "readAmount", "src/amount.ts"],
+    ["within one file", "convertCurrency", "src/money.ts", "convertCurrencyAmount", "src/money.ts"],
+  ])("opens the delta body, on a rename %s", (_, from, fromFile, to, toFile) => {
+    const md = projectChanges([renamedPair(from, fromFile, to, toFile)])
+    expect(md).toContain(`**Delta**:\n- name: \`${from}\` → \`${to}\`\n`)
+  })
+
+  it("comes before the signature rows in both bodies, the API entry titled by its new name", () => {
+    const md = projectChanges([
+      renamedPair("parseAmount", "src/parse.ts", "readAmount", "src/amount.ts", {
+        apiChanged: true,
+        signature: signature({ outputs: { added: ["number"], removed: ["string"], modified: [] } }),
+      }),
+    ])
+    const rows = "- name: `parseAmount` → `readAmount`\n- signature.outputs: `string` → `number`\n"
+    expect(md).toContain(`**Delta**:\n${rows}`)
+    expect(sectionOf(md, "## ⚠ API changes").join("\n")).toContain(
+      `### \`readAmount\` *(function)*\n**File**: \`src/amount.ts:1\`\n\n${rows}`,
     )
   })
 })
