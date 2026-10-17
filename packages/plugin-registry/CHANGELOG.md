@@ -1,5 +1,21 @@
 # @aburi/plugin-registry
 
+## 0.5.1
+
+### Patch Changes
+
+- b7a7148: `@aburi/types` exports `ImportBinding`, an `ImportEdge.symbols` entry split into the name the module exports and the local it binds. `@aburi/core`'s `ImportBinding` is now that type, so its fields are read-only, and `ImportBindingHalves` from `@aburi/plugin-registry/plugin-input` is an alias of it.
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [b7a7148]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [36fd72f]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

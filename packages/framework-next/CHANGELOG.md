@@ -1,5 +1,29 @@
 # @aburi/framework-next
 
+## 0.2.3
+
+### Patch Changes
+
+- b7a7148: The declaration files carry less JSDoc: comments that restated the code, and citations of design documents in the IR, diff, config and plugin schemas' descriptions, are gone. No behaviour changes.
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [b7a7148]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [f32e45b]
+- Updated dependencies [b7a7148]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [36fd72f]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [463d616]
+- Updated dependencies [47f8ef9]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.2.2
 
 ### Patch Changes
