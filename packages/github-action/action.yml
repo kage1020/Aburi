@@ -18,10 +18,14 @@ inputs:
     default: "latest"
   refspec:
     description: >-
-      `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls back to the
-      event's own `github.event.pull_request.base.sha` and `github.event.pull_request.head.sha`,
-      on `pull_request` and `pull_request_target` events. Any other event with an empty `refspec`
-      fails with exit code 2.
+      `<base>..<head>` ref spec forwarded to `aburi diff`, trimmed but otherwise as given. When
+      empty, on `pull_request` and `pull_request_target` events, the action reads what is checked
+      out. The merge commit a plain `actions/checkout` gives a pull request (its head,
+      `github.event.pull_request.head.sha`, as the second parent) is compared with its first
+      parent, the base branch commit it was merged into; the head itself is compared with its
+      merge base with the base branch (`origin/<github.event.pull_request.base.ref>`, and
+      `github.event.pull_request.base.sha`). Any other checkout, a shallow clone, and any other
+      event with an empty `refspec`, fail with exit code 2.
     required: false
     default: ""
   fail-on:
@@ -101,8 +105,8 @@ outputs:
     description: "Absolute path to the Markdown diff artefact this run's `aburi diff` wrote (empty when `format=json`, or when the run stopped before writing it). Read it together with `cli-exit-code`: a run that exits 1 or 2 can leave a path to something it could not clear."
     value: ${{ steps.diff.outputs.diff-md-path }}
   cli-exit-code:
-    description: "Numeric exit code from `aburi diff` (0=clean, 1=runtime error, 2=input error, 3=--fail-on gate or plugin error). Matches `packages/cli/src/exit-codes.ts`. Also 2 when `cli: workspace` finds no CLI to run, which is the one value the diff itself did not produce."
-    value: ${{ steps.diff.outputs.cli-exit-code }}
+    description: "Numeric exit code from `aburi diff` (0=clean, 1=runtime error, 2=input error, 3=--fail-on gate or plugin error). Matches `packages/cli/src/exit-codes.ts`. A run that stops before the diff still sets one: 2 for a rejected input, a ref spec that cannot be read from the checkout, or a `cli: workspace` that finds no CLI to run; 1 when a setup step failed. Never empty."
+    value: ${{ steps.exit-code.outputs.cli-exit-code }}
   comment-id:
     description: "Numeric id of the PR comment that was created or updated, or empty when `comment=false`."
     value: ${{ steps.post-comment.outputs.comment-id }}
@@ -114,6 +118,7 @@ runs:
   using: "composite"
   steps:
     - name: "Aburi: validate inputs"
+      id: validate
       shell: bash
       env:
         FORMAT: ${{ inputs.format }}
@@ -123,54 +128,32 @@ runs:
         OUTPUT_DIR: ${{ inputs.output-dir }}
       run: |
         set -euo pipefail
-        if [ "$COMMENT" = "true" ] && [ "$FORMAT" = "json" ]; then
-          echo "::error::comment=true requires format to include markdown; got format=json." >&2
+        refuse() {
+          echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"
+          echo "::error::$1" >&2
           exit 2
+        }
+        if [ "$COMMENT" = "true" ] && [ "$FORMAT" = "json" ]; then
+          refuse "comment=true requires format to include markdown; got format=json."
         fi
         case "$FORMAT" in
           json|md|both) : ;;
-          *) echo "::error::format must be one of: json | md | both (got '$FORMAT')." >&2; exit 2 ;;
+          *) refuse "format must be one of: json | md | both (got '$FORMAT')." ;;
         esac
         case "$CLI" in
           dlx|workspace) : ;;
-          *) echo "::error::cli must be one of: dlx | workspace (got '$CLI')." >&2; exit 2 ;;
+          *) refuse "cli must be one of: dlx | workspace (got '$CLI')." ;;
         esac
         case "$COMMENT" in
           true|false) : ;;
-          *) echo "::error::comment must be true or false (got '$COMMENT')." >&2; exit 2 ;;
+          *) refuse "comment must be true or false (got '$COMMENT')." ;;
         esac
         if [ -n "$MAX_BYTES" ] && ! printf '%s' "$MAX_BYTES" | grep -Eq '^(0|[1-9][0-9]*)$'; then
-          echo "::error::max-bytes must be a non-negative integer, or empty (got '$MAX_BYTES')." >&2
-          exit 2
+          refuse "max-bytes must be a non-negative integer, or empty (got '$MAX_BYTES')."
         fi
         if [ -z "$OUTPUT_DIR" ]; then
-          echo "::error::output-dir must not be empty." >&2
-          exit 2
+          refuse "output-dir must not be empty."
         fi
-
-    - name: "Aburi: resolve refspec"
-      id: refspec
-      shell: bash
-      env:
-        INPUT_REFSPEC: ${{ inputs.refspec }}
-        EVENT_NAME: ${{ github.event_name }}
-        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: |
-        set -euo pipefail
-        if [ -n "$INPUT_REFSPEC" ]; then
-          echo "value=$INPUT_REFSPEC" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "pull_request_target" ]; then
-          echo "::error::No 'refspec' input and event '$EVENT_NAME' does not carry a PR base/head." >&2
-          exit 2
-        fi
-        if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
-          echo "::error::pull_request event is missing base/head SHAs; refuse to guess." >&2
-          exit 2
-        fi
-        echo "value=${PR_BASE_SHA}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
     - name: "Setup pnpm"
       if: inputs.cli == 'dlx'
@@ -183,6 +166,20 @@ runs:
       uses: "actions/setup-node@v7"
       with:
         node-version: ${{ inputs.node-version }}
+
+    # After the toolchain so the resolver uses the pinned Node when there is one, and from
+    # `working-directory` because the commit it reads has to be the one the CLI scans as the head.
+    - name: "Aburi: resolve refspec"
+      id: refspec
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_REFSPEC: ${{ inputs.refspec }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/refspec-step.sh"
 
     - name: "Aburi: run diff"
       id: diff
@@ -266,13 +263,11 @@ runs:
       run: node "$GITHUB_ACTION_PATH/scripts/upsert-comment.mjs"
 
     - name: "Aburi: propagate CLI exit code"
+      id: exit-code
       if: always()
       shell: bash
       env:
-        CLI_EXIT: ${{ steps.diff.outputs.cli-exit-code }}
-      run: |
-        set -euo pipefail
-        if [ "${CLI_EXIT:-0}" != "0" ]; then
-          echo "::error::aburi diff exited with status $CLI_EXIT (see previous log). Failing the step so the PR check reflects it." >&2
-          exit "$CLI_EXIT"
-        fi
+        DIFF_EXIT: ${{ steps.diff.outputs.cli-exit-code }}
+        REFSPEC_EXIT: ${{ steps.refspec.outputs.cli-exit-code }}
+        INPUTS_EXIT: ${{ steps.validate.outputs.cli-exit-code }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/exit-code-step.sh"

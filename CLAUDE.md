@@ -43,7 +43,9 @@ Private packages:
 - `@aburi/test-support` — helpers every suite may use: IR and diff builders (`makeIR`, `makeSymbol`,
   `makeDiff`, `changed`, …), plugin contexts and candidates (`makeCtx`, `makeCandidate`, `importEdge`),
   `noopRegistry`, `recordingLogger`, `useScratchWorkspace`, `errorFrom`, `symbolById`,
-  `irSchemaViolations`. Depends on nothing above `@aburi/types`.
+  `irSchemaViolations`, and scratch git repositories (`git`, `gitTestEnv`, `initRepository`,
+  `commitAll`). `initRepository` creates `main` (`-b main`), and its callers depend on that name.
+  Depends on nothing above `@aburi/types`.
 - `@aburi/test-harness` — the real pipeline for suites: `scanWith` (scan over a plugin lineup), `diffIRs`,
   `diffOfEditWith` (scan, edit, rescan, diff), `extractFile`, `classifyInputsAround`. It depends on core,
   diff, plugin-registry and test-support and never on a plugin (plugins are passed in), so the plugins,

@@ -1,10 +1,9 @@
 import { copyFile, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { useScratchWorkspace } from "@aburi/test-support"
+import { git, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EXIT, runDiff } from "../src"
 import { gitChildEnv } from "../src/git/runner"
-import { git, initRepository } from "./git"
 import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-hook-env")

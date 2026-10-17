@@ -1,8 +1,7 @@
 import { resolve } from "node:path"
-import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import { git, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, formatFailOnMessage, IR_JSON_FILENAME, runDiff, runScan } from "../src"
-import { git } from "./git"
 import { writeStubRepository, writeStubWorkspace } from "./stub-language"
 
 const workspace = useScratchWorkspace("diff-scan-faults")
