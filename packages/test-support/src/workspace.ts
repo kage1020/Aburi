@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach } from "vitest"
@@ -37,4 +37,13 @@ export function useScratchWorkspace(prefix: string): ScratchWorkspace {
       await writeFile(abs, content, "utf8")
     },
   }
+}
+
+/**
+ * Make `linkPath` a link to the directory `target`, as a junction: that is what Windows creates
+ * without privilege. Elsewhere Node ignores the type and makes an ordinary symlink, and either way
+ * a filesystem walk reads it as a link, so a test using it runs on every OS.
+ */
+export async function linkDirectory(target: string, linkPath: string): Promise<void> {
+  await symlink(target, linkPath, "junction")
 }

@@ -102,6 +102,9 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     onlyFiles: true,
     dot: false,
     absolute: false,
+    // Followed, a link gives a file one Symbol id per path reaching it and brings in files from
+    // outside the workspace. Git keeps the link itself as an entry, but never looks behind it.
+    followSymbolicLinks: false,
   })
 
   const extensions = new Set((options.languageExtensions ?? []).map(toNfc))

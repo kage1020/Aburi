@@ -1,4 +1,5 @@
-import { errorFrom } from "@aburi/test-support"
+import { join } from "node:path"
+import { errorFrom, linkDirectory } from "@aburi/test-support"
 import type { Component } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CoreError, detectComponents } from "../src/index"
@@ -95,6 +96,24 @@ describe("a directory two detectors claim", () => {
 
     expect(component.id).toBe("billing-web")
     expect(component.name).toBe("billing-web")
+  })
+})
+
+describe("a link to an nx project directory", () => {
+  const outside = useWorkspaceTree("core-identity-outside")
+
+  it.each<[string, () => string]>([
+    ["a project the workspace already holds", () => join(tree.root, "apps", "billing")],
+    ["a project outside the workspace", () => outside.root],
+  ])("adds no component at the link's path when it reaches %s", async (_target, target) => {
+    await tree.writeJson("nx.json", {})
+    await tree.writeJson("apps/billing/project.json", { name: "billing-web" })
+    await outside.writeJson("project.json", { name: "ghost" })
+    await linkDirectory(target(), join(tree.root, "apps", "alias"))
+
+    const components = await detectComponents({ workspaceRoot: tree.root })
+
+    expect(components.map((component) => component.roots[0])).toEqual(["apps/billing"])
   })
 })
 

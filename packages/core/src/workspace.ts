@@ -171,6 +171,8 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
     ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
     onlyFiles: true,
     absolute: true,
+    // Discovery does not walk through a link, so a project found there would own no scanned file.
+    followSymbolicLinks: false,
     deep: 10,
   })
   const candidates: WorkspaceCandidate[] = []
@@ -194,6 +196,7 @@ async function resolveDeclaredPackages(
   managerTool: string,
 ): Promise<WorkspaceCandidate[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
+  // Links are followed because pnpm and npm follow them when they resolve these same patterns.
   const manifests = await glob(manifestPatterns, {
     cwd: workspaceRoot,
     ignore: ["**/node_modules/**", "**/.git/**"],

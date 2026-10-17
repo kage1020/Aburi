@@ -77,7 +77,7 @@ All detector results are merged, duplicates with the same path are removed, and 
 
 - POSIX globs (forward slashes)
 - Relative to the workspace root
-- **A pattern names a directory that holds the manifest, and is resolved against the manifest**: `p` is matched as `p/package.json` (a trailing slash replaced), and the directory holding each match is the candidate. This is how pnpm and npm resolve these patterns, and it is the same rule the nx detector follows with `project.json`. Three consequences worth stating:
+- **A pattern names a directory that holds the manifest, and is resolved against the manifest**: `p` is matched as `p/package.json` (a trailing slash replaced), and the directory holding each match is the candidate. This is how pnpm and npm resolve these patterns, and the nx detector finds a directory by its `project.json` the same way — though, unlike these patterns, its search does not follow links (below). Three consequences worth stating:
   - `.` and `./` name the workspace root itself, and nothing else. Matched as a directory instead, `.` is a pattern that reaches every directory in the workspace.
   - A literal path names that directory, not its subtree.
   - A matched directory with no manifest is not a package, and is not a candidate.
@@ -85,6 +85,7 @@ All detector results are merged, duplicates with the same path are removed, and 
 - An empty pattern declares nothing
 - **`package.json` is the only manifest recognized.** pnpm also accepts `package.yaml` and `package.json5`, and globs `package.{json,yaml,json5}`; a package declared in either is not detected here, because the manifest is parsed as JSON for the id, name, frameworks and public API. Supporting them is a parser change, not a resolution one.
 - **Which resolved directories become Components is §5's rule, not the manager's.** pnpm counts the workspace root as a workspace project unconditionally — *"The root package is always included, even when custom location wildcards are used"* — and a pattern naming it changes nothing for pnpm. Here it does: the root is a Component when a pattern names it, and otherwise only through §5's no-detector fallback. A root Component's `roots: ["."]` contains every other component's root, so making one unconditionally would give every workspace a component whose census covers the whole tree.
+- **Links are followed**, as pnpm and npm follow them: `pnpm ls -r` lists a package reached through a directory link at the link's path as well as at its own. A pattern matching such a link makes the package at the link's path a candidate, and so a Component. Discovery does not follow links (§8), so that Component owns no scanned file and shows as a `0` row in the workspace table — the same report §12 gives any component that fails closed. The nx detector's search for `project.json` does not follow them (§8)
 - Maximum depth of `**` is 10 (to avoid false positives)
 - A path matching multiple globs counts as a single entry
 - Anything under `node_modules/` is always excluded
@@ -344,6 +345,7 @@ When multiple detectors generate the same id with different paths (§4.1):
 - Category A's core patterns apply too, the same list discovery uses rather than a copy of part of it: `node_modules/`, `vendor/`, `__pycache__/`, `out/`, `.venv/`, `*.d.ts` and the rest of [`drop-list.md` §3.1](./drop-list.md)
 - `config.ignore[]` and the loaded language plugins' file-drop globs apply when the caller has them. The census is one walk from the **workspace root**, bucketed by component root afterwards, because those patterns are workspace-root relative by contract and cannot be matched against a walk rooted inside a package
 - The one caller that has neither is `aburi init`, which detects components in order to write the first config. It honours `.gitignore` and the core patterns, which is everything knowable before a config exists
+- Symlinks: of detection's three filesystem searches, two do not follow them and one does. The language census and the nx detector's search for `project.json` do not, because discovery does not ([`drop-list.md` §3](./drop-list.md)): a file only a link reaches is never scanned, so it does not count towards a language, and a project only a link reaches would be a Component no scanned file belongs to. The resolution of declared package patterns (pnpm, npm, yarn, bun) does, as the package manager does (§3.1.1), so a package declared through a link is a Component that owns no scanned file
 - The contents of a `.git` directory are never read. A `.git` file is read only as far as its opening `gitdir: `, to tell a linked worktree's or a submodule's pointer from any other file of that name. Either one ends the workspace-root walk (§2.1)
 
 ## 9. Performance
@@ -392,6 +394,9 @@ Implementation guidance:
 | CD31 | A Component rooted at `""`, at `"/"`, or at `../vendor` | It claims no file at all, the workspace root included |
 | CD32 | cwd inside a repository that sits under another marker — a linked worktree at `.worktrees/feat` in the main checkout, a repository nested in another, a submodule | The workspace root is that checkout's own top level, the directory holding its `.git` (a directory or a `gitdir:` file), not the outer one |
 | CD33 | cwd inside a monorepo subdirectory holding a `.git` file that does not open with `gitdir:` (an empty one left behind) | The walk passes it: the workspace root is the monorepo's |
+| CD34 | A component holding twelve `.ts` files and a link to a directory outside the workspace that holds twelve `.py` files | `languages` is `["ts"]` — the census does not walk through the link |
+| CD35 | `nx.json`, `apps/billing/project.json`, and `apps/alias` a link to `apps/billing` | One Component, rooted at `apps/billing` |
+| CD36 | `packages: ["packages/*"]`, `packages/billing/package.json`, and `packages/alias` a link to `packages/billing` | Two Components, rooted at `packages/alias` and `packages/billing`; no scanned file belongs to the one at `packages/alias` |
 
 ## 11. Design decisions
 
