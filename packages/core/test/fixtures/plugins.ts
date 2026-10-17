@@ -9,6 +9,7 @@ import {
 } from "@aburi/test-support"
 import type {
   BodyExtraction,
+  Config,
   EffectPlugin,
   ExtractionContext,
   FrameworkPlugin,
@@ -276,6 +277,7 @@ export interface OneSymbolFile {
   frameworks?: readonly FrameworkPlugin[]
   effects?: readonly EffectPlugin[]
   language?: Partial<LanguagePlugin>
+  config?: Config
 }
 
 /** The pipeline over a file declaring one candidate (`stubCandidate("Fn")` by default). */
@@ -291,6 +293,7 @@ export async function extractOneSymbol(file: OneSymbolFile = {}): Promise<Extrac
     language,
     frameworks: file.frameworks ?? [],
     effects: file.effects ?? [],
+    config: file.config ?? {},
   })
   return expectExtracted(result)
 }

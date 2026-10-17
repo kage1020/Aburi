@@ -27,8 +27,8 @@ export type ScanExtras = Pick<ScanInput, "components" | "logger" | "lspServerFac
 
 /**
  * `scan` over `workspaceRoot` with `lineup`, every plugin's manifest registered first. Classification
- * gets the ceiling budget unless `config` sets one: the 50 ms default is overrun by the first
- * classification in a process on a slow CI runner, which drops a correct effect.
+ * gets the ceiling budget unless `config` sets one: on a slow CI runner the 50 ms default is
+ * overrun by the first classification in a process, and `stats.effectClassifyTimeouts` lists it.
  */
 export async function scanWith(
   workspaceRoot: string,

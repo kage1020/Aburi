@@ -1,5 +1,5 @@
-import { makeCall } from "@aburi/test-support"
-import type { CallCandidate, ClassifyContext, Decorator } from "@aburi/types"
+import { makeCall, spend } from "@aburi/test-support"
+import type { CallCandidate, ClassifyContext, Decorator, EffectClassification } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../../src/call-site"
 import {
@@ -166,5 +166,83 @@ describe("runFilePipeline — effect classification", () => {
     })
 
     expect(seen).toStrictEqual([[{ name: "Post", qualifier: "tsed", boundary: true }]])
+  })
+})
+
+const READ: EffectClassification = {
+  effectId: "db.read",
+  confidence: "high",
+  derivedBy: "effects-stub:read",
+}
+const WRITE: EffectClassification = {
+  ...READ,
+  effectId: "db.write",
+  derivedBy: "effects-stub:write",
+}
+
+function answering(
+  name: string,
+  answer: EffectClassification | null,
+  ms: number,
+  asked: string[] = [],
+) {
+  return stubEffectsPlugin(name, (call) => {
+    asked.push(call.target)
+    spend(ms)
+    return answer
+  })
+}
+
+// 30 ms against the 10 ms floor overruns on any machine.
+const SLOW_MS = 30
+const FLOOR = { classifyTimeoutMs: 10 }
+
+describe("runFilePipeline — a classification that ran past its budget", () => {
+  it("is kept, and no later plugin is asked", async () => {
+    const asked: string[] = []
+    const { symbols, timeoutEvents } = await extractOneSymbol({
+      config: FLOOR,
+      effects: [
+        answering("effects-slow", READ, SLOW_MS),
+        answering("effects-next", WRITE, 0, asked),
+      ],
+      body: bodyCalling(makeCall({ target: "db.query" })),
+    })
+
+    expect(timeoutEvents.map((e) => e.plugin)).toEqual(["effects-slow"])
+    expect(symbols[0]?.effects.map((e) => [e.id, e.target, e.plugin])).toEqual([
+      ["db.read", "db.query", "effects-slow"],
+    ])
+    expect(symbols[0]?.calls).toEqual([])
+    expect(asked).toEqual([])
+  })
+
+  it("passes a null on to the next plugin, as a fast null would", async () => {
+    const { symbols, timeoutEvents } = await extractOneSymbol({
+      config: FLOOR,
+      effects: [answering("effects-slow", null, SLOW_MS), answering("effects-next", READ, 0)],
+      body: bodyCalling(makeCall({ target: "db.query" })),
+    })
+
+    // The next plugin is timed against the same 10 ms, so only the slow one's overrun is certain.
+    expect(timeoutEvents.filter((e) => e.plugin === "effects-slow")).toHaveLength(1)
+    expect(symbols[0]?.effects.map((e) => [e.id, e.plugin])).toEqual([["db.read", "effects-next"]])
+  })
+
+  it("leaves the Symbol, fingerprint included, as a fast run leaves it", async () => {
+    const classifiedIn = (classifyTimeoutMs: number, ms: number) =>
+      extractOneSymbol({
+        config: { classifyTimeoutMs },
+        effects: [answering("effects-slow", READ, ms)],
+        body: bodyCalling(makeCall({ target: "db.query" })),
+      })
+    const slow = await classifiedIn(FLOOR.classifyTimeoutMs, SLOW_MS)
+    const fast = await classifiedIn(5000, 0)
+
+    expect(slow.timeoutEvents).toHaveLength(1)
+    expect(fast.timeoutEvents).toEqual([])
+    expect(fast.symbols[0]?.effects.map((e) => e.id)).toEqual(["db.read"])
+    // `logic` hashes an effect by its target alone, so only the whole Symbol shows a lost confidence.
+    expect(slow.symbols).toEqual(fast.symbols)
   })
 })
