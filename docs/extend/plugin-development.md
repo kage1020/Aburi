@@ -292,8 +292,10 @@ class MyEffectsPlugin implements EffectPlugin {
 Contracts:
 
 - First non-null classification wins across the effects plugin list.
-- The classifier is called under a per-call timeout budget. Keep it pure so a
-  slow classification is a bug, not a design decision.
+- The classifier is timed against a per-call budget (`classifyTimeoutMs`). A
+  call over it keeps its answer and is listed in `stats.effectClassifyTimeouts`.
+  Keep the classifier pure and synchronous so a slow classification is a bug,
+  not a design decision.
 - **Two-signal layered gate is strongly recommended**: check for both an
   import-time signal (does the file import the target library at all?) AND a
   call-site signal (does the target's segment shape match?). See

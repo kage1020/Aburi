@@ -197,7 +197,7 @@ setting in CI.
 | `strict` | `true` | Abort when a plugin emits vocabulary it never declared. `false` keeps it and lists it in `aburi-vocab-discovered.json`. |
 | `maxFileSizeBytes` | `2097152` | Aburi skips files above this size. |
 | `parseTimeoutMs` | `5000` | Per-file budget for parse, extract, and walk. |
-| `classifyTimeoutMs` | `50` | Per-call budget for an effects plugin. |
+| `classifyTimeoutMs` | `50` | Per-call budget for an effects plugin. A call over it keeps its result and is listed in `stats.effectClassifyTimeouts`. |
 | `minParsedFileRatio` | *(unset)* | Smallest share of discovered files a scan may parse and still pass. |
 | `lsp` | off | Opt-in enrichment from a language server you install: column ranges and `this.` / `super.` call resolution. `servers` is keyed by language plugin id: `"servers": { "ts": { "command": "typescript-language-server", "args": ["--stdio"] } }` for `lang-typescript`. |
 
