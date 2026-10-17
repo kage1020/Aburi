@@ -1,10 +1,15 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import {
+  commitAll,
+  git,
+  initRepository,
+  recordingLogger,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import type { DiffResult, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, EXIT, runDiff } from "../src"
-import { commitAll, git, initRepository } from "./git"
 import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-unknown-rename")

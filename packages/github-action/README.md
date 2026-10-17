@@ -31,7 +31,8 @@ jobs:
           fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
-`fetch-depth: 0` is required so `aburi diff` can resolve the base ref locally.
+`fetch-depth: 0` is required so `aburi diff` can resolve the base ref locally, and so the
+action can find that base from the commit checked out.
 
 ## Pinning
 
@@ -71,8 +72,8 @@ uses the alias.
 | Input | Default | Purpose |
 |---|---|---|
 | `version` | `latest` | npm dist-tag or exact version of `@aburi/cli`. `cli: dlx` only. |
-| `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`. Falls back to the PR's `base.sha..head.sha` for `pull_request` / `pull_request_target` events. |
-| `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `docs/design/cli-spec.md` for the grammar. Empty = report only. |
+| `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`, trimmed but otherwise as given. Empty, on `pull_request` / `pull_request_target` events, it is read from the checkout, since `aburi diff` scans the working tree as the head: the merge commit a plain `actions/checkout` gives a pull request is compared with its first parent, the base branch commit it was merged into, and a checkout of the PR's `head.sha` with its merge base with the base branch (`origin/<base.ref>`, and `base.sha`). Any other checkout, or a shallow clone, is exit 2. That includes the base branch a `pull_request_target` checks out by default, which holds none of the PR's code: check out the pull request's head or merge ref, or — where the checkout already holds the pull request's code — set `refspec` to name both sides yourself. |
+| `fail-on` | *(empty)* | Forwarded to `--fail-on`; see [the CLI reference](https://aburi.kage1020.com/reference/cli) for the grammar. Empty = report only. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.config.jsonc`. |
 | `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
@@ -90,7 +91,7 @@ uses the alias.
 |---|---|
 | `diff-json-path` | Absolute path to the `diff.json` this run wrote (empty when `format=md`, or when the run stopped before writing it). Read it together with `cli-exit-code`: a run that exits 1 or 2 can leave a path to something it could not clear. |
 | `diff-md-path` | Absolute path to the `diff.md` this run wrote (empty when `format=json`, or when the run stopped before writing it). Read it together with `cli-exit-code`: a run that exits 1 or 2 can leave a path to something it could not clear. |
-| `cli-exit-code` | `0` clean · `1` runtime error · `2` input error · `3` `--fail-on` gate or plugin error. Matches [`packages/cli/src/exit-codes.ts`](../cli/src/exit-codes.ts). Also `2` when `cli: workspace` finds no CLI to run. |
+| `cli-exit-code` | `0` clean · `1` runtime error · `2` input error · `3` `--fail-on` gate or plugin error. Matches [`packages/cli/src/exit-codes.ts`](../cli/src/exit-codes.ts). Set even when the run stops before the diff: `2` for a rejected input, a ref spec that cannot be read from the checkout, or a `cli: workspace` that finds no CLI to run; `1` when a setup step failed. Never empty. |
 | `comment-id` | Numeric id of the created/updated comment (empty when `comment=false`). |
 | `comment-action` | `created` / `updated` / `unchanged`. |
 

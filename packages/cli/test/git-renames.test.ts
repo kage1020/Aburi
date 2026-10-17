@@ -1,9 +1,14 @@
 import { resolve } from "node:path"
-import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import {
+  commitAll,
+  git,
+  initRepository,
+  recordingLogger,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, type GitRunner, runDiff } from "../src"
 import { collectRenames, parseRenameRecords } from "../src/git/renames"
-import { commitAll, git, initRepository } from "./git"
 import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("git-renames")

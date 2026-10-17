@@ -1,9 +1,9 @@
 import { mkdir } from "node:fs/promises"
 import { resolve } from "node:path"
-import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { commitAll, errorFrom, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { CliError, type GitRunner, runDiff } from "../src"
-import { commitAll, fakeGit, initRepository, refusedBy } from "./git"
+import { fakeGit, refusedBy } from "./git"
 import { writeFileAt } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-ref-diagnosis")

@@ -1,11 +1,16 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import {
+  commitAll,
+  git,
+  initRepository,
+  recordingLogger,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import type { DiffResult } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { EXIT, runDiff } from "../src"
 import { parseSubmodulePaths } from "../src/git/submodules"
-import { commitAll, git, initRepository } from "./git"
 import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-submodules")
