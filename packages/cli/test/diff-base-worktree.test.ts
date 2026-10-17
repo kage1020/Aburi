@@ -1,10 +1,17 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { errorFrom, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import {
+  commitAll,
+  errorFrom,
+  git,
+  initRepository,
+  recordingLogger,
+  useScratchWorkspace,
+} from "@aburi/test-support"
 import type { DiffResult } from "@aburi/types"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { CliError, EXIT, runDiff } from "../src"
-import { commitAll, fakeGit, git, initRepository, refusedBy } from "./git"
+import { fakeGit, refusedBy } from "./git"
 import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-base-worktree")

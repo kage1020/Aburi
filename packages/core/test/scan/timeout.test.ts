@@ -1,7 +1,8 @@
 import { makeCall, makeCtx, spend } from "@aburi/test-support"
 import type { EffectClassification, EffectPlugin } from "@aburi/types"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  CLASSIFY_TIMEOUT_MAX_MS,
   CLASSIFY_TIMEOUT_MIN_MS,
   type ClassifyTimeoutEvent,
   type ClassifyWithTimeoutOptions,
@@ -34,11 +35,11 @@ describe("classifyWithTimeout", () => {
     expect(classify(slowPlugin(0))).toEqual(READ)
   })
 
-  it("answers null and reports the plugin, the call and the budget when the classifier overruns", () => {
+  it("keeps the classification and reports the plugin, the call and the budget when the classifier overruns", () => {
     const events: ClassifyTimeoutEvent[] = []
     const result = classify(slowPlugin(80), { timeoutMs: 50, onTimeout: (e) => events.push(e) })
 
-    expect(result).toBeNull()
+    expect(result).toEqual(READ)
     expect(events).toEqual([
       {
         plugin: "effects-stub",
@@ -59,8 +60,31 @@ describe("classifyWithTimeout", () => {
       timeoutMs: 1,
       onTimeout: (e) => events.push(e),
     })
-    expect(result).toBeNull()
+    expect(result).toEqual(READ)
     expect(events.map((e) => e.budgetMs)).toEqual([CLASSIFY_TIMEOUT_MIN_MS])
+  })
+
+  describe("a budget above the maximum", () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    // The clock is faked: the clamp's arithmetic is under test, and five real seconds buy nothing.
+    it.each([
+      ["reports a call one millisecond past it, against it", 1, [CLASSIFY_TIMEOUT_MAX_MS]],
+      ["does not report a call that took exactly it", 0, []],
+    ])("is lowered to the maximum, which %s", (_label, pastMaxMs, budgets) => {
+      vi.useFakeTimers({ toFake: ["performance"] })
+      const events: ClassifyTimeoutEvent[] = []
+      const plugin = stubEffectsPlugin("effects-stub", () => {
+        vi.advanceTimersByTime(CLASSIFY_TIMEOUT_MAX_MS + pastMaxMs)
+        return READ
+      })
+
+      classify(plugin, { timeoutMs: 99_999, onTimeout: (e) => events.push(e) })
+
+      expect(events.map((e) => e.budgetMs)).toEqual(budgets)
+    })
   })
 
   it("refuses a classifier that returns a Promise, before any timeout is reported", () => {

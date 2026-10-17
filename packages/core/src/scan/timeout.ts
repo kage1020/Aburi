@@ -55,6 +55,8 @@ export function classifyWithTimeout(
     )
   }
 
+  // An overrun keeps its answer: the work is already done, and dropping it would make the IR
+  // depend on how busy the machine was rather than on the source.
   if (elapsed > budget) {
     options.onTimeout?.({
       plugin: plugin.manifest.name,
@@ -65,7 +67,6 @@ export function classifyWithTimeout(
       budgetMs: budget,
       elapsedMs: elapsed,
     })
-    return null
   }
 
   return result
