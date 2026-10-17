@@ -108,10 +108,10 @@ describe("a .gitignore in every directory", () => {
       "keeps a re-included directory's deeper exclusions and their own re-inclusions",
       [
         ["", "src/*"],
-        ["src", "!sub/", "sub/deep/"],
+        ["src", "!sub/", "sub/deep/", "sub/gone/"],
         ["src/sub", "!deep/"],
       ],
-      ["src/a.ts", "src/sub/c.ts", "src/sub/deep/d.ts"],
+      ["src/a.ts", "src/sub/c.ts", "src/sub/deep/d.ts", "src/sub/gone/e.ts"],
       ["src/sub/c.ts", "src/sub/deep/d.ts"],
     ],
     [

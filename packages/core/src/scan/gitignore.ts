@@ -2,13 +2,18 @@ import { lstat, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { CoreError } from "../errors"
 import { describeThrown, isVanishedFile } from "./faults"
-import { compileRules, type GitignoreRules, readRuleLines, type Verdict } from "./gitignore-pattern"
+import {
+  type GitignoreRules,
+  MAX_RULE_LENGTH,
+  parseGitignore,
+  type RuleTooLong,
+  type Verdict,
+} from "./gitignore-pattern"
 
 const GITIGNORE_FILENAME = ".gitignore"
 
-// Regex engines refuse long patterns at lengths that differ by platform; one fixed cap keeps
-// the verdict on a rule the same on every machine.
-const MAX_RULE_LENGTH = 4096
+// Git skips a rule file this large, counting the newline it appends to what it read.
+const MAX_GITIGNORE_BYTES = 100 * 1024 * 1024
 
 const QUOTED_RULE_LENGTH = 60
 
@@ -21,11 +26,13 @@ export function openGitignoreTree(workspaceRoot: string): GitignoreTree {
 }
 
 async function readMatcher(path: string): Promise<GitignoreRules | null> {
-  let content: Buffer
+  let size: number
+  let parsed: GitignoreRules | RuleTooLong | undefined
   try {
     const entry = await lstat(path)
     if (!entry.isFile()) return null
-    content = await readFile(path)
+    size = entry.size
+    if (size < MAX_GITIGNORE_BYTES) parsed = parseGitignore(await readFile(path))
   } catch (error) {
     if (isVanishedFile(error)) return null
     throw new CoreError(
@@ -34,24 +41,37 @@ async function readMatcher(path: string): Promise<GitignoreRules | null> {
       { cause: error },
     )
   }
-  const lines = readRuleLines(content)
-  for (const line of lines) {
-    if (line.bytes.length > MAX_RULE_LENGTH) {
-      throw refuseRule(path, line.index, line.bytes, `it is longer than ${MAX_RULE_LENGTH} bytes`)
-    }
+  if (parsed === undefined) {
+    throw new CoreError(
+      `.gitignore at "${path}" is ${size} bytes, too large to read: git skips a rule file of ` +
+        `${MAX_GITIGNORE_BYTES} bytes or more`,
+      { code: "scan-gitignore-unreadable", value: path },
+    )
   }
-  return compileRules(lines)
+  if ("kind" in parsed) throw refuseRule(path, parsed)
+  return parsed
 }
 
-/** `rule` is the rule's bytes, one character per byte; the quotation is decoded back to text. */
-function refuseRule(path: string, index: number, rule: string, reason: string): CoreError {
-  const head = rule.length > QUOTED_RULE_LENGTH ? rule.slice(0, QUOTED_RULE_LENGTH) : rule
-  const quoted = Buffer.from(head, "latin1").toString("utf8") + (head === rule ? "" : "…")
+function refuseRule(path: string, rule: RuleTooLong): CoreError {
   return new CoreError(
-    `.gitignore at "${path}" line ${index + 1} is not a usable pattern ("${quoted}", ` +
-      `${rule.length} bytes): ${reason}`,
+    `.gitignore at "${path}" line ${rule.line} is not a usable pattern ` +
+      `("${quoteHead(rule.text)}", ${rule.byteLength} bytes): it is longer than ` +
+      `${MAX_RULE_LENGTH} bytes`,
     { code: "scan-gitignore-unreadable", value: path },
   )
+}
+
+// By code point, so the quotation never ends in half a character, and without spreading a rule
+// that can run to megabytes.
+function quoteHead(text: string): string {
+  let head = ""
+  let count = 0
+  for (const character of text) {
+    if (count === QUOTED_RULE_LENGTH) return `${head}…`
+    head += character
+    count++
+  }
+  return head
 }
 
 class GitignoreDescent implements GitignoreTree {

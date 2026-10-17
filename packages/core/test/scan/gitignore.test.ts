@@ -120,7 +120,7 @@ describe("discoverFiles — the glob as git reads it", () => {
       [],
     ],
     [
-      "matches a POSIX class and a `]` that opens a bracket",
+      "matches a POSIX class and a `]` as a bracket's first member",
       ["a[[:digit:]].ts", "a[]].ts"],
       ["a1.ts", "ax.ts", "a].ts", "b].ts"],
       ["ax.ts", "b].ts"],
