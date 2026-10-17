@@ -102,8 +102,8 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     onlyFiles: true,
     dot: false,
     absolute: false,
-    // Git stores a link as one entry and never looks behind it; followed, a link gave a file one
-    // Symbol id per path reaching it, or brought in files from outside the workspace.
+    // Followed, a link gives a file one Symbol id per path reaching it and brings in files from
+    // outside the workspace. Git keeps the link itself as an entry, but never looks behind it.
     followSymbolicLinks: false,
   })
 

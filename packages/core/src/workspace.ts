@@ -196,6 +196,7 @@ async function resolveDeclaredPackages(
   managerTool: string,
 ): Promise<WorkspaceCandidate[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
+  // Links are followed because pnpm and npm follow them when they resolve these same patterns.
   const manifests = await glob(manifestPatterns, {
     cwd: workspaceRoot,
     ignore: ["**/node_modules/**", "**/.git/**"],

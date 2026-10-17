@@ -1,6 +1,5 @@
-import { symlink } from "node:fs/promises"
 import { join } from "node:path"
-import { errorFrom } from "@aburi/test-support"
+import { errorFrom, linkDirectory } from "@aburi/test-support"
 import type { Component } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CoreError, detectComponents } from "../src/index"
@@ -100,12 +99,17 @@ describe("a directory two detectors claim", () => {
   })
 })
 
-describe("an nx project behind a symlink", () => {
-  it("is not a component, as discovery does not walk there", async () => {
+describe("a link to an nx project directory", () => {
+  const outside = useWorkspaceTree("core-identity-outside")
+
+  it.each<[string, () => string]>([
+    ["a project the workspace already holds", () => join(tree.root, "apps", "billing")],
+    ["a project outside the workspace", () => outside.root],
+  ])("adds no component at the link's path when it reaches %s", async (_target, target) => {
     await tree.writeJson("nx.json", {})
     await tree.writeJson("apps/billing/project.json", { name: "billing-web" })
-    // A junction is a directory link on Windows that needs no privilege to create.
-    await symlink(join(tree.root, "apps", "billing"), join(tree.root, "apps", "alias"), "junction")
+    await outside.writeJson("project.json", { name: "ghost" })
+    await linkDirectory(target(), join(tree.root, "apps", "alias"))
 
     const components = await detectComponents({ workspaceRoot: tree.root })
 

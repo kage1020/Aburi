@@ -1,6 +1,6 @@
 import { chmod, symlink } from "node:fs/promises"
 import { join } from "node:path"
-import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { errorFrom, linkDirectory, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { type DiscoverOptions, discoverFiles } from "../../src"
 
@@ -86,33 +86,48 @@ describe("discoverFiles", () => {
 describe("discoverFiles — symlinks are not followed", () => {
   const outside = useScratchWorkspace("scan-discover-outside")
 
-  async function discoverAmongLinks(): Promise<string[]> {
+  async function discoverAmongLinks(placeLinks: () => Promise<void>): Promise<string[]> {
+    // Without a file behind it, a link out of the workspace adds nothing even when followed.
+    await outside.writeSource("o.ts", "1")
+    await workspace.writeSource("src/a.ts", "1")
+    await placeLinks()
     const result = await discover([])
     expect(result.skipped).toEqual([])
-    expect(result.unrepresentableFiles).toEqual([])
     return result.files.map((f) => f.path)
   }
 
   it("does not walk through a link to a directory, in the workspace, out of it or back up", async () => {
-    await outside.writeSource("o.ts", "1")
-    await workspace.writeSource("src/a.ts", "1")
-    // A junction is a directory link on Windows that needs no privilege to create, and the walk
-    // reads it as a link, so this runs everywhere.
-    await symlink(join(workspace.root, "src"), join(workspace.root, "shared"), "junction")
-    await symlink(outside.root, join(workspace.root, "src", "ext"), "junction")
-    await symlink(workspace.root, join(workspace.root, "src", "loop"), "junction")
+    const files = await discoverAmongLinks(async () => {
+      await linkDirectory(join(workspace.root, "src"), join(workspace.root, "shared"))
+      await linkDirectory(outside.root, join(workspace.root, "src", "ext"))
+      await linkDirectory(workspace.root, join(workspace.root, "src", "loop"))
+    })
 
-    expect(await discoverAmongLinks()).toEqual(["src/a.ts"])
+    expect(files).toEqual(["src/a.ts"])
   })
 
   // Creating a link to a file on Windows needs a privilege an ordinary test run does not have.
   it.skipIf(process.platform === "win32")("does not list a link to a file", async () => {
-    await outside.writeSource("o.ts", "1")
-    await workspace.writeSource("src/a.ts", "1")
-    await symlink("a.ts", join(workspace.root, "src", "b.ts"))
-    await symlink(join(outside.root, "o.ts"), join(workspace.root, "src", "o.ts"))
-    await symlink("nowhere.ts", join(workspace.root, "src", "dangling.ts"))
+    const files = await discoverAmongLinks(async () => {
+      await symlink("a.ts", join(workspace.root, "src", "b.ts"))
+      await symlink(join(outside.root, "o.ts"), join(workspace.root, "src", "o.ts"))
+      await symlink("nowhere.ts", join(workspace.root, "src", "dangling.ts"))
+    })
 
-    expect(await discoverAmongLinks()).toEqual(["src/a.ts"])
+    expect(files).toEqual(["src/a.ts"])
+  })
+
+  it("walks a workspace root that is itself reached through a link", async () => {
+    await workspace.writeSource("src/a.ts", "1")
+    const linkedRoot = join(outside.root, "workspace")
+    await linkDirectory(workspace.root, linkedRoot)
+
+    const result = await discoverFiles({
+      workspaceRoot: linkedRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
   })
 })

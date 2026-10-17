@@ -1,5 +1,6 @@
-import { symlink } from "node:fs/promises"
+import { cp } from "node:fs/promises"
 import { join } from "node:path"
+import { linkDirectory } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { detectComponents } from "../src/index"
 import { useWorkspaceTree } from "./fixtures/workspace"
@@ -92,14 +93,19 @@ describe("detection drops what discovery drops", () => {
   describe("through a symlink", () => {
     const outside = useWorkspaceTree("core-component-languages-outside")
 
-    it("does not count files only a link reaches", async () => {
+    it.each<[string[], string, (from: string, to: string) => Promise<void>]>([
+      [["ts"], "a link to .py files outside the workspace", linkDirectory],
+      [
+        ["py", "ts"],
+        "a real directory holding the same files",
+        (from, to) => cp(from, to, { recursive: true }),
+      ],
+    ])("counts %j when src/linked is %s", async (languages, _linked, place) => {
       await outside.writeLanguageFiles(".", ".py")
       await tree.writeLanguageFiles("src", ".ts")
-      // A junction is a directory link on Windows that needs no privilege to create, and the
-      // walk reads it as a link, so this runs everywhere.
-      await symlink(outside.root, join(tree.root, "src", "linked"), "junction")
+      await place(outside.root, join(tree.root, "src", "linked"))
 
-      expect(await languagesOfRoot()).toEqual(["ts"])
+      expect(await languagesOfRoot()).toEqual(languages)
     })
   })
 

@@ -48,7 +48,7 @@ export async function countLanguagesPerRoot(
     ignore: [...CORE_IGNORE_PATTERNS, ...(options.ignore ?? [])],
     onlyFiles: true,
     dot: false,
-    // Discovery does not walk through a link, so a file only a link reaches is never scanned.
+    // The census must match discovery's walk, or `languages` names a language no scanned file has.
     followSymbolicLinks: false,
     deep: Math.max(...roots.map((root) => rootDepth(root) + LANGUAGE_SCAN_DEPTH)),
   })

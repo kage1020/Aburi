@@ -32,7 +32,7 @@ drop means "removed from view", not "discarded". For transparency, symbol-level 
 
 Excludes an entire file from extraction. The file is not even AST-parsed.
 
-**Symlinks are not followed, to a file or to a directory.** Git stores a link as one entry and never looks behind it, and the walk does the same: no link is a candidate, and nothing under a linked directory is reached through it. Following them gave one file a Symbol id per path that reached it (`shared -> src` listed every file twice), put files from outside the workspace into the Document under a workspace path, and expanded a cyclic link once. Component detection's language census and nx project detection make the same decision, so neither finds anything only a link reaches.
+**Symlinks are not followed, to a file or to a directory.** Git stores a link as one entry and never looks behind it, and the walk goes no further: a link is never a candidate for extraction, and nothing under a linked directory is reached through it. Followed, a link gives a file one Symbol id per path reaching it (`shared -> src` lists every file twice) and brings in files from outside the workspace under a workspace path, and a cyclic link is expanded once. Component detection's language census and its nx project search make the same decision, so neither finds anything only a link reaches; its resolution of declared package patterns follows links, as pnpm does, so a package declared through a link is a Component that owns no scanned file ([`component-detect.md` §3.1.1](./component-detect.md)).
 
 ### 3.1 Core standard patterns
 
@@ -310,7 +310,8 @@ Properties the extraction pipeline must satisfy.
 | A3d | `packages/app/.gitignore` holding `fixtures/` | Nothing under `packages/app/fixtures/` is scanned; `packages/other/fixtures/` is untouched |
 | A3e | Root `.gitignore` holding `*.ts`, `packages/app/.gitignore` holding `!keep.ts` | `packages/app/keep.ts` is scanned — the deeper file decides |
 | A4 | Adding `config.ignore: ["docs/**"]` | Everything under `docs/` is skipped |
-| A5 | `src/a.ts` beside `shared -> src`, `src/ext` linking out of the workspace, `src/loop -> ..`, and `src/b.ts -> a.ts` | Only `src/a.ts` is scanned, once: no link is a candidate and nothing is reached through one |
+| A5 | `src/a.ts` beside the directory links `shared -> src`, `src/ext` linking out of the workspace and `src/loop -> ..`, and the file links `src/b.ts -> a.ts`, `src/o.ts` linking to a file outside the workspace and the dangling `src/dangling.ts -> nowhere.ts` | Only `src/a.ts` is scanned, once, and nothing is skipped: no link is a candidate and nothing is reached through one |
+| A5b | `src/a.ts` in a workspace whose root is itself reached through a link | `src/a.ts` is scanned, as it is from the root's real path: the rule is about links inside the workspace, not the path to it |
 
 ### 8.2 Symbol-level (Category B)
 
