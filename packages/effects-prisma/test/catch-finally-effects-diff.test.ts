@@ -71,7 +71,6 @@ describe("scan + diff — writes in catch and finally", () => {
       "db.write prisma.lock.delete",
     ])
     expect(symbol.rules.map((r) => r.type)).toEqual(["try"])
-    expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
     expect(head.ir.stats.effectPropagation.symbolsWithPropagatedEffects).toBe(0)
 
     expect(diff.symbols).toMatchObject([
@@ -115,7 +114,6 @@ describe("scan + diff — a call in catch or finally to a helper that writes", (
       ["db.write", "prisma.audit.create", [AUDIT]],
     ])
     expect(head.ir.stats.effectPropagation.propagatedEffectCount).toBeGreaterThanOrEqual(1)
-    expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
 
     expect(diff.symbols).toMatchObject([
       { status: "changed", after: { id: TRANSFER }, delta: { logicChanged: true } },

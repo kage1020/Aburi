@@ -710,27 +710,40 @@ than the section: one or two thin entries can be longer as a list, and shortenin
 the document.
 
 A document that fits whole is emitted as it is. Otherwise the form of each section is decided in
-two passes, each walking the §6.1 order from the top and keeping a change only if the whole
-document, note included, still fits:
+three passes, each walking the §6.1 order from the top and measuring the whole document, note
+included. The note matters: it names every short and every omitted section, so a names-only form
+is not always the smaller document — one thin entry saves a couple of bytes in its lines and
+spends more than that on its name in the note — and omitting a one-entry section can grow the
+document.
 
-1. **Which sections stay.** Each section is kept in its smallest form — names-only where it has
-   one, full where it has not — if it fits beside the sections already kept, and omitted if it
-   does not.
+1. **Which sections stay.** Each section is kept in whichever of its forms makes the smaller
+   document, whole on a tie, if that fits beside the sections already kept, and omitted if it does
+   not.
 2. **How much of them.** The names-only sections are made full again from the top, until one does
    not fit.
+3. **What the first pass left.** The first pass measures each section with every one below it
+   still named as omitted. Placing those, or making a list full, takes names out of the note, so
+   each section still omitted is tried again as in the first pass. Where the form it takes would
+   leave a list below it full although names-only would make that list smaller, that list is made
+   names-only too, rather than cost the more important section its place. Then the second pass
+   runs again, until nothing changes.
 
-So a section goes only when it cannot fit, at its smallest, beside every more important section
-at theirs, and a reviewer never loses an API change for an implementation refactor to stay. A
-section too large to fit even as names no longer takes the smaller ones below it with it: they
-stay, and the note names it as omitted. Among the sections with a names-only form, the full ones
-are the first ones, and once one is short every one below it is short or gone. The headings that
-survive are always in §6.1 order. The title and the Summary line are never dropped, so a budget
-smaller than those is not achievable and the document comes back over it.
+So a section goes only when it cannot fit, in either form, beside every more important section
+that stayed, and a reviewer never loses an API change for an implementation refactor to stay. No
+section the document omits would fit back into it, not even with the lists below it that would
+then be smaller as names-only made names-only. A section too large to fit even as names no longer
+takes the smaller ones below it with it: they stay, and the note names it as omitted. Among the
+sections with a names-only form, every one above the first short one is full; below it each is
+short, omitted, or full where names-only would be no smaller — a thin section below a long
+names-only one stays whole (MP13c). The headings that survive are always in §6.1 order. Each pass
+is greedy, so where the note makes sizes interact the result is not always the best arrangement
+there is, only one no omitted section can be added to. The title and the Summary line are never
+dropped, so a budget smaller than those is not achievable and the document comes back over it.
 
 This matters most for the largest diffs. Dropping whole sections alone left a diff of 302 removed
 Symbols with API changes as its only section, and named none of the 302, although `➖ Removed` is
 what `--fail-on removed` gates on: the red check and the section that explains it went together.
-Under the two passes, every one of them is named (MP13a).
+Under the passes, every one of them is named (MP13a).
 
 A capped document says so, directly under the Summary, telling the short sections apart from the
 ones that went:
@@ -899,8 +912,10 @@ All Markdown projection output is **English, with fixed wording**.
 | MP11a | diff containing a moved or moved+changed Symbol whose base and head files are the same | Every place the move is written (the Moved + Changed entry and its names-only row, the folded Moved list, a Slice member's follow-up) names the file once with the base and head names and lines, never the path twice. A move between files still writes both paths |
 | MP11b | diff containing a moved or moved+changed Symbol whose base and head names differ, within one file or between files | Every place the move is written carries the base name: a move between files writes each path with its name, and every delta body of the pair opens with ``- name: `<base>` → `<head>` ``. A rename of the last segment explains the API flag, so no "no field-level detail" row follows; a new owner alone (`Repo.save` → `UserRepo.save`) does not explain it |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
-| MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, at its smallest, beside every more important section at theirs; among the sections with a names-only form, the full ones come first and every one after the first short one is short or omitted. A note names the short ones and the omitted ones apart |
+| MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, in either form, beside every more important section that stayed, and no omitted section would fit back into the result, not even with the lists below it made names-only where names-only would then be smaller; among the sections with a names-only form, the full ones come first and every one after the first short one is short, omitted, or full where names-only would be no smaller. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
+| MP13b | diff with one thin removed Symbol and eight syntax-only changes, a component added, projected with a budget that holds Removed whole but not as names | `➖ Removed` is kept whole rather than omitted, since its names-only form costs more in the note than it saves; with a budget that also holds Component changes, both are kept |
+| MP13c | diff with twelve API changes and one thin removed Symbol, projected with a budget that holds API changes only as names | `➖ Removed` is kept whole below the names-only API changes wherever that fits: not named only in a larger document, and not omitted |
 | MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
 | MP15 | A signature with an optional input and a rest input; a diff entry whose `signature.inputs.added` holds a rest input | `(a?: string, ...ids: string[])` in the signature line, and `` `...ids: string[]` `` in the diff row (§5.5). An input with an empty `type` prints as its name alone |
 
@@ -953,7 +968,8 @@ Dropping a section is still the most expensive thing the cap does, because the r
 with a heading's name in the note and nothing else. For the sections whose entries are whole
 Symbols there is a cheaper step first: the names and locations, without the entries. That keeps
 the one thing a reviewer cannot recover from the Summary — *which* Symbols changed — and it is
-what a failing `--fail-on removed` check needs the report to still say. So each section is first
-kept in its smallest form, and only then are the lists made full again, from the top, as far as
-the budget allows. The alternative ordering, keeping more sections full and dropping the lists
-below them, is the one that left a 302-removal report naming none of the 302.
+what a failing `--fail-on removed` check needs the report to still say. So each section starts in
+whichever of its forms makes the smaller document, the note counted, and only then are the lists
+made full again, from the top, as far as the budget allows. The alternative ordering, keeping more
+sections full and dropping the lists below them, is the one that left a 302-removal report naming
+none of the 302.

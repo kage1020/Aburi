@@ -1,4 +1,5 @@
 import { asSyntaxNode, type SyntaxNode } from "@aburi/core"
+import { isPathLiteral, unwrapValue, writtenChildren } from "./ast-helpers"
 
 export const EXPRESS_MIDDLEWARE_METHOD = "use"
 
@@ -20,16 +21,14 @@ export function analyzeUseArguments(callExpression: unknown): UseArgumentShape |
   const argsNode = findArguments(node)
   if (argsNode === null) return null
 
-  const argChildren: SyntaxNode[] = []
-  for (const child of argsNode.namedChildren) {
-    if (child !== null && child.type !== "comment") argChildren.push(child)
-  }
+  const argChildren = writtenChildren(argsNode)
 
   let hasErrorHandler = false
   let hasRegularHandler = false
   let hasIdentifierArg = false
 
-  for (const arg of argChildren) {
+  for (const written of argChildren) {
+    const arg = unwrapValue(written)
     if (isFunctionLike(arg)) {
       const arity = functionArity(arg)
       if (arity === ERROR_MIDDLEWARE_ARITY) hasErrorHandler = true
@@ -46,7 +45,7 @@ export function analyzeUseArguments(callExpression: unknown): UseArgumentShape |
     hasErrorHandler,
     hasRegularHandler,
     firstArgIsPathLiteral: first !== undefined && isPathLiteral(first),
-    secondArgIsIdentifier: second !== undefined && isIdentifier(second),
+    secondArgIsIdentifier: second !== undefined && isIdentifier(unwrapValue(second)),
     argCount: argChildren.length,
     hasIdentifierArg,
   }
@@ -92,28 +91,4 @@ function findParametersChild(fn: SyntaxNode): SyntaxNode | null {
 
 function isIdentifier(node: SyntaxNode): boolean {
   return node.type === "identifier"
-}
-
-function isPathLiteral(node: SyntaxNode): boolean {
-  const value = unwrapValue(node)
-  if (value.type === "string") return true
-  if (value.type !== "template_string") return false
-  return value.namedChildren.every((child) => child?.type !== "template_substitution")
-}
-
-const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
-  "parenthesized_expression",
-  "as_expression",
-  "satisfies_expression",
-  "non_null_expression",
-])
-
-function unwrapValue(node: SyntaxNode): SyntaxNode {
-  let cursor = node
-  while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
-    const inner = cursor.namedChildren.find((child) => child !== null && child.type !== "comment")
-    if (inner === undefined || inner === null) return cursor
-    cursor = inner
-  }
-  return cursor
 }
