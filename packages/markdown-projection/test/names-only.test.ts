@@ -11,7 +11,7 @@ import {
   rule,
   symbolId,
 } from "@aburi/test-support"
-import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
+import type { Symbol as IRSymbol, SymbolChange, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { namedSymbol, projectChanges, relocated, symbolWithBody } from "./fixtures"
@@ -19,9 +19,19 @@ import { bytes, headings, noteOf, sectionOf } from "./markdown"
 
 const pad = (i: number, width = 4) => String(i).padStart(width, "0")
 
-/** One byte short of the whole document: the smallest cut the size cap can be asked for. */
-function justOver(changes: readonly SymbolChange[]): string {
-  return projectChanges(changes, { maxBytes: bytes(projectChanges(changes)) - 1 })
+const NAMES_ONLY_LINE =
+  "_Names and locations only: the full entries did not fit within the size cap._"
+
+/**
+ * Each cut is one byte short of the last document, the smallest the size cap can be asked for. A
+ * section above Moved + Changed that shares its pairs takes two: the first shortens Moved + Changed,
+ * whose entries for the same pairs are longer.
+ */
+function firstNamesOnly(changes: readonly SymbolChange[], heading: string): string {
+  let md = projectChanges(changes)
+  do md = projectChanges(changes, { maxBytes: bytes(md) - 1 })
+  while (sectionOf(md, heading)[2] !== NAMES_ONLY_LINE)
+  return md
 }
 
 describe("projectDiff — maxBytes writes a names-only row per entry", () => {
@@ -45,11 +55,19 @@ describe("projectDiff — maxBytes writes a names-only row per entry", () => {
       logicChanged: true,
     })
   }
-  const acrossRenamed = (i: number) => {
+  const acrossRenamed = (i: number, flags: Partial<SymbolDelta> = { apiChanged: true }) => {
     const before = namedSymbol(`parse${pad(i)}`)
     const file = `src/amount/read${pad(i)}.ts`
     const after = { ...relocated(before, file), id: symbolId(`ts:${file}#read${pad(i)}`) }
-    return movedChanged(before, { ...after, name: `read${pad(i)}` }, { logicChanged: true })
+    return movedChanged(before, { ...after, name: `read${pad(i)}` }, flags)
+  }
+  const reowned = (i: number, flags: Partial<SymbolDelta>, after: Partial<IRSymbol> = {}) => {
+    const file = `src/repo${pad(i)}.ts`
+    const before = makeSymbol({ id: `ts:${file}#Repo${pad(i)}.save`, name: `Repo${pad(i)}.save` })
+    const name = `UserRepo${pad(i)}.save`
+    const source = { ...before.source, startLine: 30 }
+    const head = { ...before, id: symbolId(`ts:${file}#${name}`), name, source, ...after }
+    return movedChanged(before, head, flags, "name-signature")
   }
 
   it.each<[string, string, SymbolChange[], string]>([
@@ -105,14 +123,49 @@ describe("projectDiff — maxBytes writes a names-only row per entry", () => {
       Array.from({ length: 40 }, (_, i) => inFile(i)),
       "- `inFile0000Renamed` *(function)* — `src/inFile0000.ts:40` (from `inFile0000` at L1)",
     ],
+    [
+      "an API change whose name changed, with the name and path it had",
+      "## ⚠ API changes",
+      Array.from({ length: 40 }, (_, i) => acrossRenamed(i)),
+      "- `read0000` *(function)* — `src/amount/read0000.ts:1` (from `parse0000` in `src/parse0000.ts`)",
+    ],
+    [
+      "a logic change whose name changed, with the name and line it had",
+      "## 🔧 Logic changes",
+      Array.from({ length: 40 }, (_, i) => reowned(i, { logicChanged: true })),
+      "- `UserRepo0000.save` *(function)* — `src/repo0000.ts:30` (from `Repo0000.save` at L1)",
+    ],
+    [
+      "a confidence change whose name changed, with the name it had before both values",
+      "## 🎚 Confidence changes",
+      Array.from({ length: 40 }, (_, i) =>
+        reowned(i, { confidenceChanged: true }, { confidence: "medium" }),
+      ),
+      "- `UserRepo0000.save` *(function)* ⚠ medium — `src/repo0000.ts:30` (from `Repo0000.save` at L1) (`high` → `medium`)",
+    ],
   ])("for %s", (_, heading, changes, row) => {
-    const md = justOver(changes)
-    expect(noteOf(md)).toContain("names only")
-    const section = sectionOf(md, heading)
-    expect(section[2]).toBe(
-      "_Names and locations only: the full entries did not fit within the size cap._",
+    expect(sectionOf(firstNamesOnly(changes, heading), heading)).toContain(row)
+  })
+
+  it("keeps a pair's old name where API changes lists names only and Moved + Changed is omitted", () => {
+    const guards = Array.from({ length: 4 }, (_, i) =>
+      rule({ type: "guard", condition: `amount${i} !== null`, line: 3 + i }),
     )
-    expect(section).toContain(row)
+    const changes = Array.from({ length: 40 }, (_, i) =>
+      acrossRenamed(i, {
+        apiChanged: true,
+        logicChanged: true,
+        rules: { added: guards, removed: [], modified: [] },
+      }),
+    )
+    let md = projectChanges(changes)
+    while (headings(md).includes("## 🔀 Moved + Changed")) {
+      md = projectChanges(changes, { maxBytes: bytes(md) - 1 })
+    }
+    expect(noteOf(md)).toContain("Names only: ⚠ API changes. Omitted: 🔀 Moved + Changed.")
+    for (let i = 0; i < 40; i++) {
+      expect(md).toContain(`(from \`parse${pad(i)}\` in \`src/parse${pad(i)}.ts\`)`)
+    }
   })
 
   it("says only that it listed names, when that was all it did", () => {

@@ -8,15 +8,16 @@ export function renderDeltaBody(change: ChangedEntry): string[] {
   if (before.name !== after.name) {
     rows.push(`- name: ${inlineCode(before.name)} → ${inlineCode(after.name)}`)
   }
-  // The API fingerprint reads only the last segment of the name, so a new owner explains nothing.
-  const renamed = lastSegment(before.name) !== lastSegment(after.name)
-  const named = rows.length
+  // Only the last segment reaches the API fingerprint, so the name row counts as an explanation
+  // only when that segment changed.
+  const shortNameChanged = lastSegment(before.name) !== lastSegment(after.name)
+  const nameRows = rows.length
   appendSignatureDelta(rows, delta.signature ?? null)
   appendDecoratorDelta(rows, delta.decorators)
   appendArrayGroup(rows, "rules", delta.rules, describeRuleLike)
   appendArrayGroup(rows, "effects", delta.effects, describeEffectLike)
   appendArrayGroup(rows, "calls", delta.calls, describeCallLike)
-  const explained = rows.length > named || renamed || delta.visibilityChanged
+  const explained = rows.length > nameRows || shortNameChanged || delta.visibilityChanged
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
   if (delta.confidenceChanged === true) {

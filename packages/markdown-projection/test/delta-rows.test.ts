@@ -1,7 +1,7 @@
-import { changed, makeSymbol, movedChanged } from "@aburi/test-support"
+import { changed } from "@aburi/test-support"
 import type { ArrayDelta, SignatureDelta, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { LONG_CONDITION, namedSymbol, projectChanges } from "./fixtures"
+import { LONG_CONDITION, namedSymbol, projectChanges, renamedPair } from "./fixtures"
 import { sectionOf } from "./markdown"
 
 function none(): ArrayDelta {
@@ -272,40 +272,26 @@ describe("a changed Symbol's component, visibility and confidence rows", () => {
   })
 })
 
-describe("a renamed pair's name row", () => {
-  function renamed(from: string, fromFile: string, to: string, toFile: string) {
-    return movedChanged(
-      makeSymbol({ id: `ts:${fromFile}#${from}`, name: from }),
-      makeSymbol({ id: `ts:${toFile}#${to}`, name: to }),
-      { apiChanged: true, syntaxChanged: true },
-      "logic-fingerprint",
-    )
-  }
-
+describe("the name row of a pair whose name changed", () => {
   it.each([
     ["between files", "parseAmount", "src/parse.ts", "readAmount", "src/amount.ts"],
     ["within one file", "convertCurrency", "src/money.ts", "convertCurrencyAmount", "src/money.ts"],
-  ])("opens the delta body and explains the API flag, on a rename %s", (_, from, fromFile, to, toFile) => {
-    const md = projectChanges([renamed(from, fromFile, to, toFile)])
+  ])("opens the delta body, on a rename %s", (_, from, fromFile, to, toFile) => {
+    const md = projectChanges([renamedPair(from, fromFile, to, toFile)])
     expect(md).toContain(`**Delta**:\n- name: \`${from}\` → \`${to}\`\n`)
-    expect(md).not.toContain("no field-level detail was recorded")
   })
 
-  it("is written under API changes too, where the pair is titled by its new name", () => {
+  it("comes before the signature rows in both bodies, the API entry titled by its new name", () => {
     const md = projectChanges([
-      renamed("parseAmount", "src/parse.ts", "readAmount", "src/amount.ts"),
+      renamedPair("parseAmount", "src/parse.ts", "readAmount", "src/amount.ts", {
+        apiChanged: true,
+        signature: signature({ outputs: { added: ["number"], removed: ["string"], modified: [] } }),
+      }),
     ])
-    const api = sectionOf(md, "## ⚠ API changes")
-    expect(api).toContain("### `readAmount` *(function)*")
-    expect(api).toContain("- name: `parseAmount` → `readAmount`")
-  })
-
-  it.each([
-    ["Repo.save", "UserRepo.save"],
-    ["Repo::save", "UserRepo::save"],
-  ])("leaves the API flag unexplained when only the owner changed, %s → %s", (from, to) => {
-    const md = projectChanges([renamed(from, "src/repo.ts", to, "src/repo.ts")])
-    expect(md).toContain(`- name: \`${from}\` → \`${to}\``)
-    expect(md).toContain("- API fingerprint changed; no field-level detail was recorded")
+    const rows = "- name: `parseAmount` → `readAmount`\n- signature.outputs: `string` → `number`\n"
+    expect(md).toContain(`**Delta**:\n${rows}`)
+    expect(sectionOf(md, "## ⚠ API changes").join("\n")).toContain(
+      `### \`readAmount\` *(function)*\n**File**: \`src/amount.ts:1\`\n\n${rows}`,
+    )
   })
 })

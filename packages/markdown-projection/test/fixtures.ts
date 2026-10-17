@@ -1,5 +1,10 @@
-import { call, fp, makeDiff, makeSymbol, rule } from "@aburi/test-support"
-import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
+import { call, fp, makeDiff, makeSymbol, movedChanged, rule } from "@aburi/test-support"
+import type {
+  Symbol as IRSymbol,
+  SymbolChange,
+  SymbolDelta,
+  SymbolMovedChanged,
+} from "@aburi/types"
 import { type ProjectDiffOptions, projectDiff } from "../src"
 
 /** Longer than a code span may be, so a rule carrying it fences. */
@@ -31,4 +36,19 @@ export function symbolWithBody(name: string): IRSymbol {
 
 export function relocated(symbol: IRSymbol, file: string): IRSymbol {
   return { ...symbol, source: { ...symbol.source, file } }
+}
+
+export function renamedPair(
+  from: string,
+  fromFile: string,
+  to: string,
+  toFile: string,
+  flags: Partial<SymbolDelta> = { apiChanged: true, syntaxChanged: true },
+): SymbolMovedChanged {
+  return movedChanged(
+    makeSymbol({ id: `ts:${fromFile}#${from}`, name: from }),
+    makeSymbol({ id: `ts:${toFile}#${to}`, name: to }),
+    flags,
+    "logic-fingerprint",
+  )
 }

@@ -37,9 +37,9 @@ const renamedAcrossFiles = movedChanged(
   { apiChanged: true, syntaxChanged: true },
   "logic-fingerprint",
 )
-const relocatedAndRenamed = moved(
-  at("ts:src/strings.ts#slugify", "slugify", 7),
-  at("ts:src/text/slug.ts#toSlug", "toSlug", 1),
+const reownedAcrossFiles = moved(
+  at("ts:src/strings.ts#Slugger.slugify", "Slugger.slugify", 7),
+  at("ts:src/text/slug.ts#TextSlugger.slugify", "TextSlugger.slugify", 1),
   "logic-fingerprint",
 )
 
@@ -50,7 +50,7 @@ describe("a move's route in diff.md", () => {
     reownedInFile,
     acrossFiles,
     renamedAcrossFiles,
-    relocatedAndRenamed,
+    reownedAcrossFiles,
   ])
 
   it("names both sides and their lines, not the path twice, in Moved + Changed", () => {
@@ -72,12 +72,12 @@ describe("a move's route in diff.md", () => {
     expect(md).toContain("- `slug`: `src/util.ts` → `src/text/slug.ts` (`git-rename`)")
   })
 
-  it("names each side with its file when a move between files renamed it too", () => {
+  it("names each side with its file when a move between files changed its name too", () => {
     expect(md).toContain(
       "**Moved**: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts` (`logic-fingerprint`)",
     )
     expect(md).toContain(
-      "- `slugify` in `src/strings.ts` → `toSlug` in `src/text/slug.ts` (`logic-fingerprint`)",
+      "- `Slugger.slugify` in `src/strings.ts` → `TextSlugger.slugify` in `src/text/slug.ts` (`logic-fingerprint`)",
     )
   })
 })
@@ -112,11 +112,13 @@ describe("a move's route on a Slice member's follow-up line", () => {
   })
 
   it("renders a pure moved member the same way, though `@aburi/diff` never lists one", () => {
-    const md = projectSlice(renamedInFile, relocated, relocatedAndRenamed)
+    const md = projectSlice(renamedInFile, relocated, reownedAcrossFiles)
     expect(md).toContain(
       "↳ moved: within `src/output-file.ts`: `isADirectory` (L40) → `outputIsADirectory` (L60)",
     )
     expect(md).toContain("↳ moved: `src/util.ts` → `src/text/slug.ts`")
-    expect(md).toContain("↳ moved: `slugify` in `src/strings.ts` → `toSlug` in `src/text/slug.ts`")
+    expect(md).toContain(
+      "↳ moved: `Slugger.slugify` in `src/strings.ts` → `TextSlugger.slugify` in `src/text/slug.ts`",
+    )
   })
 })
