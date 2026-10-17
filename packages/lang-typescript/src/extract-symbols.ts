@@ -239,17 +239,33 @@ function mergesWithClass(namespaceNode: Node, name: string): boolean {
   }
   const scope = statement.parent
   if (scope === null) return false
-  return scope.namedChildren.some((sibling) => {
-    const declaration = sibling === null ? null : unwrappedDeclaration(sibling)
-    return (
-      declaration !== null &&
-      CLASS_DECLARATION_TYPES.has(declaration.type) &&
-      nameFieldText(declaration) === name
-    )
-  })
+  return classNamesIn(scope).has(name)
 }
 
-const STATEMENT_LISTS: ReadonlySet<string> = new Set(["program", "statement_block"])
+// A top-level statement list is the whole file: reading it again for every namespace in it would
+// make a file of many namespaces quadratic, so each list's class names are read once per tree.
+const classNamesByScope = new WeakMap<Tree, Map<number, ReadonlySet<string>>>()
+
+function classNamesIn(scope: Node): ReadonlySet<string> {
+  let byScope = classNamesByScope.get(scope.tree)
+  if (byScope === undefined) {
+    byScope = new Map()
+    classNamesByScope.set(scope.tree, byScope)
+  }
+  const known = byScope.get(scope.id)
+  if (known !== undefined) return known
+  const names = new Set<string>()
+  for (const sibling of scope.namedChildren) {
+    const declaration = sibling === null ? null : unwrappedDeclaration(sibling)
+    if (declaration === null || !CLASS_DECLARATION_TYPES.has(declaration.type)) continue
+    const declared = nameFieldText(declaration)
+    if (declared !== null) names.add(declared)
+  }
+  byScope.set(scope.id, names)
+  return names
+}
+
+export const STATEMENT_LISTS: ReadonlySet<string> = new Set(["program", "statement_block"])
 
 const CLASS_DECLARATION_TYPES: ReadonlySet<string> = new Set([
   "class_declaration",
