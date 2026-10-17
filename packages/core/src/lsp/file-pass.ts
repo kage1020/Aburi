@@ -8,6 +8,7 @@ import type {
 } from "@aburi/types"
 import { groupBy } from "../collections"
 import { compareCodeUnit } from "../order"
+import { fileExtension } from "../scan/route"
 import {
   errorMessage,
   failureReason,
@@ -33,6 +34,7 @@ export interface LanguageFilesInput {
   stats: LspStatsBuilder
   fallback: FallbackState
   receiverHints: Map<string, ReceiverHint>
+  warnings: string[]
   logger: Logger
   now: () => number
 }
@@ -43,6 +45,7 @@ export async function enrichLanguageFiles(input: LanguageFilesInput): Promise<vo
   const requestTimeout = input.serverConfig.requestTimeoutMs ?? 500
   const fileBudget = input.serverConfig.fileBudgetMs ?? 2000
   const concurrency = input.serverConfig.concurrency ?? 8
+  const lspLanguageId = lspLanguageIds(input.language, input.warnings)
 
   for (const file of [...symbolsByFile.keys()].sort(compareCodeUnit)) {
     const read = input.fileContents.get(file)
@@ -61,12 +64,7 @@ export async function enrichLanguageFiles(input: LanguageFilesInput): Promise<vo
     }
 
     try {
-      const opened = await client.didOpen(
-        uri,
-        lspLanguageId(input.language, read.fsPath),
-        read.content,
-        fileBudget,
-      )
+      const opened = await client.didOpen(uri, lspLanguageId(read.fsPath), read.content, fileBudget)
       if (isLspFailure(opened)) {
         logger.warn?.(`[aburi:lsp] didOpen failed for ${file} (${failureReason(opened)})`)
         fileFellBack = true
@@ -169,11 +167,23 @@ function joinRoot(workspaceRoot: string, fsPath: string): string {
 
 // A server parses a document by the id it was opened under, and one IR language spans several
 // of them: a `.tsx` file opened as `typescript` has its JSX read as type assertions.
-function lspLanguageId(languageId: LanguageId, fsPath: string): string {
-  return (
-    LSP_LANGUAGE_BY_EXTENSION.get(extensionOf(fsPath)) ??
-    (languageId === "ts" ? "typescript" : languageId)
-  )
+function lspLanguageIds(language: LanguageId, warnings: string[]): (fsPath: string) => string {
+  const guessed = new Set<string | null>()
+  return (fsPath) => {
+    const extension = fileExtension(fsPath)
+    const byExtension = extension === null ? undefined : LSP_LANGUAGE_BY_EXTENSION.get(extension)
+    if (byExtension !== undefined) return byExtension
+    const guess = language === "ts" ? "typescript" : language
+    // A wrong guess still parses, and shows only as hovers that answer nothing, so it is named.
+    if (!guessed.has(extension)) {
+      guessed.add(extension)
+      const files = extension === null ? "files with no extension" : `${extension} files`
+      warnings.push(
+        `LSP opened ${files} of language ${language} as ${guess}, a guess: no LSP language id is known for them, and a wrong one makes the server misread them.`,
+      )
+    }
+    return guess
+  }
 }
 
 const LSP_LANGUAGE_BY_EXTENSION: ReadonlyMap<string, string> = new Map([
@@ -186,9 +196,3 @@ const LSP_LANGUAGE_BY_EXTENSION: ReadonlyMap<string, string> = new Map([
   [".cjs", "javascript"],
   [".jsx", "javascriptreact"],
 ])
-
-function extensionOf(path: string): string {
-  const base = path.slice(path.lastIndexOf("/") + 1)
-  const dot = base.lastIndexOf(".")
-  return dot <= 0 ? "" : base.slice(dot).toLowerCase()
-}

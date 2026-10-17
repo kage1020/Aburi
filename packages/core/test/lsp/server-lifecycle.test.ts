@@ -1,5 +1,5 @@
 import { recordingLogger } from "@aburi/test-support"
-import type { Config } from "@aburi/types"
+import type { Config, Symbol as IRSymbol, LspServerConfig } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeLanguageId } from "../../src/id"
 import type { LspFailure, ServerFactory } from "../../src/lsp"
@@ -34,6 +34,7 @@ describe("a run with no server to talk to", () => {
       receiverHints: new Map(),
       implementerHints: new Map(),
       stats: undefined,
+      warnings: [],
     })
     expect(factory.clients.size).toBe(0)
   })
@@ -51,6 +52,46 @@ describe("a run with no server to talk to", () => {
     expect(factory.clients.size).toBe(0)
     expect(result.symbols).toEqual([goSymbol])
     expect(result.stats?.languagesDisabled).toEqual([])
+  })
+
+  it.each<[boolean, string, IRSymbol, Record<string, LspServerConfig>, ServerFactory]>([
+    [
+      true,
+      "a language the symbols carry has a server",
+      makeClassSymbol("src/a.ts", "C", 1),
+      { ts: makeServerConfig() },
+      mockServerFactory(),
+    ],
+    [
+      true,
+      "that server cannot be had",
+      makeClassSymbol("src/a.ts", "C", 1),
+      { ts: makeServerConfig() },
+      () => null,
+    ],
+    [
+      false,
+      "no language the symbols carry has one",
+      makeSymbol("go:src/a.go#f", { language: makeLanguageId("go") }),
+      { ts: makeServerConfig() },
+      mockServerFactory(),
+    ],
+    [
+      false,
+      "no server is configured",
+      makeClassSymbol("src/a.ts", "C", 1),
+      {},
+      mockServerFactory(),
+    ],
+  ])("reports enabled as %s when %s", async (enabled, _, symbol, servers, serverFactory) => {
+    const result = await enrich({
+      symbols: [symbol],
+      fileContents: { [symbol.source.file]: "" },
+      serverFactory,
+      lspConfig: makeLspConfig({ servers }),
+    })
+
+    expect(result.stats?.enabled).toBe(enabled)
   })
 })
 
@@ -117,7 +158,7 @@ describe("the server's lifecycle", () => {
       "src/h.jsx": "javascriptreact",
       "src/I.TSX": "typescriptreact",
       "src/a.d": "typescript",
-      "src/.tsx": "typescript",
+      "src/.tsx": "typescriptreact",
       "src/x.tsx/readme": "typescript",
     }
     const files = Object.keys(opened)
@@ -137,19 +178,39 @@ describe("the server's lifecycle", () => {
     ).toEqual(Object.fromEntries(files.map((file) => [workspaceUri(file), opened[file]])))
   })
 
-  it.each(["go", "py"])("opens a %s file under its own language id", async (language) => {
+  it.each([
+    ["go", "src/a.go", "go"],
+    ["go", "src/a.ts", "typescript"],
+  ])("opens a file of language %s at %s as %s", async (language, file, lspLanguageId) => {
     const factory = mockServerFactory()
 
     await enrich({
-      symbols: [
-        makeSymbol(`${language}:src/a.${language}#f`, { language: makeLanguageId(language) }),
-      ],
-      fileContents: { [`src/a.${language}`]: "" },
+      symbols: [makeSymbol(`${language}:${file}#f`, { language: makeLanguageId(language) })],
+      fileContents: { [file]: "" },
       serverFactory: factory,
       lspConfig: makeLspConfig({ servers: { [language]: makeServerConfig() } }),
     })
 
-    expect(factory.clients.get(language)?.openLanguageIds).toEqual([language])
+    expect(factory.clients.get(language)?.openLanguageIds).toEqual([lspLanguageId])
+  })
+
+  it("names each language and extension it has to guess an LSP language id for, once", async () => {
+    const result = await enrich({
+      symbols: [
+        makeClassSymbol("src/a.vue", "A", 1),
+        makeClassSymbol("src/b.vue", "B", 1),
+        makeClassSymbol("src/c.ts", "C", 1),
+        makeSymbol("go:src/d.go#f", { language: makeLanguageId("go") }),
+      ],
+      fileContents: { "src/a.vue": "", "src/b.vue": "", "src/c.ts": "", "src/d.go": "" },
+      serverFactory: mockServerFactory(),
+      lspConfig: makeLspConfig({ servers: { ts: makeServerConfig(), go: makeServerConfig() } }),
+    })
+
+    expect(result.warnings).toEqual([
+      expect.stringContaining(".go files of language go as go,"),
+      expect.stringContaining(".vue files of language ts as typescript,"),
+    ])
   })
 
   it("opens the file by the name on disk, not by the Document's spelling of it", async () => {
@@ -223,42 +284,71 @@ describe("the server's lifecycle", () => {
   })
 })
 
-describe("an lsp.servers key no loaded language plugin has", () => {
+describe("lsp.servers keys checked against the loaded language plugins", () => {
   async function warningsFor(
-    servers: string[],
-    languageIds: readonly string[] | undefined,
-  ): Promise<string[]> {
-    const logger = recordingLogger()
-    await enrich({
+    servers: string[] | undefined,
+    languageIds: readonly string[] | null,
+    enabled = true,
+  ): Promise<readonly string[]> {
+    const result = await enrich({
       symbols: [],
       fileContents: {},
       serverFactory: mockServerFactory(),
-      lspConfig: makeLspConfig({
-        servers: Object.fromEntries(servers.map((key) => [key, makeServerConfig()])),
-      }),
-      logger,
-      ...(languageIds === undefined ? {} : { languageIds: languageIds.map(makeLanguageId) }),
+      lspConfig:
+        servers === undefined
+          ? { enabled }
+          : {
+              enabled,
+              servers: Object.fromEntries(servers.map((key) => [key, makeServerConfig()])),
+            },
+      languageIds: languageIds === null ? null : languageIds.map(makeLanguageId),
     })
-    return logger.warnings
+    return result.warnings
   }
 
-  it("is warned about, each such key once and in key order", async () => {
+  it("warns about each key no loaded plugin has, once and in key order", async () => {
     expect(await warningsFor(["typescript", "ts", "python"], ["ts"])).toEqual([
-      "[aburi:lsp] lsp.servers.python matches no loaded language plugin (loaded: ts); its server is never started",
-      "[aburi:lsp] lsp.servers.typescript matches no loaded language plugin (loaded: ts); its server is never started",
+      "lsp.servers.python matches no loaded language plugin (loaded: ts); its server is never started.",
+      "lsp.servers.typescript matches no loaded language plugin (loaded: ts); its server is never started.",
     ])
   })
 
-  it("is warned about with none loaded when the run loaded no plugin", async () => {
-    expect(await warningsFor(["ts"], [])).toEqual([
-      "[aburi:lsp] lsp.servers.ts matches no loaded language plugin (loaded: none); its server is never started",
-    ])
+  it.each<[string, string[] | undefined, string]>([
+    ["only unknown keys", ["typescript", "python"], "(configured: python, typescript; loaded: ts)"],
+    ["an empty servers object", [], "(configured: none; loaded: ts)"],
+    ["no servers object", undefined, "(configured: none; loaded: ts)"],
+  ])("warns once, naming every key and every loaded id, when no key matches: %s", async (_, servers, named) => {
+    expect(await warningsFor(servers, ["ts"])).toEqual([expect.stringContaining(named)])
   })
 
-  it.each<[string, string[], string[] | undefined]>([
-    ["every key is loaded", ["ts"], ["ts"]],
-    ["the caller does not say what is loaded", ["typescript"], undefined],
-  ])("is not warned about when %s", async (_, servers, languageIds) => {
-    expect(await warningsFor(servers, languageIds)).toEqual([])
+  it.each<[string, readonly string[], string]>([
+    ["the run loaded no plugin", [], "loaded: none"],
+    ["the run loaded one id twice", ["ts", "go", "ts"], "loaded: go, ts"],
+  ])("names the loaded ids when %s", async (_, languageIds, named) => {
+    expect(await warningsFor(["x"], languageIds)).toEqual([expect.stringContaining(named)])
+  })
+
+  it.each<[string, string[], string[] | null, boolean]>([
+    ["every key is loaded", ["ts"], ["ts"], true],
+    ["the caller does not say what is loaded", ["typescript"], null, true],
+    ["lsp is not enabled", ["typescript"], ["ts"], false],
+  ])("warns about nothing when %s", async (_, servers, languageIds, enabled) => {
+    expect(await warningsFor(servers, languageIds, enabled)).toEqual([])
+  })
+
+  it("starts the server of the key that matches and none for the one that does not", async () => {
+    const factory = mockServerFactory()
+
+    await enrich({
+      symbols: [makeClassSymbol("src/a.ts", "C", 1)],
+      fileContents: { "src/a.ts": "class C {}" },
+      serverFactory: factory,
+      lspConfig: makeLspConfig({
+        servers: { ts: makeServerConfig(), typescript: makeServerConfig() },
+      }),
+      languageIds: [makeLanguageId("ts")],
+    })
+
+    expect([...factory.clients.keys()]).toEqual(["ts"])
   })
 })

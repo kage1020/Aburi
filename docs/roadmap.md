@@ -42,7 +42,7 @@ consecutive scans of an unchanged tree produce byte-identical IR.
 |---|---|
 | TypeScript and JavaScript only | Other languages planned below |
 | Effects sit where the call happens, without propagating to callers | [Designed](./design/effect-propagation.md), not implemented |
-| Call resolution is syntactic, with no type information — 2–19% of call sites resolve on public repositories | [LSP enrichment designed](./design/lsp-enrichment.md), not implemented |
+| Call resolution is syntactic unless a language server is configured — 2–19% of call sites resolve on public repositories | Opt-in [LSP enrichment](./design/lsp-enrichment.md) (`lsp.servers.ts`) resolves `this.` / `super.` calls; interface-typed receivers are not resolved yet |
 | No graph visualisation beyond the workspace overview and Slice View | No design yet |
 | No LLM integration | Deliberate. Aburi produces the facts, and interpreting them belongs to a separate tool. |
 

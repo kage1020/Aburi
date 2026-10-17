@@ -16,12 +16,18 @@ const baseServerConfig: LspServerConfig = {
 
 const LSP_ON: Config = { lsp: { enabled: true, servers: { ts: baseServerConfig } } }
 
-function mockServer(request: LspClient["request"]): ServerFactory {
+interface OpenedDocument {
+  file: string
+  languageId: string
+}
+
+function mockServer(request: LspClient["request"], opened: OpenedDocument[] = []): ServerFactory {
   return () => ({
     async initialize() {
       return { capabilities: {} }
     },
-    async didOpen() {
+    async didOpen(uri: string, languageId: string) {
+      opened.push({ file: uri.slice(uri.lastIndexOf("/") + 1), languageId })
       return null
     },
     async didClose() {
@@ -32,8 +38,8 @@ function mockServer(request: LspClient["request"]): ServerFactory {
   })
 }
 
-const healthyMockFactory = (): ServerFactory =>
-  mockServer(async (): Promise<never | LspFailure> => null as never)
+const healthyMockFactory = (opened?: OpenedDocument[]): ServerFactory =>
+  mockServer(async (): Promise<never | LspFailure> => null as never, opened)
 
 const erroringMockFactory = (): ServerFactory =>
   mockServer(
@@ -99,11 +105,27 @@ describe("LSP fingerprint parity across enablement", () => {
   })
 })
 
+describe("the language id a real scan opens each file under", () => {
+  it("opens a .tsx file as typescriptreact and a .ts file as typescript", async () => {
+    const opened: OpenedDocument[] = []
+    await scanWithLsp(healthyMockFactory(opened))
+
+    expect(opened).toEqual([
+      { file: "service.ts", languageId: "typescript" },
+      { file: "util.ts", languageId: "typescript" },
+      { file: "view.tsx", languageId: "typescriptreact" },
+    ])
+  })
+})
+
 describe("receiver hints survive the trip from enrichment to the resolver", () => {
   it("resolves `this.helper()` through a real scan, and declines `this.repo.save()`", async () => {
     const hovered: Array<{ line: number; character: number }> = []
     const on = await scanWithLsp(hoveringMockFactory(hovered))
-    expect(hovered).toEqual([{ line: 20, character: 9 }])
+    expect(hovered).toEqual([
+      { line: 20, character: 9 },
+      { line: 5, character: 22 },
+    ])
 
     const handle = on.ir.symbols.find((symbol) => symbol.id.endsWith("#Service.handle"))
     expect(handle).toBeDefined()
@@ -123,7 +145,7 @@ describe("LSP hint counters in the scanned IR", () => {
     const lsp = on.ir.stats.lspEnrichment
     expect(lsp?.hintsProduced).toBe(0)
     expect(lsp?.hintsConsumed).toBe(0)
-    expect(lsp?.hintsRejected?.unparseableHover).toBe(1)
+    expect(lsp?.hintsRejected?.unparseableHover).toBe(2)
     expect(lsp?.requestsIssued ?? 0).toBeGreaterThan(0)
     expect(lsp?.requestsFailed).toBe(0)
     expect(lsp?.requestsTimedOut).toBe(0)
@@ -136,7 +158,7 @@ describe("LSP hint counters in the scanned IR", () => {
     expect(lsp?.hintsProduced).toBe(1)
     expect(lsp?.hintsConsumed).toBe(1)
     expect(lsp?.hintsRejected).toEqual({
-      unparseableHover: 0,
+      unparseableHover: 1,
       ownerClassNotFound: 0,
       memberNotFound: 0,
       kindMismatch: 0,

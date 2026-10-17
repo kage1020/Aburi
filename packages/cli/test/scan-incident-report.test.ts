@@ -271,6 +271,13 @@ describe("reportScanIncidents — LSP enrichment", () => {
       ["⚠ LSP receiver hints: 30 produced · 28 resolved a call · 2 rejected."],
     ],
     [
+      "says no request was made when no language the scan found Symbols in had a server",
+      { enabled: false, filesEnriched: 0, requestsIssued: 0 },
+      [
+        "⚠ LSP enrichment is on, but no language the scan found Symbols in has a server under lsp.servers, so no LSP request was made.",
+      ],
+    ],
+    [
       "stays quiet when the run neither produced nor refused a hint",
       { hintsProduced: 0, hintsConsumed: 0, hintsRejected: NO_HINTS_REJECTED },
       [],
@@ -279,9 +286,18 @@ describe("reportScanIncidents — LSP enrichment", () => {
     expect(incidentLinesFrom({ lspEnrichment: lsp(stats) })).toEqual(expected)
   })
 
-  it("labels every LSP line", () => {
-    const lines = incidentLinesFrom({ lspEnrichment: lsp({ requestsFailed: 1 }) }, "head")
-    expect(lines).toEqual(["⚠ head: LSP requests: 10 issued · 0 timed out · 1 failed."])
+  it("labels every LSP line, the scan's configuration warnings first", () => {
+    const lines = incidentLinesFrom(
+      {
+        lspWarnings: ["lsp.servers.typescript matches no loaded language plugin"],
+        lspEnrichment: lsp({ requestsFailed: 1 }),
+      },
+      "head",
+    )
+    expect(lines).toEqual([
+      "⚠ head: lsp.servers.typescript matches no loaded language plugin",
+      "⚠ head: LSP requests: 10 issued · 0 timed out · 1 failed.",
+    ])
   })
 })
 

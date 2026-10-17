@@ -42,6 +42,41 @@ async function incidentsOf(files: readonly string[], label?: string): Promise<re
   return log.warnings
 }
 
+describe("runScan — LSP configuration the pass cannot act on", () => {
+  it.each<[string, Record<string, unknown>, ScanOptions, RegExp[]]>([
+    [
+      "a server key no loaded plugin has",
+      {
+        lsp: { enabled: true, servers: { typescript: { command: "typescript-language-server" } } },
+      },
+      {},
+      [
+        /^⚠ head: No lsp\.servers key .*\(configured: typescript; loaded: stub\)/,
+        /^⚠ head: LSP enrichment is on/,
+      ],
+    ],
+    [
+      "--lsp with no lsp block",
+      {},
+      { lsp: true },
+      [/^⚠ head: No lsp\.servers key .*\(configured: none; loaded: stub\)/],
+    ],
+  ])("reports %s on the labelled incident channel", async (_, config, options, expected) => {
+    await writeStubWorkspace(workspace.root, ["ok.stub"], config)
+    const log = recordingLogger()
+
+    await runScan({
+      cwd: workspace.root,
+      outputDir: resolve(workspace.root, "out"),
+      format: "json",
+      ...options,
+      incidents: { warn: log.warn, label: "head" },
+    })
+
+    expect(log.warnings).toEqual(expected.map((line) => expect.stringMatching(line)))
+  })
+})
+
 describe("runScan — the incident report goes to the caller's sink", () => {
   it("emits the lines the scan command prints, in the same order", async () => {
     expect(await incidentsOf(FOUR_KINDS_OF_FILE)).toEqual(FOUR_KINDS_REPORTED)

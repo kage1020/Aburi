@@ -57,10 +57,16 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
     sayIncident(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
   }
   reportSkipped(report.skipped, sayIncident, warn)
+  for (const line of report.lspWarnings) sayIncident(line)
   if (report.lspEnrichment !== undefined) reportLspEnrichment(report.lspEnrichment, sayIncident)
 }
 
 function reportLspEnrichment(lsp: LspEnrichmentStats, sayIncident: SayIncident): void {
+  if (!lsp.enabled) {
+    sayIncident(
+      "LSP enrichment is on, but no language the scan found Symbols in has a server under lsp.servers, so no LSP request was made.",
+    )
+  }
   if (lsp.filesFellBack > 0) {
     sayIncident(
       `LSP enrichment fell back for ${lsp.filesFellBack} file(s); IR field values in those files remain at the untyped tier.`,

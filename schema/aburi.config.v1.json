@@ -120,7 +120,7 @@
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/LspServerConfig" },
           "propertyNames": { "$ref": "#/$defs/LspLanguageKey" },
-          "description": "Per-language server config. Keys are language short-form ids (typescript, python, go, …)."
+          "description": "Per-language server config. One entry per loaded language plugin, keyed by that plugin's language id (ts for @aburi/lang-typescript, which covers .js / .jsx / .tsx too)."
         }
       }
     }

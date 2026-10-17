@@ -148,6 +148,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     extractionFailures: scanResult.extractionFailures.map((failure) => ({ ...failure })),
     treeReleaseFailures: scanResult.treeReleaseFailures.map((failure) => ({ ...failure })),
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
+    lspWarnings: [...scanResult.lspWarnings],
     callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
     unresolvedCalls: scanResult.unresolvedCalls,
     configSource: loaded.source,
