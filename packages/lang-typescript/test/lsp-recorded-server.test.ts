@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url"
 import type { LspClient, LspFailure, ServerFactory } from "@aburi/core"
 import { symbolById, useScratchWorkspace } from "@aburi/test-support"
-import type { Config } from "@aburi/types"
+import type { Config, LspServerConfig } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import recorded from "./fixtures/lsp-recorded.answers.json" with { type: "json" }
 import { scanTypeScript } from "./fixtures/scan"
@@ -15,7 +15,7 @@ const PROJECT: Record<string, string> = {
     '{"compilerOptions":{"experimentalDecorators":true,"strict":true,"target":"es2022"}}\n',
   "src/api.ts": [
     "function Controller(_p: string): ClassDecorator { return () => {} }",
-    "function Get(_p: string): MethodDecorator { return () => {} }",
+    "function Get(_p: string | { path: string }): MethodDecorator { return () => {} }",
     '@Controller("x")',
     "export class Api {",
     '  @Get("a")',
@@ -24,6 +24,11 @@ const PROJECT: Record<string, string> = {
     "  }",
     "  one(): number {",
     "    return 2",
+    "  }",
+    "  @Get({",
+    '    path: "b",',
+    "  }) find(): number {",
+    "    return 3",
     "  }",
     "}",
     "export default function () {",
@@ -49,6 +54,20 @@ const PROJECT: Record<string, string> = {
     "  run(): number {",
     "    return this.load(1)",
     "  }",
+    "  /**",
+    "   * @throws {NotFoundError} when the row",
+    "   *   is missing",
+    "   * @throws {@link RangeError} if negative",
+    "   * @throws {@linkcode TypeError}",
+    "   * @throws SyntaxError",
+    "   *   on a wrapped line",
+    "   */",
+    "  find(id: number): number {",
+    "    return id",
+    "  }",
+    "  seek(): number {",
+    "    return this.find(1)",
+    "  }",
     "}",
     "export class Store<T> {",
     "  items: T[] = []",
@@ -62,6 +81,44 @@ const PROJECT: Record<string, string> = {
     "  static build(): Factory {",
     "    return this.create()",
     "  }",
+    "  static {",
+    "    this.create()",
+    "  }",
+    "}",
+    "",
+  ].join("\n"),
+  "src/kinds.ts": [
+    "function debounce<A extends unknown[]>(fn: (...args: A) => void, _ms: number): (...args: A) => void {",
+    "  return fn",
+    "}",
+    "function makeFn(): () => string {",
+    '  return () => ""',
+    "}",
+    "export class Pool {",
+    "  size(): number { return 1 }",
+    "  static size(): number { return 2 }",
+    "  static {",
+    "    this.size()",
+    "  }",
+    "  static total(): number {",
+    "    return this.size()",
+    "  }",
+    "  count(): number {",
+    "    return this.size()",
+    "  }",
+    "}",
+    "export class Search {",
+    "  static search(q: string): string { return q.trim() }",
+    "  search = debounce((_q: string) => {}, 300)",
+    '  static run(): string { return "" }',
+    "  run: () => string = makeFn()",
+    '  static load(): string { return "" }',
+    "  load!: () => string",
+    "  onInput(): void {",
+    '    this.search("x")',
+    "    this.run()",
+    "    this.load()",
+    "  }",
     "}",
     "",
   ].join("\n"),
@@ -72,21 +129,24 @@ const answers: {
   hover: Record<string, unknown>
 } = recorded
 
-const config: Config = {
-  lsp: {
-    enabled: true,
-    servers: {
-      ts: {
-        command: "recorded-typescript-language-server",
-        args: [],
-        initializeTimeoutMs: 1000,
-        requestTimeoutMs: 100,
-        fileBudgetMs: 500,
-        concurrency: 4,
-        initializationOptions: {},
+function lspConfig(server: Partial<LspServerConfig>): Config {
+  return {
+    lsp: {
+      enabled: true,
+      servers: {
+        ts: {
+          command: "recorded-typescript-language-server",
+          args: [],
+          initializeTimeoutMs: 1000,
+          requestTimeoutMs: 100,
+          fileBudgetMs: 500,
+          concurrency: 4,
+          initializationOptions: {},
+          ...server,
+        },
       },
     },
-  },
+  }
 }
 
 function replayingFactory(root: string): ServerFactory {
@@ -122,52 +182,102 @@ function replayingFactory(root: string): ServerFactory {
 
 const workspace = useScratchWorkspace("lsp-recorded")
 
-async function scanRecorded() {
+async function writeProject() {
   for (const [path, content] of Object.entries(PROJECT)) await workspace.writeSource(path, content)
-  return scanTypeScript(workspace.root, config, {
+}
+
+async function scanRecorded() {
+  await writeProject()
+  return scanTypeScript(workspace.root, lspConfig({}), {
     lspServerFactory: replayingFactory(workspace.root),
   })
 }
 
 describe("the LSP pass against recorded typescript-language-server answers", () => {
   it("reads @throws as the server renders it into inferredThrows", async () => {
-    const run = symbolById(await scanRecorded(), "ts:src/repo.ts#Repo.run")
-
-    expect(run.signature?.inferredThrows).toEqual(["NotFoundError", "RangeError"])
-    expect(run.signature?.throws).toEqual([])
-  })
-
-  it("resolves this. calls in a generic class and in a static method", async () => {
     const result = await scanRecorded()
 
-    expect(symbolById(result, "ts:src/repo.ts#Store.run").calls.map((c) => c.resolved)).toEqual([
-      "ts:src/repo.ts#Store.count",
-      "ts:src/repo.ts#Store.count",
-    ])
-    expect(
-      symbolById(result, "ts:src/repo.ts#Factory::build").calls.map((c) => c.resolved),
-    ).toEqual(["ts:src/repo.ts#Factory::create"])
-    expect(result.ir.stats.lspEnrichment?.hintsProduced).toBe(4)
+    const run = symbolById(result, "ts:src/repo.ts#Repo.run")
+    expect(run.signature?.inferredThrows).toEqual(["NotFoundError", "RangeError"])
+    expect(run.signature?.throws).toEqual([])
+    const seek = symbolById(result, "ts:src/repo.ts#Repo.seek")
+    expect(seek.signature?.inferredThrows).toEqual(["NotFoundError", "RangeError", "TypeError"])
+    expect(seek.signature?.inferredThrows).toEqual(
+      symbolById(result, "ts:src/repo.ts#Repo.find").signature?.throws.toSorted(),
+    )
+  })
+
+  it("resolves this. calls to a member of the caller's own kind", async () => {
+    const result = await scanRecorded()
+    const resolved = (id: string) => symbolById(result, id).calls.map((c) => c.resolved)
+
+    expect({
+      "Store.run": resolved("ts:src/repo.ts#Store.run"),
+      "Factory::build": resolved("ts:src/repo.ts#Factory::build"),
+      Factory: resolved("ts:src/repo.ts#Factory"),
+      "Pool::total": resolved("ts:src/kinds.ts#Pool::total"),
+      "Pool.count": resolved("ts:src/kinds.ts#Pool.count"),
+      Pool: resolved("ts:src/kinds.ts#Pool"),
+      "Search.onInput": resolved("ts:src/kinds.ts#Search.onInput"),
+    }).toEqual({
+      "Store.run": ["ts:src/repo.ts#Store.count", "ts:src/repo.ts#Store.count"],
+      "Factory::build": ["ts:src/repo.ts#Factory::create"],
+      Factory: ["ts:src/repo.ts#Factory::create"],
+      "Pool::total": ["ts:src/kinds.ts#Pool::size"],
+      "Pool.count": ["ts:src/kinds.ts#Pool.size"],
+      Pool: [null],
+      "Search.onInput": [null, null, null],
+    })
+    expect(result.ir.stats.lspEnrichment?.hintsProduced).toBe(8)
     expect(result.ir.stats.lspEnrichment?.hintsRejected).toEqual({
       unparseableHover: 0,
       ownerClassNotFound: 0,
-      memberNotFound: 0,
+      memberNotFound: 4,
       kindMismatch: 0,
       targetDropped: 0,
     })
   })
 
-  it.each([
-    ["ts:src/api.ts#Api", { startLine: 4, startColumn: 1, endLine: 12, endColumn: 2 }],
-    ["ts:src/api.ts#Api.list", { startLine: 6, startColumn: 3, endLine: 8, endColumn: 4 }],
-    ["ts:src/api.ts#Api.one", { startLine: 9, startColumn: 3, endLine: 11, endColumn: 4 }],
-    ["ts:src/api.ts#<default>", { startLine: 13, startColumn: 1, endLine: 15, endColumn: 2 }],
-  ])("gives %s its columns, decorated or a default export", async (id, expected) => {
-    const { startLine, startColumn, endLine, endColumn } = symbolById(
-      await scanRecorded(),
-      id,
-    ).source
+  it("gives decorated declarations and a default export their columns", async () => {
+    const result = await scanRecorded()
+    const columns = (id: string) => {
+      const { startLine, startColumn, endLine, endColumn } = symbolById(result, id).source
+      return { startLine, startColumn, endLine, endColumn }
+    }
 
-    expect({ startLine, startColumn, endLine, endColumn }).toEqual(expected)
+    expect({
+      Api: columns("ts:src/api.ts#Api"),
+      "Api.list": columns("ts:src/api.ts#Api.list"),
+      "Api.one": columns("ts:src/api.ts#Api.one"),
+      "Api.find": columns("ts:src/api.ts#Api.find"),
+      "<default>": columns("ts:src/api.ts#<default>"),
+    }).toEqual({
+      Api: { startLine: 4, startColumn: 1, endLine: 17, endColumn: 2 },
+      "Api.list": { startLine: 6, startColumn: 3, endLine: 8, endColumn: 4 },
+      "Api.one": { startLine: 9, startColumn: 3, endLine: 11, endColumn: 4 },
+      "Api.find": { startLine: 14, startColumn: 6, endLine: 16, endColumn: 4 },
+      "<default>": { startLine: 18, startColumn: 1, endLine: 20, endColumn: 2 },
+    })
   })
+})
+
+// A typescript-language-server binary, such as core's devDependency, to check the answers against.
+const liveServer = process.env.ABURI_LIVE_TS_LANGUAGE_SERVER
+
+describe.runIf(liveServer !== undefined)("the recorded answers against a live server", () => {
+  it("give the IR the live server's own answers give", async () => {
+    const replayed = await scanRecorded()
+    const live = await scanTypeScript(
+      workspace.root,
+      lspConfig({
+        command: liveServer ?? "",
+        args: ["--stdio"],
+        initializeTimeoutMs: 60_000,
+        requestTimeoutMs: 30_000,
+        fileBudgetMs: 120_000,
+      }),
+    )
+
+    expect(live.ir).toEqual(replayed.ir)
+  }, 180_000)
 })
