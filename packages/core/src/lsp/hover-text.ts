@@ -10,16 +10,20 @@ export function extractOwnerClassName(hoverText: string): string | null {
 }
 
 // typescript-language-server renders a tag as `*@throws* — {NotFoundError} …`, a plaintext hover
-// as written in source, so the emphasis and the dash are optional.
+// as written in source, so the emphasis and the dash are optional. Text with a line break in it
+// starts on the next line instead, braces included.
 const THROWS_TAG_PATTERN =
-  /@(?:throws?|exception)(?![\w$])\*?(?![\w$])[ \t]*(?:—[ \t]*)?(?:\{([^}\n]+)\})?((?:(?!\n[ \t]*\*?@|[ \t]\*?@[a-zA-Z])[\s\S])*)/g
+  /@(?:throws?|exception)(?![\w$])\*?(?![\w$])[ \t]*(?:—[ \t]*)?(?:\s*\{([^}\n]+)\})?((?:(?!\n[ \t]*\*?@|[ \t]\*?@[a-zA-Z])[\s\S])*)/g
+// tsserver reads `{@link X}` after a tag as a tag of its own and renders `{` and `*@link* — X}`.
+const SPLIT_LINK_PATTERN = /\{[ \t]*\n\s*\*@(link(?:code|plain)?)\*(?:[ \t]*—[ \t]*|[ \t]*\n)/g
 const THROWS_LINK_PATTERN =
   /^@link(?:code|plain)?\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:[\s|]|$)/
 const TYPE_NAME_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
 
 export function extractInferredThrowsFromHover(hoverText: string): string[] {
   const out = new Set<string>()
-  for (const [, braced, description = ""] of hoverText.matchAll(THROWS_TAG_PATTERN)) {
+  const tags = hoverText.replace(SPLIT_LINK_PATTERN, "{@$1 ")
+  for (const [, braced, description = ""] of tags.matchAll(THROWS_TAG_PATTERN)) {
     if (braced !== undefined) {
       const inBraces = braced.trim()
       const typed = inBraces.startsWith("@") ? THROWS_LINK_PATTERN.exec(inBraces)?.[1] : inBraces

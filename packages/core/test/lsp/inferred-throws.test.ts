@@ -52,6 +52,41 @@ describe("inferredThrows from a hover's tags", () => {
       ["A", "RangeError"],
     ],
     ["a tag name running straight into a word", "@throwsX\n*@throws*Y", null],
+    [
+      "a rendered tag whose description wraps after its braces",
+      "*@throws*  \n{NotFoundError} when the row\nis missing",
+      ["NotFoundError"],
+    ],
+    [
+      "a rendered tag whose description wraps after a type name",
+      "*@throws*  \nRangeError\non a negative id",
+      null,
+    ],
+    [
+      "a `{@link}` the server renders as a tag of its own",
+      "*@throws* — {  \n\n*@link* — NotFoundError} if missing",
+      ["NotFoundError"],
+    ],
+    [
+      "a `{@linkcode}` the server renders as a tag of its own",
+      "*@throws* — {  \n\n*@linkcode* — NotFound} if gone",
+      ["NotFound"],
+    ],
+    [
+      "a `{@linkplain}` the server renders as a tag of its own",
+      "*@throws* — {  \n\n*@linkplain* — errors.NotFound}",
+      ["errors.NotFound"],
+    ],
+    [
+      "a `{@link}` rendered as a tag of its own, with a wrapped description",
+      "*@throws* — {  \n\n*@link*  \nNotFoundError} when the row\nis wrapped",
+      ["NotFoundError"],
+    ],
+    [
+      "one wrapped tag among rendered ones",
+      "*@throws* — {A} when x  \n\n*@throws*  \n{NotFoundError} when the row\nis missing  \n\n*@throws* — RangeError",
+      ["A", "NotFoundError", "RangeError"],
+    ],
   ])("reads %s", async (_, tags, expected) => {
     const signature = await callerSignature(tags)
 
