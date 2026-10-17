@@ -1,5 +1,10 @@
 import type { Symbol as IRSymbol, SymbolId } from "@aburi/types"
-import type { DocumentSymbol, Range, SymbolInformation } from "vscode-languageserver-protocol"
+import type {
+  DocumentSymbol,
+  Position,
+  Range,
+  SymbolInformation,
+} from "vscode-languageserver-protocol"
 import { lastQnameSegment } from "../fingerprint/short-name"
 import { DEFAULT_EXPORT_QNAME } from "../id"
 import { DEFAULT_EXPORT_NAME } from "../import-edge"
@@ -7,8 +12,12 @@ import { DEFAULT_EXPORT_NAME } from "../import-edge"
 interface NamedRange {
   name: string
   range: Range
-  nameLine: number
+  nameStart: Position
 }
+
+// A word right after `@` or `.` names the decorator itself, as in `@readonly m()`.
+const TRAILING_MODIFIER =
+  /(?:(?<![\p{ID_Continue}$@.#])(?:export|default|declare|abstract|class|static|public|private|protected|readonly|override|accessor|async|get|set)|\*)[ \t]*$/u
 
 export function applyDocumentSymbols(
   entries: DocumentSymbol[] | SymbolInformation[],
@@ -20,27 +29,66 @@ export function applyDocumentSymbols(
   let lines: string[] | null = null
   for (const symbol of fileSymbols) {
     const line = symbol.source.startLine
-    // tsserver starts a decorated declaration's range at its first decorator, while the IR starts
-    // it after them, on or above the line its name is on.
-    const match = named.find(
-      (entry) =>
-        entry.range.start.line + 1 <= line &&
-        line <= entry.nameLine &&
-        entry.name === lastQnameSegment(symbol.name),
-    )
+    // tsserver starts a decorated declaration's range at its first decorator; the IR starts there
+    // too, or below them where the decorators sit outside the node, never below the name's line.
+    const match =
+      named.find(
+        (entry) =>
+          entry.range.start.line + 1 === line && entry.name === lastQnameSegment(symbol.name),
+      ) ??
+      named.find(
+        (entry) =>
+          entry.range.start.line + 1 < line &&
+          line <= entry.nameStart.line + 1 &&
+          entry.name === lastQnameSegment(symbol.name),
+      )
     const working = workingById.get(symbol.id)
     if (match === undefined || working === undefined) continue
-    let startColumn = match.range.start.character + 1
-    if (match.range.start.line + 1 !== line) {
-      // The server gives no column for where the declaration starts below its decorators.
-      lines ??= content.split(/\r\n|\r|\n/)
-      startColumn = firstNonBlankColumn(lines[line - 1] ?? "")
-    }
+    lines ??= content.split(/\r\n|\r|\n/)
+    const startColumn = declarationStartColumn(match, line, lines)
+    if (startColumn === null) continue
     working.source = {
       ...working.source,
       startColumn,
       endColumn: match.range.end.character + 1,
     }
+  }
+}
+
+// The server gives no column for where a declaration starts after its decorators. Where the IR's
+// line is the first decorator's own, the decorators are inside the node and the range is right.
+function declarationStartColumn(
+  entry: NamedRange,
+  line: number,
+  lines: readonly string[],
+): number | null {
+  const { start } = entry.range
+  const startsOnLine = start.line + 1 === line
+  if (startsOnLine && lines[start.line]?.[start.character] !== "@") return start.character + 1
+  const declaration = walkBackOverModifiers(entry.nameStart, start, lines)
+  if (declaration.line + 1 === line) return declaration.character + 1
+  return startsOnLine ? start.character + 1 : null
+}
+
+function walkBackOverModifiers(
+  name: Position,
+  limit: Position,
+  lines: readonly string[],
+): Position {
+  let found = name
+  let line = name.line
+  let end = name.character
+  for (;;) {
+    const before = (lines[line] ?? "").slice(0, end)
+    const modifier = TRAILING_MODIFIER.exec(before)
+    if (modifier !== null && (line > limit.line || modifier.index >= limit.character)) {
+      found = { line, character: modifier.index }
+      end = modifier.index
+      continue
+    }
+    if (before.trim() !== "" || line <= limit.line) return found
+    line -= 1
+    end = (lines[line] ?? "").length
   }
 }
 
@@ -73,10 +121,6 @@ function namedRange(name: string, topLevel: boolean, range: Range, nameRange?: R
   return {
     name: topLevel && name === DEFAULT_EXPORT_NAME ? DEFAULT_EXPORT_QNAME : name,
     range,
-    nameLine: (nameRange ?? range).start.line + 1,
+    nameStart: (nameRange ?? range).start,
   }
-}
-
-function firstNonBlankColumn(line: string): number {
-  return (/^[ \t]*/.exec(line)?.[0].length ?? 0) + 1
 }

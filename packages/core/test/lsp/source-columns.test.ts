@@ -1,7 +1,7 @@
 import { symbolId } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { DocumentSymbol, Range, SymbolInformation } from "vscode-languageserver-protocol"
+import type { DocumentSymbol, SymbolInformation } from "vscode-languageserver-protocol"
 import { makeSymbol } from "../fixtures/ir"
 import { enrich, makeClassSymbol, makeMethodSymbol } from "./fixtures/enrichment-ctx"
 import { docSymbol, documentSymbolServer } from "./fixtures/mock-server"
@@ -22,14 +22,6 @@ const FLAT_ENTRY: SymbolInformation = {
   },
 }
 
-function span(startLine: number, startChar: number, endLine: number, endChar: number): Range {
-  return {
-    start: { line: startLine, character: startChar },
-    end: { line: endLine, character: endChar },
-  }
-}
-
-/** Each Symbol's columns by id, after a documentSymbol answer of `entries` for `src/a.ts`. */
 async function columnsFor(symbols: IRSymbol[], content: string, entries: unknown[]) {
   const result = await enrich({
     symbols,
@@ -117,29 +109,84 @@ describe("source columns from documentSymbol", () => {
     expect(result.symbols[0]?.source.startColumn).toBe(7)
   })
 
-  it.each<[string, string, number, Range, Range, [number, number]]>([
+  it.each<[string, string, IRSymbol, DocumentSymbol, [number, number] | [null, null]]>([
     [
-      "starts a decorated declaration at the first non-blank column of the line it starts on",
+      "an exported class under a decorator on the line above at its first modifier",
       "@Dec()\n\t  export class D {}\n",
-      2,
-      span(0, 0, 1, 20),
-      span(1, 16, 1, 17),
-      [4, 21],
+      makeClassSymbol("src/a.ts", "D", 2),
+      docSymbol("D", 1, 0, [], { line: 2, startCol: 16 }),
+      [4, 18],
     ],
     [
-      "takes the range's column when the range starts on the Symbol's line",
+      "a class after a decorator on its line at its keyword",
       "  @Dec() class D {}\n",
-      1,
-      span(0, 2, 0, 20),
-      span(0, 15, 0, 16),
-      [3, 21],
+      makeClassSymbol("src/a.ts", "D", 1),
+      docSymbol("D", 1, 2, [], { line: 1, startCol: 15 }),
+      [10, 17],
     ],
-  ])("%s", async (_, content, line, range, selectionRange, expected) => {
+    [
+      "a method under two decorators over two lines at its name",
+      "  @A()\n  @B() m() {}\n",
+      makeMethodSymbol("src/a.ts", "K", "m", 2),
+      docSymbol("m", 1, 2, [], { line: 2, startCol: 7 }),
+      [8, 9],
+    ],
+    [
+      "a method whose decorator closes on its line at its name",
+      '  @Get({\n    path: "a",\n  }) list(): number {}\n',
+      makeMethodSymbol("src/a.ts", "K", "list", 3),
+      docSymbol("list", 1, 2, [], { line: 3, startCol: 5 }),
+      [6, 10],
+    ],
+    [
+      "an exported class whose decorator closes on its line at its first modifier",
+      "@Svc({\n}) export class Svc {}\n",
+      makeClassSymbol("src/a.ts", "Svc", 2),
+      docSymbol("Svc", 1, 0, [], { line: 2, startCol: 16 }),
+      [4, 20],
+    ],
+    [
+      "a method under a decorator named like a modifier at its name",
+      "  @readonly m() {}\n",
+      makeMethodSymbol("src/a.ts", "K", "m", 1),
+      docSymbol("m", 1, 2, [], { line: 1, startCol: 12 }),
+      [13, 14],
+    ],
+    [
+      "a member at the first of its modifiers",
+      "  @Dec() static async *gen() {}\n",
+      makeMethodSymbol("src/a.ts", "K", "gen", 1),
+      docSymbol("gen", 1, 2, [], { line: 1, startCol: 23 }),
+      [10, 27],
+    ],
+    [
+      "a class whose IR line is its decorator's own at the decorator",
+      "@Dec()\nclass D {}\n",
+      makeClassSymbol("src/a.ts", "D", 1),
+      docSymbol("D", 1, 0, [], { line: 2, startCol: 6 }),
+      [1, 8],
+    ],
+    [
+      "a class whose IR line holds only a decorator at no column",
+      "@A()\n@B()\nclass D {}\n",
+      makeClassSymbol("src/a.ts", "D", 2),
+      docSymbol("D", 1, 0, [], { line: 3, startCol: 6 }),
+      [null, null],
+    ],
+  ])("starts %s", async (_, content, symbol, entry, expected) => {
+    expect(await columnsFor([symbol], content, [entry])).toEqual({ [symbol.id]: expected })
+  })
+
+  it("takes an entry starting on the Symbol's line before one whose decorators start above it", async () => {
+    const entries = [docSymbol("Foo", 1, 0, [docSymbol("Foo", 2, 12)], { line: 2, startCol: 6 })]
+
     expect(
-      await columnsFor([makeClassSymbol("src/a.ts", "D", line)], content, [
-        { name: "D", kind: 5, range, selectionRange },
-      ]),
-    ).toEqual({ "ts:src/a.ts#D": expected })
+      await columnsFor(
+        [makeClassSymbol("src/a.ts", "Foo", 1), makeMethodSymbol("src/a.ts", "Foo", "Foo", 2)],
+        "@Dec()\nclass Foo { Foo(): void {}\n}\n",
+        entries,
+      ),
+    ).toEqual({ "ts:src/a.ts#Foo": [1, 10], "ts:src/a.ts#Foo.Foo": [13, 16] })
   })
 
   it("matches nothing on a line outside the span from the range's start to the name", async () => {
@@ -147,18 +194,17 @@ describe("source columns from documentSymbol", () => {
       ...makeClassSymbol("src/a.ts", "D", line),
       id: symbolId(id),
     })
-    const entry = { name: "D", kind: 5, range: span(1, 0, 3, 1), selectionRange: span(2, 6, 2, 7) }
 
     expect(
       await columnsFor(
         [at(1, "ts:src/a.ts#D"), at(4, "ts:src/a.ts#D2"), at(3, "ts:src/a.ts#D3")],
         "\n@Dec\nclass D {\n}\n",
-        [entry],
+        [docSymbol("D", 2, 0, [], { line: 3, startCol: 6 })],
       ),
     ).toEqual({
       "ts:src/a.ts#D": [null, null],
       "ts:src/a.ts#D2": [null, null],
-      "ts:src/a.ts#D3": [1, 2],
+      "ts:src/a.ts#D3": [1, 8],
     })
   })
 
@@ -166,25 +212,19 @@ describe("source columns from documentSymbol", () => {
     const member = makeMethodSymbol("src/a.ts", "K", "default", 3)
     const memberNamedDefault = { ...makeMethodSymbol("src/a.ts", "K", "x", 4), name: "K.<default>" }
     const entries = [
-      { name: "default", kind: 12, range: span(0, 0, 0, 30), selectionRange: span(0, 0, 0, 30) },
-      {
-        name: "K",
-        kind: 5,
-        range: span(1, 0, 4, 1),
-        selectionRange: span(1, 6, 1, 7),
-        children: [
-          { name: "default", kind: 6, range: span(2, 2, 2, 14), selectionRange: span(2, 2, 2, 9) },
-          { name: "default", kind: 6, range: span(3, 2, 3, 14), selectionRange: span(3, 2, 3, 9) },
-        ],
-      },
+      docSymbol("default", 1, 0),
+      docSymbol("K", 2, 0, [docSymbol("default", 3, 2), docSymbol("default", 4, 2)], {
+        line: 2,
+        startCol: 6,
+      }),
     ]
     const content = "export default function () {}\nclass K {\n  default() {}\n  default() {}\n}\n"
 
     expect(
       await columnsFor([anonymousDefault, member, memberNamedDefault], content, entries),
     ).toEqual({
-      "ts:src/a.ts#<default>": [1, 31],
-      "ts:src/a.ts#K.default": [3, 15],
+      "ts:src/a.ts#<default>": [1, 8],
+      "ts:src/a.ts#K.default": [3, 10],
       "ts:src/a.ts#K.x": [null, null],
     })
   })
@@ -196,7 +236,10 @@ describe("source columns from documentSymbol", () => {
     const entry: SymbolInformation = {
       name: "default",
       kind: 12,
-      location: { uri: "file:///workspace/src/a.ts", range: span(0, 0, 0, 30) },
+      location: {
+        uri: "file:///workspace/src/a.ts",
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 30 } },
+      },
       ...container,
     }
 
