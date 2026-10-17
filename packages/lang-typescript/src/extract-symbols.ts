@@ -265,7 +265,7 @@ function classNamesIn(scope: Node): ReadonlySet<string> {
   return names
 }
 
-const STATEMENT_LISTS: ReadonlySet<string> = new Set(["program", "statement_block"])
+export const STATEMENT_LISTS: ReadonlySet<string> = new Set(["program", "statement_block"])
 
 const CLASS_DECLARATION_TYPES: ReadonlySet<string> = new Set([
   "class_declaration",
