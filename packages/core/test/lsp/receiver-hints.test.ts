@@ -1,3 +1,5 @@
+import { symbolId } from "@aburi/test-support"
+import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../../src/call-site"
 import { resolveCallGraph } from "../../src/callgraph"
@@ -22,6 +24,22 @@ function resolveWith(enrichment: EnrichmentResult) {
 
 const SUPER_FOO_SOURCE =
   "class Base {\n  foo() {}\n}\nclass Sub extends Base {\n  foo() {\n    super.foo()\n  }\n}"
+
+const STATIC_FOO_SOURCE =
+  "class F {\n  foo() {}\n  static foo() {}\n  static bar() {\n    this.foo()\n  }\n  baz() {\n    this.foo()\n  }\n}"
+
+function staticMethodSymbol(
+  className: string,
+  methodName: string,
+  line: number,
+  calls: Array<{ target: string; line: number }> = [],
+): IRSymbol {
+  return {
+    ...makeMethodSymbol("src/a.ts", className, methodName, line, calls),
+    id: symbolId(`ts:src/a.ts#${className}::${methodName}`),
+    name: `${className}::${methodName}`,
+  }
+}
 
 describe("receiver hints", () => {
   it("resolves `this.foo()` to the class's own member at high confidence, where the untyped tier cannot", async () => {
@@ -85,6 +103,97 @@ describe("receiver hints", () => {
     expect([...enrichment.receiverHints.values()]).toEqual([
       { kind: "this", targetSymbolId: "ts:src/a.ts#C.#v" },
     ])
+  })
+
+  it.each([
+    "(method) C<T>.foo(): void",
+    "(method) C<Map<K, Array<V>>>.foo(): void",
+    "(method) C.foo<T>(x: D<T>.E): void",
+  ])("reads the owner past its type arguments in %s", async (hover) => {
+    const enrichment = await enrich({
+      ...thisFooFile(),
+      serverFactory: hoverServer(() => ({ contents: hover })),
+    })
+
+    expect([...enrichment.receiverHints.values()]).toEqual([
+      { kind: "this", targetSymbolId: "ts:src/a.ts#C.foo" },
+    ])
+  })
+
+  it.each<[string, number, readonly string[], string | undefined]>([
+    ["a static member to the static", 5, [], "ts:src/a.ts#F::foo"],
+    ["an instance member to the instance one", 8, [], "ts:src/a.ts#F.foo"],
+    [
+      "a static member to nothing when the class has only an instance one",
+      5,
+      ["F::foo"],
+      undefined,
+    ],
+    ["an instance member to nothing when the class has only a static", 8, ["F.foo"], undefined],
+  ])("resolves `this.foo()` in %s", async (_, line, missing, expected) => {
+    const symbols = [
+      makeClassSymbol("src/a.ts", "F", 1),
+      makeMethodSymbol("src/a.ts", "F", "foo", 2),
+      staticMethodSymbol("F", "foo", 3),
+      staticMethodSymbol("F", "bar", 4, [{ target: "this.foo", line: 5 }]),
+      makeMethodSymbol("src/a.ts", "F", "baz", 7, [{ target: "this.foo", line: 8 }]),
+    ].filter((symbol) => !missing.includes(symbol.name))
+
+    const enrichment = await enrich({
+      symbols,
+      fileContents: { "src/a.ts": STATIC_FOO_SOURCE },
+      serverFactory: hoverServer(() => ({ contents: "(method) F.foo(): void" })),
+    })
+
+    expect(
+      enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", line, "this.foo"))?.targetSymbolId,
+    ).toBe(expected)
+    expect(enrichment.stats?.hintsRejected.memberNotFound).toBe(expected === undefined ? 1 : 0)
+  })
+
+  it.each<[string, readonly string[], string | undefined]>([
+    ["to the static when the class declares only that", ["F.foo"], "ts:src/a.ts#F::foo"],
+    ["to the instance member when the class declares only that", ["F::foo"], "ts:src/a.ts#F.foo"],
+    ["to nothing when the class declares both", [], undefined],
+  ])("resolves the class's own `this.foo()` %s", async (_, missing, expected) => {
+    const symbols = [
+      {
+        ...makeClassSymbol("src/a.ts", "F", 1),
+        calls: [{ target: "this.foo", line: 5, resolved: null }],
+      },
+      makeMethodSymbol("src/a.ts", "F", "foo", 2),
+      staticMethodSymbol("F", "foo", 3),
+    ].filter((symbol) => !missing.includes(symbol.name))
+
+    const enrichment = await enrich({
+      symbols,
+      fileContents: {
+        "src/a.ts": "class F {\n  foo() {}\n  static foo() {}\n  static {\n    this.foo()\n  }\n}",
+      },
+      serverFactory: hoverServer(() => ({ contents: "(method) F.foo(): void" })),
+    })
+
+    expect(
+      enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", 5, "this.foo"))?.targetSymbolId,
+    ).toBe(expected)
+    expect(enrichment.stats?.hintsRejected.memberNotFound).toBe(expected === undefined ? 1 : 0)
+  })
+
+  it("tells a static caller by its id, not its name", async () => {
+    const enrichment = await enrich({
+      symbols: [
+        makeClassSymbol("src/a.ts", "F", 1),
+        makeMethodSymbol("src/a.ts", "F", "foo", 2),
+        staticMethodSymbol("F", "foo", 3),
+        { ...staticMethodSymbol("F", "bar", 4, [{ target: "this.foo", line: 5 }]), name: "bar" },
+      ],
+      fileContents: { "src/a.ts": STATIC_FOO_SOURCE },
+      serverFactory: hoverServer(() => ({ contents: "(method) F.foo(): void" })),
+    })
+
+    expect(
+      enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", 5, "this.foo"))?.targetSymbolId,
+    ).toBe("ts:src/a.ts#F::foo")
   })
 
   it("finds the hovered class and its member in another file of the caller's language", async () => {

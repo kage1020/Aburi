@@ -81,7 +81,9 @@ export async function enrichLanguageFiles(input: LanguageFilesInput): Promise<vo
     if (!fileFellBack) {
       stats.requestsIssued += 1
       const docSymbols = await requestDocumentSymbols(client, uri, requestTimeout)
-      if (settle(docSymbols)) applyDocumentSymbols(docSymbols, fileSymbols, input.workingById)
+      if (settle(docSymbols)) {
+        applyDocumentSymbols(docSymbols, read.content, fileSymbols, input.workingById)
+      }
     }
 
     if (!fileFellBack && outOfBudget()) fileFellBack = true
