@@ -105,6 +105,38 @@ describe("discoverFiles — .gitignore is decided the way git decides it", () =>
   })
 })
 
+describe("discoverFiles — the glob as git reads it", () => {
+  it.each<[string, string[], string[], string[]]>([
+    [
+      "reads `src/**/` as the directories below `src`, not the files directly in it",
+      ["src/**/"],
+      ["top.ts", "src/a.ts", "src/sub/c.ts"],
+      ["src/a.ts", "top.ts"],
+    ],
+    [
+      "reads a lone `!` as a line that undoes nothing",
+      ["*", "!", "!*/", "!*.js"],
+      ["top.ts", "src/a.ts", "src/sub/c.ts"],
+      [],
+    ],
+    [
+      "matches a POSIX class and a `]` as a bracket's first member",
+      ["a[[:digit:]].ts", "a[]].ts"],
+      ["a1.ts", "ax.ts", "a].ts", "b].ts"],
+      ["ax.ts", "b].ts"],
+    ],
+  ])("%s", async (_label, rules, files, kept) => {
+    await writeGitignore(...rules)
+    expect(await discover(files)).toEqual(kept)
+  })
+
+  // A `?` cannot be part of a Windows filename, so there is no `q?.ts` to ignore there.
+  it.skipIf(process.platform === "win32")("matches an escaped `?` as the character", async () => {
+    await writeGitignore("q\\?.ts")
+    expect(await discover(["q?.ts", "qx.ts"])).toEqual(["qx.ts"])
+  })
+})
+
 describe("discoverFiles — what a .gitignore negation cannot reach", () => {
   it.each<[string, string, { ignore?: readonly string[] }]>([
     ["config.ignore", "src/local.ts", { ignore: ["src/local.ts"] }],

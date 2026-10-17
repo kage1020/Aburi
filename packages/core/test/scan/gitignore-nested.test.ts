@@ -6,7 +6,7 @@ import { discoverFiles } from "../../src"
 
 const workspace = useScratchWorkspace("gitignore-nested")
 
-/** A rule no regex engine takes, so a run that read the file would end. */
+/** A rule past the length limit, so a run that read the file would end. */
 const UNUSABLE = "a".repeat(5_000)
 
 /** A `.gitignore` in `directory` (`""` for the workspace root). */
@@ -94,6 +94,25 @@ describe("a .gitignore in every directory", () => {
       ],
       ["generated/g.ts", "generated/x.ts"],
       ["generated/g.ts"],
+    ],
+    [
+      "re-includes a directory from a deeper file, and the files under it with it",
+      [
+        ["", "generated/*"],
+        ["generated", "!sub/"],
+      ],
+      ["generated/sub/x.ts", "generated/y.ts", "generated/other/z.ts"],
+      ["generated/sub/x.ts"],
+    ],
+    [
+      "keeps a re-included directory's deeper exclusions and their own re-inclusions",
+      [
+        ["", "src/*"],
+        ["src", "!sub/", "sub/deep/", "sub/gone/"],
+        ["src/sub", "!deep/"],
+      ],
+      ["src/a.ts", "src/sub/c.ts", "src/sub/deep/d.ts", "src/sub/gone/e.ts"],
+      ["src/sub/c.ts", "src/sub/deep/d.ts"],
     ],
     [
       "does not let two nested files together rescue a file under an excluded directory",
