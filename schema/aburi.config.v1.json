@@ -120,7 +120,7 @@
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/LspServerConfig" },
           "propertyNames": { "$ref": "#/$defs/LspLanguageKey" },
-          "description": "Per-language server config. Keys are language short-form ids (typescript, python, go, …)."
+          "description": "Per-language server config. One entry per loaded language plugin, keyed by that plugin's language id (ts for @aburi/lang-typescript, which covers .js / .jsx / .tsx too)."
         }
       }
     }
@@ -227,7 +227,7 @@
     "LspLanguageKey": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*$",
-      "description": "Language short-form id (typescript, python, go, …). Matches ir-schema LanguageId."
+      "description": "The id of a loaded language plugin, exactly as Symbol ids carry it (ir-schema LanguageId): ts for @aburi/lang-typescript, which also covers .js, .jsx and .tsx. A key that names no loaded plugin is never looked up, and the scan warns about it."
     },
 
     "LspServerConfig": {

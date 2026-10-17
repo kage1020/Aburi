@@ -8,7 +8,7 @@ import type {
 } from "@aburi/types"
 import { groupBy } from "../collections"
 import { silentLogger } from "../logger"
-import { compareBy } from "../order"
+import { compareBy, compareCodeUnit } from "../order"
 import {
   createLspClient,
   errorMessage,
@@ -33,6 +33,11 @@ export interface EnrichmentInput {
   workspaceRoot: string
   fileContents: ReadonlyMap<string, ReadFile>
   lspConfig: Config["lsp"] | undefined
+  /**
+   * The loaded language plugins' ids. Without them an unknown `lsp.servers` key cannot be told
+   * from a plugin that was not loaded, so `null` checks no key.
+   */
+  languageIds: readonly LanguageId[] | null
   logger?: Logger
   serverFactory?: ServerFactory
   now?: () => number
@@ -43,6 +48,8 @@ export interface EnrichmentResult {
   receiverHints: ReadonlyMap<string, ReceiverHint>
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
   stats: LspProducerStats | undefined
+  /** Returned rather than logged, so a caller that scans twice can say which scan each came from. */
+  warnings: readonly string[]
 }
 
 export interface ReceiverHint {
@@ -67,18 +74,13 @@ const CLIENT_CAPABILITIES = {
 } as const
 
 export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentResult> {
-  const servers = input.lspConfig?.enabled === true ? input.lspConfig.servers : undefined
-  if (servers === undefined) {
-    return {
-      symbols: [...input.symbols],
-      receiverHints: new Map(),
-      implementerHints: new Map(),
-      stats: undefined,
-    }
-  }
+  if (input.lspConfig?.enabled !== true) return untouched(input.symbols, [])
+  const { servers } = input.lspConfig
+  const warnings = serverKeyWarnings(Object.keys(servers ?? {}), input.languageIds)
+  if (servers === undefined) return untouched(input.symbols, warnings)
 
   const logger: Logger = input.logger ?? silentLogger
-  const stats = createStatsBuilder(true)
+  const stats = createStatsBuilder(false)
   const fallback = createFallbackState()
   const workingSymbols = input.symbols.map(cloneSymbol)
   const workingById = new Map(workingSymbols.map((symbol) => [symbol.id, symbol]))
@@ -93,6 +95,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
   for (const [language, langSymbols] of [...symbolsByLanguage].sort(compareBy(([id]) => id))) {
     const serverConfig = servers[language]
     if (serverConfig === undefined) continue
+    stats.enabled = true
 
     let client: LspClient | null
     try {
@@ -134,6 +137,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
         stats,
         fallback,
         receiverHints,
+        warnings,
         logger,
         now: input.now ?? (() => performance.now()),
       })
@@ -157,7 +161,39 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
     receiverHints,
     implementerHints: new Map(),
     stats: finalizeStats(stats),
+    warnings,
   }
+}
+
+function untouched(symbols: readonly IRSymbol[], warnings: readonly string[]): EnrichmentResult {
+  return {
+    symbols: [...symbols],
+    receiverHints: new Map(),
+    implementerHints: new Map(),
+    stats: undefined,
+    warnings,
+  }
+}
+
+function serverKeyWarnings(
+  keys: readonly string[],
+  languageIds: readonly LanguageId[] | null,
+): string[] {
+  if (languageIds === null) return []
+  const known = new Set<string>(languageIds)
+  const loaded = [...known].sort(compareCodeUnit).join(", ") || "none"
+  const configured = [...keys].sort(compareCodeUnit)
+  if (!configured.some((key) => known.has(key))) {
+    return [
+      `No lsp.servers key names a loaded language plugin (configured: ${configured.join(", ") || "none"}; loaded: ${loaded}), so LSP enrichment starts no server.`,
+    ]
+  }
+  return configured
+    .filter((key) => !known.has(key))
+    .map(
+      (key) =>
+        `lsp.servers.${key} matches no loaded language plugin (loaded: ${loaded}); its server is never started.`,
+    )
 }
 
 function cloneSymbol(symbol: IRSymbol): IRSymbol {

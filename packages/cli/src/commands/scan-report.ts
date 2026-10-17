@@ -40,6 +40,7 @@ export interface ScanReport {
   extractionFailures: readonly { file: string; message: string; code?: string }[]
   treeReleaseFailures: readonly TreeReleaseFailure[]
   lspEnrichment: LspEnrichmentStats | undefined
+  lspWarnings: readonly string[]
   callResolutionLine: string
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
   configSource: string | null

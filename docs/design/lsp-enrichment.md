@@ -96,6 +96,7 @@ Requests explicitly NOT used by this pass:
 
 ### 4.3 Request batching
 
+- `didOpen` carries the LSP `languageId` the file's extension names: `.ts` / `.mts` / `.cts` → `typescript`, `.tsx` → `typescriptreact`, `.js` / `.mjs` / `.cjs` → `javascript`, `.jsx` → `javascriptreact`. One IR language covers several of these (the TypeScript plugin's `ts` takes all eight extensions), and a server parses a document by the id it was opened under, so the IR language id alone would open a `.tsx` file without JSX. A file whose extension names none of them is opened under its IR language id, except that `ts` becomes `typescript`.
 - After `didOpen` for a file, the pass issues one `documentSymbol` request per file, awaited as a single round-trip.
 - All hover / typeDefinition / implementation requests for that file's call sites are fanned out with `Promise.all` under a concurrency cap of `lsp.servers.<lang>.concurrency` (default `8`).
 - The pass MUST NOT batch across files. Each file goes `didOpen → drain requests → didClose` as a discrete unit. Rationale: per-file fallback (§6.1) needs a clear boundary, and per-file bounded memory keeps large monorepos tractable.
@@ -228,6 +229,8 @@ Under any fallback:
   }
 }
 ```
+
+`enabled` is `true` when `lsp.enabled` was and at least one language the scan found Symbols in has an `lsp.servers` entry, whether or not its server could then be started. Otherwise it is `false`, with every counter at `0`: no server was looked up for anything the scan found, and the CLI says so among the scan's incidents.
 
 **Why the hint counters exist.** The seven counters above them describe requests, not answers. A request that comes back on time, with a body this pass cannot read a callee out of, is a healthy row in every one of them: it counts in `requestsIssued`, in neither failure counter, it resets the consecutive-failure counter in §6.1, and its file still lands in `filesEnriched`. So `requestsIssued: 5170, requestsFailed: 0` describes a run that resolved 331 extra call sites and a run that resolved none, and nothing in the document tells the two apart. The hint counters are that distinction, and they are the only place it is recorded — §6.2 keeps errors out of the IR, and a hint the pass declined to write leaves no other trace anywhere.
 
@@ -372,6 +375,14 @@ Concrete rules:
 - LE27 (a hint the resolver declines is counted, not lost): a hand-built hint whose receiver kind is not the one its call site writes → `hintsRejected.kindMismatch` increments by 1; a hint naming a dropped Symbol → `hintsRejected.targetDropped` increments by 1. In both cases the call stays `resolved: null`, is bucketed into the `call-resolution.md` §8.1 diagnostics like any other miss, and `hintsConsumed` does not move.
 - LE28 (an all-rejected scan says so): a scan in which every produced hint is refused reports `hintsConsumed: 0` with the rejection buckets accounting for every hover, and reports it identically on a rerun (§10, LE15).
 
+### 11.8 Language ids and server keys — LE29..LE31
+
+- LE29 (`didOpen` names the extension's language): files ending in `.ts`, `.tsx`, `.js` and `.jsx` (and their module variants, whatever their letter case) are opened as `typescript`, `typescriptreact`, `javascript` and `javascriptreact`, whichever language plugin owns them. A file whose extension names none of them is opened under its own language id, except that `ts` becomes `typescript`; that id is a guess, so each language and extension that falls back to it → one warning naming the extension, the language and the id the files were opened under.
+- LE30 (a server key nothing looks up is reported): with `lsp.enabled` true and the caller having passed the loaded language plugins' ids, an `lsp.servers` key that is not the id of a plugin the run loaded (`typescript` where the plugin is `ts`) → one warning naming the key and the loaded ids, and no server is started for it. When no key matches at all, an empty or missing `servers` included (`aburi scan --lsp` over a config with no `lsp` block) → one warning naming every configured key and the loaded ids, in place of the per-key ones. Keys that match stay quiet, and so does every key when `lsp.enabled` is false or the caller did not say what was loaded.
+- LE31 (`enabled` says whether a server was configured for what was found): a run in which no language the scan found Symbols in has an `lsp.servers` entry → `stats.lspEnrichment.enabled` is `false`; one in which some language does → `true`, even when that server cannot be started (§7.2).
+
+The warnings of LE29 and LE30 are returned with the scan rather than logged, so the CLI reports them among the scan's incidents and `aburi diff` labels each with the side it came from.
+
 ## 12. Config Surface
 
 ### 12.1 JSON
@@ -383,7 +394,7 @@ Concrete rules:
   "lsp": {
     "enabled": false,
     "servers": {
-      "typescript": {
+      "ts": {
         "command": "typescript-language-server",
         "args": ["--stdio"],
         "initializeTimeoutMs": 10000,
@@ -400,7 +411,7 @@ Concrete rules:
 ### 12.2 Field definitions
 
 - `lsp.enabled` (bool, default `false`): master switch. `false` short-circuits the pass to a no-op regardless of `servers`.
-- `lsp.servers.<language-id>` (object): one entry per language short-form id (`typescript`, `python`, `go`, …), keyed identically to the language-plugin id convention used in [`ir-schema.md`](./ir-schema.md) §3.
+- `lsp.servers.<language-id>` (object): one entry per language plugin, keyed by that plugin's language id exactly as Symbol ids carry it ([`ir-schema.md`](./ir-schema.md) §3): `ts` for `@aburi/lang-typescript`, which covers `.js` / `.jsx` / `.tsx` as well. A key that names no loaded plugin is never looked up; the pass warns about each one, and about a configuration in which no key matches at all, rather than leaving the servers unused in silence (§11.8).
 - `lsp.servers.<lang>.command` (string, required when the entry is present): absolute path or PATH-resolvable binary.
 - `lsp.servers.<lang>.args` (string[], default `[]`).
 - `lsp.servers.<lang>.initializeTimeoutMs` / `requestTimeoutMs` / `fileBudgetMs` / `concurrency`: the knobs specified in §4.3 / §4.4.
@@ -411,6 +422,8 @@ Concrete rules:
 `--lsp` / `--no-lsp` on `aburi scan` map to `lsp.enabled = true / false`, following [`config.md`](./config.md) §11 boolean-flag convention. All other knobs are config-file only.
 
 ### 12.4 Autodetect
+
+> **Status**: not implemented. `aburi init` emits no `lsp` block; `lsp.servers` is written by hand.
 
 `aburi init` autodetects a candidate `command` per configured language plugin by probing `PATH` (for TypeScript: `typescript-language-server`). Regardless of what it detects, the emitted config sets `lsp.enabled: false`. Users MUST flip the master switch consciously.
 
@@ -457,9 +470,9 @@ A single pathological file (large generated `.ts`, refactor-in-progress with mal
 
 Empirically derived from `typescript-language-server` on medium monorepos: warm hover < 50 ms, p90 file ~2 s (§4.4). The defaults trade some enrichment on cold starts (where request timeouts fire) for predictable file-level throughput. The knobs are named `lsp.servers.<lang>.*` core fields (§12.1), not `pluginOptions` — timeouts are not server-specific opaque configuration, they are Aburi-level circuit-breaker settings — but they are still user-tunable per project, and revising the defaults themselves is non-breaking under [`config.md`](./config.md) §14.1.
 
-### 14.7 Why `lsp.servers` is keyed by language short-form id
+### 14.7 Why `lsp.servers` is keyed by the language plugin's `languageId`
 
-One LSP server per language, not per plugin manifest. A hypothetical `@aburi/lang-python-experimental` and `@aburi/lang-python` share the same Pyright process. Keying by the short-form language id (`typescript`, `python`, `go`) matches the same convention used for Symbol id language prefixes ([`ir-schema.md`](./ir-schema.md) §3), keeping mental overhead down.
+One LSP server per language, not per plugin manifest. A hypothetical `@aburi/lang-python-experimental` and `@aburi/lang-python` share the same Pyright process. Keying by the language plugin's `languageId` (`ts` for TypeScript and JavaScript alike) matches the same convention used for Symbol id language prefixes ([`ir-schema.md`](./ir-schema.md) §3), keeping mental overhead down.
 
 ### 14.8 Why we do not fight `logic` fingerprint non-invariance
 

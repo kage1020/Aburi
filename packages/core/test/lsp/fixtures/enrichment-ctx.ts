@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url"
-import type { Config, Symbol as IRSymbol, Logger, LspServerConfig } from "@aburi/types"
+import type { Config, Symbol as IRSymbol, LanguageId, Logger, LspServerConfig } from "@aburi/types"
 import {
   type EnrichmentInput,
   type EnrichmentResult,
@@ -47,14 +47,16 @@ export interface EnrichmentCase {
   lspConfig?: Config["lsp"]
   now?: () => number
   fsPaths?: Record<string, string>
+  languageIds?: readonly LanguageId[] | null
   logger?: Logger
 }
 
 export function makeEnrichmentInput(input: EnrichmentCase): EnrichmentInput {
-  const { fileContents, fsPaths, lspConfig, ...rest } = input
+  const { fileContents, fsPaths, lspConfig, languageIds, ...rest } = input
   return {
     ...rest,
     workspaceRoot: WORKSPACE_ROOT,
+    languageIds: languageIds ?? null,
     fileContents: new Map(
       Object.entries(fileContents).map(([path, content]) => [
         path,

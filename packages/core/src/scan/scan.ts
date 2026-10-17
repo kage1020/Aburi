@@ -62,6 +62,7 @@ export interface ScanResult {
   treeReleaseFailures: readonly TreeReleaseFailure[]
   undeclaredVocab: readonly UndeclaredVocabOccurrence[]
   unrepresentableFiles: readonly UnrepresentableFile[]
+  lspWarnings: readonly string[]
 }
 
 export async function scan(input: ScanInput): Promise<ScanResult> {
@@ -103,6 +104,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     workspaceRoot: input.workspaceRoot,
     fileContents: extracted.fileContents,
     lspConfig: input.config.lsp,
+    languageIds: input.languages.map((plugin) => plugin.languageId),
     logger,
   }
   if (input.lspServerFactory !== undefined) enrichmentInput.serverFactory = input.lspServerFactory
@@ -180,6 +182,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     treeReleaseFailures: extracted.treeReleaseFailures,
     unrepresentableFiles: discovered.unrepresentableFiles,
     undeclaredVocab: extracted.undeclaredVocab,
+    lspWarnings: enrichment.warnings,
   }
 }
 
