@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { symbolIdParts } from "../src/id"
 import {
   backslashSite,
   CoreError,
@@ -209,7 +210,7 @@ describe("qualified-name builders", () => {
   })
 })
 
-describe("isSymbolId and symbolIdFile", () => {
+describe("isSymbolId, symbolIdFile and symbolIdParts", () => {
   it.each([
     ["ts:src/a.ts#foo", "src/a.ts"],
     ["ts:src/nested/dir/a.ts#Cls.method", "src/nested/dir/a.ts"],
@@ -220,6 +221,14 @@ describe("isSymbolId and symbolIdFile", () => {
   ])("accept %j, whose file is %j", (id, file) => {
     expect(isSymbolId(id)).toBe(true)
     expect(symbolIdFile(id)).toBe(file)
+  })
+
+  it.each<SymbolIdParts>([
+    { language: "ts", file: "src/a.ts", qualifiedName: "Repository" },
+    { language: "ts", file: "src/nested/dir/a.ts", qualifiedName: "C.#v" },
+    { language: "tsx", file: "src/a.tsx", qualifiedName: "C::m" },
+  ])("hand back the parts the id of $qualifiedName in $file was built from", (idParts) => {
+    expect(symbolIdParts(makeSymbolId(idParts))).toEqual(idParts)
   })
 
   it.each([
@@ -240,6 +249,7 @@ describe("isSymbolId and symbolIdFile", () => {
   ])("refuse %j, which makeSymbolId would not have built", (value) => {
     expect(isSymbolId(value)).toBe(false)
     expect(symbolIdFile(value)).toBeNull()
+    expect(symbolIdParts(value)).toBeNull()
   })
 })
 

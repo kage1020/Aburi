@@ -37,7 +37,8 @@ describe("the classify budget comes from the config", () => {
     ["the configured budget", { classifyTimeoutMs: 10 }, 10],
     ["the default budget when the config names none", {}, DEFAULT_CLASSIFY_TIMEOUT_MS],
   ])("reports %s as the one that was blown", async (_label, config, budgetMs) => {
-    const { timeoutEvents } = expectExtracted(await run(config, budgetMs + 30))
+    const { timeoutEvents, symbols } = expectExtracted(await run(config, budgetMs + 30))
     expect(timeoutEvents.map((event) => event.budgetMs)).toEqual([budgetMs])
+    expect(symbols[0]?.calls).toEqual([{ target: "db.query", line: 2, resolved: null }])
   })
 })
