@@ -1,6 +1,12 @@
 import { basename, join } from "node:path"
+import { linkDirectory } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { detectComponents, detectManagers } from "../src/index"
+import {
+  buildComponentAttribution,
+  detectComponents,
+  detectManagers,
+  discoverFiles,
+} from "../src/index"
 import { useWorkspaceTree } from "./fixtures/workspace"
 
 const tree = useWorkspaceTree("core-declared")
@@ -182,5 +188,30 @@ describe("the workspace root as a declared component", () => {
     expect(components).toHaveLength(1)
     expect(components[0]?.id).toBe("storefront")
     expect(components[0]?.roots).toEqual(["."])
+  })
+})
+
+describe("a link to a declared package directory", () => {
+  it("is a component at the link's path that owns no file discovery lists", async () => {
+    await tree.writePnpmWorkspace("packages/*")
+    await tree.writePackage("packages/billing", { name: "billing" })
+    await tree.writeSource("packages/billing/src/a.ts", "1")
+    await linkDirectory(
+      join(tree.root, "packages", "billing"),
+      join(tree.root, "packages", "alias"),
+    )
+
+    const components = await detectComponents({ workspaceRoot: tree.root })
+    const attribute = buildComponentAttribution(components)
+    const { files } = await discoverFiles({ workspaceRoot: tree.root, languageExtensions: [".ts"] })
+    const owningRoots = files.map(
+      (file) => components.find((component) => component.id === attribute(file.path))?.roots[0],
+    )
+
+    expect(components.map((component) => component.roots[0]).sort()).toEqual([
+      "packages/alias",
+      "packages/billing",
+    ])
+    expect(owningRoots).toEqual(["packages/billing"])
   })
 })
