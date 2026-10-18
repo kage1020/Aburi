@@ -15,7 +15,7 @@ describe("extractWrapperCall", () => {
     ).toEqual({ callee: "forwardRef", leaf: "forwardRef" })
   })
 
-  it("keeps a member callee verbatim beside its leaf", async () => {
+  it("names a member callee by its receiver beside its leaf", async () => {
     expect(await wrapperOf("const X = React.forwardRef((p, r) => null)")).toEqual({
       callee: "React.forwardRef",
       leaf: "forwardRef",

@@ -48,6 +48,15 @@ async function callIn(source: string): Promise<string | null> {
 const inExpressApp = (line: string) =>
   [`import express from "express"`, `const app = express()`, line].join("\n")
 
+/** `classifiedIn` for a file declaring one const, `router`, initialised by `initializer`. */
+async function routerIn(initializer: string): Promise<string[]> {
+  await workspace.writeSource(
+    "src/app.ts",
+    [`import express from "express"`, `export const router = ${initializer}`].join("\n"),
+  )
+  return classifiedIn(await scanWorkspace(), "src/app.ts")
+}
+
 describe("scan — an Express app", () => {
   it("classifies its routers, routes, middleware, error middleware and mounts", async () => {
     await workspace.writeSource(
@@ -288,5 +297,111 @@ describe("scan — a .use argument behind a wrapper", () => {
 
   it("does not read an old-style assertion, as the language plugin does not", async () => {
     expect(await callIn(inExpressApp(`app.use(<RequestHandler>logger)`))).toBeNull()
+  })
+})
+
+describe("scan — a call's derivedBy", () => {
+  it.each([
+    [
+      "a route chain wrapped over several lines",
+      `app\n  .route("/users/:id")\n  .get(getUser)\n  .delete(deleteUser)`,
+      `app.route("/users/:id").get(getUser).delete(deleteUser)`,
+      "framework:express:route high framework:express:route:app.delete",
+    ],
+    [
+      "a route with a line comment in its chain",
+      `app // users\n  .get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route whose dot ends a line",
+      `app.\n  get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route on a receiver cast to its type",
+      `;(app as Express).get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route on a receiver that satisfies its type",
+      `;(app satisfies Express).get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route on a receiver with a non-null assertion",
+      `app!.get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "error middleware after a comment holding a ;",
+      `app // admin; see the runbook\n  .use((err, req, res, next) => res.end())`,
+      `app.use((err, req, res, next) => res.end())`,
+      "framework:express:error-middleware high framework:express:error-middleware:app.use arity-4",
+    ],
+    [
+      "a mount wrapped over two lines",
+      `app\n  .use("/api", adminRouter)`,
+      `app.use("/api", adminRouter)`,
+      "framework:express:mount high framework:express:mount:app.use router-identifier",
+    ],
+    [
+      "middleware after a block comment",
+      `app /* logs */ .use((req, res, next) => next())`,
+      `app.use((req, res, next) => next())`,
+      "framework:express:middleware high framework:express:middleware:app.use arity-3",
+    ],
+  ])("names %s as its one-line spelling does", async (_label, written, oneLine, expected) => {
+    expect(await callIn(inExpressApp(written))).toBe(expected)
+    expect(await callIn(inExpressApp(oneLine))).toBe(expected)
+  })
+
+  it.each([
+    [
+      "a mount chained after middleware",
+      `app.use(cors()).use("/api", adminRouter)`,
+      "framework:express:mount high framework:express:mount:app.use router-identifier",
+    ],
+    [
+      "error middleware chained after a path's middleware",
+      `app.use('/a; b', audit).use((err, req, res, next) => res.end())`,
+      "framework:express:error-middleware high framework:express:error-middleware:app.use arity-4",
+    ],
+    [
+      "a route on a Router made in the statement",
+      `express.Router().get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:express.get",
+    ],
+  ])("names %s by the name its chain starts from", async (_label, line, expected) => {
+    expect(await callIn(inExpressApp(line))).toBe(expected)
+  })
+
+  it.each([
+    [
+      "a factory wrapped onto a second line after a comment",
+      "express /* v5 */\n  .Router()",
+      "express.Router",
+    ],
+    ["a factory on a receiver cast to its type", "(express as any).Router()", "express.Router"],
+    [
+      "a factory reached through require in single quotes",
+      "require('express').Router()",
+      "require.Router",
+    ],
+    [
+      "a factory reached through require in double quotes",
+      `require("express").Router()`,
+      "require.Router",
+    ],
+    ["a factory written on one line", "express.Router()", "express.Router"],
+  ])("names a Router made by %s", async (_label, initializer, callee) => {
+    expect(await routerIn(initializer)).toEqual([
+      `framework:express:router high framework:express:router:${callee}`,
+    ])
   })
 })

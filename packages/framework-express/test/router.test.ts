@@ -17,7 +17,7 @@ describe("extractRouterCall", () => {
   it.each([
     ["`Router()`", `import { Router } from "express"\nconst r = Router()\n`, ["r Router"]],
     [
-      "`express.Router()`, keeping the member text",
+      "`express.Router()`, named with its receiver",
       `import express from "express"\nconst r = express.Router()\n`,
       ["r express.Router"],
     ],

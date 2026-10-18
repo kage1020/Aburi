@@ -1,10 +1,4 @@
-import {
-  asSyntaxNode,
-  calleeLeaf,
-  calleeText,
-  declaratorValue,
-  lastQnameSegment,
-} from "@aburi/core"
+import { asSyntaxNode, calleeName, declaratorValue, lastQnameSegment } from "@aburi/core"
 
 /** Bare identifiers only: `React.<name>` callees are matched by leaf. */
 export const REACT_CONTEXT_FACTORIES: ReadonlySet<string> = new Set(["createContext"])
@@ -21,9 +15,8 @@ export function extractWrapperCall(fullNode: unknown, name: string): WrapperCall
   if (node === null) return null
   const call = declaratorValue(node, lastQnameSegment(name))
   if (call === null || call.type !== "call_expression") return null
-  const callee = calleeText(call)
-  if (callee === null) return null
-  return { callee, leaf: calleeLeaf(callee) }
+  const callee = calleeName(call)
+  return callee === null ? null : { callee: callee.name, leaf: callee.leaf }
 }
 
 export function isContextCall(call: WrapperCall | null): boolean {

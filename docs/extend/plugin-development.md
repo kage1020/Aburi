@@ -236,6 +236,14 @@ Contracts:
   frameworks in the order they appear in `aburi.json`.
 - `derivedBy` may contain `;`-separated multi-signal reasons; the pipeline
   splits them into individual `derivedBy[]` entries.
+- Build an entry that names something in the source from the syntax tree, never
+  from a node's `.text`. The text carries the line breaks, indentation and
+  comments the code was written with, and a `;` in a comment splits the entry.
+  `calleeName` from `@aburi/core` reads a call's callee as
+  `<receiver>.<method>`, through parentheses, `as`, `satisfies` and `!`:
+  `app.get` for `app.get(…)`, `(app as Express).get(…)` and
+  `app.route("/x").get(…)` alike. A `const`'s call is the one `declaratorValue`
+  returns for its name.
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
   `extKindPrefixes` / `derivedByPrefixes`.
 - Match a decorator on the name it was **imported** under, not the one the source

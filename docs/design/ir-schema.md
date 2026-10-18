@@ -359,6 +359,8 @@ A string array indicating why this symbol was extracted in this form. Each entry
 
 An empty array means "picked up automatically by the core extraction path".
 
+An entry that names something the source wrote — the call a framework plugin classified, `framework:express:route:app.get` — is read off the syntax tree, never copied from the source text. A node's text carries the formatting it was written with, so a chain wrapped over several lines would put line breaks and indentation into the entry and a comment inside it would be copied in. A name is its identifiers joined with `.`, so no entry carries the source's line breaks, indentation or comments, and reformatting the code it names, re-indenting a chain or adding a comment inside it leaves the entry as it was ([`lang-plugin.md`](./lang-plugin.md) §5.2.3 gives the framework plugins' reading).
+
 ### 5.6 `dropped`
 
 - `false` (default): included in the IR output

@@ -30,6 +30,15 @@ initializer must be the wrapper call itself, read through `as`, `satisfies`,
 (`memo(Row) as typeof Row` is a memo), and its outermost call names the role,
 so `memo(forwardRef(…))` is a memo.
 
+That call is named in `derivedBy` by the name read off the syntax tree: the
+name the callee's receiver chain starts from, read through the same wrappers,
+and the name called. `React.memo(Inner)`, `(React as any).memo(Inner)` and the
+same call wrapped over two lines or with a comment before `.memo` all give
+`framework:react:memo:React.memo`, and `memo(Inner)` gives
+`framework:react:memo:memo`. A receiver that is not a name is `<computed>`
+(`new Registry().memo(Inner)` gives `framework:react:memo:<computed>.memo`), so
+no entry carries the source's line breaks, indentation or comments.
+
 Not classified today (documented for completeness):
 
 - A wrapper call a const's initializer only contains: one in an array or an

@@ -3,6 +3,7 @@ import {
   anyCallCalleeMatches,
   asSyntaxNode,
   calleeLeaf,
+  calleeName,
   calleeText,
   declaratorValue,
   findFirstDescendantOfType,
@@ -75,6 +76,69 @@ describe("calleeLeaf", () => {
     ["forwardRef", "forwardRef"],
   ])("reads %j as %j", (callee, leaf) => {
     expect(calleeLeaf(callee)).toBe(leaf)
+  })
+})
+
+describe("calleeName", () => {
+  const identifier = (text: string) => node({ type: "identifier", text })
+  const withFields = (type: string, fields: Record<string, SyntaxNode>) =>
+    node({ type, childForFieldName: (name) => fields[name] ?? null })
+  const member = (object: SyntaxNode, property: string) =>
+    withFields("member_expression", {
+      object,
+      property: node({ type: "property_identifier", text: property }),
+    })
+  const call = (callee: SyntaxNode) => withFields("call_expression", { function: callee })
+  const wrapped = (type: string, inner: SyntaxNode) =>
+    node({ type, namedChildren: [node({ type: "comment", text: "/* c */" }), inner] })
+
+  it.each([
+    ["a bare identifier", identifier("Router"), "Router", "Router"],
+    ["a member", member(identifier("express"), "Router"), "express.Router", "Router"],
+    [
+      "a chain through calls by its first name",
+      member(call(member(identifier("app"), "route")), "get"),
+      "app.get",
+      "get",
+    ],
+    [
+      "a receiver behind wrappers and a comment",
+      member(
+        wrapped("parenthesized_expression", wrapped("as_expression", identifier("app"))),
+        "get",
+      ),
+      "app.get",
+      "get",
+    ],
+    [
+      "a receiver reached through an index",
+      member(withFields("subscript_expression", { object: identifier("routers") }), "get"),
+      "routers.get",
+      "get",
+    ],
+    [
+      "a chain from this",
+      member(member(node({ type: "this", text: "this" }), "app"), "get"),
+      "this.get",
+      "get",
+    ],
+    [
+      "a receiver that is not a name as computed",
+      member(node({ type: "new_expression", text: "new Lib()" }), "get"),
+      "<computed>.get",
+      "get",
+    ],
+  ])("names %s", (_label, callee, name, leaf) => {
+    expect(calleeName(callWith(callee))).toEqual({ name, leaf })
+  })
+
+  it.each([
+    ["no callee", null],
+    ["a callee written in parentheses", wrapped("parenthesized_expression", identifier("memo"))],
+    ["a member with no property", withFields("member_expression", { object: identifier("app") })],
+    ["an identifier with no text", identifier("")],
+  ])("returns null for %s", (_label, callee) => {
+    expect(calleeName(callWith(callee))).toBeNull()
   })
 })
 

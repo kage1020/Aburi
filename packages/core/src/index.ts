@@ -146,7 +146,9 @@ export { isStrict, type UndeclaredVocabOccurrence, VocabCheck } from "./scan/voc
 export {
   anyCallCalleeMatches,
   asSyntaxNode,
+  type CalleeName,
   calleeLeaf,
+  calleeName,
   calleeText,
   declaratorValue,
   findFirstDescendantOfType,
