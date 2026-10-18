@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "commander"
+import { type Command, InvalidArgumentError } from "commander"
 import { CliError } from "./errors"
 
 export type OutputFormat = "json" | "md" | "both"
@@ -31,6 +31,23 @@ export function parseMaxBytes(value: string): number {
 
 export function collect(value: string, accumulator: string[]): string[] {
   return [...accumulator, value]
+}
+
+export function refuseRepeatedValues(command: Command): void {
+  for (const option of command.options) {
+    if (!option.required || option.parseArg === collect) continue
+    const flag = option.long ?? option.flags
+    let first: string | undefined
+    command.on(`option:${option.name()}`, (value: string) => {
+      if (first !== undefined) {
+        throw new CliError(
+          `${flag} is given more than once ("${first}", then "${value}"): pass one`,
+          "input-error",
+        )
+      }
+      first = value
+    })
+  }
 }
 
 export function deriveStrict(cmdOptions: {

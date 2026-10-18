@@ -7,6 +7,7 @@ import {
   type OutputFormat,
   parseFormat,
   parseMaxBytes,
+  refuseRepeatedValues,
 } from "./cli-options"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
 import { type CoverageDoubt, runExplain } from "./commands/explain"
@@ -198,7 +199,12 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--head <path>", "head IR file")
     .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
     .option("--format <format>", "json | md | both", parseFormat, "both")
-    .option("--fail-on <spec>", "comma-separated CI gate spec (e.g. changed,removed:>10)")
+    .option(
+      "--fail-on <spec>",
+      "comma-separated CI gate spec (e.g. changed,removed:>10), repeatable",
+      collect,
+      [],
+    )
     .option("--compact", "compact JSON output")
     .option(
       "--max-bytes <n>",
@@ -214,7 +220,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           head?: string
           outputDir?: string
           format?: OutputFormat
-          failOn?: string
+          failOn?: string[]
           compact?: boolean
           maxBytes?: number
           config?: string
@@ -326,6 +332,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           return outcome.exitCode
         })(),
     )
+
+  for (const command of program.commands) refuseRepeatedValues(command)
 
   try {
     await program.parseAsync(options.argv, { from: "user" })

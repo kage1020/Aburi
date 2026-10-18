@@ -51,7 +51,7 @@ export interface DiffOptions {
   head?: string | null
   outputDir?: string
   format?: "json" | "md" | "both"
-  failOn?: string
+  failOn?: string | readonly string[]
   configPath?: string
   compact?: boolean
   maxBytes?: number
@@ -73,7 +73,7 @@ export interface DiffReport {
 export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
-  const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
+  const failOn = [options.failOn ?? []].flat().flatMap((value) => parseFailOn(value))
   if (
     options.maxBytes !== undefined &&
     (!Number.isInteger(options.maxBytes) || options.maxBytes <= 0)
