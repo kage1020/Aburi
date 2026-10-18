@@ -145,14 +145,14 @@ function renderDependencies(ir: IR): string[] {
     rows.push("```mermaid")
     rows.push("graph LR")
     for (const c of sortedComponents) {
-      rows.push(`  ${mermaidNodeId(c.id)}["${escapeMermaidLabel(c.name)}"]`)
+      rows.push(`  ${sanitizeMermaidId(c.id)}["${escapeMermaidLabel(c.name)}"]`)
     }
     const seenEdge = new Set<string>()
     for (const d of sortDependencies(componentDeps)) {
       const key = `${d.from}->${d.to}`
       if (seenEdge.has(key)) continue
       seenEdge.add(key)
-      rows.push(`  ${mermaidNodeId(d.from)} --> ${mermaidNodeId(d.to)}`)
+      rows.push(`  ${sanitizeMermaidId(d.from)} --> ${sanitizeMermaidId(d.to)}`)
     }
     rows.push("```")
   } else {
@@ -171,7 +171,7 @@ function renderDependencies(ir: IR): string[] {
 }
 
 /** Prefixed rather than checked against a keyword list, which changes with mermaid releases. */
-function mermaidNodeId(id: string): string {
+function sanitizeMermaidId(id: string): string {
   return `c_${id.replace(/-/g, "_")}`
 }
 
