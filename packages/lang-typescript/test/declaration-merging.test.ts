@@ -175,6 +175,19 @@ describe("a namespace merged into a class declares static members", () => {
       ["ts:src/a.ts#A", "ts:src/a.ts#A.C", "ts:src/a.ts#A.C.m", "ts:src/a.ts#A.C::m"],
     ],
     [
+      "a class beside a namespace, and a second block with its own class of the same name",
+      "export class C {}\nnamespace A { export namespace C { export const x = 1 } }\nnamespace B { export class C {} export namespace C { export const y = 1 } }",
+      [
+        "ts:src/a.ts#A",
+        "ts:src/a.ts#A.C",
+        "ts:src/a.ts#A.C.x",
+        "ts:src/a.ts#B",
+        "ts:src/a.ts#B.C",
+        "ts:src/a.ts#B.C::y",
+        "ts:src/a.ts#C",
+      ],
+    ],
+    [
       "a class merged inside a merged namespace",
       "class C {}\nnamespace C { export class D {} export namespace D { export const x = 1 } }",
       ["ts:src/a.ts#C", "ts:src/a.ts#C::D", "ts:src/a.ts#C::D::x"],
