@@ -1,3 +1,4 @@
+import { DEFAULT_EXPORT_NAME } from "@aburi/core"
 import type { SymbolCandidate, Visibility } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import {
@@ -8,10 +9,13 @@ import {
   unwrapValue,
 } from "./ast-helpers"
 import { hasPrivateName } from "./class-members"
+import { readStaticString } from "./string-escape"
 
 const EXPORT_DEFAULT = "export-default"
 
 const EXPORT_KEYWORD = "export-keyword"
+
+const EXPORT_CLAUSE = "export-clause"
 
 export function exportEvidence(node: Node): string[] {
   if (isDefaultExport(node)) return [EXPORT_DEFAULT]
@@ -46,33 +50,53 @@ export function isDefaultExport(node: Node): boolean {
   return hasChildOfType(parent, "default")
 }
 
-export function promoteDefaultExports(
+export function promoteDetachedExports(
   root: Node,
   candidates: SymbolCandidate<Node>[],
 ): SymbolCandidate<Node>[] {
-  const names = defaultExportedNames(root)
-  if (names.size === 0) return candidates
+  const exported = detachedExportsByLocalName(root)
+  if (exported.size === 0) return candidates
   return candidates.map((candidate): SymbolCandidate<Node> => {
-    if (candidate.kind === "call" || !names.has(candidate.name)) return candidate
-    if (candidate.derivedBy.includes(EXPORT_DEFAULT)) return candidate
-    return {
-      ...candidate,
-      visibility: "public",
-      derivedBy: [...candidate.derivedBy, EXPORT_DEFAULT],
-    }
+    const tokens = candidate.kind === "call" ? undefined : exported.get(candidate.name)
+    const added = tokens?.filter((token) => !candidate.derivedBy.includes(token)) ?? []
+    if (added.length === 0) return candidate
+    return { ...candidate, visibility: "public", derivedBy: [...candidate.derivedBy, ...added] }
   })
 }
 
-function defaultExportedNames(root: Node): ReadonlySet<string> {
-  const names = new Set<string>()
+function detachedExportsByLocalName(root: Node): ReadonlyMap<string, readonly string[]> {
+  const exported = new Map<string, string[]>()
+  const record = (local: string, as: string): void => {
+    const token = as === DEFAULT_EXPORT_NAME ? EXPORT_DEFAULT : `${EXPORT_CLAUSE}:${as}`
+    const tokens = exported.get(local)
+    if (tokens === undefined) exported.set(local, [token])
+    else if (!tokens.includes(token)) tokens.push(token)
+  }
   for (const stmt of root.namedChildren) {
     if (stmt === null || stmt.type !== "export_statement") continue
+    // A re-export binds nothing here, so a declaration sharing one of its names is not what it exports.
+    if (stmt.childForFieldName("source") !== null) continue
+    const clause = findChild(stmt, "export_clause")
+    if (clause !== null) {
+      for (const specifier of clause.namedChildren) {
+        if (specifier === null || specifier.type !== "export_specifier") continue
+        const local = specifier.childForFieldName("name")
+        if (local === null || local.type !== "identifier") continue
+        const alias = specifier.childForFieldName("alias")
+        const as = alias === null ? local.text : moduleExportName(alias)
+        if (as !== null) record(local.text, as)
+      }
+      continue
+    }
     if (!hasChildOfType(stmt, "default")) continue
     const value = stmt.childForFieldName("value")
     if (value === null) continue
     const inner = unwrapValue(value)
-    if (inner.type !== "identifier") continue
-    names.add(inner.text)
+    if (inner.type === "identifier") record(inner.text, DEFAULT_EXPORT_NAME)
   }
-  return names
+  return exported
+}
+
+function moduleExportName(node: Node): string | null {
+  return node.type === "identifier" ? node.text : readStaticString(node)
 }
