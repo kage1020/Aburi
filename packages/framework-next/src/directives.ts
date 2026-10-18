@@ -1,7 +1,6 @@
-export type ModuleDirective = "client" | "server"
+import { stripUtf8Bom } from "@aburi/core"
 
-/** Some editors prepend a BOM to UTF-8 sources; the parser skips it. */
-const UTF8_BOM = "﻿"
+export type ModuleDirective = "client" | "server"
 
 export function detectModuleDirective(source: string): ModuleDirective | null {
   let remainder = stripUtf8Bom(source)
@@ -14,10 +13,6 @@ export function detectModuleDirective(source: string): ModuleDirective | null {
     if (readStatement.body === "use server") return "server"
     remainder = readStatement.rest
   }
-}
-
-function stripUtf8Bom(source: string): string {
-  return source.startsWith(UTF8_BOM) ? source.slice(UTF8_BOM.length) : source
 }
 
 function skipLeadingCommentsAndWhitespace(source: string): string | null {

@@ -7,7 +7,10 @@ The JSON Schema at `schema/aburi.ir.v1.json` is the single source of truth; this
 
 ## 1. File Format, Ordering, and Key Presence
 
-- Format: JSON (UTF-8, LF)
+- Format: JSON (UTF-8, LF), written with no byte order mark. An IR read back from a path the user
+  names (`aburi diff --base/--head`, `aburi explain --ir`) may have been re-saved by an editor or by
+  PowerShell 5's `Set-Content -Encoding utf8`, which add one, so one opening the file is read past; a
+  second one, or one after the first character, is not JSON
 - Indentation: 2 spaces (default), single line with `--compact`
 - Top-level keys: ascending, by UTF-16 code unit
 - Array ordering (fixed for diff stability):

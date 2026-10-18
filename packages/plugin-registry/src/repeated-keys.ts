@@ -4,6 +4,13 @@ const PROTOTYPE_KEY = "__proto__"
 
 export const JSONC_PARSE_OPTIONS = { allowTrailingComma: true, disallowComments: false } as const
 
+const UTF8_BOM = "\uFEFF"
+
+/** Windows editors open a UTF-8 file with one, and `jsonc-parser` reads it as an invalid symbol. */
+export function stripUtf8Bom(text: string): string {
+  return text.startsWith(UTF8_BOM) ? text.slice(UTF8_BOM.length) : text
+}
+
 export interface RepeatedKey {
   readonly kind: "repeated" | "prototype-key"
   readonly key: string

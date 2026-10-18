@@ -127,6 +127,11 @@ if (scan.kind === "repeated" || scan.kind === "prototype-key") {
 }
 ```
 
+Both parsers pass the text through `stripUtf8Bom`, exported beside it, before
+`parse` or `scanKeys` sees it: `jsonc-parser` reads the byte order mark a Windows
+editor writes as an invalid symbol, and a position counted after it is the one
+the editor shows.
+
 Like `/plugin-input`, it is a separate chunk that does not compile the plugin
 schema, so a caller that only parses JSONC pays nothing for the registry.
 

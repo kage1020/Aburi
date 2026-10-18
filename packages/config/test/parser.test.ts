@@ -38,6 +38,15 @@ describe("parseConfig", () => {
     expect(parseConfig(JSON.stringify(config), "inline")).toEqual(config)
   })
 
+  it.each([
+    ["opens with two byte order marks", `\uFEFF\uFEFF{ "strict": true }`],
+    ["has a byte order mark after its first character", `{\uFEFF "strict": true }`],
+  ])("throws config-parse-failed on a config that %s", async (_, text) => {
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
+    expect(caught.code).toBe("config-parse-failed")
+    expect(caught.message).toMatch(/^Config at inline is not valid JSONC: InvalidSymbol at offset /)
+  })
+
   it("throws config-parse-failed on a lexical error, with the offset in the message and the parse errors as cause", async () => {
     const caught = await errorFrom(ConfigError, () => parseConfig("{not json", "inline"))
     expect(caught.code).toBe("config-parse-failed")
@@ -184,13 +193,24 @@ describe("a key named twice in one object", () => {
     const text = `{ "components": [{ "id": "a", "roots": ["x"] }, { "id": "b", "roots": ["y"] }] }`
     expect(parseConfig(text, "inline").components).toHaveLength(2)
   })
+
+  it("names the column an editor shows when a byte order mark opens the config", async () => {
+    const text = `\uFEFF{ "ignore": ["a/**"], "ignore": ["b/**"] }`
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
+    expect(caught.message).toBe(
+      'Config at inline names "ignore" twice in the top-level object (again at line 1, column 23)',
+    )
+  })
 })
 
 describe("readConfigFile", () => {
   const scratch = useScratchWorkspace("config")
 
-  it("reads, parses and validates a config from disk", async () => {
-    await scratch.writeSource("aburi.jsonc", VALID_JSONC)
+  it.each([
+    ["", VALID_JSONC],
+    [" that opens with a byte order mark", `\uFEFF${VALID_JSONC}`],
+  ])("reads, parses and validates a config%s from disk", async (_, text) => {
+    await scratch.writeSource("aburi.jsonc", text)
     const path = join(scratch.root, "aburi.jsonc")
     expect((await readConfigFile(path)).effects).toEqual(["effects-prisma", "effects-pino"])
   })

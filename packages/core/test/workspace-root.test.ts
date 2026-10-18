@@ -45,6 +45,16 @@ describe("a directory is a workspace root when it holds a marker", () => {
     expect(await codeFrom()).toBe("workspace-root-not-found")
   })
 
+  it.each([
+    ["package.json", JSON.stringify({ name: "root", workspaces: ["apps/*"] })],
+    ["Cargo.toml", '[workspace]\nmembers = ["crate-a"]\n'],
+    ["pyproject.toml", '[tool.uv.workspace]\nmembers = ["pkg-a"]\n'],
+  ])("%s opening with a byte order mark", async (file, content) => {
+    await tree.writeSource(file, `\uFEFF${content}`)
+
+    expect(await rootFrom()).toBe(tree.root)
+  })
+
   it("resolves a relative cwd against the process's working directory", async () => {
     await tree.writeSource("turbo.json", "{}")
     await tree.mkdir("src")
@@ -106,8 +116,11 @@ describe("a manifest that cannot be read", () => {
     expect(await codeFrom("apps", "billing")).toBe("workspace-manifest-malformed")
   })
 
-  it("is raised at the workspace root itself", async () => {
-    await tree.writeSource("package.json", "{ not json")
+  it.each([
+    ["that is not JSON", "{ not json"],
+    ["with a byte order mark after its first character", '{\uFEFF "workspaces": [] }'],
+  ])("is raised at the workspace root itself, for a manifest %s", async (_case, content) => {
+    await tree.writeSource("package.json", content)
     await tree.writeSource("Cargo.toml", '[workspace]\nmembers = ["crate-a"]\n')
 
     expect(await codeFrom()).toBe("workspace-manifest-malformed")

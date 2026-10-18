@@ -1,4 +1,5 @@
 import { readFile, stat } from "node:fs/promises"
+import { stripUtf8Bom } from "./codepoints"
 import { CoreError } from "./errors"
 import { isVanishedFile } from "./scan/faults"
 
@@ -18,7 +19,7 @@ export async function readJson(path: string): Promise<unknown> {
 
 export function parseManifestJson(text: string, path: string): unknown {
   try {
-    return JSON.parse(text)
+    return JSON.parse(stripUtf8Bom(text))
   } catch (cause) {
     throw new CoreError(
       `Failed to parse JSON at ${path}`,

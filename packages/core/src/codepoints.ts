@@ -9,3 +9,10 @@ export function describeCodePoints(value: string): string {
 export function toNfc(value: string): string {
   return value.normalize("NFC")
 }
+
+const UTF8_BOM = "\uFEFF"
+
+/** Windows editors open a UTF-8 file with one; Node's `require()`, npm and pnpm read past it. */
+export function stripUtf8Bom(text: string): string {
+  return text.startsWith(UTF8_BOM) ? text.slice(UTF8_BOM.length) : text
+}
