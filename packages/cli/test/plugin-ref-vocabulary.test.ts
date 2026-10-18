@@ -127,3 +127,52 @@ describe("aburi scan — a plugin name where a framework id belongs", () => {
     expect(output).not.toContain("names a plugin")
   })
 })
+
+describe("aburi scan — a pluginOptions key that names no loaded plugin", () => {
+  const PRISMA = { ...TYPESCRIPT, effects: ["effects-prisma"] }
+  const unmatched = (key: string, loaded: string) =>
+    `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}); its options are ignored.`
+
+  it.each([
+    [
+      "warns about a misspelled plugin name",
+      { ...PRISMA, pluginOptions: { "effects-prsima": { treatExtendsAsTx: true } } },
+      [unmatched("effects-prsima", "lang-typescript, effects-prisma")],
+    ],
+    [
+      "warns about a plugin no list enables",
+      { ...TYPESCRIPT, pluginOptions: { "effects-prisma": { treatExtendsAsTx: true } } },
+      [unmatched("effects-prisma", "lang-typescript")],
+    ],
+    [
+      "warns about each of several keys, in config order, and not the one that matches",
+      {
+        ...PRISMA,
+        pluginOptions: { "framework-nestjs": {}, "effects-prisma": {}, "effects-pino": {} },
+      },
+      [
+        unmatched("framework-nestjs", "lang-typescript, effects-prisma"),
+        unmatched("effects-pino", "lang-typescript, effects-prisma"),
+      ],
+    ],
+    [
+      "says nothing about a loaded plugin's name",
+      { ...PRISMA, pluginOptions: { "effects-prisma": { treatExtendsAsTx: true } } },
+      [],
+    ],
+    [
+      "says nothing about the name a frameworkHints entry is loaded under",
+      {
+        ...TYPESCRIPT,
+        frameworkHints: [{ name: "acme", decorators: {} }],
+        pluginOptions: { "hint-acme": {} },
+      },
+      [],
+    ],
+  ])("%s, and exits 0", async (_, config, expected) => {
+    const { code, output } = await scanWith(config)
+
+    expect(code, output).toBe(EXIT.SUCCESS)
+    expect(output.split("\n").filter((line) => line.includes("pluginOptions"))).toEqual(expected)
+  })
+})

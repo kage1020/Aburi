@@ -335,6 +335,23 @@ describe("reportScanIncidents — the other incidents", () => {
     expect(lines[2]).toContain("parse tree(s) were not released")
   })
 
+  it("names a pluginOptions key no loaded plugin has, unlabelled, between the frameworks lines and the tree leaks", () => {
+    const lines = incidentLinesFrom(
+      {
+        treeReleaseFailures: [{ plugin: "lang-stub", file: "a.ts", detail: "gone" }],
+        pluginNamedFrameworks: [{ component: "web", value: "lang-typescript", frameworkIds: [] }],
+        loadedPlugins: ["lang-typescript", "effects-prisma"],
+        unmatchedPluginOptions: ["effects-prsima"],
+      },
+      "head",
+    )
+    expect(lines[0]).toContain('⚠ head: Component "web" lists "lang-typescript"')
+    expect(lines[1]).toBe(
+      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, effects-prisma); its options are ignored.',
+    )
+    expect(lines[2]).toContain("parse tree(s) were not released")
+  })
+
   it("names every file behind the recoverable-error count, uncapped and unlabelled", () => {
     const parseErrorFiles = Array.from({ length: 12 }, (_, i) => ({
       path: `src/c${i}.tsx`,

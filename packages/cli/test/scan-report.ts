@@ -30,6 +30,8 @@ export function scanReportWith(overrides: Partial<ScanReport>): ScanReport {
     treeReleaseFailures: [],
     fellBackToSingleComponent: false,
     pluginNamedFrameworks: [],
+    loadedPlugins: [],
+    unmatchedPluginOptions: [],
     exitCode: EXIT.SUCCESS,
     ...overrides,
   }

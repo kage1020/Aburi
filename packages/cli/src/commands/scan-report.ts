@@ -53,5 +53,7 @@ export interface ScanReport {
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
   fellBackToSingleComponent: boolean
   pluginNamedFrameworks: readonly PluginNamedFramework[]
+  loadedPlugins: readonly string[]
+  unmatchedPluginOptions: readonly string[]
   exitCode: ExitCode
 }

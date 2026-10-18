@@ -71,6 +71,10 @@ under `pluginOptions`, keyed by plugin name:
 }
 ```
 
+A key that names no plugin the scan loaded, misspelled or missing from the three
+lists, gets a warning on stderr naming the plugins that did load, and its options
+are ignored.
+
 ## Define components
 
 Components are the boxes in `workspace.md`, and the unit Aburi writes each

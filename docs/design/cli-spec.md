@@ -194,6 +194,7 @@ With `--quiet`, only the final line:
 
 ```
 ⚠ Component "api" lists "framework-nestjs" in frameworks, which names a plugin, not a framework; the IR carries it as written. Write "nestjs".
+⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, framework-nestjs, effects-prisma); its options are ignored.
 ⚠ 3 file(s) had recoverable parse errors.
     src/widget.tsx: 4 errors, first at 31:12 — syntax error
     src/panel.tsx: 12:4 — syntax error
@@ -214,6 +215,15 @@ With `--quiet`, only the final line:
 The `frameworks` line comes ahead of the parse lines because the artifact cannot always
 reproduce it: a first-party plugin that is not loaded is absent from `plugins[]`, so nothing in
 the IR says `framework-next` was a plugin's name ([config.md](./config.md) §6).
+
+The `pluginOptions` line follows it, one per key that names no loaded plugin
+([config.md](./config.md) §5.4), for the same reason: the IR records the plugins that loaded but
+not the options the config gave. Of the report's `⚠` lines it is the only one that never carries
+a scan's label, and a command says it once however many scans it runs: it describes the config
+and the plugins loaded for it, not the tree a scan read, and `aburi diff`'s two scans load the
+same of both (§6.4 step 3, §6.4.1.5), so a label would pin it on one side and a second copy would
+say nothing new. The scans of one command share the set of lines already said, which `runScan`
+takes as `incidents.said`.
 
 The parse-error line names its files, which nothing else does: mostly they are in the IR, so
 `stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
@@ -1073,6 +1083,7 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 | CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
 | CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
+| CL35 | `aburi diff main..HEAD` with a `pluginOptions` key that names no loaded plugin (`config.md` C10) | The warning once, with no side label, while the base scan's own lines keep theirs; the exit code is the one the run has without the key |
 
 ## 18. Design Decisions
 

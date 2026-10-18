@@ -125,7 +125,9 @@ unparseable file tells you something about your source, not about the scan.
 :::
 
 Every command that scans reports the same way. `aburi diff` runs two scans and
-labels each: the base by its ref, the head as `head (working tree)`.
+labels each: the base by its ref, the head as `head (working tree)`. A
+`pluginOptions` key that names no loaded plugin is about the config both scans
+read, so `aburi diff` says it once, with no label.
 
 ---
 

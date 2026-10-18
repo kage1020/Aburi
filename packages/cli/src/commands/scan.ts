@@ -63,6 +63,8 @@ export interface ScanOptions {
   incidents?: {
     warn: WarnFn
     label?: string
+    /** Shared by the scans of one command, which load one config and one plugin set. */
+    said?: Set<string>
   }
 }
 
@@ -130,6 +132,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     config.minParsedFileRatio,
   )
 
+  const loadedPlugins = plugins.registry.listPlugins().map((plugin) => plugin.name)
   const report: ScanReport = {
     irPath,
     workspaceMdPath: null,
@@ -161,6 +164,10 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
     pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
+    loadedPlugins,
+    unmatchedPluginOptions: Object.keys(config.pluginOptions ?? {}).filter(
+      (key) => !loadedPlugins.includes(key),
+    ),
     exitCode:
       scanResult.extractionFailures.length > 0 ||
       coverageFault !== null ||
@@ -190,7 +197,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 function reportIncidents(report: ScanReport, incidents: ScanOptions["incidents"]): void {
   if (incidents === undefined) return
   try {
-    reportScanIncidents(report, incidents.warn, incidents.label ?? null)
+    reportScanIncidents(report, incidents.warn, incidents.label ?? null, incidents.said)
   } catch {
     // The exit code must not depend on stderr surviving: `aburi scan 2>&1 | head -1` closes it.
   }

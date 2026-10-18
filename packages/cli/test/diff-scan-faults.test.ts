@@ -8,9 +8,9 @@ const workspace = useScratchWorkspace("diff-scan-faults")
 
 async function diffRevisions(
   files: { base: readonly string[]; head: readonly string[] },
-  options: { refSpec?: string; failOn?: string } = {},
+  options: { refSpec?: string; failOn?: string; config?: Record<string, unknown> } = {},
 ) {
-  await writeStubRepository(workspace.root, files)
+  await writeStubRepository(workspace.root, files, options.config)
   const log = recordingLogger()
   const report = await runDiff({
     cwd: workspace.root,
@@ -44,6 +44,21 @@ describe("aburi diff — the two scans it ran", () => {
     expect(log.warnings).toContain("⚠ head (working tree): 1 file(s) had recoverable parse errors.")
     expect(log.warnings).toContain("    warn.stub: 2:1 — stray token")
     expect(log.warnings.join("\n")).not.toContain("v1.1.0")
+  })
+
+  it("says a pluginOptions key that names no loaded plugin once, unlabelled, though both sides load the plugins", async () => {
+    const { report, warnings } = await diffRevisions(
+      { base: ["bad.stub", "ok.stub"], head: ["ok.stub"] },
+      { config: { pluginOptions: { "effects-prsima": {} } } },
+    )
+
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    expect(warnings.filter((line) => line.includes("pluginOptions"))).toEqual([
+      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-stub); its options are ignored.',
+    ])
+    expect(warnings).toContain(
+      '⚠ base ref "main": 1 file(s) could not be parsed and were left out of the IR.',
+    )
   })
 
   it("gates on a plugin fault at either side and names which, with no clause triggered", async () => {
