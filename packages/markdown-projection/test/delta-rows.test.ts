@@ -1,4 +1,4 @@
-import { changed } from "@aburi/test-support"
+import { call, changed, decorator, effect, rule, sig } from "@aburi/test-support"
 import type { ArrayDelta, SignatureDelta, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { LONG_CONDITION, namedSymbol, projectChanges, renamedPair } from "./fixtures"
@@ -20,8 +20,11 @@ function signature(overrides: Partial<SignatureDelta>): SignatureDelta {
   }
 }
 
-function renderDelta(flags: Partial<SymbolDelta>): string {
-  return projectChanges([changed(namedSymbol("Foo"), { apiChanged: true, ...flags })])
+function renderDelta(
+  flags: Partial<SymbolDelta>,
+  before: Parameters<typeof namedSymbol>[1] = {},
+): string {
+  return projectChanges([changed(namedSymbol("Foo", before), { apiChanged: true, ...flags })])
 }
 
 describe("a changed Symbol's signature rows", () => {
@@ -95,22 +98,10 @@ describe("a changed Symbol's decorator rows", () => {
       "- decorator removed: `@Legacy()`",
     ],
     [
-      "a modified decorator by name, without the arguments that may be what changed",
+      "a modified decorator with no base to set beside it as written, arguments included",
       "modified",
-      { name: "UseGuards", raw: "UseGuards(A,B)", arguments: [], boundary: false, line: 7 },
-      "- decorator modified: `@UseGuards`",
-    ],
-    [
-      "a modified decorator with its receiver, which may be what changed",
-      "modified",
-      { name: "Post", qualifier: "tsed", raw: "tsed.Post('/x')", arguments: [], line: 7 },
-      "- decorator modified: `@tsed.Post`",
-    ],
-    [
-      "a multi-segment receiver whole",
-      "modified",
-      { name: "Post", qualifier: "a.b", raw: "a.b.Post()", arguments: [], line: 7 },
-      "- decorator modified: `@a.b.Post`",
+      { name: "UseGuards", raw: "UseGuards(A,B)", arguments: ["A", "B"], line: 7 },
+      "- decorator modified: `@UseGuards(A,B)`\n",
     ],
     [
       "an added decorator with no raw form by its name and receiver",
@@ -119,10 +110,16 @@ describe("a changed Symbol's decorator rows", () => {
       "- decorator added: `@nest.Post`",
     ],
     [
+      "a multi-segment receiver whole",
+      "added",
+      { name: "Post", qualifier: "a.b", arguments: [], line: 7 },
+      "- decorator added: `@a.b.Post`",
+    ],
+    [
       "an empty receiver as no receiver at all",
-      "modified",
-      { name: "Post", qualifier: "", raw: "Post()", arguments: [], boundary: false, line: 7 },
-      "- decorator modified: `@Post`\n",
+      "added",
+      { name: "Post", qualifier: "", arguments: [], boundary: false, line: 7 },
+      "- decorator added: `@Post`\n",
     ],
   ])("names %s", (_, bucket, entry, row) => {
     expect(renderDelta({ decorators: { ...none(), [bucket]: [entry] } })).toContain(row)
@@ -140,6 +137,16 @@ describe("a changed Symbol's rule, effect and call rows", () => {
       "a rule with no payload by type and line",
       { rules: { ...none(), removed: [{ type: "try", line: 5 }] } },
       "- rules removed:\n  - try (L5)\n",
+    ],
+    [
+      "an added loop by its kind",
+      { rules: { ...none(), added: [rule({ type: "loop", line: 9, loopKind: "do" })] } },
+      "- rules added:\n  - loop (`do`) (L9)\n",
+    ],
+    [
+      "a modified loop with no base to set beside it by its new kind",
+      { rules: { ...none(), modified: [rule({ type: "loop", line: 3, loopKind: "while" })] } },
+      "- rules modified:\n  - loop (`while`) (L3)\n",
     ],
     [
       "a rewritten guard condition",
@@ -166,14 +173,37 @@ describe("a changed Symbol's rule, effect and call rows", () => {
       `- rules added:\n  - guard: \`${LONG_CONDITION}\` (L3)\n`,
     ],
     [
-      "an added effect by id, target and line",
+      "an added effect by id, target, line and plugin",
       {
-        effects: { ...none(), added: [{ id: "db.write", target: "prisma.user.create", line: 42 }] },
+        effects: {
+          ...none(),
+          added: [
+            { id: "db.write", target: "prisma.user.create", line: 42, plugin: "effects-prisma" },
+          ],
+        },
       },
-      "- effects added:\n  - db.write: `prisma.user.create` (L42)\n",
+      "- effects added:\n  - db.write: `prisma.user.create` (L42) [effects-prisma]\n",
     ],
     [
-      "an effect whose confidence was downgraded",
+      "a removed effect with its confidence badge",
+      {
+        effects: {
+          ...none(),
+          removed: [
+            effect({
+              id: "event.publish",
+              target: "bus.emit",
+              plugin: "effects-nest",
+              line: 3,
+              confidence: "medium",
+            }),
+          ],
+        },
+      },
+      "- effects removed:\n  - event.publish: `bus.emit` (L3) [effects-nest] ⚠ medium\n",
+    ],
+    [
+      "an effect whose confidence was downgraded, with no base to set beside it, by its badge",
       {
         effects: {
           ...none(),
@@ -189,7 +219,7 @@ describe("a changed Symbol's rule, effect and call rows", () => {
           ],
         },
       },
-      "- effects modified:\n  - db.write: `prisma.user.create` (L7)\n",
+      "- effects modified:\n  - db.write: `prisma.user.create` (L7) [effects-prisma] ⚠ low\n",
     ],
     [
       "a propagated effect by its direct sources",
@@ -209,20 +239,224 @@ describe("a changed Symbol's rule, effect and call rows", () => {
           ],
         },
       },
-      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from ts:src/repository.ts#Repository.save]\n",
+      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from ts:src/repository.ts#Repository.save] [effects-prisma]\n",
     ],
     [
       "a removed call by target and line",
-      { calls: { ...none(), removed: [{ target: "helper.doWork", line: 8 }] } },
+      {
+        calls: {
+          ...none(),
+          removed: [{ target: "helper.doWork", line: 8, resolved: "ts:src/helper.ts#doWork" }],
+        },
+      },
       "- calls removed:\n  - `helper.doWork` (L8)\n",
     ],
     [
-      "a call that stopped resolving",
+      "a call that stopped resolving, with no base to set beside it, by what it resolves to",
       { calls: { ...none(), modified: [{ target: "useInvoices", line: 15, resolved: null }] } },
-      "- calls modified:\n  - `useInvoices` (L15)\n",
+      "- calls modified:\n  - `useInvoices` (L15) resolved: none\n",
     ],
   ])("names %s", (_, flags, rows) => {
     expect(renderDelta(flags)).toContain(rows)
+  })
+})
+
+describe("a modified element's row beside the base element the diff paired it with", () => {
+  const userCreate = (overrides: Partial<Parameters<typeof effect>[0]> = {}) =>
+    effect({ id: "db.write", target: "prisma.user.create", plugin: "effects-prisma", ...overrides })
+  const loop = (line: number, loopKind: "for" | "while" | "do") =>
+    rule({ type: "loop", line, loopKind })
+
+  it.each<[string, Parameters<typeof namedSymbol>[1], Partial<SymbolDelta>, string]>([
+    [
+      "a loop's old kind before its new one",
+      { rules: [loop(3, "for")] },
+      { rules: { ...none(), modified: [loop(3, "while")] } },
+      "- rules modified:\n  - loop (`for` → `while`) (L3)\n",
+    ],
+    [
+      "a guard's old condition before its new one",
+      { rules: [rule({ type: "guard", line: 4, condition: "!data.name" })] },
+      {
+        rules: {
+          ...none(),
+          modified: [
+            rule({ type: "guard", line: 4, condition: "!data.name || data.name.length > 64" }),
+          ],
+        },
+      },
+      "- rules modified:\n  - guard: `!data.name` → `!data.name || data.name.length > 64` (L4)\n",
+    ],
+    [
+      "an effect's old confidence after its new badge",
+      { effects: [userCreate({ line: 5 })] },
+      { effects: { ...none(), modified: [userCreate({ line: 5, confidence: "medium" })] } },
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) [effects-prisma] ⚠ medium (was high)\n",
+    ],
+    [
+      "the badge an effect lost when its confidence rose",
+      { effects: [userCreate({ line: 5, confidence: "medium" })] },
+      { effects: { ...none(), modified: [userCreate({ line: 5 })] } },
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) [effects-prisma] (was ⚠ medium)\n",
+    ],
+    [
+      "an effect's old plugin before its new one",
+      { effects: [userCreate({ line: 5, plugin: "effects-drizzle" })] },
+      { effects: { ...none(), modified: [userCreate({ line: 5 })] } },
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) [effects-drizzle → effects-prisma]\n",
+    ],
+    [
+      "a propagated effect's old sources before its new ones",
+      { effects: [userCreate({ propagated: true, derivedFrom: ["ts:src/a.ts#a"] })] },
+      {
+        effects: {
+          ...none(),
+          modified: [
+            userCreate({ propagated: true, derivedFrom: ["ts:src/a.ts#a", "ts:src/b.ts#b"] }),
+          ],
+        },
+      },
+      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from ts:src/a.ts#a] → [propagated from ts:src/a.ts#a, ts:src/b.ts#b] [effects-prisma]\n",
+    ],
+    [
+      "the line of a local effect that is now propagated",
+      { effects: [userCreate({ line: 5 })] },
+      {
+        effects: {
+          ...none(),
+          modified: [userCreate({ propagated: true, derivedFrom: ["ts:src/a.ts#a"] })],
+        },
+      },
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) → [propagated from ts:src/a.ts#a] [effects-prisma]\n",
+    ],
+    [
+      "a call's old resolution before its new one",
+      {
+        calls: [call({ target: "useInvoices", line: 15, resolved: "ts:src/hooks.ts#useInvoices" })],
+      },
+      { calls: { ...none(), modified: [call({ target: "useInvoices", line: 15 })] } },
+      "- calls modified:\n  - `useInvoices` (L15) resolved: `ts:src/hooks.ts#useInvoices` → none\n",
+    ],
+    [
+      "a decorator's old arguments, each side as written",
+      {
+        decorators: [
+          decorator({ name: "UseGuards", raw: "UseGuards(AuthGuard)", arguments: ["AuthGuard"] }),
+        ],
+      },
+      {
+        decorators: {
+          ...none(),
+          modified: [
+            decorator({
+              name: "UseGuards",
+              raw: "UseGuards(AuthGuard, RoleGuard)",
+              arguments: ["AuthGuard", "RoleGuard"],
+            }),
+          ],
+        },
+      },
+      "- decorator modified: `@UseGuards(AuthGuard)` → `@UseGuards(AuthGuard, RoleGuard)`\n",
+    ],
+    [
+      "a decorator's old receiver",
+      { decorators: [decorator({ name: "Post", qualifier: "nest" })] },
+      { decorators: { ...none(), modified: [decorator({ name: "Post" })] } },
+      "- decorator modified: `@nest.Post()` → `@Post()`\n",
+    ],
+    [
+      "an input's old type before its new one",
+      { signature: sig({ inputs: [{ name: "id", type: "string" }] }) },
+      {
+        signature: signature({ inputs: { ...none(), modified: [{ name: "id", type: "number" }] } }),
+      },
+      "- signature.inputs modified: `id: string` → `id: number`\n",
+    ],
+    [
+      "an input that turned optional",
+      {
+        signature: sig({
+          inputs: [
+            { name: "id", type: "string" },
+            { name: "limit", type: "number" },
+          ],
+        }),
+      },
+      {
+        signature: signature({
+          inputs: { ...none(), modified: [{ name: "limit", type: "number", optional: true }] },
+        }),
+      },
+      "- signature.inputs modified: `limit: number` → `limit?: number`\n",
+    ],
+  ])("writes %s", (_, before, flags, row) => {
+    expect(renderDelta(flags, before)).toContain(row)
+  })
+
+  it.each<[string, Parameters<typeof namedSymbol>[1], Partial<SymbolDelta>, string]>([
+    [
+      "a line or derivedBy, which the diff does not compare",
+      { effects: [userCreate({ line: 9, derivedBy: "convention:a" })] },
+      {
+        effects: {
+          ...none(),
+          modified: [userCreate({ line: 5, derivedBy: "convention:b", confidence: "medium" })],
+        },
+      },
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) [effects-prisma] ⚠ medium (was high)\n",
+    ],
+    [
+      "a base element equal to the head one, which is another element's counterpart",
+      { rules: [loop(3, "for"), loop(8, "while")] },
+      { rules: { ...none(), modified: [loop(3, "while")] } },
+      "- rules modified:\n  - loop (`for` → `while`) (L3)\n",
+    ],
+    [
+      "a base element under another key",
+      {
+        effects: [
+          userCreate({ line: 5 }),
+          userCreate({
+            target: "prisma.post.create",
+            line: 6,
+            plugin: "effects-drizzle",
+            confidence: "low",
+          }),
+        ],
+      },
+      { effects: { ...none(), modified: [userCreate({ line: 5, confidence: "medium" })] } },
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) [effects-prisma] ⚠ medium (was high)\n",
+    ],
+  ])("takes no base value from %s", (_, before, flags, row) => {
+    expect(renderDelta(flags, before)).toContain(row)
+  })
+
+  it.each<[string, Parameters<typeof namedSymbol>[1], Partial<SymbolDelta>, string]>([
+    [
+      "the loop kind of two base loops either of which it could have been",
+      { rules: [loop(3, "for"), loop(7, "do")] },
+      { rules: { removed: [loop(7, "do")], added: [], modified: [loop(5, "while")] } },
+      "- rules modified:\n  - loop (`while`) (L5)\n",
+    ],
+    [
+      "the confidence two base effects disagree on, while it sets the plugin they share beside its own",
+      {
+        effects: [
+          userCreate({ line: 3, plugin: "effects-drizzle" }),
+          userCreate({ line: 9, plugin: "effects-drizzle", confidence: "low" }),
+        ],
+      },
+      {
+        effects: {
+          added: [],
+          removed: [userCreate({ line: 9, plugin: "effects-drizzle", confidence: "low" })],
+          modified: [userCreate({ line: 5, confidence: "medium" })],
+        },
+      },
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) [effects-drizzle → effects-prisma] ⚠ medium\n",
+    ],
+  ])("writes the head value alone for %s", (_, before, flags, row) => {
+    expect(renderDelta(flags, before)).toContain(row)
   })
 })
 

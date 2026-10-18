@@ -469,12 +469,13 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 
 - signature.outputs: `Promise<Invoice>` → `Promise<InvoiceWithReceipt>`
 - signature.throws added: `NotFoundError`
+- signature.inputs modified: `id: string` → `id: InvoiceId`
 - decorator added: `@UseGuards(AuthGuard)`
 - decorator removed: `@UseGuards(LegacyGuard)`
-- decorator modified: `@tsed.Post`
+- decorator modified: `@nest.Post('/invoices')` → `@tsed.Post('/invoices')`
 ```
 
-`added` and `removed` print the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4). `modified` prints `qualifier.name`: the arguments are dropped because they may be the change, and the receiver is kept because it may be. Both fall back to `qualifier.name` when `raw` is absent. A modified row shows the head side only, so a receiver lost (`@nest.Post` → `@Post`) reads `@Post`, the same as an argument edit.
+Every decorator row prints the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4), and falls back to `qualifier.name` when `raw` is absent. A modified decorator differs from its base in its arguments or its receiver, the two things the diff compares beside the name ([`diff-algorithm.md`](./diff-algorithm.md) §5.2.2), and `raw` spells both, so its row sets the base's `raw` before the head's, as every modified row sets its base value beside its head value (Delta rows, below).
 
 A change whose `delta.confidenceChanged` is also true adds a row such as ``- confidence: `high` → `medium` ``, base side first, in whichever section the entry lands. This holds for every section that renders a delta body, Moved + Changed included. A fingerprint flag with no field-level row to explain it gets `- <axis> fingerprint changed; no field-level detail was recorded`; the component and confidence rows do not count as that explanation, since no fingerprint reads either, so a syntax change moved into Confidence changes still says it happened. The name row of a pair whose name changed (see Moved + Changed below) explains the API flag only when the last segment of the name changed, since that segment is all of the name the API fingerprint reads ([`fingerprint.md`](./fingerprint.md) §3.3): `Repo.save` → `UserRepo.save` still gets the note.
 
@@ -486,13 +487,38 @@ Entries with `delta.logicChanged: true`.
 ### `RolesGuard.canActivate` *(method)*
 **File**: `apps/billing/src/guards/roles.guard.ts:9`
 
-- effects added:
-  - db.write: `prisma.audit.create` (L75)
 - rules added:
   - guard: `!user.verified` (L42)
 - rules removed:
   - guard: `roles.length === 0` (L40)
+- effects added:
+  - db.write: `prisma.audit.create` (L75) [effects-prisma]
 ```
+
+#### Delta rows
+
+A delta body lists rules, effects and calls in that order, each array's `added`, `removed` and `modified` buckets in that order. Their rows are the component page's rows (§5.6–§5.8) nested one level, and inline however long the payload: a bucket lists the elements that moved rather than showing each in full, and a widened code span holds any condition on one line. So a loop carries its kind and an effect its plugin and confidence badge (§3.5) in every bucket:
+
+```md
+- rules added:
+  - loop (`while`) (L12)
+- effects removed:
+  - event.publish: `eventBus.emit` (L78) [effects-nest] ⚠ medium
+```
+
+A `modified` element is one the diff paired with a base element of the same key whose contents differ ([`diff-algorithm.md`](./diff-algorithm.md) §5.2), and the bucket holds the head element alone. Its row therefore shows every field the diff compares, and sets the base value in place beside each field that differs, so the row never reads like the element nobody touched:
+
+| Array (key) | Compared beside the key | Modified row |
+|---|---|---|
+| rules (`type`) | `condition`, `what`, `expr`, `loopKind` | ``loop (`for` → `while`) (L3)``, ``guard: `amount < 0` → `amount <= 0` (L4)`` |
+| effects (`id`, `target`) | origin (`propagated`, `derivedFrom`), `plugin`, `confidence` | ``db.write: `prisma.user.create` (L5) [effects-drizzle → effects-prisma] ⚠ medium (was high)`` |
+| calls (`target`) | `resolved` | ``` `useInvoices` (L15) resolved: `ts:src/hooks.ts#useInvoices` → none ``` |
+| decorators (`name`) | `qualifier`, `arguments` | ``decorator modified: `@UseGuards(AuthGuard)` → `@UseGuards(AuthGuard, RoleGuard)` `` |
+| signature.inputs (position, `name`) | `type`, `optional`, `rest` | ``signature.inputs modified: `limit: number` → `limit?: number` `` |
+
+`high` has no badge, so a confidence that fell reads `⚠ medium (was high)` and one that rose to `high` reads `(was ⚠ medium)`. An effect's origin is its line or its `[propagated from …]` list, so a local effect that is now propagated reads `` (L5) → [propagated from …] ``. A call row names what the call resolves to only under `calls modified`, the one thing a modified call can differ in, with `none` for an unresolved call.
+
+The base element is looked up in the entry's `before`, among the elements under the head element's key that differ from it: the diff paired it with one of them. A field gets a base value only where every one of them differs from the head element on that field and all of them agree on its value, which is then the paired element's. Otherwise, and for a diff whose `before` holds none, the row shows the head value alone. Keys do not identify one element, and rules key on `type` alone, so a guard edited beside a second guard gets its new condition alone, and a loop beside a second loop of another kind its new kind alone. A field the diff does not compare never gets a base value: a body that moved carries no line arrow, and an effect's `derivedBy` is not shown.
 
 #### ➕ Added / ➖ Removed
 
@@ -549,7 +575,7 @@ The section is omitted when the array is empty, and equally when the key is abse
 **Moved**: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
 **Delta**:
 - effects added:
-  - state.mutate: `result.value += ...` (L12)
+  - db.write: `prisma.ledger.create` (L12) [effects-prisma]
 ```
 
 A Symbol can move without leaving its file: the diff counts any change of id in a matched pair as a move ([`diff-algorithm.md`](./diff-algorithm.md) §4), so a rename or a new owner within one file is one too. Its two paths would read the same twice, so the line names the file once and gives the name it had and the name it has, each with its line:
@@ -560,7 +586,7 @@ A Symbol can move without leaving its file: the diff counts any change of id in 
 **Delta**:
 - name: `Repo.save` → `UserRepo.save`
 - rules modified:
-  - guard: `user.id !== null` (L31)
+  - guard: `id !== null` → `user.id !== null` (L31)
 ```
 
 The folded list below reads the same way, less the head name it otherwise opens with, since the route already gives it. A Slice member's follow-up line opens with the route, ``↳ moved: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged``, as a move between files that kept its name opens with its two paths. A names-only row ends ``(from `Repo.save` at L12)`` where a move between files that kept its name ends ``(from `<path>`)``.
@@ -921,6 +947,9 @@ All Markdown projection output is **English, with fixed wording**.
 | MP13c | diff with twelve API changes and one thin removed Symbol, projected with a budget that holds API changes only as names | `➖ Removed` is kept whole below the names-only API changes wherever that fits: not named only in a larger document, and not omitted |
 | MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
 | MP15 | A signature with an optional input and a rest input; a diff entry whose `signature.inputs.added` holds a rest input | `(a?: string, ...ids: string[])` in the signature line, and `` `...ids: string[]` `` in the diff row (§5.5). An input with an empty `type` prints as its name alone |
+| MP17 | diff entry whose delta lists a loop, an effect, a call or a decorator, in any bucket | The loop row carries its kind, ``loop (`<loopKind>`) (L<line>)``, and the effect row its `[plugin]` and, at medium or low confidence, its badge, as on the component page. Under `calls modified` the row names what the call resolves to (`none` when nothing); a decorator row prints its `raw`, arguments included, in every bucket |
+| MP17a | `modified` rule, effect, call, decorator or input whose entry's `before` holds the base element it was paired with, differing in a compared field | That field reads `<base> → <head>` in its place: ``loop (`for` → `while`)``, `[effects-drizzle → effects-prisma]`, an origin `(L5) → [propagated from …]`, ``resolved: `<id>` → none``, `` `@nest.Post()` → `@Post()` ``, `` `limit: number` → `limit?: number` ``; a confidence as `⚠ medium (was high)`, or `(was ⚠ medium)` when it rose to `high`. A field the diff does not compare (`line`, `derivedBy`) gets no base value, and a base element equal to the head element or under another key is not taken for the paired one |
+| MP17b | `modified` element whose `before` holds two elements under its key that differ from it and disagree on a field | That field shows the head value alone; a field they agree on still gets its base value |
 
 ## 12. Design decisions
 

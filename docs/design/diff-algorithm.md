@@ -725,12 +725,11 @@ However, fingerprints themselves contain no line information (D4 §4), so line f
 
 ##### 5.2.2 Handling of arguments and receivers in Decorator deltas
 
-Decorators are identified by `(name)`, but differences in `arguments` and `qualifier` are shown in the delta:
+Decorators are identified by `(name)`, but differences in `arguments` and `qualifier` are shown in the delta, each side as written ([`markdown-projection.md`](./markdown-projection.md) §6.2):
 
 ```
-Decorator delta (modified):
-- @Post: arguments '/invoices' → '/invoices/v2'
-- @UseGuards: arguments AuthGuard → AuthGuard,RoleGuard
+- decorator modified: `@Post('/invoices')` → `@Post('/invoices/v2')`
+- decorator modified: `@UseGuards(AuthGuard)` → `@UseGuards(AuthGuard, RoleGuard)`
 ```
 
 `arguments` is combined with line fuzz for the modified determination:

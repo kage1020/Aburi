@@ -34,7 +34,7 @@ Documentation: **[aburi.kage1020.com](https://aburi.kage1020.com)**
 - rules removed:
   - guard: `session.user.role !== 'admin'` (L14)
 - effects added:
-  - db.write: `prisma.auditLog.create` (L31)
+  - db.write: `prisma.auditLog.create` (L31) [effects-prisma]
 ```
 
 That deleted guard is a single red line somewhere in a 2,000-line `git diff`.

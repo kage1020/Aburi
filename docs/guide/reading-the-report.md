@@ -59,8 +59,22 @@ does.
 - signature.throws added: `PaymentDeclined`
 ```
 
-A change entry lists what differs. For an added or removed symbol, Aburi
-renders the whole thing:
+A change entry lists what differs. A rule, effect, call or decorator that was
+edited rather than added or removed sits under `modified`, with the old value
+beside the new one:
+
+```md
+- rules modified:
+  - loop (`for` → `while`) (L3)
+- effects modified:
+  - db.write: `prisma.user.create` (L5) [effects-prisma] ⚠ medium (was high)
+```
+
+When the old symbol had several elements of that kind the edit could have
+touched, such as a second guard beside the edited one, and they disagree on the
+old value, the row shows only the new one.
+
+For an added or removed symbol, Aburi renders the whole thing:
 
 ```md
 ### `refundOrder` *(function)*
@@ -90,7 +104,8 @@ branches. A removed `guard` line means somebody removed a condition.
 
 Aburi flags anything it is less sure about. A symbol carries the badge on its
 heading; an effect, at the end of its row. When the badge on a symbol moves, the
-entry says so with a `confidence: before → after` line.
+entry says so with a `confidence: before → after` line; when an effect's moves,
+its row under `effects modified` ends with the old one, `(was high)`.
 
 | Marker | Meaning |
 |---|---|
