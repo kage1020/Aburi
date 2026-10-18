@@ -13,6 +13,12 @@ aburi <command> [flags]
 
 `-v` / `--version` and `-h` / `--help` work anywhere and exit `0`.
 
+`--log-level debug|info|warn|error` works on every command too, before it or after it. It
+sets how much of the per-file log (`warn: Skipped src/big.ts: …`) reaches stderr, from
+`aburi scan` and from the scans `aburi diff` and `aburi explain` run. The default is `warn`;
+`error` leaves only errors, and `debug` adds a line for every file extracted. The `⚠` warnings
+are printed whatever the level. Any other value exits `2`.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -29,6 +35,7 @@ CI gates on `3`.
 | Variable | Effect |
 |---|---|
 | `ABURI_CONFIG` | Config file path. The `--config` flag wins over it. |
+| `ABURI_LOG_LEVEL` | The same as `--log-level`, which wins over it. A value other than the four levels is ignored. |
 | `NO_COLOR` | Suppress colour output. |
 | `CI` | Makes `aburi scan` omit the timestamp, so identical commits produce identical bytes. |
 

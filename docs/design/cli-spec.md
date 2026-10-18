@@ -39,7 +39,7 @@ Available on every command:
 |---|---|---|
 | `--cwd <path>` | — | Change the working directory (origin for config resolution) |
 | `--config <path>` | — | Explicitly specify the config file location |
-| `--log-level <level>` | — | `debug` / `info` / `warn` / `error` (default: `info`) |
+| `--log-level <level>` | — | `debug` / `info` / `warn` / `error` (default: `warn`): the lowest level of the run's `Logger` lines (§5.6) that reach stderr. Written before the command or after it; any other value exits `2` |
 | `--no-color` | — | Disable colored output |
 | `--help` | `-h` | Show command-specific help |
 
@@ -281,9 +281,13 @@ printing them while the other two discard the report. A caller that supplies no 
 incident report.
 
 That is not the same as silence. The run's `Logger` is a separate channel — per file rather
-than per run, governed by `ABURI_LOG_LEVEL` (§11), and still writing to `process.stderr`
-whatever streams the caller injected. An embedded scan with no sink is quiet, not mute, and
-routing that channel to the caller is a known gap rather than something this contract covers.
+than per run, governed by `--log-level` (§3) and `ABURI_LOG_LEVEL` (§11), and still writing to
+`process.stderr` whatever streams the caller injected. The level is the command's rather than
+one scan's: `diff` hands it to both of its scans and `explain` to the one it rescans with, so no
+scan logs at a level the reader did not choose. An embedder passes it as `logLevel` to
+`runScan`, `runDiff` or `runExplain`, and gets `warn` without one. An embedded scan with no sink
+is quiet, not mute, and routing that channel to the caller is a known gap rather than something
+this contract covers.
 It is also why the files above are listed by the CLI itself rather than left to that channel:
 at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `unroutable` and an
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
@@ -937,7 +941,7 @@ The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON
 | Variable | Meaning |
 |---|---|
 | `ABURI_CONFIG` | Config file path (equivalent to --config) |
-| `ABURI_LOG_LEVEL` | Equivalent to --log-level |
+| `ABURI_LOG_LEVEL` | Equivalent to --log-level, except that a value other than the four levels is ignored rather than refused |
 | `NO_COLOR` | If set, disable coloring (standard convention) |
 | `FORCE_COLOR` | If set, force coloring on (standard convention) |
 | `CI` | If set, CI mode (§12) |
@@ -1073,6 +1077,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 | CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
 | CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
+| CL35 | `aburi scan`, `aburi diff main..HEAD`, or `aburi explain <name>` with no IR on disk, where each scanned tree holds a file that fails to parse | One `warn:` line per scan naming that file, so two from `diff`; none at `ABURI_LOG_LEVEL=error`; the per-file `debug:` lines as well at `ABURI_LOG_LEVEL=debug`; `--log-level`, before the command or after it, wins over the variable |
+| CL36 | `aburi scan --log-level loud`, and `aburi init --log-level debug` | exit 2 naming the four levels; `init` accepts the flag, which has no per-file log there to govern |
 
 ## 18. Design Decisions
 

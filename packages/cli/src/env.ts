@@ -8,13 +8,16 @@ export interface AburiEnv {
 
 export type LogLevel = "debug" | "info" | "warn" | "error"
 
-const LOG_LEVELS = new Set<LogLevel>(["debug", "info", "warn", "error"])
+const LOG_LEVELS: ReadonlySet<string> = new Set<LogLevel>(["debug", "info", "warn", "error"])
+
+export function isLogLevel(value: string): value is LogLevel {
+  return LOG_LEVELS.has(value)
+}
 
 export function readEnv(source: NodeJS.ProcessEnv = process.env): AburiEnv {
   const configPath = nonEmpty(source.ABURI_CONFIG) ?? null
   const rawLevel = nonEmpty(source.ABURI_LOG_LEVEL)
-  const logLevel =
-    rawLevel !== undefined && LOG_LEVELS.has(rawLevel as LogLevel) ? (rawLevel as LogLevel) : null
+  const logLevel = rawLevel !== undefined && isLogLevel(rawLevel) ? rawLevel : null
   return {
     configPath,
     logLevel,
