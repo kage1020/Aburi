@@ -1,4 +1,4 @@
-import { asSyntaxNode, findNamedChildOfType, type SyntaxNode } from "@aburi/core"
+import { asSyntaxNode, findNamedChildOfType, type SyntaxNode, unwrapValue } from "@aburi/core"
 
 const JSX_NODE_TYPES: ReadonlySet<string> = new Set([
   "jsx_element",
@@ -19,8 +19,12 @@ const FUNCTION_SCOPE_TYPES: ReadonlySet<string> = new Set([
   "function_expression",
   "arrow_function",
   "generator_function_declaration",
+  "generator_function",
   "method_definition",
 ])
+
+// `ready && <X />` evaluates to `ready` only when it is falsy, which no element is.
+const FALLBACK_OPERATORS: ReadonlySet<string> = new Set(["||", "??"])
 
 export function hasJsxReturn(body: unknown): boolean {
   const node = asSyntaxNode(body)
@@ -28,12 +32,20 @@ export function hasJsxReturn(body: unknown): boolean {
   return findFirstJsxDescendant(node) !== null
 }
 
-export function findReturnedJsxElementName(body: unknown): string | null {
+export function findReturnedJsxElementNames(body: unknown): string[] {
   const node = asSyntaxNode(body)
-  if (node === null) return null
-  const jsx = findReturnedJsxElement(node)
-  if (jsx === null) return null
-  return jsxElementName(jsx)
+  if (node === null) return []
+  const values: SyntaxNode[] = []
+  // A concise arrow's body is the value it returns.
+  if (node.type === "statement_block") collectReturnedValues(node, values)
+  else values.push(node)
+  const elements: SyntaxNode[] = []
+  for (const value of values) collectReturnedElements(value, elements)
+  return elements.map(jsxElementName).filter((name) => name !== null)
+}
+
+export function findReturnedJsxElementName(body: unknown): string | null {
+  return findReturnedJsxElementNames(body)[0] ?? null
 }
 
 export function isProviderElementName(name: string | null): boolean {
@@ -53,38 +65,34 @@ function findFirstJsxDescendant(node: SyntaxNode): SyntaxNode | null {
   return null
 }
 
-function findReturnedJsxElement(body: SyntaxNode): SyntaxNode | null {
-  if (JSX_ELEMENT_TYPES.has(body.type)) return body
-  return walkForReturnedJsx(body)
-}
-
-function walkForReturnedJsx(node: SyntaxNode): SyntaxNode | null {
+function collectReturnedValues(node: SyntaxNode, into: SyntaxNode[]): void {
   if (node.type === "return_statement") {
-    for (const child of node.namedChildren) {
-      if (child === null) continue
-      const jsx = findFirstJsxElementOnly(child)
-      if (jsx !== null) return jsx
-    }
-    return null
+    for (const child of node.namedChildren) if (child !== null) into.push(child)
+    return
   }
-  if (FUNCTION_SCOPE_TYPES.has(node.type)) return null
-  for (const child of node.namedChildren) {
-    if (child === null) continue
-    const found = walkForReturnedJsx(child)
-    if (found !== null) return found
-  }
-  return null
+  if (FUNCTION_SCOPE_TYPES.has(node.type)) return
+  for (const child of node.namedChildren) if (child !== null) collectReturnedValues(child, into)
 }
 
-/** Like `findFirstJsxDescendant` but ignores bare `jsx_opening_element` nodes. */
-function findFirstJsxElementOnly(node: SyntaxNode): SyntaxNode | null {
-  if (JSX_ELEMENT_TYPES.has(node.type)) return node
-  for (const child of node.namedChildren) {
-    if (child === null) continue
-    const found = findFirstJsxElementOnly(child)
-    if (found !== null) return found
+function collectReturnedElements(expression: SyntaxNode, into: SyntaxNode[]): void {
+  const value = unwrapValue(expression)
+  if (JSX_ELEMENT_TYPES.has(value.type)) into.push(value)
+  for (const branch of branchesOf(value)) if (branch !== null) collectReturnedElements(branch, into)
+}
+
+function branchesOf(value: SyntaxNode): (SyntaxNode | null)[] {
+  switch (value.type) {
+    case "ternary_expression":
+      return [value.childForFieldName("consequence"), value.childForFieldName("alternative")]
+    case "binary_expression": {
+      const operator = value.childForFieldName("operator")?.type ?? ""
+      if (operator === "&&") return [value.childForFieldName("right")]
+      if (!FALLBACK_OPERATORS.has(operator)) return []
+      return [value.childForFieldName("left"), value.childForFieldName("right")]
+    }
+    default:
+      return []
   }
-  return null
 }
 
 function jsxElementName(node: SyntaxNode): string | null {
