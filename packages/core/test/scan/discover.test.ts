@@ -40,15 +40,58 @@ describe("discoverFiles", () => {
       { langDropPatterns: ["**/lib.ts"] },
     ],
     [
-      "files under a dot-directory, .git among them",
-      [".git/hooks/pre-commit.ts", ".cache/x.ts"],
-      {},
+      "git's own files: a .git directory at any depth, and a .git file",
+      [".git/HEAD", ".git/hooks/pre-commit.ts", "libs/vendored/.git/config", "libs/sub/.git"],
+      { languageExtensions: [] },
+    ],
+    [
+      "Yarn's release, SDKs and Plug'n'Play loader",
+      [
+        ".yarn/releases/yarn-4.5.0.cjs",
+        ".yarn/sdks/typescript/lib/tsserver.js",
+        ".pnp.cjs",
+        ".pnp.loader.mjs",
+      ],
+      { languageExtensions: [] },
     ],
     ["files whose extension no plugin claims", ["src/b.py", "README.md"], {}],
   ])("leaves out %s", async (_label, dropped, options) => {
     const result = await discover(["src/keep.ts", ...dropped], options)
     expect(result.files.map((f) => f.path)).toEqual(["src/keep.ts"])
     expect(result.skipped).toEqual([])
+  })
+
+  it("lists files under a dot directory and files whose name starts with a dot", async () => {
+    const result = await discover([
+      "src/a.ts",
+      ".github/actions/deploy/src/main.ts",
+      ".storybook/main.ts",
+      "docs/.vitepress/config.ts",
+      ".commitlintrc.ts",
+    ])
+
+    expect(result.files.map((f) => f.path)).toEqual([
+      ".commitlintrc.ts",
+      ".github/actions/deploy/src/main.ts",
+      ".storybook/main.ts",
+      "docs/.vitepress/config.ts",
+      "src/a.ts",
+    ])
+  })
+
+  it("lets every drop glob's * and ** match a name that starts with a dot", async () => {
+    const result = await discover(
+      [
+        ".storybook/main.ts",
+        ".storybook/env.d.ts",
+        ".github/actions/deploy/dist/index.ts",
+        "docs/.vitepress/config.ts",
+        ".config/legacy/a.ts",
+      ],
+      { ignore: ["docs/**"], langDropPatterns: ["**/legacy/**"] },
+    )
+
+    expect(result.files.map((f) => f.path)).toEqual([".storybook/main.ts"])
   })
 
   it("takes every extension when no language narrows them", async () => {

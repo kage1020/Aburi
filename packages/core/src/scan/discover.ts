@@ -10,7 +10,11 @@ import { fileExtension } from "./route"
 import { walk } from "./walk"
 
 export const CORE_IGNORE_PATTERNS: readonly string[] = [
+  "**/.git/**",
   "**/node_modules/**",
+  "**/.yarn/**",
+  "**/.pnp.cjs",
+  "**/.pnp.loader.mjs",
   "**/dist/**",
   "**/build/**",
   "**/out/**",
@@ -100,7 +104,7 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     cwd: workspaceRoot,
     ignore: dropGlobs,
     onlyFiles: true,
-    dot: false,
+    dot: true,
     absolute: false,
     // Followed, a link gives a file one Symbol id per path reaching it and brings in files from
     // outside the workspace. Git keeps the link itself as an entry, but never looks behind it.

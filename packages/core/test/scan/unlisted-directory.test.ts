@@ -37,7 +37,7 @@ const discovery: Walk = {
     discoverFiles({ workspaceRoot: tree.root, languageExtensions: [".ts"], ...options }),
 }
 
-describe.each<[string, Walk]>([
+const walks: [string, Walk][] = [
   ["discovery", discovery],
   [
     "the language census",
@@ -66,10 +66,15 @@ describe.each<[string, Walk]>([
       run: (options) => detectManagers(tree.root, options),
     },
   ],
-])("a directory %s cannot list", (_, walk) => {
-  it("ends the run, naming the directory and the operating system's error", async () => {
-    await walk.plant("src/locked")
-    const locked = unlistable("src/locked")
+]
+
+describe.each(walks)("a directory %s cannot list", (_, walk) => {
+  it.each([
+    "src/locked",
+    ".config/locked",
+  ])("ends the run at %s, naming the directory and the operating system's error", async (directory) => {
+    await walk.plant(directory)
+    const locked = unlistable(directory)
 
     const error = await errorFrom(CoreError, () => walk.run({}))
 
@@ -99,6 +104,19 @@ describe.each<[string, Walk]>([
     const error = await errorFrom(CoreError, () => walk.run({ respectGitignore: false }))
 
     expect(error).toMatchObject({ code: "scan-directory-unreadable", value: pg })
+  })
+})
+
+describe.each(walks)("%s", (_, walk) => {
+  it("never lists a .git directory, at the root or in a nested repository", async () => {
+    await walk.plant("src")
+    const stores = [".git", "libs/vendored/.git"]
+    for (const store of stores) await tree.mkdir(store)
+    const refusable = stores.map((store) => unlistable(store))
+
+    await walk.run({})
+
+    for (const store of refusable) expect(faults.refused).not.toContain(store)
   })
 })
 

@@ -62,6 +62,20 @@ describe("detectManagers", () => {
     expect(result.workspaces.map((w) => w.relativeRoot)).toEqual(["libs/shared"])
   })
 
+  it("finds an nx project.json in a dot directory, and none under .git", async () => {
+    await tree.writeJson("nx.json", {})
+    await tree.writeJson("libs/shared/project.json", {})
+    await tree.writeJson(".github/actions/deploy/project.json", {})
+    await tree.writeJson(".git/modules/vendored/project.json", {})
+
+    const result = await detectManagers(tree.root)
+
+    expect(result.workspaces.map((w) => w.relativeRoot)).toEqual([
+      ".github/actions/deploy",
+      "libs/shared",
+    ])
+  })
+
   it("records turbo as a co-marker without emitting workspaces", async () => {
     await tree.writeJson("turbo.json", {})
 

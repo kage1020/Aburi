@@ -73,6 +73,15 @@ describe("a declared package is the directory that holds the manifest", () => {
     expect(await pnpmRoots()).toEqual(["packages/app"])
   })
 
+  it("matches a name that starts with a dot only where the pattern spells the dot", async () => {
+    await tree.writePackage("packages/app", { name: "app" })
+    await tree.writePackage("packages/.template", { name: "template" })
+    await tree.writePackage(".github/actions/deploy", { name: "deploy" })
+    await tree.writePnpmWorkspace("packages/*", ".github/actions/*")
+
+    expect(await pnpmRoots()).toEqual([".github/actions/deploy", "packages/app"])
+  })
+
   it("passes over a directory that is itself named package.json", async () => {
     await tree.writePackage("packages/app", { name: "app" })
     await tree.writeSource("packages/weird/package.json/inner.txt", "x")
