@@ -230,11 +230,15 @@ function reportUnrepresentable(
   writeDetail: WarnFn,
 ): void {
   const unspellable: UnnameableFile[] = []
+  const driveShaped: UnnameableFile[] = []
   const colliding: CollidingFile[] = []
   for (const file of files) {
     switch (file.reason) {
       case "unspellable-name":
         unspellable.push(file)
+        break
+      case "drive-shaped-name":
+        driveShaped.push(file)
         break
       case "colliding-spelling":
         colliding.push(file)
@@ -246,20 +250,34 @@ function reportUnrepresentable(
         )
     }
   }
-  reportUnspellable(unspellable, sayIncident, writeDetail)
+  reportUnnameable(
+    unspellable,
+    (names) =>
+      `under ${names} name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.`,
+    sayIncident,
+    writeDetail,
+  )
+  reportUnnameable(
+    driveShaped,
+    (names) =>
+      `under ${names} top-level name(s) a Document path reads as a Windows drive: a path opening with one letter and ":" names a drive there, and a Document means the same on every platform, so no workspace-relative path can open that way. Rename each one below, or leave it out with ignore, which matches the name as printed.`,
+    sayIncident,
+    writeDetail,
+  )
   reportColliding(colliding, sayIncident, writeDetail)
 }
 
-/** One section per cause, because the fix differs and the two are told apart by nothing else. */
-function reportUnspellable(
+/** One section per cause, because the fix differs and nothing else tells them apart. */
+function reportUnnameable(
   files: readonly UnnameableFile[],
+  why: (nameCount: number) => string,
   sayIncident: SayIncident,
   writeDetail: WarnFn,
 ): void {
   if (files.length === 0) return
   const byPrefix = groupByKeyOrder(files, (file) => file.unnameablePrefix)
   sayIncident(
-    `${files.length} file(s) were left out of the IR and out of its counts, under ${byPrefix.size} name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.`,
+    `${files.length} file(s) were left out of the IR and out of its counts, ${why(byPrefix.size)}`,
   )
   for (const [prefix, group] of byPrefix) {
     writeDetail(

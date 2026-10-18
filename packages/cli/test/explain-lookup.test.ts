@@ -291,6 +291,7 @@ describe("runExplain — a path no Document can name", () => {
 
     expect(outcome).toMatchObject({
       kind: "unnameable",
+      reason: "unspellable-name",
       unnameablePrefix: "src/weird\\name.stub",
       exitCode: EXIT.GATE,
     })
@@ -304,5 +305,37 @@ describe("runExplain — a path no Document can name", () => {
       answer: {},
     })
     expect(outcome.kind).toBe("unnameable")
+  })
+
+  onPosix.each([
+    ["d:data/x.stub", "d:data"],
+    ["./a:notes.stub", "a:notes.stub"],
+  ])(
+    "does not answer for %s, whose first segment a Document path reads as a drive",
+    async (argument, prefix) => {
+      const outcome = await lookUp({
+        document: { symbols: [KEPT] },
+        argument,
+        onDisk: [argument],
+        answer: {},
+      })
+
+      expect(outcome).toMatchObject({
+        kind: "unnameable",
+        reason: "drive-shaped-name",
+        unnameablePrefix: prefix,
+        exitCode: EXIT.GATE,
+      })
+    },
+  )
+
+  onPosix("looks up a colon after two letters as any file the document does not hold", async () => {
+    const outcome = await lookUp({
+      document: { symbols: [KEPT] },
+      argument: "./ab:notes.stub",
+      onDisk: ["ab:notes.stub"],
+      answer: {},
+    })
+    expect(outcome).toMatchObject({ kind: "not-found", exitCode: EXIT.RUNTIME })
   })
 })

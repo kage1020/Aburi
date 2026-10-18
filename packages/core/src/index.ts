@@ -60,6 +60,8 @@ export {
   toDocumentPath,
   toPosixRelative,
   trySymbolId,
+  type UnnameableSite,
+  unnameableSite,
 } from "./id"
 export { DEFAULT_EXPORT_NAME, type ImportBinding, splitAliasedImportName } from "./import-edge"
 export { assertIRIntegrity, checkIRIntegrity, isCoreEffectId } from "./integrity"

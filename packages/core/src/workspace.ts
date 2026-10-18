@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises"
-import { dirname, join, posix, relative, sep } from "node:path"
+import { dirname, isAbsolute, join, posix, relative, sep } from "node:path"
 import type { WorkspaceManager } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
 import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
-import { posixWorkspaceRelativeViolation } from "./id"
+import { posixWorkspaceRelativeViolation, unnameableSite } from "./id"
 import { compareBy, compareCodeUnit } from "./order"
 import { describeJsonType } from "./scan/faults"
 import { pathExists, readJson } from "./workspace-fs"
@@ -88,6 +88,7 @@ function mergeManager(
   if (scan === null) return
   const roots = new Set<string>()
   for (const candidate of scan.candidates) {
+    if (hasNoDocumentSpelling(candidate.relativeRoot)) continue
     assertInsideWorkspace(candidate, scan.tool)
     roots.add(candidate.relativeRoot)
     const key = `${candidate.managerTool}\t${candidate.relativeRoot}`
@@ -96,6 +97,12 @@ function mergeManager(
     workspaces.push(candidate)
   }
   managers.push({ tool: scan.tool, roots: [...roots] })
+}
+
+// Discovery reports every file under such a root, and no Document path could name the root itself.
+// A root `relative` gives as absolute is on another Windows drive: outside, not a name.
+function hasNoDocumentSpelling(relativeRoot: string): boolean {
+  return !isAbsolute(relativeRoot) && unnameableSite(relativeRoot) !== null
 }
 
 function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): void {

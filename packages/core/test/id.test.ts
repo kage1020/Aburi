@@ -22,6 +22,7 @@ import {
   toDocumentPath,
   toPosixRelative,
   trySymbolId,
+  unnameableSite,
 } from "../src/index"
 import { WORKSPACE_PATH_CASES } from "./fixtures/paths"
 
@@ -166,6 +167,25 @@ describe("backslashSite", () => {
     ["a\\1/b\\2/c.ts", { segment: "a\\1", prefix: "a\\1" }],
   ])("answers %j with the first segment holding one and the prefix up to it", (path, site) => {
     expect(backslashSite(path)).toEqual(site)
+  })
+})
+
+describe("unnameableSite", () => {
+  it.each<[string, ReturnType<typeof unnameableSite>]>([
+    ["src/a.ts", null],
+    ["ab:notes.ts", null],
+    ["src/x:y.ts", null],
+    ["src/weird\\name.ts", { reason: "unspellable-name", prefix: "src/weird\\name.ts" }],
+    ["a:notes.ts", { reason: "drive-shaped-name", prefix: "a:notes.ts" }],
+    ["d:data/x.ts", { reason: "drive-shaped-name", prefix: "d:data" }],
+    ["x:/y.ts", { reason: "drive-shaped-name", prefix: "x:" }],
+    ["\u212A:notes.ts", { reason: "drive-shaped-name", prefix: "\u212A:notes.ts" }],
+    ["d:data/v\\1/x.ts", { reason: "drive-shaped-name", prefix: "d:data" }],
+    ["a:b\\c.ts", { reason: "unspellable-name", prefix: "a:b\\c.ts" }],
+  ])("answers %j with the prefix to rename, and null exactly when toDocumentPath accepts it", (path, site) => {
+    expect(unnameableSite(path)).toEqual(site)
+    if (site === null) expect(() => toDocumentPath(path)).not.toThrow()
+    else expect(() => toDocumentPath(path)).toThrowError(CoreError)
   })
 })
 

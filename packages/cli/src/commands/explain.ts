@@ -1,5 +1,5 @@
-import { dirname, join, relative, resolve, sep } from "node:path"
-import { backslashSite, symbolIdFile } from "@aburi/core"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { symbolIdFile, type UnnameableSite, unnameableSite } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
@@ -43,7 +43,13 @@ export type ExplainOutcome =
     }
   | { kind: "ambiguous"; candidates: readonly IRSymbol[]; exitCode: ExitCode }
   | { kind: "not-found"; exitCode: ExitCode; coverage: CoverageDoubt | null }
-  | { kind: "unnameable"; path: string; unnameablePrefix: string; exitCode: ExitCode }
+  | {
+      kind: "unnameable"
+      path: string
+      reason: UnnameableSite["reason"]
+      unnameablePrefix: string
+      exitCode: ExitCode
+    }
   | {
       kind: "unknown"
       exitCode: typeof EXIT.GATE
@@ -117,11 +123,13 @@ async function locate(
     const documentPath = (
       sep === "/" ? nativeRelative : nativeRelative.split(sep).join("/")
     ).normalize("NFC")
-    const unnameable = backslashSite(documentPath)
+    // A path on another Windows drive comes back absolute: outside the workspace, not a name.
+    const unnameable = isAbsolute(nativeRelative) ? null : unnameableSite(documentPath)
     if (unnameable !== null) {
       return {
         kind: "unnameable",
         path: documentPath,
+        reason: unnameable.reason,
         unnameablePrefix: unnameable.prefix,
         exitCode: EXIT.GATE,
       }

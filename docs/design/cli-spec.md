@@ -363,9 +363,9 @@ a claim about what gating does not change rather than about what a gated run alw
 
 ### 5.8 Files the Document cannot name
 
-Two things put a file beyond what a Document can name, and both end the same way: the file is
-not skippable — a skip entry is a path plus a reason, and it is the path that is missing — and not
-countable either, because invariant #21 holds `stats.skippedFiles`'s length to
+Three things put a file beyond what a Document can name, and all three end the same way: the
+file is not skippable — a skip entry is a path plus a reason, and it is the path that is missing —
+and not countable either, because invariant #21 holds `stats.skippedFiles`'s length to
 `totalFiles - parsedFiles`.
 
 **The first: a name a path cannot spell.** A filename may contain a backslash on any POSIX
@@ -416,7 +416,38 @@ disallowed one.
 `aburi explain` answers for one of these files without consulting the document, since no document
 could hold it: see §7.2.
 
-**The second cause: two names, one path.** A path is normalized on the way into the Document
+**The second: a top-level name that reads as a drive.** A path opening with one ASCII letter and
+`:` names a Windows drive, and invariant #10 refuses it as absolute on every platform, because a
+Document written on POSIX has to mean the same thing read on Windows. So `a:notes.ts`, and every
+file under a top-level directory `d:data/`, has no spelling either, though both are ordinary
+workspace-relative names on a POSIX filesystem. The test is on the first segment as the rule reads
+it, after normalization to NFC, so a name opening with U+212A KELVIN SIGN and `:` is one too —
+NFC turns that sign into `K` — and the listing prints the name as it is spelled on disk.
+
+A `:` anywhere else is the `unroutable` case §5.6 lists — `ab:notes.ts` and `src/x:y.ts` are
+recorded by path, since the rule admits them and only the Symbol id grammar refuses them — so the
+line between the two is drawn exactly where the rule draws it, and no name the walk accepts is one
+the rule then throws on.
+
+```
+⚠ 3 file(s) were left out of the IR and out of its counts, under 2 top-level name(s) a Document path reads as a Windows drive: a path opening with one letter and ":" names a drive there, and a Document means the same on every platform, so no workspace-relative path can open that way. Rename each one below, or leave it out with ignore, which matches the name as printed.
+    a:notes.ts
+    d:data — a directory, and the 2 file(s) under it
+```
+
+It exits `3`, lists one line per name with no cap, and blames a directory once, for the reasons
+given for the backslash above. Its own paragraph, because the `ignore` advice differs: picomatch
+gives `:` no meaning, so `a:notes.ts` and `d:data/**` exclude these as printed. Where one segment
+holds both a backslash and a drive, the backslash's paragraph names it, since doubling is then
+what the pattern needs; a drive-shaped directory with a backslash further down is named by the
+directory, the shallower of the two.
+
+A workspace package whose directory has no spelling — under either of these causes — is not a
+Component and not a `workspace.managers[].roots` entry, since no root could name it; the rest of
+the workspace is detected and scanned, and the package's files are listed here
+([`component-detect.md`](./component-detect.md) §3.1.1).
+
+**The third cause: two names, one path.** A path is normalized on the way into the Document
 (§1.2), and two names differing only in how they are composed normalize to the same string. The
 Document then has one path for two files, which is no name for either.
 
@@ -726,11 +757,13 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 - **File path** — the string contains `/` and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file. A `#` in it does not disqualify it: the id form above is checked first and only claims the argument when it *is* one, and a file whose name holds an id separator is recorded in `stats.skippedFiles` precisely because no Symbol in it could be named
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
 
-A file path whose name holds a **backslash** is answered without consulting the document at
-all, with exit 3: no IR can name it (§5.8), so neither the skip list nor the file existing on
-disk says anything about it, and `No matches` would be a claim about the workspace when the
-absence is the format's. The same answer whether the run scanned or read an IR off disk, because
-it is decided from the argument.
+A file path whose name holds a **backslash**, or whose first segment reads as a **drive**
+(`d:data/x.ts`, `./a:notes.ts`), is answered without consulting the document at all, with exit 3:
+no IR can name it (§5.8), so neither the skip list nor the file existing on disk says anything
+about it, and `No matches` would be a claim about the workspace when the absence is the format's.
+The line on stderr says which of the two it is. The same answer whether the run scanned or read an
+IR off disk, because it is decided from the argument. On Windows an argument on another drive is
+outside the workspace rather than a name, and is looked up as any other path.
 
 #### 7.2.1 Exact Definition of Partial Matching
 
@@ -1062,7 +1095,10 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL21 | `aburi explain src/route.ts --ir <ir>` where that IR names `src/route.ts` in `stats.skippedFiles` | exit 3, the file and its skip reason on stderr, nothing on stdout |
 | CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
 | CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the name to rename on stderr, and the file not counted in `stats.totalFiles` |
+| CL23a | `aburi scan` in a workspace holding `a:notes.ts`, `d:data/x.ts` and `ab:notes.ts` beside `src/ok.ts` | exit 3, the IR written, `a:notes.ts` and `d:data` to rename on stderr and neither counted in `stats.totalFiles`; `ab:notes.ts`, like `src/x:y.ts`, is an `unroutable` skip |
+| CL23b | `aburi scan` in a pnpm or nx workspace one of whose packages sits at `a:pkg/` | exit 3 as CL23a, naming `a:pkg`; the other packages are Components and scanned, and `a:pkg` is none |
 | CL24 | `aburi explain 'src/weird\name.ts'` where that file exists | exit 3, a line saying no IR can name it, nothing on stdout |
+| CL24a | `aburi explain d:data/x.ts` or `aburi explain ./a:notes.ts` | exit 3, a line saying no IR can name it because the name reads as a drive, nothing on stdout. `./ab:notes.ts` is looked up as any other file |
 | CL25 | `aburi init --output config/aburi.jsonc` where `config/` does not exist | Creates the directory, writes the file, exit 0 |
 | CL26 | `aburi explain <id> --output docs/alpha.md` where `docs/` does not exist | Creates the directory, writes the Markdown, exit 0 |
 | CL27 | `aburi init` or `aburi explain` with an `--output` that names a directory, or whose parent path is an existing file | exit 2, the path and the remedy on stderr |

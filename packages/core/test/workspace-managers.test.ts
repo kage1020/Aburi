@@ -115,6 +115,31 @@ describe("detectManagers", () => {
     expect(error.value).toContain("..")
   })
 
+  it.skipIf(process.platform === "win32").each([
+    ["a top-level name that reads as a drive", "a:pkg"],
+    ["a backslash", "x\\pkg"],
+  ])(
+    "leaves out a package whose directory has no Document spelling, through %s, and keeps the rest",
+    async (_, odd) => {
+      await tree.writePnpmWorkspace("*")
+      await tree.writeJson("nx.json", {})
+      await tree.writePackage(odd, { name: "odd" })
+      await tree.writeJson(`${odd}/project.json`, {})
+      await tree.writePackage("ok", { name: "ok" })
+
+      const result = await detectManagers(tree.root)
+
+      expect(result.managers).toEqual([
+        { tool: "nx", roots: [] },
+        { tool: "pnpm", roots: ["ok"] },
+      ])
+      expect(result.workspaces.map((w) => `${w.relativeRoot} ${w.managerTool}`)).toEqual([
+        "ok pnpm",
+      ])
+      expect(result.unresolved).toEqual([])
+    },
+  )
+
   it("spells a workspace root in Unicode NFC, as the paths beside it are spelled", async () => {
     const decomposed = "café".normalize("NFD")
     await tree.writePnpmWorkspace("apps/*")

@@ -1,3 +1,4 @@
+import type { UnnameableSite } from "@aburi/core"
 import { Command } from "commander"
 import {
   collect,
@@ -307,7 +308,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               break
             case "unnameable":
               stderr.write(
-                `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" holds a backslash, and "/" is the only separator a Document path has, so nothing Aburi writes can refer to it. Rename it.\n`,
+                `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" ${UNNAMEABLE_BECAUSE[outcome.reason]}, so nothing Aburi writes can refer to it. Rename it.\n`,
               )
               break
             case "unknown": {
@@ -339,6 +340,12 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     return handleError(error, stderr)
   }
   return capturedExitCode
+}
+
+const UNNAMEABLE_BECAUSE: Record<UnnameableSite["reason"], string> = {
+  "unspellable-name": 'holds a backslash, and "/" is the only separator a Document path has',
+  "drive-shaped-name":
+    'opens with one letter and ":", which a Document path reads as a Windows drive',
 }
 
 function coverageLine(doubt: CoverageDoubt): string {

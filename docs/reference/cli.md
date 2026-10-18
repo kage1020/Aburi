@@ -119,9 +119,11 @@ unparseable file tells you something about your source, not about the scan.
   (the default). No output is written. Declare the value, or run with
   `--discover` to keep it and see the full list.
 - **A filename cannot be written down.** The analysis has no representation for
-  a path containing a backslash, and filenames differing in Unicode composition
-  alone collapse to one. The scan names both kinds on stderr. Rename them, or
-  exclude them with `ignore`, doubling the backslash in the glob pattern.
+  a path containing a backslash, or for a top-level name that opens with one
+  letter and a colon (`a:notes.ts`, `d:data/`), which reads as a Windows drive.
+  Filenames differing in Unicode composition alone collapse to one. The scan
+  names each kind on stderr and still analyses the rest. Rename them, or exclude
+  them with `ignore`, doubling the backslash in the glob pattern.
 :::
 
 Every command that scans reports the same way. `aburi diff` runs two scans and

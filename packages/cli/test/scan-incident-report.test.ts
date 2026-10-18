@@ -38,6 +38,10 @@ function unspellable(fsPath: string, unnameablePrefix: string): UnrepresentableF
   return { fsPath, reason: "unspellable-name", unnameablePrefix }
 }
 
+function driveShaped(fsPath: string, unnameablePrefix: string): UnrepresentableFile {
+  return { fsPath, reason: "drive-shaped-name", unnameablePrefix }
+}
+
 describe("reportScanIncidents — what a scan with nothing to report says", () => {
   it("says nothing", () => {
     expect(incidentLinesFrom({ totalFiles: 3, parsedFiles: 3 })).toEqual([])
@@ -197,6 +201,29 @@ describe("reportScanIncidents — files no Document path can name", () => {
     expect(lines.slice(1)).toEqual([
       "    odd\\name.stub",
       "    src/v\\1 — a directory, and the 2 file(s) under it",
+    ])
+  })
+
+  it("names a top-level name read as a drive under a paragraph of its own, whose ignore advice differs", () => {
+    const lines = incidentLinesFrom({
+      unrepresentableFiles: [
+        driveShaped("d:data/x.stub", "d:data"),
+        driveShaped("d:data/y.stub", "d:data"),
+        driveShaped("a:notes.stub", "a:notes.stub"),
+        unspellable("odd\\name.stub", "odd\\name.stub"),
+      ],
+    })
+    expect(lines).toHaveLength(5)
+    expect(lines[0]).toContain("1 file(s) were left out of the IR and out of its counts")
+    expect(lines[0]).toContain("write its backslash twice")
+    expect(lines[1]).toBe("    odd\\name.stub")
+    expect(lines[2]).toContain("3 file(s) were left out of the IR and out of its counts")
+    expect(lines[2]).toContain("under 2 top-level name(s) a Document path reads as a Windows drive")
+    expect(lines[2]).toContain("ignore, which matches the name as printed")
+    expect(lines[2]).not.toContain("backslash")
+    expect(lines.slice(3)).toEqual([
+      "    a:notes.stub",
+      "    d:data — a directory, and the 2 file(s) under it",
     ])
   })
 

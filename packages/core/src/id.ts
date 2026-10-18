@@ -12,7 +12,7 @@ const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
 const PRIVATE_NAME_PATTERN = /^#[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
-const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:)/
+const DRIVE_LETTER_PATTERN = /^[A-Za-z]:/
 
 const COMPONENT_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -158,6 +158,22 @@ export function backslashSite(path: string): BackslashSite | null {
   return null
 }
 
+export interface UnnameableSite {
+  reason: "unspellable-name" | "drive-shaped-name"
+  prefix: string
+}
+
+export function unnameableSite(path: string): UnnameableSite | null {
+  const backslash = backslashSite(path)
+  const [head = ""] = path.split("/", 1)
+  // Tested after NFC, as the grammar reads it, but named as spelled, which is what `ignore` matches.
+  // A backslash in the same segment wins the tie: its `ignore` advice is the one that holds there.
+  if (backslash?.prefix !== head && DRIVE_LETTER_PATTERN.test(toNfc(head))) {
+    return { reason: "drive-shaped-name", prefix: head }
+  }
+  return backslash === null ? null : { reason: "unspellable-name", prefix: backslash.prefix }
+}
+
 export interface SymbolIdSeparatorSite {
   segment: string
   separators: readonly string[]
@@ -266,7 +282,7 @@ export function posixWorkspaceRelativeViolation(
       value: path,
     }
   }
-  if (ABSOLUTE_PATH_PATTERN.test(path)) {
+  if (path.startsWith("/") || DRIVE_LETTER_PATTERN.test(path)) {
     return {
       code: "non-posix-path",
       message: `${subject} "${path}" is absolute; only workspace-relative paths are allowed`,
