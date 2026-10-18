@@ -85,7 +85,7 @@ export function applyHover(
     countProducerRejection(stats, "ownerClassNotFound")
     return
   }
-  const memberId = findMemberSymbolId(ownerClass, job.method, workingById)
+  const memberId = findMemberSymbolId(caller, ownerClass, job.method, workingById)
   if (memberId === null) {
     countProducerRejection(stats, "memberNotFound")
     return
@@ -127,19 +127,36 @@ function findOwnerClass(
   if (named.length === 1) return named[0] ?? null
   const owners = named.filter(
     (symbol) =>
-      symbol.dropped !== true || findMemberSymbolId(symbol, methodName, workingById) !== null,
+      symbol.dropped !== true ||
+      findMemberSymbolId(caller, symbol, methodName, workingById) !== null,
   )
   return owners.length === 1 ? (owners[0] ?? null) : null
 }
 
-// Built from the class's id: nothing binds a Symbol's `name` or `source.file` to its id.
+// Built from the class's id, as nothing binds `name` or `source.file` to it. A hover reads
+// `Class.m` for either kind, and the other kind is never what a member's `this.m` reaches.
 function findMemberSymbolId(
+  caller: IRSymbol,
   ownerClass: IRSymbol,
   methodName: string,
   workingById: Map<SymbolId, IRSymbol>,
 ): SymbolId | null {
   const owner = symbolIdParts(ownerClass.id)
   if (owner === null) return null
-  const id = trySymbolId({ ...owner, qualifiedName: `${owner.qualifiedName}.${methodName}` })
-  return id !== null && workingById.has(id) ? id : null
+  const found = memberSeparators(caller).flatMap((separator) => {
+    const id = trySymbolId({
+      ...owner,
+      qualifiedName: `${owner.qualifiedName}${separator}${methodName}`,
+    })
+    return id !== null && workingById.has(id) ? [id] : []
+  })
+  return found.length === 1 ? (found[0] ?? null) : null
+}
+
+// A class's own calls come from static blocks, computed members and field initializers of either
+// kind, so its `this` may be either side.
+function memberSeparators(caller: IRSymbol): readonly string[] {
+  if (caller.kind === "class") return [".", "::"]
+  const qualifiedName = symbolIdParts(caller.id)?.qualifiedName ?? ""
+  return qualifiedName.lastIndexOf("::") > qualifiedName.lastIndexOf(".") ? ["::"] : ["."]
 }

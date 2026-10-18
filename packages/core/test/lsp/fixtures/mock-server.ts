@@ -124,22 +124,26 @@ export function documentSymbolServer(entries: () => unknown): MockServerFactory 
   return mockServerFactory((client) => client.installHandler(DOC_SYMBOL_METHOD, entries))
 }
 
-/** A documentSymbol entry for `name` on 1-based `line`, starting at 0-based `startCol` the way LSP sends it. */
+/**
+ * A documentSymbol entry for `name` on 1-based `line`, starting at 0-based `startCol` the way LSP
+ * sends it. `nameAt` places the name elsewhere, as a decorator before it does; the range ends with it.
+ */
 export function docSymbol(
   name: string,
   line: number,
   startCol: number,
   children?: DocumentSymbol[],
+  nameAt: { line: number; startCol: number } = { line, startCol },
 ): DocumentSymbol {
-  const range = {
-    start: { line: line - 1, character: startCol },
-    end: { line: line - 1, character: startCol + name.length },
+  const selectionRange = {
+    start: { line: nameAt.line - 1, character: nameAt.startCol },
+    end: { line: nameAt.line - 1, character: nameAt.startCol + name.length },
   }
   return {
     name,
     kind: 5,
-    range,
-    selectionRange: range,
+    range: { start: { line: line - 1, character: startCol }, end: selectionRange.end },
+    selectionRange,
     ...(children === undefined ? {} : { children }),
   }
 }

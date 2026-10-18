@@ -1,0 +1,1132 @@
+{
+  "recordedWith": "typescript-language-server 5.3.0 --stdio over TypeScript 6.0.3, through core's own client: hover contentFormat [plaintext, markdown], hierarchicalDocumentSymbolSupport",
+  "documentSymbol": {
+    "src/api.ts": [
+      {
+        "name": "default",
+        "detail": "",
+        "kind": 12,
+        "range": {
+          "start": {
+            "line": 17,
+            "character": 0
+          },
+          "end": {
+            "line": 19,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 17,
+            "character": 0
+          },
+          "end": {
+            "line": 19,
+            "character": 1
+          }
+        },
+        "children": []
+      },
+      {
+        "name": "Api",
+        "detail": "",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 2,
+            "character": 0
+          },
+          "end": {
+            "line": 16,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 3,
+            "character": 13
+          },
+          "end": {
+            "line": 3,
+            "character": 16
+          }
+        },
+        "children": [
+          {
+            "name": "find",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 11,
+                "character": 2
+              },
+              "end": {
+                "line": 15,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 13,
+                "character": 5
+              },
+              "end": {
+                "line": 13,
+                "character": 9
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "list",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 4,
+                "character": 2
+              },
+              "end": {
+                "line": 7,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 5,
+                "character": 2
+              },
+              "end": {
+                "line": 5,
+                "character": 6
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "one",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 8,
+                "character": 2
+              },
+              "end": {
+                "line": 10,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 8,
+                "character": 2
+              },
+              "end": {
+                "line": 8,
+                "character": 5
+              }
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "name": "Controller",
+        "detail": "",
+        "kind": 12,
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 67
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 0,
+            "character": 9
+          },
+          "end": {
+            "line": 0,
+            "character": 19
+          }
+        },
+        "children": []
+      },
+      {
+        "name": "Get",
+        "detail": "",
+        "kind": 12,
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 0
+          },
+          "end": {
+            "line": 1,
+            "character": 80
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 12
+          }
+        },
+        "children": []
+      }
+    ],
+    "src/kinds.ts": [
+      {
+        "name": "debounce",
+        "detail": "",
+        "kind": 12,
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 2,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 0,
+            "character": 9
+          },
+          "end": {
+            "line": 0,
+            "character": 17
+          }
+        },
+        "children": []
+      },
+      {
+        "name": "makeFn",
+        "detail": "",
+        "kind": 12,
+        "range": {
+          "start": {
+            "line": 3,
+            "character": 0
+          },
+          "end": {
+            "line": 5,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 3,
+            "character": 9
+          },
+          "end": {
+            "line": 3,
+            "character": 15
+          }
+        },
+        "children": []
+      },
+      {
+        "name": "Pool",
+        "detail": "",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 6,
+            "character": 0
+          },
+          "end": {
+            "line": 18,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 6,
+            "character": 13
+          },
+          "end": {
+            "line": 6,
+            "character": 17
+          }
+        },
+        "children": [
+          {
+            "name": "count",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 15,
+                "character": 2
+              },
+              "end": {
+                "line": 17,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 15,
+                "character": 2
+              },
+              "end": {
+                "line": 15,
+                "character": 7
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "size",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 7,
+                "character": 2
+              },
+              "end": {
+                "line": 7,
+                "character": 29
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 7,
+                "character": 2
+              },
+              "end": {
+                "line": 7,
+                "character": 6
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "size",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 8,
+                "character": 2
+              },
+              "end": {
+                "line": 8,
+                "character": 36
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 8,
+                "character": 9
+              },
+              "end": {
+                "line": 8,
+                "character": 13
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "total",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 12,
+                "character": 2
+              },
+              "end": {
+                "line": 14,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 12,
+                "character": 9
+              },
+              "end": {
+                "line": 12,
+                "character": 14
+              }
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "name": "Search",
+        "detail": "",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 19,
+            "character": 0
+          },
+          "end": {
+            "line": 31,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 19,
+            "character": 13
+          },
+          "end": {
+            "line": 19,
+            "character": 19
+          }
+        },
+        "children": [
+          {
+            "name": "load",
+            "detail": "",
+            "kind": 7,
+            "range": {
+              "start": {
+                "line": 25,
+                "character": 2
+              },
+              "end": {
+                "line": 25,
+                "character": 21
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 25,
+                "character": 2
+              },
+              "end": {
+                "line": 25,
+                "character": 6
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "load",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 24,
+                "character": 2
+              },
+              "end": {
+                "line": 24,
+                "character": 37
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 24,
+                "character": 9
+              },
+              "end": {
+                "line": 24,
+                "character": 13
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "onInput",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 26,
+                "character": 2
+              },
+              "end": {
+                "line": 30,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 26,
+                "character": 2
+              },
+              "end": {
+                "line": 26,
+                "character": 9
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "run",
+            "detail": "",
+            "kind": 7,
+            "range": {
+              "start": {
+                "line": 23,
+                "character": 2
+              },
+              "end": {
+                "line": 23,
+                "character": 30
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 23,
+                "character": 2
+              },
+              "end": {
+                "line": 23,
+                "character": 5
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "run",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 22,
+                "character": 2
+              },
+              "end": {
+                "line": 22,
+                "character": 36
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 22,
+                "character": 9
+              },
+              "end": {
+                "line": 22,
+                "character": 12
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "search",
+            "detail": "",
+            "kind": 7,
+            "range": {
+              "start": {
+                "line": 21,
+                "character": 2
+              },
+              "end": {
+                "line": 21,
+                "character": 44
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 21,
+                "character": 2
+              },
+              "end": {
+                "line": 21,
+                "character": 8
+              }
+            },
+            "children": [
+              {
+                "name": "debounce() callback",
+                "detail": "",
+                "kind": 12,
+                "range": {
+                  "start": {
+                    "line": 21,
+                    "character": 20
+                  },
+                  "end": {
+                    "line": 21,
+                    "character": 38
+                  }
+                },
+                "selectionRange": {
+                  "start": {
+                    "line": 21,
+                    "character": 20
+                  },
+                  "end": {
+                    "line": 21,
+                    "character": 38
+                  }
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "name": "search",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 20,
+                "character": 2
+              },
+              "end": {
+                "line": 20,
+                "character": 54
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 20,
+                "character": 9
+              },
+              "end": {
+                "line": 20,
+                "character": 15
+              }
+            },
+            "children": []
+          }
+        ]
+      }
+    ],
+    "src/repo.ts": [
+      {
+        "name": "Factory",
+        "detail": "",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 39,
+            "character": 0
+          },
+          "end": {
+            "line": 47,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 39,
+            "character": 13
+          },
+          "end": {
+            "line": 39,
+            "character": 20
+          }
+        },
+        "children": [
+          {
+            "name": "build",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 41,
+                "character": 2
+              },
+              "end": {
+                "line": 43,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 41,
+                "character": 9
+              },
+              "end": {
+                "line": 41,
+                "character": 14
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "create",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 40,
+                "character": 2
+              },
+              "end": {
+                "line": 40,
+                "character": 51
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 40,
+                "character": 9
+              },
+              "end": {
+                "line": 40,
+                "character": 15
+              }
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "name": "NotFoundError",
+        "detail": "",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 43
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 0,
+            "character": 13
+          },
+          "end": {
+            "line": 0,
+            "character": 26
+          }
+        },
+        "children": []
+      },
+      {
+        "name": "Repo",
+        "detail": "",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 0
+          },
+          "end": {
+            "line": 31,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 1,
+            "character": 13
+          },
+          "end": {
+            "line": 1,
+            "character": 17
+          }
+        },
+        "children": [
+          {
+            "name": "find",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 25,
+                "character": 2
+              },
+              "end": {
+                "line": 27,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 25,
+                "character": 2
+              },
+              "end": {
+                "line": 25,
+                "character": 6
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "load",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 8,
+                "character": 2
+              },
+              "end": {
+                "line": 13,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 8,
+                "character": 2
+              },
+              "end": {
+                "line": 8,
+                "character": 6
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "run",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 2
+              },
+              "end": {
+                "line": 16,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 14,
+                "character": 2
+              },
+              "end": {
+                "line": 14,
+                "character": 5
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "seek",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 28,
+                "character": 2
+              },
+              "end": {
+                "line": 30,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 28,
+                "character": 2
+              },
+              "end": {
+                "line": 28,
+                "character": 6
+              }
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "name": "Store",
+        "detail": "",
+        "kind": 5,
+        "range": {
+          "start": {
+            "line": 32,
+            "character": 0
+          },
+          "end": {
+            "line": 38,
+            "character": 1
+          }
+        },
+        "selectionRange": {
+          "start": {
+            "line": 32,
+            "character": 13
+          },
+          "end": {
+            "line": 32,
+            "character": 18
+          }
+        },
+        "children": [
+          {
+            "name": "count",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 34,
+                "character": 2
+              },
+              "end": {
+                "line": 34,
+                "character": 46
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 34,
+                "character": 2
+              },
+              "end": {
+                "line": 34,
+                "character": 7
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "items",
+            "detail": "",
+            "kind": 7,
+            "range": {
+              "start": {
+                "line": 33,
+                "character": 2
+              },
+              "end": {
+                "line": 33,
+                "character": 17
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 33,
+                "character": 2
+              },
+              "end": {
+                "line": 33,
+                "character": 7
+              }
+            },
+            "children": []
+          },
+          {
+            "name": "run",
+            "detail": "",
+            "kind": 6,
+            "range": {
+              "start": {
+                "line": 35,
+                "character": 2
+              },
+              "end": {
+                "line": 37,
+                "character": 3
+              }
+            },
+            "selectionRange": {
+              "start": {
+                "line": 35,
+                "character": 2
+              },
+              "end": {
+                "line": 35,
+                "character": 5
+              }
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "hover": {
+    "src/kinds.ts:10:9": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Pool.size(): number\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 10,
+          "character": 9
+        },
+        "end": {
+          "line": 10,
+          "character": 13
+        }
+      }
+    },
+    "src/kinds.ts:13:16": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Pool.size(): number\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 13,
+          "character": 16
+        },
+        "end": {
+          "line": 13,
+          "character": 20
+        }
+      }
+    },
+    "src/kinds.ts:16:16": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Pool.size(): number\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 16,
+          "character": 16
+        },
+        "end": {
+          "line": 16,
+          "character": 20
+        }
+      }
+    },
+    "src/kinds.ts:27:9": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(property) Search.search: (_q: string) => void\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 27,
+          "character": 9
+        },
+        "end": {
+          "line": 27,
+          "character": 15
+        }
+      }
+    },
+    "src/kinds.ts:28:9": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(property) Search.run: () => string\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 28,
+          "character": 9
+        },
+        "end": {
+          "line": 28,
+          "character": 12
+        }
+      }
+    },
+    "src/kinds.ts:29:9": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(property) Search.load: () => string\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 29,
+          "character": 9
+        },
+        "end": {
+          "line": 29,
+          "character": 13
+        }
+      }
+    },
+    "src/repo.ts:15:16": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Repo.load(id: number): number\n```\nLoads a row.\n\n*@throws* — {NotFoundError} when the row is missing  \n\n*@throws* — RangeError  \n\n*@throws* — TypeError when id is not an integer"
+      },
+      "range": {
+        "start": {
+          "line": 15,
+          "character": 16
+        },
+        "end": {
+          "line": 15,
+          "character": 20
+        }
+      }
+    },
+    "src/repo.ts:29:16": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Repo.find(id: number): number\n```\n\n\n*@throws*  \n{NotFoundError} when the row\nis missing  \n\n*@throws* — {  \n\n*@link* — RangeError} if negative  \n\n*@throws* — {  \n\n*@linkcode* — TypeError}  \n\n*@throws*  \nSyntaxError\non a wrapped line"
+      },
+      "range": {
+        "start": {
+          "line": 29,
+          "character": 16
+        },
+        "end": {
+          "line": 29,
+          "character": 20
+        }
+      }
+    },
+    "src/repo.ts:36:16": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Store<T>.count(): number\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 36,
+          "character": 16
+        },
+        "end": {
+          "line": 36,
+          "character": 21
+        }
+      }
+    },
+    "src/repo.ts:42:16": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Factory.create(): Factory\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 42,
+          "character": 16
+        },
+        "end": {
+          "line": 42,
+          "character": 22
+        }
+      }
+    },
+    "src/repo.ts:45:9": {
+      "contents": {
+        "kind": "markdown",
+        "value": "\n```typescript\n(method) Factory.create(): Factory\n```\n"
+      },
+      "range": {
+        "start": {
+          "line": 45,
+          "character": 9
+        },
+        "end": {
+          "line": 45,
+          "character": 15
+        }
+      }
+    }
+  }
+}
