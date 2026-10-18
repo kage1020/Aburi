@@ -2,6 +2,7 @@ import { resolve } from "node:path"
 import {
   CoreError,
   detectManagers,
+  isComponentId,
   isStrict,
   type ScanResult,
   scan,
@@ -9,11 +10,12 @@ import {
   type UndeclaredVocabOccurrence,
 } from "@aburi/core"
 import {
+  componentHeading,
   formatCallResolutionLine,
   projectComponent,
   projectWorkspace,
 } from "@aburi/markdown-projection"
-import type { CallResolutionStats, Config, IR, ParseError } from "@aburi/types"
+import type { CallResolutionStats, ComponentId, Config, IR, ParseError } from "@aburi/types"
 import {
   COMPONENTS_DIRNAME,
   IR_JSON_FILENAME,
@@ -28,8 +30,11 @@ import { readGeneratorInfo } from "../generator-info"
 import { createLogger } from "../logger"
 import {
   createOutputDir,
+  listOutputFiles,
+  type OutputArtefact,
   type OutputCommand,
   removeOutputFile,
+  removeOutputFileOpeningWith,
   writeOutputFile,
 } from "../output-file"
 import { loadPlugins } from "../plugin-loader"
@@ -116,6 +121,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const format = options.format ?? "both"
   const irPath = format === "md" ? null : await writeIR(command, outputDir, scanResult.ir, options)
+  if (irPath === null) await removeOutputFile(irOutput(command, outputDir))
   const undeclaredVocab = summarizeUndeclaredVocab(requireUndeclaredVocab(scanResult))
   const withdrawnByParse = new Set(
     scanResult.skipped.filter((file) => file.reason === "parse-failed").map((file) => file.path),
@@ -174,6 +180,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       report.componentMdPaths = await writeComponentMds(command, outputDir, scanResult.ir)
     }
     if (command === "scan") {
+      if (format === "json") await removeOutputFile(workspaceMdOutput(command, outputDir))
+      await removeComponentMdsExcept(command, outputDir, report.componentMdPaths)
       report.vocabDiscoveredPath = await updateVocabRecord(
         outputDir,
         isStrict(config) ? null : renderVocabDiscovered(undeclaredVocab, discoveredAt(options)),
@@ -248,25 +256,49 @@ function mergeCliOverrides(config: Partial<Config>, options: ScanOptions): Confi
   return merged as Config
 }
 
+function irOutput(command: OutputCommand, outputDir: string): OutputArtefact {
+  return { command, artefact: "the IR", path: resolve(outputDir, IR_JSON_FILENAME) }
+}
+
+function workspaceMdOutput(command: OutputCommand, outputDir: string): OutputArtefact {
+  return {
+    command,
+    artefact: "the workspace Markdown",
+    path: resolve(outputDir, WORKSPACE_MD_FILENAME),
+  }
+}
+
+function componentMdOutput(
+  command: OutputCommand,
+  outputDir: string,
+  id: ComponentId,
+): OutputArtefact {
+  return {
+    command,
+    artefact: `the Markdown for component "${id}"`,
+    path: resolve(outputDir, COMPONENTS_DIRNAME, `${id}.md`),
+  }
+}
+
 async function writeIR(
   command: OutputCommand,
   outputDir: string,
   ir: IR,
   options: ScanOptions,
 ): Promise<string> {
-  const path = resolve(outputDir, IR_JSON_FILENAME)
+  const output = irOutput(command, outputDir)
   let serialized: string
   try {
     serialized = serializeCanonical(ir, { format: options.compact ? "compact" : "pretty" })
   } catch (error) {
     throw new CliError(
-      `Failed to serialize the IR for ${path}: ${errorMessage(error)}`,
+      `Failed to serialize the IR for ${output.path}: ${errorMessage(error)}`,
       "config-error",
       { cause: error },
     )
   }
-  await writeOutputFile({ command, artefact: "the IR", path }, serialized)
-  return path
+  await writeOutputFile(output, serialized)
+  return output.path
 }
 
 async function writeWorkspaceMd(
@@ -275,13 +307,12 @@ async function writeWorkspaceMd(
   ir: IR,
   options: ScanOptions,
 ): Promise<string> {
-  const path = resolve(outputDir, WORKSPACE_MD_FILENAME)
-  const artefact = "the workspace Markdown"
-  const md = renderPage(artefact, () =>
+  const output = workspaceMdOutput(command, outputDir)
+  const md = renderPage(output.artefact, () =>
     projectWorkspace(ir, { suppressTimestamp: options.suppressTimestamp ?? false }),
   )
-  await writeOutputFile({ command, artefact, path }, md)
-  return path
+  await writeOutputFile(output, md)
+  return output.path
 }
 
 async function writeComponentMds(
@@ -291,19 +322,37 @@ async function writeComponentMds(
 ): Promise<string[]> {
   const written: string[] = []
   for (const component of ir.components) {
-    const artefact = `the Markdown for component "${component.id}"`
-    const md = renderPage(artefact, () =>
+    const output = componentMdOutput(command, outputDir, component.id)
+    const md = renderPage(output.artefact, () =>
       projectComponent({
         component,
         symbols: ir.symbols.filter((symbol) => symbol.component === component.id),
         dependencies: ir.dependencies,
       }),
     )
-    const path = resolve(outputDir, COMPONENTS_DIRNAME, `${component.id}.md`)
-    await writeOutputFile({ command, artefact, path }, md)
-    written.push(path)
+    await writeOutputFile(output, md)
+    written.push(output.path)
   }
   return written
+}
+
+async function removeComponentMdsExcept(
+  command: OutputCommand,
+  outputDir: string,
+  written: readonly string[],
+): Promise<void> {
+  const kept = new Set(written)
+  const directory = {
+    command,
+    artefact: "the Markdown of components this run does not write",
+    path: resolve(outputDir, COMPONENTS_DIRNAME),
+  }
+  for (const name of await listOutputFiles(directory)) {
+    const id = name.endsWith(".md") ? name.slice(0, -".md".length) : ""
+    if (!isComponentId(id)) continue
+    const page = componentMdOutput(command, outputDir, id)
+    if (!kept.has(page.path)) await removeOutputFileOpeningWith(page, componentHeading(id))
+  }
 }
 
 function renderPage(artefact: string, render: () => string): string {

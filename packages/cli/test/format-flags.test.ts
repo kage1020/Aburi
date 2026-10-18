@@ -26,6 +26,7 @@ async function scan(
 const IR = ["aburi.ir.json"]
 const MARKDOWN = ["components", "components/format-flags.md", "workspace.md"]
 const BOTH = [...IR, ...MARKDOWN].sort()
+const CALLERS = ["components/notes.md", "notes.md"]
 
 describe("scan format flags", () => {
   it.each([
@@ -41,6 +42,22 @@ describe("scan format flags", () => {
     const { code, wrote } = await scan(...flags)
     expect(code).toBe(EXIT.SUCCESS)
     expect(wrote).toEqual(expected)
+  })
+
+  it.each([
+    [["--format", "json"], IR],
+    [["--no-md"], IR],
+    [["--format", "md"], MARKDOWN],
+    [["--no-json"], MARKDOWN],
+    [["--format", "both"], BOTH],
+  ])("%j after a scan that wrote both leaves %j beside the caller's own files", async (flags, expected) => {
+    expect((await scan()).wrote).toEqual(BOTH)
+    for (const file of CALLERS) await workspace.writeSource(`out/${file}`, "# Notes\n")
+
+    const { code, wrote } = await scan(...flags)
+
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(wrote).toEqual([...new Set([...expected, "components", ...CALLERS])].sort())
   })
 
   it.each([

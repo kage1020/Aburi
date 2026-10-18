@@ -80,6 +80,20 @@ describe("aburi scan with an --output-dir that cannot hold the outputs", () => {
     expect(stderr).toContain("--output-dir")
   })
 
+  it.each([
+    ["the IR", "md", IR_JSON_FILENAME],
+    ["the workspace Markdown", "json", WORKSPACE_MD_FILENAME],
+  ])("names %s, which --format %s does not write, when a directory stands in its place", async (artefact, format, filename) => {
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    await mkdir(under("out", filename), { recursive: true })
+
+    const { code, stderr } = await run("scan", "--format", format)
+
+    expect(code).toBe(EXIT.INPUT_ERROR)
+    expect(stderr).toContain(`aburi scan could not remove ${artefact} at ${under("out", filename)}`)
+    expect(stderr).toContain("--output-dir")
+  })
+
   it("names the component whose Markdown could not be written", async () => {
     await writeTypeScriptWorkspace(workspace.root, "write-fixture")
     const componentMd = under("out", COMPONENTS_DIRNAME, "write-fixture.md")
@@ -115,6 +129,23 @@ describe("aburi scan into a place the machine refuses", () => {
     )
     expect(stderr).toContain("EACCES")
     expect(stderr).not.toContain("--output-dir")
+  })
+
+  onPosixAsAUser("names the component whose page it may not remove", async () => {
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    expect((await run("scan")).code).toBe(EXIT.SUCCESS)
+    const components = under("out", COMPONENTS_DIRNAME)
+    await chmod(components, 0o500)
+
+    const { code, stderr } = await run("scan", "--format", "json").finally(() =>
+      chmod(components, 0o700),
+    )
+
+    expect(code).toBe(EXIT.RUNTIME)
+    expect(stderr).toContain(
+      `aburi scan could not remove the Markdown for component "write-fixture" at ${resolve(components, "write-fixture.md")}`,
+    )
+    expect(stderr).toContain("EACCES")
   })
 
   it.skipIf(process.platform === "win32")(

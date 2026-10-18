@@ -83,7 +83,11 @@ aburi scan [--output-dir <dir>] [--format json|md|both] [--no-md|--no-json]
 ```
 
 Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
-`components/*.md`.
+`components/*.md`. It also removes what an earlier run wrote there that this one does
+not: the output a `--format` leaves out, and the page of a component that has since been
+renamed or removed. Your own files stay, in `components/` too: a page is only Aburi's when it
+is named after a component id and opens with that component's `# Component:` heading. A scan
+that fails before it writes anything removes nothing.
 
 | Flag | Effect |
 |---|---|

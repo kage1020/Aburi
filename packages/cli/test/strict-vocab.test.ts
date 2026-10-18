@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { readdir, readFile } from "node:fs/promises"
+import { resolve, sep } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, runScan, VOCAB_DISCOVERED_FILENAME } from "../src"
@@ -16,6 +16,11 @@ async function readRecord(): Promise<unknown> {
   return JSON.parse(
     await readFile(resolve(workspace.root, "out", VOCAB_DISCOVERED_FILENAME), "utf8"),
   )
+}
+
+async function listOutputs(): Promise<string[]> {
+  const entries = await readdir(resolve(workspace.root, "out"), { recursive: true })
+  return entries.map((entry) => entry.replaceAll(sep, "/")).sort()
 }
 
 const ODD_TWICE = {
@@ -43,6 +48,23 @@ describe("aburi scan, strict by default", () => {
     expect(code).toBe(EXIT.GATE)
     expect(stderr).toContain('Plugin "lang-stub" emitted extKind "stub:odd:thing" at odd.stub')
     expect(stderr).toContain("aburi scan --discover")
+  })
+
+  it("leaves what an earlier scan wrote as it was when it stops at such a value", async () => {
+    await writeStubWorkspace(workspace.root, ["ok.stub"])
+    expect((await runCliIn(workspace.root, ["scan"])).code).toBe(EXIT.SUCCESS)
+    const earlier = await listOutputs()
+    expect(earlier).toEqual([
+      "aburi.ir.json",
+      "components",
+      "components/stub-fixture.md",
+      "workspace.md",
+    ])
+    await writeStubWorkspace(workspace.root, ["odd.stub", "ok.stub"])
+
+    expect((await scanWith()).code).toBe(EXIT.GATE)
+
+    expect(await listOutputs()).toEqual(earlier)
   })
 
   it("exits 3 under --strict even when the config turns strict off", async () => {

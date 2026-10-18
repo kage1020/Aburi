@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, open, readdir, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import { OUTPUT_DIR_SOURCES } from "./artifact-paths"
 import { CliError, errorCode, errorMessage } from "./errors"
@@ -29,11 +29,48 @@ export async function writeOutputFile(output: OutputArtefact, contents: string):
 }
 
 export async function removeOutputFile(output: OutputArtefact): Promise<void> {
+  await unlessAbsent(output, undefined, () => rm(output.path))
+}
+
+export async function removeOutputFileOpeningWith(
+  output: OutputArtefact,
+  firstLine: string,
+): Promise<void> {
+  if (await opensWith(output, firstLine)) await removeOutputFile(output)
+}
+
+export async function listOutputFiles(directory: OutputArtefact): Promise<string[]> {
+  return unlessAbsent(directory, [], async () =>
+    (await readdir(directory.path, { withFileTypes: true }))
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name),
+  )
+}
+
+async function opensWith(output: OutputArtefact, firstLine: string): Promise<boolean> {
+  const opening = Buffer.alloc(Buffer.byteLength(firstLine) + "\r\n".length)
+  const length = await unlessAbsent(output, null, async () => {
+    const handle = await open(output.path)
+    try {
+      return (await handle.read(opening, 0, opening.length, 0)).bytesRead
+    } finally {
+      await handle.close()
+    }
+  })
+  if (length === null) return false
+  return opening.toString("utf8", 0, length).split(/\r?\n/, 1)[0] === firstLine
+}
+
+async function unlessAbsent<T>(
+  output: OutputArtefact,
+  absent: T,
+  act: () => Promise<T>,
+): Promise<T> {
   try {
-    await rm(output.path)
+    return await act()
   } catch (error) {
     const code = errorCode(error)
-    if (code !== null && ABSENT_ERRNOS.has(code)) return
+    if (code !== null && ABSENT_ERRNOS.has(code)) return absent
     throw cannotWrite(output, error, "remove")
   }
 }
