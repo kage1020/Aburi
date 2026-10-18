@@ -1,0 +1,8 @@
+---
+"@aburi/core": patch
+"@aburi/cli": patch
+---
+
+Component detection now writes a `publicApi` entry only for a `package.json` value that names a file inside the package. `"main": "./"`, a legal npm value, and the folder-mapping form of `exports`, `"./": "./"`, used to give `publicApi: [""]`: `aburi scan` exited 0 having written an IR that fails its own schema. They now give no entry, and neither do `"."`, a value ending in `/` (`"./lib/"`), an absolute path or one with a `..` segment, which used to be written as `"."`, `"lib/"`, `"/dist/index.js"` or `"../shared/index.js"`. A value spelled with repeated or inner `.` segments or a doubled slash (`"././dist/index.js"`, `"dist//index.js"`) is written as the one path it names, `"dist/index.js"`, where it used to keep the extra `./` or slash. The integrity check now holds every `publicApi` entry to what the schema states for one, non-empty and free of backslashes, so a scan stops rather than write a Document that breaks it. A `publicApi` entry in `aburi.json` holding a backslash is refused with exit 2 naming the component; it used to be copied into an IR that failed its schema.
+
+Only a package whose manifest spells one of those values sees a difference, and no Symbol does. An IR scanned before this release, compared with one scanned after, reports that component's `publicApi` as changed, once. An IR written before this release that holds an empty `publicApi` entry fails `aburi diff`'s integrity check and is refused with exit 2. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with this release and is unaffected.

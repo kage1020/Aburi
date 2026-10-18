@@ -165,6 +165,33 @@ describe("checkIRIntegrity", () => {
   })
 })
 
+describe("checkIRIntegrity — publicApi entries", () => {
+  function withPublicApi(publicApi: string[]): IR {
+    return irWith((ir) => {
+      ir.components = [component({ id: "a", name: "a", publicApi })]
+    })
+  }
+
+  it.each([
+    ["an empty entry", "", "is empty"],
+    ["an entry holding a backslash", "src\\index.ts", "contains a backslash"],
+  ])("refuses %s, as the schema does", (_what, entry, reason) => {
+    expect(checkIRIntegrity(withPublicApi([entry]))).toEqual([
+      {
+        invariant: 10,
+        subject: "components[id=a].publicApi",
+        message: expect.stringContaining(reason),
+      },
+    ])
+  })
+
+  it("holds an entry to no rule about where a path points, since it is a glob or a Symbol id", () => {
+    const ir = withPublicApi(["../shared/**", "./src/**", "/abs/index.ts", "ts:src/a.ts#Invoice"])
+
+    expect(checkIRIntegrity(ir)).toEqual([])
+  })
+})
+
 describe("isCoreEffectId", () => {
   it.each([
     ["db.write", true],

@@ -119,6 +119,32 @@ describe("the public API from package.json", () => {
     ],
     ["no path written with a backslash or left empty", { main: "dist\\index.js", types: "" }, []],
     [
+      "no entry for a value naming the package directory",
+      { main: "./", module: ".", types: "./.", typings: "././" },
+      [],
+    ],
+    ["no entry for a value naming a directory inside it", { main: "./lib/", types: "lib/" }, []],
+    [
+      "the files of an exports map and not the folders it maps",
+      { exports: { ".": "./src/ok.js", "./": "./", "./lib/": "./lib/" } },
+      ["src/ok.js"],
+    ],
+    [
+      "no entry for a path that is absolute or leaves the package",
+      {
+        main: "/",
+        module: "/dist/index.mjs",
+        types: "C:/dist/index.d.ts",
+        typings: "../shared/index.d.ts",
+      },
+      [],
+    ],
+    [
+      "one entry for a path written with repeated or inner `.` segments or a doubled slash",
+      { main: "././dist/index.js", module: "./dist/./index.js", types: "dist//index.js" },
+      ["dist/index.js"],
+    ],
+    [
       "one entry for two spellings of one path, in NFC",
       { exports: { ".": `./src/${decomposed}.ts` }, main: `./src/${composed}.ts` },
       [`src/${composed}.ts`],

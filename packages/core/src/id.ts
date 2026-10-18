@@ -252,20 +252,26 @@ function languageIdViolation(language: string): GrammarViolation | null {
 const PATH_SUBJECT = "path"
 const SYMBOL_ID_PATH_SUBJECT = "Symbol id file path"
 
+export function posixSpellingViolation(value: string, subject: string): GrammarViolation | null {
+  if (value.length === 0) {
+    return { code: "non-posix-path", message: `${subject} is empty`, value }
+  }
+  if (backslashSite(value) !== null) {
+    return {
+      code: "non-posix-path",
+      message: `${subject} "${value}" contains a backslash; "/" is the only separator a Document path has, so a native path must be converted before it reaches this rule, and a name holding one cannot be written here at all`,
+      value,
+    }
+  }
+  return null
+}
+
 export function posixWorkspaceRelativeViolation(
   path: string,
   subject: string = PATH_SUBJECT,
 ): GrammarViolation | null {
-  if (path.length === 0) {
-    return { code: "non-posix-path", message: `${subject} is empty`, value: path }
-  }
-  if (backslashSite(path) !== null) {
-    return {
-      code: "non-posix-path",
-      message: `${subject} "${path}" contains a backslash; "/" is the only separator a Document path has, so a native path must be converted before it reaches this rule, and a name holding one cannot be written here at all`,
-      value: path,
-    }
-  }
+  const spelling = posixSpellingViolation(path, subject)
+  if (spelling !== null) return spelling
   if (ABSOLUTE_PATH_PATTERN.test(path)) {
     return {
       code: "non-posix-path",

@@ -263,7 +263,17 @@ Resolve `exports` / `main` / `module` / `types` from `package.json`:
 ```
 
 If there is no `exports`, take the file path from `main` / `module` / `types`.
-If none exist, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
+
+Each value is a path relative to the package directory, and its entry is written in one spelling: NFC, with no leading `./` however often it repeats, and no `.` or empty segment inside it, so `././src/index.ts`, `./src/./index.ts` and `src//index.ts` are all `src/index.ts`. A value that does not name a file inside the package contributes no entry:
+
+- the package directory itself: `""`, `"."`, `"./"`, `"./."`. `"main": "./"` is a legal npm value (it resolves to `./index.js`), and `"./": "./"` is the folder-mapping form of `exports` that Node accepted before subpath patterns
+- any other directory, which is a value ending in `/`: `"./lib/"`, or the target of a folder mapping such as `"./lib/": "./lib/"`
+- an absolute path (`"/"`, `"/dist/index.js"`, `"C:/dist/index.js"`) or one holding a `..` segment, both of which point outside the package
+- a value holding a backslash, which a Document cannot spell ([`ir-schema.md`](./ir-schema.md) §14 #10)
+
+An entry is the file the manifest names, not a file a resolver would find for it. `index.js` inside a directory is Node's lookup, and a folder mapping exports whatever the directory holds at the time; neither is a path the manifest wrote. An empty entry in particular would be no glob at all, and the schema refuses it.
+
+If no value gives an entry, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
 
 For Python / Go / Rust, each language plugin will provide "public API file" inference logic in a future release (see the [roadmap](../roadmap.md)). Today only JS/TS is covered.
 
@@ -397,6 +407,9 @@ Implementation guidance:
 | CD34 | A component holding twelve `.ts` files and a link to a directory outside the workspace that holds twelve `.py` files | `languages` is `["ts"]` — the census does not walk through the link |
 | CD35 | `nx.json`, `apps/billing/project.json`, and `apps/alias` a link to `apps/billing` | One Component, rooted at `apps/billing` |
 | CD36 | `packages: ["packages/*"]`, `packages/billing/package.json`, and `packages/alias` a link to `packages/billing` | Two Components, rooted at `packages/alias` and `packages/billing`; no scanned file belongs to the one at `packages/alias` |
+| CD37 | `package.json#main: "./"`, or `exports: {".": "./src/ok.js", "./": "./"}` | No entry for the package directory: no `publicApi` key, or `publicApi = ["src/ok.js"]`. The IR satisfies its schema |
+| CD38 | `main`, `module`, `types` or `typings` set to `"."`, `"./."`, `"././"`, `"./lib/"`, `"/"`, `"/dist/index.mjs"`, `"C:/dist/index.d.ts"` or `"../shared/index.d.ts"`, or an `exports` folder mapping `"./lib/": "./lib/"` | No entry for any of them |
+| CD39 | `main: "././dist/index.js"`, `module: "./dist/./index.js"`, `types: "dist//index.js"` | publicApi = ["dist/index.js"] |
 
 ## 11. Design decisions
 

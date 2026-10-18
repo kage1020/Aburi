@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
+import { posixWorkspaceRelativeViolation } from "./id"
 import { compareCodeUnit } from "./order"
 import { describeThrown, isVanishedFile } from "./scan/faults"
 import { parseManifestJson } from "./workspace-fs"
@@ -141,8 +142,10 @@ function collectFromExports(value: unknown, out: Set<string>): void {
 }
 
 function normalizePackagePath(raw: string | undefined | null): string | null {
-  if (raw === undefined || raw === null) return null
-  if (typeof raw !== "string" || raw.length === 0) return null
-  if (raw.includes("\\")) return null
-  return toNfc(raw.replace(/^\.\//, ""))
+  if (typeof raw !== "string" || raw.startsWith("/") || raw.endsWith("/")) return null
+  const path = toNfc(raw)
+    .split("/")
+    .filter((segment) => segment.length > 0 && segment !== ".")
+    .join("/")
+  return posixWorkspaceRelativeViolation(path) === null ? path : null
 }

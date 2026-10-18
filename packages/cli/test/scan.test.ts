@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { errorFrom, irSchemaViolations, useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it } from "vitest"
 import { CliError, EXIT, runScan, type ScanOptions } from "../src"
 import { runCliIn } from "./run-cli"
-import { TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
+import { TYPESCRIPT, writeConfig, writePackageJson, writeTypeScriptWorkspace } from "./workspace"
 
 const workspace = useScratchWorkspace("scan")
 
@@ -101,6 +101,37 @@ describe("aburi scan — what the caller and the config add", () => {
       components: { publicApi?: string[] }[]
     }
     expect(ir.components[0]?.publicApi).toEqual([`src/${decomposed.normalize("NFC")}.ts`])
+  })
+
+  it("blames the config, not the IR, for a publicApi entry holding a backslash", async () => {
+    await declaredComponent({ roots: ["packages/shared"], publicApi: ["src\\index.ts"] })
+
+    const error = await errorFrom(CliError, () => scan())
+
+    expect(error.code).toBe("config-error")
+    expect(error.message).toContain("components[id=shared] publicApi entry")
+  })
+})
+
+describe("aburi scan — a package.json value that names the package directory", () => {
+  it.each<[string, Record<string, unknown>, string[] | undefined]>([
+    ['"main": "./"', { main: "./" }, undefined],
+    [
+      'the folder mapping "./": "./" in exports',
+      { exports: { ".": "./src/ok.js", "./": "./" } },
+      ["src/ok.js"],
+    ],
+  ])("writes no publicApi entry for %s, and the IR satisfies its schema", async (_value, manifest, publicApi) => {
+    await writePackageJson(workspace.root, { name: "scan-fixture", ...manifest })
+
+    const report = await scan()
+
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    const ir = JSON.parse(await readFile(report.irPath ?? "", "utf8")) as {
+      components: { publicApi?: string[] }[]
+    }
+    expect(ir.components.map((component) => component.publicApi)).toEqual([publicApi])
+    expect(irSchemaViolations(ir)).toEqual([])
   })
 })
 

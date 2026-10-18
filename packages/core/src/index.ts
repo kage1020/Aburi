@@ -51,6 +51,7 @@ export {
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  posixSpellingViolation,
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
   type SegmentOptions,

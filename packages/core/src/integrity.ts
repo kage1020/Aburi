@@ -6,6 +6,7 @@ import {
   isLanguageId,
   isQualifiedName,
   isSymbolId,
+  posixSpellingViolation,
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
 } from "./id"
@@ -370,5 +371,17 @@ function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
     const violation = posixWorkspaceRelativeViolation(site.path)
     if (violation === null) continue
     out.push({ invariant: 10, subject: site.subject, message: violation.message })
+  }
+
+  for (const component of ir.components) {
+    for (const entry of component.publicApi ?? []) {
+      const violation = posixSpellingViolation(entry, "publicApi entry")
+      if (violation === null) continue
+      out.push({
+        invariant: 10,
+        subject: `components[id=${component.id}].publicApi`,
+        message: violation.message,
+      })
+    }
   }
 }
