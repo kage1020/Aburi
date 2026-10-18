@@ -22,7 +22,8 @@ aburi <command> [flags]
 | `2` | Bad invocation: an unknown flag, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
-CI gates on `3`.
+CI gates on `3`. A reader that stops early does not change the code:
+`aburi diff main..HEAD | head -1` exits `0` or `3` as it would without the pipe.
 
 ## Environment variables
 
@@ -303,7 +304,10 @@ const code = await runCli({ argv, stdout, stderr, env, cwd })
 `runCli` returns the code rather than calling `process.exit`, leaving the
 decision to you. A CLI entry point should assign `process.exitCode`, as the
 `aburi` bin does: `process.exit()` can truncate output still being written to a
-pipe (`aburi scan … | head`).
+pipe (`aburi scan … | head`). Like the bin, it should also listen for `error` on
+`process.stdout` and `process.stderr` and ignore `EPIPE`: Node reports a reader
+that closed early as that event, and with no listener the process exits 1
+whatever `runCli` returned.
 
 ---
 

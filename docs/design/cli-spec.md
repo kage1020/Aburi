@@ -901,6 +901,15 @@ Description: NestJS OnModuleInit hook
 
 128+N is for fatal signals. Aburi does not choose it: a run stopped by a signal ends on that signal once its cleanup has run, so the status is the one the shell reports for the signal (§6.4, step 8).
 
+A reader that stops reading does not choose the code either. `aburi diff main..HEAD | head -1`
+closes the pipe after one line, and the command still runs to its end — the head scan, the
+artefacts, the base worktree's removal — and exits with the code it reached: `0` for a clean
+diff, `3` for a tripped gate. What it writes after the reader left is lost, on stdout and on
+stderr alike (`aburi scan 2>&1 | head -1`). A pipeline under `set -o pipefail`, which GitHub
+Actions uses for `shell: bash`, reads the command's own answer, and `aburi explain`'s `1` keeps
+meaning "not found". Any other failure to write either stream — a disk that refuses stdout
+redirected to a file — is an IO error and ends the run with `1`.
+
 The line between `1` and `2` is who has to act, not which subsystem failed. `2` covers the whole
 of what the reader wrote: a config that does not parse, does not conform, or names the same
 component twice — and a `--config` path that names nothing, which is the "missing" in the table
@@ -929,6 +938,10 @@ and left at the code the answer itself earned.
 | stderr | Progress, warnings, error messages, colored UI |
 
 Example: `aburi diff main..HEAD --quiet > result.txt 2> log.txt`
+
+Either stream may lose its reader part way through (`| head -1`). That costs the reader the rest of
+that stream and nothing else: the other stream, the artefacts and the exit code are what they
+would have been (§9).
 
 The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON.
 
@@ -1073,6 +1086,7 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 | CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
 | CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
+| CL35 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3`, `2`), never `1`, and the other stream byte for byte. stdout into a file the disk refuses (`/dev/full`) still exits 1 |
 
 ## 18. Design Decisions
 

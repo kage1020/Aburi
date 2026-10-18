@@ -189,11 +189,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
 function reportIncidents(report: ScanReport, incidents: ScanOptions["incidents"]): void {
   if (incidents === undefined) return
-  try {
-    reportScanIncidents(report, incidents.warn, incidents.label ?? null)
-  } catch {
-    // The exit code must not depend on stderr surviving: `aburi scan 2>&1 | head -1` closes it.
-  }
+  reportScanIncidents(report, incidents.warn, incidents.label ?? null)
 }
 
 function describeParseErrors(errors: readonly ParseError[]): string {

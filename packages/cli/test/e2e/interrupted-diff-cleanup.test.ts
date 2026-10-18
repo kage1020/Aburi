@@ -3,11 +3,9 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { gitTestEnv } from "@aburi/test-support"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
-
-const CLI_BIN = fileURLToPath(new URL("../../dist/bin/aburi.mjs", import.meta.url))
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { CLI_BIN, requireBuiltBin } from "./bin"
 
 const STALLING_PLUGIN = `
 import { writeFileSync } from "node:fs"
@@ -87,11 +85,7 @@ afterEach(async () => {
 })
 
 describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the base scan", () => {
-  beforeAll(() => {
-    if (!existsSync(CLI_BIN)) {
-      throw new Error(`${CLI_BIN} is missing: build @aburi/cli before running this file.`)
-    }
-  })
+  requireBuiltBin()
 
   it.each([
     { signal: "SIGINT", decoyEnv: false },
