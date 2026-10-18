@@ -1,7 +1,7 @@
 import { changed, makeSymbol, movedChanged } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { projectChanges } from "./fixtures"
+import { projectChanges, renamedPair } from "./fixtures"
 
 const f = makeSymbol({ id: "ts:src/a.ts#f", name: "f" })
 const note = (side: string) => `- ${side} fingerprint changed; no field-level detail was recorded`
@@ -59,6 +59,28 @@ describe("the note under a fingerprint flag no row explains", () => {
     const md = projectChanges([changed(f, flags)])
     expect(md).toContain(row)
     expect(md).not.toContain("no field-level detail")
+  })
+
+  it.each([
+    ["parseAmount", "readAmount"],
+    ["Repo.save", "Repo.persist"],
+    ["C::Inner.g", "C::Inner.h"],
+  ])("gives way to a name row whose last segment changed, %s → %s", (from, to) => {
+    const md = projectChanges([renamedPair(from, "src/a.ts", to, "src/a.ts")])
+    expect(md).toContain(`- name: \`${from}\` → \`${to}\``)
+    expect(md).not.toContain("no field-level detail")
+  })
+
+  it.each([
+    ["a new owner", "Repo.save", "UserRepo.save"],
+    ["a new owner", "Repo::save", "UserRepo::save"],
+    ["a new owner", "A.B.save", "A.C.save"],
+    ["a new owner", "C::Inner.g", "C::Outer.g"],
+    ["a new separator", "Repo.save", "Repo::save"],
+  ])("does not count %s as explaining the API flag, %s → %s", (_, from, to) => {
+    const md = projectChanges([renamedPair(from, "src/a.ts", to, "src/a.ts")])
+    expect(md).toContain(`- name: \`${from}\` → \`${to}\``)
+    expect(md).toContain(note("API"))
   })
 
   it("is not written for a change no fingerprint flag records", () => {

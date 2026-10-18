@@ -3,14 +3,21 @@ import { formatInput, inlineCode, propagatedFromSuffix } from "../format"
 import type { ChangedEntry } from "./partition"
 
 export function renderDeltaBody(change: ChangedEntry): string[] {
-  const { delta } = change
+  const { delta, before, after } = change
   const rows: string[] = []
+  if (before.name !== after.name) {
+    rows.push(`- name: ${inlineCode(before.name)} → ${inlineCode(after.name)}`)
+  }
+  // Only the last segment reaches the API fingerprint, so the name row counts as an explanation
+  // only when that segment changed.
+  const shortNameChanged = lastSegment(before.name) !== lastSegment(after.name)
+  const nameRows = rows.length
   appendSignatureDelta(rows, delta.signature ?? null)
   appendDecoratorDelta(rows, delta.decorators)
   appendArrayGroup(rows, "rules", delta.rules, describeRuleLike)
   appendArrayGroup(rows, "effects", delta.effects, describeEffectLike)
   appendArrayGroup(rows, "calls", delta.calls, describeCallLike)
-  const explained = rows.length > 0 || delta.visibilityChanged
+  const explained = rows.length > nameRows || shortNameChanged || delta.visibilityChanged
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
   if (delta.confidenceChanged === true) {
@@ -32,6 +39,12 @@ function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
         : null
   if (which === null) return
   rows.push(`- ${which} fingerprint changed; no field-level detail was recorded`)
+}
+
+function lastSegment(name: string): string {
+  const at = name.lastIndexOf("::")
+  const tail = at < 0 ? name : name.slice(at + 2)
+  return tail.slice(tail.lastIndexOf(".") + 1)
 }
 
 function appendSignatureDelta(rows: string[], sig: SignatureDelta | null): void {

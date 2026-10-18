@@ -8,14 +8,14 @@ export function indexSymbols(symbols: readonly IRSymbol[]): string[] {
 }
 
 export function indexChanged(items: readonly ChangedEntry[]): string[] {
-  return items.map((item) => indexRow(item.after))
+  return items.map((item) => indexRow(item.after, oldName(item)))
 }
 
 export function indexConfidence(items: readonly ChangedEntry[]): string[] {
   return items.map((item) =>
     indexRow(
       item.after,
-      ` (${inlineCode(item.before.confidence)} → ${inlineCode(item.after.confidence)})`,
+      `${oldName(item)} (${inlineCode(item.before.confidence)} → ${inlineCode(item.after.confidence)})`,
     ),
   )
 }
@@ -27,15 +27,23 @@ export function indexUnknown(items: readonly SymbolUnknown[]): string[] {
 }
 
 export function indexMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
-  return items.map((item) => indexRow(item.after, ` (from ${movedFrom(item.before, item.after)})`))
+  return items.map((item) => indexRow(item.after, movedFrom(item)))
 }
 
 function indexRow(symbol: IRSymbol, suffix = ""): string {
   return `- ${symbolTitle(symbol)} — ${fileLine(symbol)}${suffix}`
 }
 
+/** The size cap can omit Moved + Changed and keep this section, so the old name goes here too. */
+function oldName(item: ChangedEntry): string {
+  return item.before.name === item.after.name ? "" : movedFrom(item)
+}
+
 /** The row already carries the head's `file:line`, so only the base side is named. */
-function movedFrom(before: IRSymbol, after: IRSymbol): string {
-  if (before.source.file !== after.source.file) return inlineCode(before.source.file)
-  return `${inlineCode(before.name)} at L${before.source.startLine}`
+function movedFrom({ before, after }: ChangedEntry): string {
+  if (before.source.file !== after.source.file) {
+    if (before.name === after.name) return ` (from ${inlineCode(before.source.file)})`
+    return ` (from ${inlineCode(before.name)} in ${inlineCode(before.source.file)})`
+  }
+  return ` (from ${inlineCode(before.name)} at L${before.source.startLine})`
 }

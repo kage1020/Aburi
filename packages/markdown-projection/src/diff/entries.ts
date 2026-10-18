@@ -85,7 +85,13 @@ export function renderNotCompared(files: readonly NotComparedFile[]): string[] {
 
 export function moveRoute(before: IRSymbol, after: IRSymbol): string {
   if (before.source.file !== after.source.file) {
-    return `${inlineCode(before.source.file)} → ${inlineCode(after.source.file)}`
+    if (before.name === after.name) {
+      return `${inlineCode(before.source.file)} → ${inlineCode(after.source.file)}`
+    }
+    return (
+      `${inlineCode(before.name)} in ${inlineCode(before.source.file)}` +
+      ` → ${inlineCode(after.name)} in ${inlineCode(after.source.file)}`
+    )
   }
   return (
     `within ${inlineCode(after.source.file)}: ${inlineCode(before.name)} (L${before.source.startLine})` +
@@ -96,7 +102,7 @@ export function moveRoute(before: IRSymbol, after: IRSymbol): string {
 export function renderMoved(items: readonly SymbolMoved[]): string[] {
   return items.map((entry) => {
     const lead =
-      entry.before.source.file === entry.after.source.file
+      entry.before.source.file === entry.after.source.file || entry.before.name !== entry.after.name
         ? ""
         : `${inlineCode(entry.after.name)}: `
     return `- ${lead}${moveRoute(entry.before, entry.after)} (${inlineCode(entry.rationale)})`

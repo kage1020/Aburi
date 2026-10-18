@@ -31,9 +31,27 @@ const acrossFiles = movedChanged(
     logicChanged: true,
   },
 )
+const renamedAcrossFiles = movedChanged(
+  at("ts:src/parse.ts#parseAmount", "parseAmount", 1),
+  at("ts:src/amount.ts#readAmount", "readAmount", 1),
+  { apiChanged: true, syntaxChanged: true },
+  "logic-fingerprint",
+)
+const reownedAcrossFiles = moved(
+  at("ts:src/strings.ts#Slugger.slugify", "Slugger.slugify", 7),
+  at("ts:src/text/slug.ts#TextSlugger.slugify", "TextSlugger.slugify", 1),
+  "logic-fingerprint",
+)
 
 describe("a move's route in diff.md", () => {
-  const md = projectChanges([renamedInFile, relocated, reownedInFile, acrossFiles])
+  const md = projectChanges([
+    renamedInFile,
+    relocated,
+    reownedInFile,
+    acrossFiles,
+    renamedAcrossFiles,
+    reownedAcrossFiles,
+  ])
 
   it("names both sides and their lines, not the path twice, in Moved + Changed", () => {
     expect(md).toContain(
@@ -52,6 +70,15 @@ describe("a move's route in diff.md", () => {
   it("keeps the two paths, and the leading name, for a move between files", () => {
     expect(md).toContain("**Moved**: `src/old.ts` → `src/new.ts` (`git-rename`)")
     expect(md).toContain("- `slug`: `src/util.ts` → `src/text/slug.ts` (`git-rename`)")
+  })
+
+  it("names each side with its file when a move between files changed its name too", () => {
+    expect(md).toContain(
+      "**Moved**: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts` (`logic-fingerprint`)",
+    )
+    expect(md).toContain(
+      "- `Slugger.slugify` in `src/strings.ts` → `TextSlugger.slugify` in `src/text/slug.ts` (`logic-fingerprint`)",
+    )
   })
 })
 
@@ -73,18 +100,25 @@ describe("a move's route on a Slice member's follow-up line", () => {
   }
 
   it("leads a moved+changed member with its route, then its axes", () => {
-    const md = projectSlice(reownedInFile, acrossFiles)
+    const md = projectSlice(reownedInFile, acrossFiles, renamedAcrossFiles)
     expect(md).toContain(
       "↳ moved: within `src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged",
     )
     expect(md).toContain("↳ moved: `src/old.ts` → `src/new.ts`; delta.logicChanged")
+    expect(md).toContain(
+      "↳ moved: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts`; " +
+        "delta.apiChanged, delta.syntaxChanged",
+    )
   })
 
   it("renders a pure moved member the same way, though `@aburi/diff` never lists one", () => {
-    const md = projectSlice(renamedInFile, relocated)
+    const md = projectSlice(renamedInFile, relocated, reownedAcrossFiles)
     expect(md).toContain(
       "↳ moved: within `src/output-file.ts`: `isADirectory` (L40) → `outputIsADirectory` (L60)",
     )
     expect(md).toContain("↳ moved: `src/util.ts` → `src/text/slug.ts`")
+    expect(md).toContain(
+      "↳ moved: `Slugger.slugify` in `src/strings.ts` → `TextSlugger.slugify` in `src/text/slug.ts`",
+    )
   })
 })
