@@ -13,15 +13,14 @@ const NESTJS_BILLING = component({
 const fixture = useFixtureCheckout()
 
 describe("e2e: projectWorkspace on fixtures/nestjs-billing", () => {
-  it("renders the single fixture component as an isolated mermaid node, then a list saying there is no edge", async () => {
+  it("renders the single fixture component as an isolated mermaid node, then a list saying there is no component edge", async () => {
     const result = await scanFixture(fixture.root, {}, {}, [NESTJS_BILLING])
     const md = projectWorkspace(result.ir, { suppressTimestamp: true })
 
     expect(md).toContain("# Workspace")
     expect(md).toContain("## Component dependencies")
     expect(md).toContain(
-      '```mermaid\ngraph LR\n  c_nestjs_billing["nestjs-billing"]\n```\n\nFallback list:\n\n_No inter-component dependencies._\n',
+      '```mermaid\ngraph LR\n  c_nestjs_billing["nestjs-billing"]\n```\n\nFallback list:\n\n_No Component edges recorded._\n',
     )
-    expect(md).not.toContain("-->")
   })
 })

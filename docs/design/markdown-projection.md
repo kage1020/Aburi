@@ -234,12 +234,13 @@ as mermaid node ids in snake_case behind a `c_` prefix (`billing-api` →
 injective because ComponentId cannot contain `_`. The prefix is there
 because mermaid's flowchart grammar reads several valid ComponentIds as
 keywords — `graph`, `flowchart`, `subgraph`, `end`, `style`, `class` and
-`interpolate` as a declaration, `click`, `call` and `href` at the end of an
-edge — and one such node id fails the whole block. No prefixed id is one of
-them, and a prefix keeps holding when a mermaid release adds a keyword,
-which a list of the keywords to avoid would not. Labels use `Component.name`
-with mermaid-hostile characters (`"`, `<`, `>`, `]`, newline) escaped so the
-`id["label"]` syntax stays intact.
+`interpolate` as a declaration, `click`, `call` and `href` at either end of
+an edge — and one such node id fails the whole block, or, for `click` at the
+start of an edge, turns the line into a click statement that drops the
+edge. No prefixed id is one of them, and a prefix keeps holding when a
+mermaid release adds a keyword, which a list of the keywords to avoid would
+not. Labels use `Component.name` with mermaid-hostile characters (`"`,
+`<`, `>`, `]`, newline) escaped so the `id["label"]` syntax stays intact.
 
 If the union of declared components and edge endpoints exceeds 100 nodes,
 the mermaid block is replaced by an explicit `_Component graph omitted…_`
@@ -248,14 +249,14 @@ the text list is emitted (avoids unreadability).
 
 The mermaid block, or the note that replaces it, is always followed by
 `Fallback list:` and the text form of the edges: one bullet per Component
-edge, `- <from> → <to> (via <via>)` in edge order, or
-`_No inter-component dependencies._` when there is none. The list is
-emitted with no edge too, because a reader looking at a block that failed to
-render cannot otherwise tell whether it held any edge; its nodes are already
-the Components table's rows. A workspace with no component and no edge has
-no diagram, and the section is that sentence alone. Turning mermaid output
-off entirely via config (e.g. `output.mermaid: false`) is planned; the
-config-schema decision is pending.
+edge, ``- <from> → <to> (via `<via>`)`` in edge order, or
+`_No Component edges recorded._` when there is none. The list is emitted
+with no edge too, because a reader looking at a block that failed to render
+cannot otherwise tell whether it held any edge; every node is a Components
+table row or an endpoint named in the list. The sentence says what the IR
+records, not that the components are independent: `aburi scan` writes Symbol
+edges only. A workspace with no component and no Component edge has no
+diagram, and the section is that sentence alone.
 
 ### 4.3 generation metadata
 
@@ -898,8 +899,8 @@ Emitted in the L0 `workspace.md` `## Component dependencies` section (see §4.2)
 - `graph LR` (left → right) is used for Component dependencies
 - every component in `ir.components` renders as a node, including isolated ones with no incident edges
 - node ids are the component ids with a `c_` prefix and `-` written `_`, so no component id is read as a mermaid keyword (§4.2)
-- omitted above 100 nodes measured against the union of declared components and edge endpoints (falls back to the text bullet list)
-- the `Fallback list:` follows every mermaid block and every omission note, with one bullet per edge or `_No inter-component dependencies._`, so reviewers still see the dependency inventory, empty or not, whenever GitHub's mermaid fails to render
+- omitted above 100 nodes measured against the union of declared components and edge endpoints (falls back to the `Fallback list:`)
+- the `Fallback list:` follows every mermaid block and every omission note, with one bullet per Component edge or `_No Component edges recorded._`, so reviewers still see the dependency inventory, empty or not, whenever GitHub's mermaid fails to render
 
 Turning mermaid output off entirely via config (e.g. `output.mermaid: false`) is planned; the config-schema decision is pending.
 
@@ -923,9 +924,9 @@ All Markdown projection output is **English, with fixed wording**.
 | MP6 | Effect with confidence=high | No badge |
 | MP6a | Symbol with confidence=medium or low, on the component page, in a `diff.md` entry or its names-only row, and in `explain` (kept or dropped) | Every heading and names-only row naming it carries the badge after the kind |
 | MP6b | Symbol with confidence=high | No badge on any heading or names-only row |
-| MP7 | mermaid nodes > 100 | Falls back to the text bullet list |
-| MP7a | Component whose id mermaid's flowchart grammar reads as a keyword (`graph`, `flowchart`, `subgraph`, `end`, `style`, `class`, `interpolate`, `click`, `call`, `href`), with no edge and at the end of an edge | Its node declaration and every edge naming it write `c_<id>`, `-` written `_`, as for every other component |
-| MP7b | Components with no Component edge, with the diagram drawn and with it omitted past 100 nodes | The diagram or its omission note is followed by `Fallback list:` and `_No inter-component dependencies._` |
+| MP7 | mermaid nodes > 100 | Falls back to the `Fallback list:` |
+| MP7a | Component whose id mermaid's flowchart grammar reads as a keyword (`graph`, `flowchart`, `subgraph`, `end`, `style`, `class`, `interpolate`, `click`, `call`, `href`), with no edge and at either end of an edge | Its node declaration and every edge naming it write `c_<id>`, `-` written `_`, as for every other component |
+| MP7b | Components with no Component edge, with the diagram drawn and with it omitted past 100 nodes | The diagram or its omission note is followed by `Fallback list:` and `_No Component edges recorded._` |
 | MP8 | `aburi explain <dropped-symbol>` | Drop reason shown, no detail sections |
 | MP9 | Symbol id containing slashes/colons | Written under a sanitized file name |
 | MP10 | diff where only `delta.syntaxChanged` is true | Classified into the Syntax-only section (folded) |
@@ -961,7 +962,7 @@ Creates a state where a reviewer can simply read from the top. API changes come 
 
 ### 12.5 Text fallback accompanying mermaid
 
-mermaid can fail to render on GitHub (large diagrams / syntax errors), so a text list is emitted alongside every diagram and no information is lost. It is emitted when there is no edge as well, saying so, because a diagram that failed to render cannot say it either.
+mermaid can fail to render on GitHub (large diagrams / syntax errors), so a text list follows every diagram and every note that replaces one past 100 nodes, and no information is lost. It is emitted when there is no edge as well, saying so, because a diagram that failed to render cannot say it either.
 
 ### 12.6 English section headings
 

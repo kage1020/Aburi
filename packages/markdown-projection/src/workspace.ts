@@ -16,7 +16,7 @@ export const MERMAID_NODE_LIMIT = 100
 /** Ten rows keep the effect surface table short enough for a PR comment. */
 export const EFFECT_SURFACE_TOP_N = 10
 
-const NO_COMPONENT_EDGES = "_No inter-component dependencies._"
+const NO_COMPONENT_EDGES = "_No Component edges recorded._"
 
 export interface ProjectWorkspaceOptions {
   suppressTimestamp?: boolean
