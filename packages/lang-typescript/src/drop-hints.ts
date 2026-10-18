@@ -32,7 +32,7 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
   const bodies = bodyNodesOf(symbol).filter((body) => body.type === "class_body")
   if (bodies.length === 0) return null
 
-  let hasMethod = false
+  let hasBehaviour = false
   let allStaticLiteral = true
   let hasAnyField = false
   for (const member of bodies.flatMap((body) => body.namedChildren)) {
@@ -41,28 +41,31 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
       case "method_definition":
       case "method_signature":
       case "abstract_method_signature":
-        hasMethod = true
+      case "class_static_block":
+        hasBehaviour = true
         allStaticLiteral = false
         break
       case "public_field_definition":
         if (functionValueOf(member) !== null) {
-          hasMethod = true
+          hasBehaviour = true
           allStaticLiteral = false
           break
         }
         hasAnyField = true
         if (!isConstantLikeField(member)) allStaticLiteral = false
         break
+      case "comment":
+        break
       default:
         allStaticLiteral = false
         break
     }
   }
-  if (!hasMethod && !hasAnyField) return null
-  if (!hasMethod && hasAnyField && allStaticLiteral) {
+  if (!hasBehaviour && !hasAnyField) return null
+  if (!hasBehaviour && hasAnyField && allStaticLiteral) {
     return { reason: "pure constants", category: "B" }
   }
-  if (!hasMethod) return { reason: "pure DTO", category: "B" }
+  if (!hasBehaviour) return { reason: "pure DTO", category: "B" }
   return null
 }
 
