@@ -183,13 +183,13 @@ The monorepo overview.
 
 ```mermaid
 graph LR
-  billing["Billing"]
-  docs["Docs"]
-  pricing["Pricing"]
-  shared["Shared"]
-  billing --> pricing
-  billing --> shared
-  pricing --> shared
+  c_billing["Billing"]
+  c_docs["Docs"]
+  c_pricing["Pricing"]
+  c_shared["Shared"]
+  c_billing --> c_pricing
+  c_billing --> c_shared
+  c_pricing --> c_shared
 ```
 
 Fallback list:
@@ -228,18 +228,34 @@ isolated ones with no incident dependencies — so the L0 view matches the
 "full monorepo view" contract of [`overview.md`](./overview.md) §3.1
 (`docs` above is such a node). Node declarations are ordered ascending by
 `id`; edges are ordered lexicographically by `(from, to, via)`. Component
-ids are ASCII kebab-case per [`ir-schema.md`](./ir-schema.md) §4, sanitized
-to snake_case for mermaid (`billing-api` → `billing_api`) — the mapping is
-injective because ComponentId cannot contain `_`. Labels use `Component.name`
+ids are ASCII kebab-case per [`ir-schema.md`](./ir-schema.md) §4, written
+as mermaid node ids in snake_case behind a `c_` prefix (`billing-api` →
+`c_billing_api`), in node declarations and edges alike. The mapping is
+injective because ComponentId cannot contain `_`. The prefix is there
+because mermaid's flowchart grammar reads several valid ComponentIds as
+keywords — `graph`, `flowchart`, `subgraph`, `end`, `style`, `class` and
+`interpolate` as a declaration, `click`, `call` and `href` at the end of an
+edge — and one such node id fails the whole block. No prefixed id is one of
+them, and a prefix keeps holding when a mermaid release adds a keyword,
+which a list of the keywords to avoid would not. Labels use `Component.name`
 with mermaid-hostile characters (`"`, `<`, `>`, `]`, newline) escaped so the
 `id["label"]` syntax stays intact.
 
 If the union of declared components and edge endpoints exceeds 100 nodes,
 the mermaid block is replaced by an explicit `_Component graph omitted…_`
 note so a missing diagram is not mistaken for a broken renderer, and only
-the text bullet list of edges is emitted (avoids unreadability). Turning
-mermaid output off entirely via config (e.g. `output.mermaid: false`) is
-planned; the config-schema decision is pending.
+the text list is emitted (avoids unreadability).
+
+The mermaid block, or the note that replaces it, is always followed by
+`Fallback list:` and the text form of the edges: one bullet per Component
+edge, `- <from> → <to> (via <via>)` in edge order, or
+`_No inter-component dependencies._` when there is none. The list is
+emitted with no edge too, because a reader looking at a block that failed to
+render cannot otherwise tell whether it held any edge; its nodes are already
+the Components table's rows. A workspace with no component and no edge has
+no diagram, and the section is that sentence alone. Turning mermaid output
+off entirely via config (e.g. `output.mermaid: false`) is planned; the
+config-schema decision is pending.
 
 ### 4.3 generation metadata
 
@@ -881,8 +897,9 @@ Emitted in the L0 `workspace.md` `## Component dependencies` section (see §4.2)
 
 - `graph LR` (left → right) is used for Component dependencies
 - every component in `ir.components` renders as a node, including isolated ones with no incident edges
+- node ids are the component ids with a `c_` prefix and `-` written `_`, so no component id is read as a mermaid keyword (§4.2)
 - omitted above 100 nodes measured against the union of declared components and edge endpoints (falls back to the text bullet list)
-- a text bullet list accompanies the mermaid whenever there is at least one edge, so reviewers still see the dependency inventory even when GitHub's mermaid fails to render
+- the `Fallback list:` follows every mermaid block and every omission note, with one bullet per edge or `_No inter-component dependencies._`, so reviewers still see the dependency inventory, empty or not, whenever GitHub's mermaid fails to render
 
 Turning mermaid output off entirely via config (e.g. `output.mermaid: false`) is planned; the config-schema decision is pending.
 
@@ -907,6 +924,8 @@ All Markdown projection output is **English, with fixed wording**.
 | MP6a | Symbol with confidence=medium or low, on the component page, in a `diff.md` entry or its names-only row, and in `explain` (kept or dropped) | Every heading and names-only row naming it carries the badge after the kind |
 | MP6b | Symbol with confidence=high | No badge on any heading or names-only row |
 | MP7 | mermaid nodes > 100 | Falls back to the text bullet list |
+| MP7a | Component whose id mermaid's flowchart grammar reads as a keyword (`graph`, `flowchart`, `subgraph`, `end`, `style`, `class`, `interpolate`, `click`, `call`, `href`), with no edge and at the end of an edge | Its node declaration and every edge naming it write `c_<id>`, `-` written `_`, as for every other component |
+| MP7b | Components with no Component edge, with the diagram drawn and with it omitted past 100 nodes | The diagram or its omission note is followed by `Fallback list:` and `_No inter-component dependencies._` |
 | MP8 | `aburi explain <dropped-symbol>` | Drop reason shown, no detail sections |
 | MP9 | Symbol id containing slashes/colons | Written under a sanitized file name |
 | MP10 | diff where only `delta.syntaxChanged` is true | Classified into the Syntax-only section (folded) |
@@ -942,7 +961,7 @@ Creates a state where a reviewer can simply read from the top. API changes come 
 
 ### 12.5 Text fallback accompanying mermaid
 
-mermaid can fail to render on GitHub (large diagrams / syntax errors), so a text bullet list is emitted alongside and no information is lost.
+mermaid can fail to render on GitHub (large diagrams / syntax errors), so a text list is emitted alongside every diagram and no information is lost. It is emitted when there is no edge as well, saying so, because a diagram that failed to render cannot say it either.
 
 ### 12.6 English section headings
 

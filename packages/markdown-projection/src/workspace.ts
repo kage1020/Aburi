@@ -16,6 +16,8 @@ export const MERMAID_NODE_LIMIT = 100
 /** Ten rows keep the effect surface table short enough for a PR comment. */
 export const EFFECT_SURFACE_TOP_N = 10
 
+const NO_COMPONENT_EDGES = "_No inter-component dependencies._"
+
 export interface ProjectWorkspaceOptions {
   suppressTimestamp?: boolean
 }
@@ -136,21 +138,21 @@ function renderDependencies(ir: IR): string[] {
     edgeNodes.add(d.to)
   }
   const unionNodeCount = new Set<string>([...sortedComponents.map((c) => c.id), ...edgeNodes]).size
-  if (unionNodeCount === 0) return ["_No inter-component dependencies._"]
+  if (unionNodeCount === 0) return [NO_COMPONENT_EDGES]
 
   const rows: string[] = []
   if (unionNodeCount <= MERMAID_NODE_LIMIT) {
     rows.push("```mermaid")
     rows.push("graph LR")
     for (const c of sortedComponents) {
-      rows.push(`  ${sanitizeMermaidId(c.id)}["${escapeMermaidLabel(c.name)}"]`)
+      rows.push(`  ${mermaidNodeId(c.id)}["${escapeMermaidLabel(c.name)}"]`)
     }
     const seenEdge = new Set<string>()
     for (const d of sortDependencies(componentDeps)) {
       const key = `${d.from}->${d.to}`
       if (seenEdge.has(key)) continue
       seenEdge.add(key)
-      rows.push(`  ${sanitizeMermaidId(d.from)} --> ${sanitizeMermaidId(d.to)}`)
+      rows.push(`  ${mermaidNodeId(d.from)} --> ${mermaidNodeId(d.to)}`)
     }
     rows.push("```")
   } else {
@@ -158,19 +160,19 @@ function renderDependencies(ir: IR): string[] {
       `_Component graph omitted: ${unionNodeCount} nodes exceeds the render limit (${MERMAID_NODE_LIMIT}). See list below._`,
     )
   }
-  if (componentDeps.length > 0) {
-    rows.push("")
-    rows.push("Fallback list:")
-    rows.push("")
-    for (const d of sortDependencies(componentDeps)) {
-      rows.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})`)
-    }
+  rows.push("")
+  rows.push("Fallback list:")
+  rows.push("")
+  if (componentDeps.length === 0) rows.push(NO_COMPONENT_EDGES)
+  for (const d of sortDependencies(componentDeps)) {
+    rows.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})`)
   }
   return rows
 }
 
-function sanitizeMermaidId(id: string): string {
-  return id.replace(/-/g, "_")
+/** Prefixed rather than checked against a keyword list, which changes with mermaid releases. */
+function mermaidNodeId(id: string): string {
+  return `c_${id.replace(/-/g, "_")}`
 }
 
 function escapeMermaidLabel(label: string): string {
