@@ -1,7 +1,7 @@
 import { resolve } from "node:path"
 import {
-  CoreError,
   detectManagers,
+  isPluginSetFault,
   isStrict,
   type ScanResult,
   scan,
@@ -108,8 +108,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       logger: createLogger(options.logLevel === undefined ? {} : { minimum: options.logLevel }),
     })
   } catch (error) {
-    if (error instanceof CoreError && error.code === "vocab-undeclared") {
-      throw new CliError(error.message, "plugin-error", { cause: error })
+    if (isPluginSetFault(error)) {
+      throw new CliError(errorMessage(error), "plugin-error", { cause: error })
     }
     throw error
   }

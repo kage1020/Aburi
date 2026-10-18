@@ -4,6 +4,18 @@ export function errorCode(error: unknown): string | null {
   return typeof code === "string" ? code : null
 }
 
+const PLUGIN_SET_FAULT_CODES: ReadonlySet<string> = new Set([
+  "scan-plugin-misconfigured",
+  "invalid-language-id",
+  "vocab-undeclared",
+])
+
+/** Matched by code, not class: a plugin raises `vocab-undeclared` through the registry's own error. */
+export function isPluginSetFault(error: unknown): boolean {
+  const code = errorCode(error)
+  return code !== null && PLUGIN_SET_FAULT_CODES.has(code)
+}
+
 export function isVanishedFile(error: unknown): boolean {
   const code = errorCode(error)
   return code === "ENOENT" || code === "ENOTDIR"
