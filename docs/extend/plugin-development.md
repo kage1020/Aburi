@@ -248,6 +248,14 @@ Contracts:
   the [language plugin spec](../design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
 - `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
   Read it, memoize on its identity if you like, and never mutate it.
+- A `const` Symbol's `fullNode` is its whole declaration statement, which can
+  declare several names (`export const PAGE_SIZE = 20, Row = memo(RowImpl)`), so
+  read one name's initializer from its own declarator. Given the statement
+  (`asSyntaxNode(symbol.fullNode)`) and the name's last segment
+  (`lastQnameSegment(symbol.name)`), `declaratorValue` from `@aburi/core` returns
+  that initializer read through `as`, `satisfies`, `!` and parentheses, and
+  `null` for a name a destructuring pattern binds. A search of the whole
+  statement for a call answers for whichever name holds the first one.
 - An optional `symbolDropHint(symbol, ctx)` drops a Symbol the way a language
   plugin's does. Every framework plugin is asked, not only the one that
   classified the Symbol, and the Symbol already carries the winning

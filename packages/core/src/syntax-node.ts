@@ -23,6 +23,35 @@ export function findNamedChildOfType(node: SyntaxNode, typeName: string): Syntax
   return null
 }
 
+export function declaratorValue(statement: SyntaxNode, binding: string): SyntaxNode | null {
+  for (const child of statement.namedChildren) {
+    if (child === null || child.type !== "variable_declarator") continue
+    const declared = child.childForFieldName("name")
+    if (declared === null || declared.type !== "identifier" || declared.text !== binding) continue
+    const value = child.childForFieldName("value")
+    return value === null ? null : unwrapValue(value)
+  }
+  return null
+}
+
+// `<T>x` is left out because lang-typescript does not read through it either.
+const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
+  "parenthesized_expression",
+  "as_expression",
+  "satisfies_expression",
+  "non_null_expression",
+])
+
+export function unwrapValue(node: SyntaxNode): SyntaxNode {
+  let cursor = node
+  while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
+    const inner = cursor.namedChildren.find((child) => child !== null && child.type !== "comment")
+    if (inner === undefined || inner === null) return cursor
+    cursor = inner
+  }
+  return cursor
+}
+
 export function findFirstDescendantOfType(node: SyntaxNode, typeName: string): SyntaxNode | null {
   if (node.type === typeName) return node
   for (const child of node.namedChildren) {

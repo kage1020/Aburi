@@ -148,9 +148,11 @@ export {
   asSyntaxNode,
   calleeLeaf,
   calleeText,
+  declaratorValue,
   findFirstDescendantOfType,
   findNamedChildOfType,
   type SyntaxNode,
+  unwrapValue,
 } from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {

@@ -13,9 +13,9 @@ Recognised shapes:
 | `const Widget = () => <div/>` | `framework:react:component` | PascalCase name + JSX return |
 | `function useThing() { … }` | `framework:react:hook` | `/^use[A-Z]/` name |
 | `function useX() { useState(…); … }` | `framework:react:hook` (+ `hook-call` signal) | naming + inner hook call |
-| `const Ctx = createContext(…)` | `framework:react:context` | `createContext(...)` / `React.createContext(...)` |
-| `const B = forwardRef((p,r) => …)` | `framework:react:forward-ref` | `forwardRef(...)` / `React.forwardRef(...)` |
-| `const M = memo(Inner)` | `framework:react:memo` | `memo(...)` / `React.memo(...)` |
+| `const Ctx = createContext(…)` | `framework:react:context` | that const's own initializer is a `createContext(...)` / `React.createContext(...)` call |
+| `const B = forwardRef((p,r) => …)` | `framework:react:forward-ref` | that const's own initializer is a `forwardRef(...)` / `React.forwardRef(...)` call |
+| `const M = memo(Inner)` | `framework:react:memo` | that const's own initializer is a `memo(...)` / `React.memo(...)` call |
 | `function P() { return <Ctx.Provider>…</Ctx.Provider> }` | `framework:react:provider` | PascalCase + `<X.Provider>` root JSX |
 | `function withAuth(C) { … }` | `framework:react:hoc` | `/^with[A-Z]/` name |
 
@@ -23,7 +23,23 @@ Priorities are first-match-wins in the order listed above: a `useX` function
 that also returns JSX still classifies as `hook`, and a `<Ctx.Provider>`-shaped
 component classifies as `provider` rather than `component`.
 
+A const is read from its own declarator, so in
+`export const PAGE_SIZE = 20, Row = memo(RowImpl)` only `Row` is a memo. The
+initializer must be the wrapper call itself, read through `as`, `satisfies`,
+`!` and parentheses as `@aburi/lang-typescript` reads it
+(`memo(Row) as typeof Row` is a memo), and its outermost call names the role,
+so `memo(forwardRef(…))` is a memo.
+
 Not classified today (documented for completeness):
+
+- A wrapper call a const's initializer only contains: one in an array or an
+  object literal (`[{ element: memo(Page) }]`), handed to another call
+  (`withTheme(memo(Row))`) or to `new`, or in one branch of a conditional
+  (`flag ? memo(A) : B`). The const holds whatever that expression evaluates
+  to, not the wrapper's result.
+- A name a destructuring pattern pulls out of a wrapper call
+  (`const { displayName } = memo(Row)`) — the binding is not the wrapped
+  component, only something read off it.
 
 - Class components (`class X extends React.Component`) — the plugin only
   targets function components; adding class support is a separate signal path.

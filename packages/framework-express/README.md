@@ -37,11 +37,12 @@ to skip, and a handler alone makes them a route: a chain that has called
 any depth (`app.route("/users").get(listUsers).post(createUser)`), and a call
 whose first argument is a spread (`app.get(...routeArgs)`).
 
-Arguments are read through `as`, `satisfies`, `!` and parentheses, and so is a
-route's receiver chain, as `@aburi/lang-typescript` reads them to name the
-registration: `app.use(logger as RequestHandler)` is middleware as
-`app.use(logger)` is, and `app.route("/users")!.get(h)` is a route as
-`app.route("/users").get(h)` is.
+Arguments are read through `as`, `satisfies`, `!` and parentheses, and so are a
+route's receiver chain and a Router's initializer, as `@aburi/lang-typescript`
+reads them to name the registration: `app.use(logger as RequestHandler)` is
+middleware as `app.use(logger)` is, `app.route("/users")!.get(h)` is a route as
+`app.route("/users").get(h)` is, and
+`const r = express.Router() as express.Router` is a Router.
 
 Confidence is `high` when the file imports the `express` package or one of its
 subpaths (or reaches Express via CommonJS `require('express')`) and `medium`
