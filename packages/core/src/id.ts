@@ -12,6 +12,8 @@ const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
 const PRIVATE_NAME_PATTERN = /^#[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
+const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:)/
+
 const DRIVE_LETTER_PATTERN = /^[A-Za-z]:/
 
 const COMPONENT_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -282,7 +284,7 @@ export function posixWorkspaceRelativeViolation(
       value: path,
     }
   }
-  if (path.startsWith("/") || DRIVE_LETTER_PATTERN.test(path)) {
+  if (ABSOLUTE_PATH_PATTERN.test(path)) {
     return {
       code: "non-posix-path",
       message: `${subject} "${path}" is absolute; only workspace-relative paths are allowed`,
