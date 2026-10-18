@@ -34,10 +34,13 @@ describe("scan — App Router special files", () => {
     expect(symbolById(result, `ts:${file}#formatDate`).extKind).toBeNull()
   })
 
-  it("classifies a page whose default export is written apart from its declaration", async () => {
+  it.each([
+    ["by `export default`", "export default Page"],
+    ["by an export clause", "export { Page as default }"],
+  ])("classifies a page whose default export is written apart from its declaration, %s", async (_label, exportLine) => {
     await workspace.writeSource(
       "app/dashboard/page.tsx",
-      ["const Page = () => {", "  return null", "}", "export default Page", ""].join("\n"),
+      ["const Page = () => {", "  return null", "}", exportLine, ""].join("\n"),
     )
 
     const result = await scanWorkspace()
@@ -45,23 +48,92 @@ describe("scan — App Router special files", () => {
     expect(symbolById(result, "ts:app/dashboard/page.tsx#Page").extKind).toBe("framework:next:page")
   })
 
-  it("classifies each HTTP verb a route file exports, tagged with the verb", async () => {
-    await workspace.writeSource(
-      "app/api/users/route.ts",
+  it.each<[string, string[], Record<string, string[]>]>([
+    [
+      "functions declared with the export keyword",
       [
         "export async function GET() { return new Response('ok') }",
         "export async function POST() { return new Response('created') }",
-        "",
-      ].join("\n"),
-    )
+      ],
+      { GET: ["GET"], POST: ["POST"] },
+    ],
+    [
+      "an arrow assigned to an exported const",
+      ["export const GET = async () => new Response('ok')"],
+      { GET: ["GET"] },
+    ],
+    [
+      "consts destructured from Auth.js's handlers",
+      ['import { handlers } from "@/auth"', "export const { GET, POST } = handlers"],
+      { GET: ["GET"], POST: ["POST"] },
+    ],
+    [
+      "a const a wrapping call initialises",
+      [
+        'import { auth } from "@/auth"',
+        "export const GET = auth(async (req) => Response.json(req.auth))",
+      ],
+      { GET: ["GET"] },
+    ],
+    [
+      "a function an export clause names",
+      ["async function POST() { return new Response('created') }", "export { POST }"],
+      { POST: ["POST"] },
+    ],
+    [
+      "one handler an export clause names under two verbs",
+      [
+        'import NextAuth from "next-auth"',
+        "const handler = NextAuth({})",
+        "export { handler as GET, handler as POST }",
+      ],
+      { handler: ["GET", "POST"] },
+    ],
+  ])("classifies %s as the routes the module exports", async (_label, lines, routes) => {
+    await workspace.writeSource("app/api/users/route.ts", [...lines, ""].join("\n"))
 
     const result = await scanWorkspace()
 
-    for (const verb of ["GET", "POST"]) {
-      const handler = symbolById(result, `ts:app/api/users/route.ts#${verb}`)
+    for (const [name, verbs] of Object.entries(routes)) {
+      const handler = symbolById(result, `ts:app/api/users/route.ts#${name}`)
       expect(handler.extKind).toBe("framework:next:route")
-      expect(handler.derivedBy).toContain(`framework:next:route:${verb}`)
+      expect(
+        handler.derivedBy.filter((token) => token.startsWith("framework:next:route:")),
+      ).toEqual(verbs.map((verb) => `framework:next:route:${verb}`))
     }
+  })
+
+  it.each([
+    [
+      "a function of a route file named after a verb the module does not export",
+      "app/api/hook/route.ts",
+      [
+        "function OPTIONS() { return new Response(null, { status: 204 }) }",
+        "export async function GET() { return OPTIONS() }",
+      ],
+      "OPTIONS",
+    ],
+    [
+      "an export of a route file that is no HTTP verb",
+      "app/api/users/route.ts",
+      [
+        "export const dynamic = 'force-dynamic'",
+        "export async function GET() { return new Response('ok') }",
+      ],
+      "dynamic",
+    ],
+    [
+      "a verb-named const exported from a file that is no route",
+      "app/api/auth/handlers.ts",
+      ['import { handlers } from "@/auth"', "export const { GET, POST } = handlers"],
+      "GET",
+    ],
+  ])("does not classify %s", async (_label, file, lines, name) => {
+    await workspace.writeSource(file, [...lines, ""].join("\n"))
+
+    const result = await scanWorkspace()
+
+    expect(symbolById(result, `ts:${file}#${name}`).extKind).toBeNull()
   })
 
   it("tags a page in a 'use client' module with both its role and the directive", async () => {

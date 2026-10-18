@@ -17,6 +17,31 @@ Recognised files under `app/**/`:
 | `not-found.{ts,tsx,js,jsx}` | `framework:next:not-found` |
 | `route.{ts,js}` | `framework:next:route` |
 
+A component role (`page` through `not-found`) is the file's default export, written
+`export default function Page()`, `export default Page` or `export { Page as default }`.
+
+A route is what `route.{ts,js}` exports under an HTTP verb name (`GET`, `POST`, `PUT`,
+`DELETE`, `PATCH`, `OPTIONS`, `HEAD`). Next.js dispatches to the module's exports by name, so
+the plugin reads the export, not the declaration's name:
+
+| Written | Routes |
+|---|---|
+| `export async function GET() {}` | `GET` |
+| `export const GET = async () => …` | `GET` |
+| `export const { GET, POST } = handlers` (Auth.js) | `GET`, `POST` |
+| `export const GET = auth(async (req) => …)` | `GET` |
+| `async function POST() {}` with `export { POST }` | `POST` |
+| `const handler = NextAuth(options)` with `export { handler as GET, handler as POST }` | `GET` and `POST`, both on the one Symbol `handler` |
+| `function OPTIONS() {}`, not exported | none |
+
+A declaration exported only as `default`, or from inside a namespace, is not a route either.
+The handler is a `function` Symbol where the language plugin can see its value is a function,
+and a `const` where it cannot (a destructuring, a call's result). Both get the one extKind
+`framework:next:route`, so a consumer filtering on it sees every route; its manifest
+`baseKind` is `function`, what Next.js calls, and the Symbol's `kind` stays the language
+plugin's reading. Export clauses are read by `@aburi/lang-typescript`, which records the name
+each clause exports a declaration under.
+
 Component roles accept both React (`.tsx` / `.jsx`) and non-React (`.ts` / `.js`)
 extensions. `route.*` intentionally does **not** accept `.tsx` / `.jsx`: route
 files export named HTTP verb handlers and do not participate in JSX rendering,

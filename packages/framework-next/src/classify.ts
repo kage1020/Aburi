@@ -1,9 +1,9 @@
-import { lastQnameSegment } from "@aburi/core"
 import type {
   ExtractionContext,
   OpaqueAstNode,
   SymbolCandidate,
   SymbolClassification,
+  SymbolKind,
 } from "@aburi/types"
 import { type AppRouterFile, recognizeAppRouterFile } from "./app-router"
 import { detectModuleDirective, type ModuleDirective } from "./directives"
@@ -35,18 +35,35 @@ export function classifyNextSymbol(
   return classifyComponentSymbol(symbol, file, ctx)
 }
 
+/** Next calls the handler either way; a `const` is one whose value the language plugin cannot see into. */
+const ROUTE_HANDLER_KINDS: ReadonlySet<SymbolKind> = new Set<SymbolKind>(["function", "const"])
+
+const EXPORT_CLAUSE_PREFIX = "export-clause:"
+
 function classifyRouteSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: ExtractionContext,
 ): SymbolClassification | null {
-  if (symbol.kind !== "function") return null
-  // `lastQnameSegment` throws on a broken qname; that is a language-plugin bug not to swallow.
-  const leaf = lastQnameSegment(symbol.name)
-  if (!isNextHttpVerb(leaf)) return null
+  if (!ROUTE_HANDLER_KINDS.has(symbol.kind)) return null
+  const verbs = exportedNames(symbol).filter(isNextHttpVerb)
+  if (verbs.length === 0) return null
   return withDirective(
-    { extKind: "framework:next:route", derivedBy: `${NEXT_DERIVED_BY_PREFIX}:route:${leaf}` },
+    {
+      extKind: "framework:next:route",
+      derivedBy: verbs.map((verb) => `${NEXT_DERIVED_BY_PREFIX}:route:${verb}`).join(";"),
+    },
     ctx,
   )
+}
+
+/** The keyword exports a declaration under its whole qname, so a namespace's `N.GET` is no module export. */
+function exportedNames(symbol: SymbolCandidate<OpaqueAstNode>): string[] {
+  const names = new Set<string>()
+  if (symbol.derivedBy.includes("export-keyword")) names.add(symbol.name)
+  for (const token of symbol.derivedBy) {
+    if (token.startsWith(EXPORT_CLAUSE_PREFIX)) names.add(token.slice(EXPORT_CLAUSE_PREFIX.length))
+  }
+  return [...names]
 }
 
 function classifyComponentSymbol(
