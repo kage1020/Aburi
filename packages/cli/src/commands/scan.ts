@@ -82,7 +82,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   })
   requireLanguagePlugin(plugins.languages.length, loaded.source)
 
-  const managers = await detectManagers(workspaceRoot)
+  const managers = await detectManagers(workspaceRoot, config)
   const components = await resolveComponents(config, workspaceRoot, plugins.languages)
   const fellBackToSingleComponent =
     declaredComponents(config) === undefined && managers.workspaces.length === 0

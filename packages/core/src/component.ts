@@ -31,7 +31,7 @@ export interface DetectComponentsOptions {
 }
 
 export async function detectComponents(options: DetectComponentsOptions): Promise<Component[]> {
-  const { workspaces } = await detectManagers(options.workspaceRoot)
+  const { workspaces } = await detectManagers(options.workspaceRoot, options)
   const mergedCandidates =
     workspaces.length === 0
       ? [rootCandidate(options.workspaceRoot)]

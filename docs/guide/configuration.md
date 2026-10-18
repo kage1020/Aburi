@@ -39,6 +39,11 @@ them. Turn that off when you want to analyse build output on purpose:
 { "respectGitignore": false }
 ```
 
+A directory Aburi may not list ends the run with exit 1 and names it, because every file
+under it would otherwise be missing from the analysis without a word. One that `.gitignore`
+excludes is passed over while `.gitignore` is honoured, as git passes over it, so a data
+directory a container owns does not stop a scan.
+
 ## Choose plugins
 
 Three lists, one per plugin kind:

@@ -18,7 +18,7 @@ aburi <command> [flags]
 | Code | Meaning |
 |---|---|
 | `0` | Success, no gate tripped. |
-| `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output), an unexpected exception, or `explain` found no match. |
+| `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output; a file or directory the scan may not read is named), an unexpected exception, or `explain` found no match. |
 | `2` | Bad invocation: an unknown flag, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 

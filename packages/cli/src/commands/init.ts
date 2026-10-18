@@ -17,6 +17,11 @@ const CONFIG_ARTEFACT = "the config"
 
 const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
+const UNREADABLE_TREE_CODES: ReadonlySet<string> = new Set([
+  "scan-gitignore-unreadable",
+  "scan-directory-unreadable",
+])
+
 export interface InitOptions {
   respectGitignore?: boolean
   cwd?: string
@@ -57,7 +62,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     )
   }
 
-  const managers = await detectManagers(workspaceRoot)
+  const managers = await detectManagers(workspaceRoot, options)
   let components: Awaited<ReturnType<typeof detectComponents>>
   try {
     components = await detectComponents({
@@ -69,7 +74,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   } catch (error) {
     throw new CliError(
       `Failed to detect components: ${errorMessage(error)}${gitignoreEscapeHatch(error)}`,
-      error instanceof CoreError && error.code === "scan-gitignore-unreadable"
+      error instanceof CoreError && UNREADABLE_TREE_CODES.has(error.code)
         ? "runtime-error"
         : "config-error",
       { cause: error },
