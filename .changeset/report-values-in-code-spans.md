@@ -1,0 +1,7 @@
+---
+"@aburi/markdown-projection": minor
+---
+
+A value the report quotes from the IR, the diff or the config is now in a code span wherever it appears, so Markdown inside it is shown rather than rendered. Five places wrote it bare. The thrown types after a signature, `throws ApiError<NotFound>`, lost `<NotFound>` to GitHub's sanitizer. The direct sources of a propagated effect, `[propagated from ts:src/__generated__/client.ts#save]`, rendered `generated` in bold and named a file that does not exist. A Component's `name` on its page could start a heading with a newline, or fold the rest of the page away with a `<details>`. A drop reason on the component page, in Dropped changes and in `aburi explain` turned a `frameworkHints` glob such as `class *Payload*` into italics. And the refs in the `diff.md` title, `# Aburi diff: main..feat/_wip_`, rendered `wip` in italics. These now read ``throws `ApiError<NotFound>` ``, ``[propagated from `ts:src/__generated__/client.ts#save`]``, ``**Name**: `Payments <beta>` ``, ``— `pure DTO` `` and ``# Aburi diff: `main`..`feat/_wip_` ``. A line break inside one of these values shows as a space, as in every other span, so `aburi explain` no longer keeps the line breaks of a multi-line drop reason.
+
+Only the Markdown changes. `diff.json` and every fingerprint are as before, so an IR scanned before this release compared with one scanned after reports nothing new. The first line of every `diff.md` now reads `` # Aburi diff: `<base>`..`<head>` ``; a workflow that matches the old title verbatim needs the backticks.

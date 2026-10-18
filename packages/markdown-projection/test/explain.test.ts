@@ -99,17 +99,11 @@ describe("projectSymbolExplain — a dropped Symbol", () => {
         "# `Dto` *(class)* — dropped",
         "",
         "**File**: `src/a.ts:1-10`",
-        "**Drop reason**: pure DTO",
+        "**Drop reason**: `pure DTO`",
         "",
         "_(dropped symbols carry no rules / effects / calls / fingerprint by IR contract.)_",
         "",
       ].join("\n"),
-    )
-  })
-
-  it("leaves a multi-line drop reason exactly as the producer wrote it", () => {
-    expect(projectSymbolExplain(dto("matched rule A\n\n\nmatched rule B"))).toContain(
-      "matched rule A\n\n\nmatched rule B",
     )
   })
 })

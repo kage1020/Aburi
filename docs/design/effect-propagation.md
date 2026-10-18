@@ -232,7 +232,7 @@ A "propagated-only change" — the callee gained (or lost) an effect while the c
 
 1. The callee's local `effects[]` changes. Its `logic` fingerprint changes. `diff-algorithm.md` §4 emits `status: "changed"` with `delta.logicChanged: true` on the callee.
 2. Propagation runs. Every caller in the transitive closure sees a new (or removed) propagated entry in `effects[]`. Their `logic` fingerprint changes. `diff-algorithm.md` §4 emits `status: "changed"` with `delta.logicChanged: true` on each caller.
-3. The Markdown projection ([`diff-algorithm.md`](./diff-algorithm.md) §7.2) renders these under section **2. Logic changes**. The `propagated: true` discriminator (§5.1) lets the projection format the sub-line as "logic change — propagated from `<derivedFrom>`" so the reviewer sees at a glance that the caller's own body was untouched.
+3. The Markdown projection ([`diff-algorithm.md`](./diff-algorithm.md) §7.2) renders these under section **2. Logic changes**. The `propagated: true` discriminator (§5.1) lets the projection end the effect's row with ``[propagated from `<derivedFrom>`]`` in place of a line tag, each Symbol id in a code span of its own ([`markdown-projection.md`](./markdown-projection.md) §5.7), so the reviewer sees at a glance that the caller's own body was untouched.
 
 Example — two diff scenarios:
 

@@ -10,6 +10,7 @@ import {
   fingerprintLine,
   inlineCode,
   isSymbolIdEndpoint,
+  joinCode,
   orderEffects,
   orderFilesAscending,
   orderSymbolsWithinFile,
@@ -36,7 +37,7 @@ export function projectComponent(input: ProjectComponentInput): string {
   const lines: string[] = []
   lines.push(`# Component: ${component.id}`)
   lines.push("")
-  lines.push(`**Name**: ${component.name}`)
+  lines.push(`**Name**: ${inlineCode(component.name)}`)
   lines.push(`**Roots**: ${joinCode(component.roots)}`)
   lines.push(`**Languages**: ${component.languages.join(", ")}`)
   if ((component.frameworks ?? []).length > 0) {
@@ -94,15 +95,11 @@ export function projectComponent(input: ProjectComponentInput): string {
       droppedFoldout(
         [...droppedSymbols]
           .sort((a, b) => compareStrings(a.id, b.id))
-          .map((s) => `${inlineCode(s.id)} — ${requireDropReason(s)}`),
+          .map((s) => `${inlineCode(s.id)} — ${inlineCode(requireDropReason(s))}`),
       ),
     )
   }
   return renderDocument(lines)
-}
-
-function joinCode(items: readonly string[]): string {
-  return items.map((item) => inlineCode(item)).join(", ")
 }
 
 function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {

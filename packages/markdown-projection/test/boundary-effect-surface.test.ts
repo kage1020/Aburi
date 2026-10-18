@@ -62,7 +62,7 @@ describe("projectComponent — Boundary effect surface", () => {
       "## Boundary effect surface",
       "",
       "- `Ctl.create` — db.write(`prisma.audit.create`), db.write(`prisma.invoice.create`) " +
-        "[propagated from ts:src/svc.ts#Svc.persist, ts:src/other.ts#Other.helper], " +
+        "[propagated from `ts:src/svc.ts#Svc.persist`, `ts:src/other.ts#Other.helper`], " +
         "queue.publish(`bus.emit`)",
       "- `Ctl.update` — db.write(`prisma.invoice.create`)",
       "",

@@ -1,4 +1,17 @@
-import { component, effect, makeIR, makeSymbol, rule, symbolId } from "@aburi/test-support"
+import {
+  changed,
+  component,
+  decorator,
+  effect,
+  makeDiff,
+  makeIR,
+  makeSymbol,
+  rule,
+  sig,
+  symbolId,
+  zeroFp,
+} from "@aburi/test-support"
+import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   callRow,
@@ -7,12 +20,14 @@ import {
   INLINE_CODE_MAX_LENGTH,
   inlineCode,
   projectComponent,
+  projectDiff,
   projectSymbolExplain,
   projectWorkspace,
   ruleRow,
   tableCell,
 } from "../src"
-import { LONG_CONDITION } from "./fixtures"
+import { LONG_CONDITION, namedSymbol, projectChanges } from "./fixtures"
+import { sectionOf, shownText } from "./markdown"
 
 const THROWN_TEMPLATE = `new Error(\`unknown kind: \${k}\`)`
 const CACHE_KEY_TEMPLATE = `redis.get(\`k:\${id}\`)`
@@ -230,5 +245,87 @@ describe("table cells keep their column count", () => {
     const row = md.split("\n").find((l) => l.startsWith("| 4 |")) ?? ""
     expect(row).not.toBe("")
     expect(cellCount(row)).toBe(cellCount(header))
+  })
+})
+
+describe("a value written into a row of the report", () => {
+  const VALUE = "ts:src/_x_/<T>/`y`\n## z.ts#f"
+  const SHOWN = "ts:src/_x_/<T>/`y` ## z.ts#f"
+
+  const handler = (overrides: Omit<Parameters<typeof makeSymbol>[0], "id" | "name">) =>
+    makeSymbol({ id: "ts:src/a.ts#handler", name: "handler", ...overrides })
+  const dropped = (dropReason: string): IRSymbol =>
+    handler({ kind: "class", dropped: true, dropReason, fingerprint: zeroFp() })
+  const propagatedFrom = (source: string) =>
+    effect({
+      id: "db.write",
+      target: "prisma.user.create",
+      plugin: "effects-prisma",
+      propagated: true,
+      derivedFrom: [source],
+    })
+  const page = (symbols: IRSymbol[], name = "Billing") =>
+    projectComponent({ component: component({ id: "billing", name }), symbols, dependencies: [] })
+  const titled = (refs: { base?: string; head?: string }) => {
+    const diff = makeDiff()
+    return projectDiff({
+      ...diff,
+      base: { ...diff.base, ref: refs.base ?? diff.base.ref },
+      head: { ...diff.head, ref: refs.head ?? diff.head.ref },
+    })
+  }
+
+  it("is one CommonMark rewrites when it is written bare", () => {
+    expect(shownText(`- ${VALUE}`)).not.toContain(SHOWN)
+  })
+
+  it.each<[string, (value: string) => string]>([
+    ["a thrown type", (value) => page([handler({ signature: sig({ throws: [value] }) })])],
+    [
+      "a propagated effect's direct source",
+      (value) => page([handler({ effects: [propagatedFrom(value)] })]),
+    ],
+    [
+      "a direct source in the Boundary effect surface",
+      (value) =>
+        sectionOf(
+          page([
+            handler({
+              decorators: [decorator({ name: "Post", boundary: true })],
+              effects: [propagatedFrom(value)],
+            }),
+          ]),
+          "## Boundary effect surface",
+        ).join("\n"),
+    ],
+    [
+      "a direct source in a delta row",
+      (value) =>
+        projectChanges([
+          changed(namedSymbol("Foo"), {
+            logicChanged: true,
+            effects: { added: [propagatedFrom(value)], removed: [], modified: [] },
+          }),
+        ]),
+    ],
+    ["a Component name", (value) => page([], value)],
+    ["the base ref in the diff title", (value) => titled({ base: value })],
+    ["the head ref in the diff title", (value) => titled({ head: value })],
+    ["a drop reason on the component page", (value) => page([dropped(value)])],
+    [
+      "a drop reason in Dropped changes",
+      (value) =>
+        projectChanges([
+          {
+            status: "dropped-toggled",
+            before: handler({}),
+            after: dropped(value),
+            direction: "to-dropped",
+          },
+        ]),
+    ],
+    ["a drop reason in explain", (value) => projectSymbolExplain(dropped(value))],
+  ])("shows %s as written, its line break as a space", (_, render) => {
+    expect(shownText(render(VALUE))).toContain(SHOWN)
   })
 })

@@ -961,7 +961,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
 A format intended for pasting into PR comments:
 
 ```md
-# Aburi diff: main..HEAD
+# Aburi diff: `main`..`HEAD`
 
 **Summary**: +5 added, -3 removed, ~12 changed, 2 moved, 1 moved+changed
 

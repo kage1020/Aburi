@@ -130,6 +130,36 @@ backslash outright. `RelativePath` admits `|`, and `Call.target` (`minLength: 1`
 admits both. The escaping is applied to every cell regardless — a table whose correctness
 depends on which column the value landed in is one schema change away from being wrong.
 
+#### 3.4.2 Values in a row
+
+A value the IR, the diff or the config supplies goes in a code span wherever a row names it,
+free-form text included: a thrown type (§5.5), a propagated effect's direct sources (§5.7), a
+Component's `name` (§5.1), a `dropReason` (§3.6, §6.2, §7) and each ref of the `diff.md` title
+(§6.1). Written bare, the value is read as Markdown, and what a reviewer sees is no longer what
+the IR holds:
+
+- `_` and `*` open emphasis: `ts:src/__generated__/client.ts#save` renders `generated` in bold
+  and drops the underscores, naming a file that does not exist, and a `frameworkHints` drop
+  reason ending `class *Payload*` loses its glob to italics.
+- `<…>` is raw HTML, which GitHub's sanitizer then removes: `ApiError<NotFound>` reads
+  `ApiError`.
+- A newline starts a block: a name holding `\n## Beta` writes a heading of its own, and one
+  holding `<details>` an unclosed fold that swallows the rest of the page.
+- GFM's strikethrough takes a single `~`, so a title of `HEAD~2..HEAD~1` would strike out
+  `2..HEAD`.
+
+A span is the one construct none of these reach, with its fence sized and its newlines
+collapsed as above. Backslash escapes would keep `main..HEAD` byte for byte, and are not used:
+the characters to escape are a list that grows with every extension the renderer turns on (`~`
+is GFM's), and a newline still cannot sit inside a heading or a list item's row.
+
+What a row writes bare is what admits no Markdown by its grammar: `ComponentId`, `LanguageId`,
+`EffectId`, plugin, framework and package-manager names, the schema's enums (`kind`,
+`visibility`, `confidence`, a skip reason, a change status), counts and line numbers. A
+component-level Dependency endpoint is bare on the same footing, as the Component id it is
+([`ir-schema.md`](./ir-schema.md) §11). The headings, labels and notes around the values are
+the projection's own fixed text (§10).
+
 ### 3.5 Confidence badges
 
 | Value | Display |
@@ -150,8 +180,8 @@ Dropped symbols are shown in a `## Dropped` section inside a `<details>` fold:
 <details>
 <summary>14 dropped symbols</summary>
 
-- `ts:apps/billing/src/dto/create-invoice.dto.ts#CreateInvoiceDto` — pure DTO
-- `ts:apps/billing/src/types.ts#Invoice` — interface (data model)
+- `ts:apps/billing/src/dto/create-invoice.dto.ts#CreateInvoiceDto` — `pure DTO`
+- `ts:apps/billing/src/types.ts#Invoice` — `interface (data model)`
 
 </details>
 ```
@@ -254,7 +284,7 @@ The component's logical boundary + full details of every symbol belonging to tha
 ```md
 # Component: billing
 
-**Name**: Billing
+**Name**: `Billing`
 **Roots**: `apps/billing`, `packages/billing-domain`
 **Languages**: ts
 **Frameworks**: nestjs
@@ -332,14 +362,14 @@ A symbol with everything empty (class without boundary, no methods) is normally 
 
 ### 5.5 Signature display
 
-`(name: type, name: type) → output` form. Multiple outputs are separated by `|`. `throws: A, B` is appended.
+`(name: type, name: type) → output` form, in one code span. Multiple outputs are separated by `|`. ``throws `A`, `B` `` is appended, each thrown type in a span of its own: a JSDoc `@throws {…}` is recorded verbatim, generics included (§3.4.2).
 `async` / `generator*` / `<T,U>` (type parameters) are shown alongside as badges.
 
 Each input is written as TypeScript writes it, whatever language the IR came from: an input's `optional` and `rest` fields ([ir-schema.md](./ir-schema.md) §7) print as `a?: string` and `...ids: string[]`, and a defaulted input as the optional one it is to a caller, `limit?`. An input with an empty `type` prints its name alone, `x`. The `signature.inputs` rows of a diff entry spell inputs the same way.
 
 Example:
-```
-(id: string) → Promise<User | null> throws NotFoundError ⚡async
+```md
+`(id: string) → Promise<User | null>` throws `NotFoundError` ⚡async
 ```
 
 ### 5.6 Rule display
@@ -398,6 +428,13 @@ Extension effects with the `x-` prefix use the same form:
 - x-stripe:charge: `stripe.charges.create` (L42) [effects-stripe]
 ```
 
+A propagated effect has no line of its own; its direct sources take the line tag's place, each
+Symbol id in a span of its own (§3.4.2). The Boundary effect surface and the delta rows of
+`diff.md` write the same suffix:
+```
+- db.write: `prisma.invoice.create` [propagated from `ts:src/repo.ts#Repo.save`] [effects-prisma]
+```
+
 ### 5.8 Call display
 
 ```
@@ -425,7 +462,7 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ### 6.1 Overall structure
 
 ```md
-# Aburi diff: <base.ref>..<head.ref>
+# Aburi diff: `<base.ref>`..`<head.ref>`
 
 **Summary**: +5 added · -3 removed · ~12 changed · 2 moved · 1 moved+changed · ?2 unknown
 
@@ -634,10 +671,10 @@ The Unknown group is not split by level the way the added and removed groups are
 <summary>4 added / 1 removed</summary>
 
 ### Added
-- `ts:apps/billing/src/dto/refund.dto.ts#RefundDto` — pure DTO
+- `ts:apps/billing/src/dto/refund.dto.ts#RefundDto` — `pure DTO`
 
 ### Removed
-- `ts:apps/billing/src/dto/legacy.dto.ts#LegacyDto` — pure DTO
+- `ts:apps/billing/src/dto/legacy.dto.ts#LegacyDto` — `pure DTO`
 
 </details>
 ```
@@ -810,11 +847,7 @@ Renders L2 standalone. Written to `out/symbols/<sanitized-id>.md` or to `stdout`
 `@Post('/invoices')` `@UseGuards(AuthGuard)`
 
 ## Signature
-```
-(customerId: CustomerId, items: LineItem[]) → Promise<Invoice>
-throws: CreditLimitExceeded
-async
-```
+`(customerId: CustomerId, items: LineItem[]) → Promise<Invoice>` throws `CreditLimitExceeded` ⚡async
 
 ## Rules
 - guard: `customer.creditLimit < invoice.total` (L58)
@@ -851,7 +884,7 @@ When a dropped symbol is explained:
 
 **Component**: billing
 **File**: `apps/billing/src/dto/create-invoice.dto.ts:1-8`
-**Drop reason**: pure DTO
+**Drop reason**: `pure DTO`
 
 (dropped symbols carry no rules/effects/calls/fingerprint, so there are no detail sections)
 ```
@@ -921,6 +954,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP13c | diff with twelve API changes and one thin removed Symbol, projected with a budget that holds API changes only as names | `➖ Removed` is kept whole below the names-only API changes wherever that fits: not named only in a larger document, and not omitted |
 | MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
 | MP15 | A signature with an optional input and a rest input; a diff entry whose `signature.inputs.added` holds a rest input | `(a?: string, ...ids: string[])` in the signature line, and `` `...ids: string[]` `` in the diff row (§5.5). An input with an empty `type` prints as its name alone |
+| MP16 | A value holding `_x_`, `<T>`, a backtick and a newline, as a thrown type, as a propagated effect's direct source (Symbol block, Boundary effect surface, delta row), as a Component `name`, as either ref of the `diff.md` title, and as a `dropReason` (component page, Dropped changes, `explain`) | Rendered as CommonMark, each shows the value as written, its newline as a space: no emphasis, no HTML and no block of its own (§3.4.2) |
 
 ## 12. Design decisions
 

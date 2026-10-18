@@ -83,7 +83,7 @@ describe("renderExample", () => {
 
     const { page } = await renderExample(dir)
 
-    expect(page).toContain("### Aburi diff: HEAD~1..HEAD")
+    expect(page).toContain("### Aburi diff: `HEAD~1`..`HEAD`")
     expect(page).toContain("guard: `total < 0`")
     expect(page).not.toMatch(/^# Aburi diff/m)
   })

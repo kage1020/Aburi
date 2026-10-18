@@ -1,4 +1,5 @@
 import type { DiffResult } from "@aburi/types"
+import { inlineCode } from "../format"
 import { renderComponentChanges } from "./component-changes"
 import { renderDependencyChanges } from "./dependency-changes"
 import {
@@ -40,7 +41,7 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     )
   }
   const heading = [
-    `# Aburi diff: ${diff.base.ref}..${diff.head.ref}`,
+    `# Aburi diff: ${inlineCode(diff.base.ref)}..${inlineCode(diff.head.ref)}`,
     "",
     `**Summary**: ${summaryLine(diff)}`,
     "",
