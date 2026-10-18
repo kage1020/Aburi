@@ -12,7 +12,6 @@ function condensed(outSccs: readonly number[][]): SccNode[] {
     id: `scc-${index}`,
     members: [`ts:src/n${index}.ts#f` as SymbolId],
     outSccs: [...out],
-    outEdgeConfidence: new Map(out.map((o) => [o, "high"])),
   }))
 }
 

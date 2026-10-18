@@ -9,6 +9,7 @@ import type { CallEdge } from "./callgraph"
 import { compareCodeUnit } from "./order"
 import {
   buildAdjacency,
+  callersWithinScc,
   condense,
   invariantFailure,
   maxConfidence,
@@ -37,9 +38,41 @@ interface AggregatedEntry {
   id: string
   target: string
   plugin: string
-  confidence: Confidence
   derivedBy: string
   hasLocal: boolean
+}
+
+type ConfidenceByKey = Map<string, Confidence>
+
+function raise(reached: ConfidenceByKey, key: string, offered: Confidence): boolean {
+  const held = reached.get(key)
+  if (held !== undefined && maxConfidence(held, offered) === held) return false
+  reached.set(key, offered)
+  return true
+}
+
+/** A confidence only rises, through three levels, so each (member, key) is queued at most thrice. */
+function settleWithinScc(
+  members: readonly SymbolId[],
+  callersInScc: ReadonlyMap<SymbolId, ReadonlyArray<{ from: SymbolId; confidence: Confidence }>>,
+  confidenceByNode: ReadonlyMap<SymbolId, ConfidenceByKey>,
+): void {
+  const reachedOf = (id: SymbolId): ConfidenceByKey =>
+    confidenceByNode.get(id) ?? invariantFailure(`SCC member ${id} has no confidence yet`)
+  const pending: Array<{ callee: SymbolId; key: string }> = []
+  for (const member of members) {
+    for (const key of reachedOf(member).keys()) pending.push({ callee: member, key })
+  }
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { callee, key } = next
+    const carried =
+      reachedOf(callee).get(key) ?? invariantFailure(`${callee} lost its confidence for ${key}`)
+    for (const { from, confidence } of callersInScc.get(callee) ?? []) {
+      if (raise(reachedOf(from), key, minConfidence(confidence, carried))) {
+        pending.push({ callee: from, key })
+      }
+    }
+  }
 }
 
 export function propagateEffects(input: PropagateInput): PropagateResult {
@@ -51,8 +84,10 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
   const { sccs, sccOfNode } = tarjanSCC(nodeIds, adjacency)
   const condensed = condense(sccs, sccOfNode, adjacency)
   const sweepOrder = reverseTopoOrder(condensed)
+  const callersInScc = callersWithinScc(adjacency, sccOfNode)
 
   const aggregateBySccIdx: Map<string, AggregatedEntry>[] = condensed.map(() => new Map())
+  const confidenceByNode = new Map<SymbolId, ConfidenceByKey>()
 
   for (const sccIdx of sweepOrder) {
     const scc = condensed[sccIdx] ?? invariantFailure(`sweepOrder references missing SCC ${sccIdx}`)
@@ -63,39 +98,46 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
       const symbol =
         symbolById.get(memberId) ??
         invariantFailure(`SCC member ${memberId} missing from symbolById`)
+      const reached: ConfidenceByKey = new Map()
       for (const effect of symbol.effects) {
         if (effect.propagated === true) continue
         const key = effectKey(effect.id, effect.target)
+        raise(reached, key, effect.confidence)
         const existing = agg.get(key)
         if (existing === undefined) {
           agg.set(key, {
             id: effect.id,
             target: effect.target,
             plugin: effect.plugin,
-            confidence: effect.confidence,
             derivedBy: effect.derivedBy,
             hasLocal: true,
           })
         } else {
           existing.hasLocal = true
-          existing.confidence = maxConfidence(existing.confidence, effect.confidence)
           if (effect.derivedBy < existing.derivedBy) {
             existing.derivedBy = effect.derivedBy
             existing.plugin = effect.plugin
           }
         }
       }
+      for (const { to, confidence } of adjacency.get(memberId) ?? []) {
+        if (sccOfNode.get(to) === sccIdx) continue
+        const carried =
+          confidenceByNode.get(to) ??
+          invariantFailure(`callee ${to} of ${memberId} swept after its caller`)
+        for (const [key, calleeConfidence] of carried) {
+          raise(reached, key, minConfidence(confidence, calleeConfidence))
+        }
+      }
+      confidenceByNode.set(memberId, reached)
     }
+    if (scc.members.length > 1) settleWithinScc(scc.members, callersInScc, confidenceByNode)
 
     for (const toScc of scc.outSccs) {
-      const edgeConfidence =
-        scc.outEdgeConfidence.get(toScc) ??
-        invariantFailure(`outSccs entry ${toScc} missing edge-confidence for SCC ${sccIdx}`)
       const downstream =
         aggregateBySccIdx[toScc] ??
         invariantFailure(`downstream aggregate missing for SCC ${toScc}`)
       for (const downEntry of downstream.values()) {
-        const propagatedConfidence = minConfidence(downEntry.confidence, edgeConfidence)
         const key = effectKey(downEntry.id, downEntry.target)
         const existing = agg.get(key)
         if (existing === undefined) {
@@ -103,13 +145,11 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
             id: downEntry.id,
             target: downEntry.target,
             plugin: downEntry.plugin,
-            confidence: propagatedConfidence,
             derivedBy: downEntry.derivedBy,
             hasLocal: false,
           })
           continue
         }
-        existing.confidence = maxConfidence(existing.confidence, propagatedConfidence)
         if (!existing.hasLocal && downEntry.derivedBy < existing.derivedBy) {
           existing.derivedBy = downEntry.derivedBy
           existing.plugin = downEntry.plugin
@@ -137,6 +177,8 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
     const localKeys = localKeysBySymbol.get(original.id) ?? new Set()
     const mySccIdx = sccOfNode.get(original.id)
     const mySccAgg = mySccIdx !== undefined ? aggregateBySccIdx[mySccIdx] : undefined
+    const reached =
+      confidenceByNode.get(original.id) ?? invariantFailure(`symbol ${original.id} was never swept`)
     const outCallees = (adjacency.get(original.id) ?? []).map((edge) => edge.to)
 
     const propagatedEntries: Effect[] = []
@@ -160,7 +202,8 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
           id: entry.id,
           target: entry.target,
           plugin: entry.plugin,
-          confidence: entry.confidence,
+          confidence:
+            reached.get(key) ?? invariantFailure(`${original.id} reached ${key} at no confidence`),
           derivedBy: entry.derivedBy,
           propagated: true,
           derivedFrom,

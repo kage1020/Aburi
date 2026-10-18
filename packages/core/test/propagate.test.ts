@@ -1,4 +1,4 @@
-import { makeIR, symbolById } from "@aburi/test-support"
+import { makeIR, seeded, symbolById } from "@aburi/test-support"
 import type { Confidence, Effect, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { CallEdge } from "../src/callgraph"
@@ -18,6 +18,8 @@ const A = "ts:a.ts#A"
 const B = "ts:b.ts#B"
 const C = "ts:c.ts#C"
 const D = "ts:d.ts#D"
+const X = "ts:x.ts#X"
+const Y = "ts:y.ts#Y"
 
 describe("what reaches a caller", () => {
   it("carries a callee's effect to its caller, without a line", () => {
@@ -207,6 +209,153 @@ describe("the confidence a propagated effect carries", () => {
     const { symbols: out } = propagateEffects({ symbols, edges })
 
     expect(propagatedOf(out, A)).toMatchObject([{ confidence: "high", derivedFrom: [B, C] }])
+  })
+
+  it.each<[string, CallEdge[]]>([
+    ["without", []],
+    ["with", [edge(B, A, { confidence: "low" })]],
+  ])("is the weakest hop's on the only path to it, %s a call back into the caller", (_case, back) => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+      makeSymbol(X),
+    ]
+    const edges = [edge(X, A), edge(A, B, { confidence: "low" }), ...back]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect(propagatedOf(out, A).map((e) => e.confidence)).toEqual(["low"])
+    expect(propagatedOf(out, X).map((e) => e.confidence)).toEqual(["low"])
+  })
+
+  it("is each cycle member's own, and a caller outside the cycle reads the member it calls", () => {
+    const symbols = [
+      makeSymbol(A),
+      makeSymbol(B),
+      makeSymbol(C, { effects: [localEffect({ id: "db.write", target: "x" })] }),
+      makeSymbol(X),
+      makeSymbol(Y),
+    ]
+    const edges = [
+      edge(A, B, { confidence: "low" }),
+      edge(B, A),
+      edge(B, C),
+      edge(X, A),
+      edge(Y, B),
+    ]
+
+    const { symbols: out } = propagateEffects({ symbols, edges })
+
+    expect([A, B, X, Y].map((id) => [id, propagatedOf(out, id).map((e) => e.confidence)])).toEqual([
+      [A, ["low"]],
+      [B, ["high"]],
+      [X, ["low"]],
+      [Y, ["high"]],
+    ])
+  })
+})
+
+const RANK: Record<Confidence, number> = { low: 0, medium: 1, high: 2 }
+const CONFIDENCES: readonly Confidence[] = ["low", "medium", "high"]
+
+/** Every Symbol's confidence per target: local evidence, then edges relaxed until nothing rises. */
+function relaxToFixedPoint(
+  symbols: readonly IRSymbol[],
+  edges: readonly CallEdge[],
+): Map<string, Map<string, Confidence>> {
+  const reached = new Map<string, Map<string, Confidence>>(symbols.map((s) => [s.id, new Map()]))
+  const raise = (id: string, target: string, offered: Confidence): boolean => {
+    const held = reached.get(id)?.get(target)
+    if (held !== undefined && RANK[held] >= RANK[offered]) return false
+    reached.get(id)?.set(target, offered)
+    return true
+  }
+  for (const s of symbols) for (const e of s.effects) raise(s.id, e.target, e.confidence)
+  for (let changed = true; changed; ) {
+    changed = false
+    for (const { from, to, confidence } of edges) {
+      for (const [target, carried] of reached.get(to) ?? []) {
+        const offered = RANK[confidence] < RANK[carried] ? confidence : carried
+        if (raise(from, target, offered)) changed = true
+      }
+    }
+  }
+  return reached
+}
+
+function expectedByFixedPoint(
+  symbols: readonly IRSymbol[],
+  edges: readonly CallEdge[],
+): IRSymbol[] {
+  const reached = relaxToFixedPoint(symbols, edges)
+  return symbols.map((s) => {
+    const local = new Set(s.effects.map((e) => e.target))
+    const propagated = [...(reached.get(s.id) ?? [])]
+      .filter(([target]) => !local.has(target))
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(
+        ([target, confidence]): Effect => ({
+          id: "db.write",
+          target,
+          plugin: "effects-test",
+          confidence,
+          derivedBy: "convention:test",
+          propagated: true,
+          derivedFrom: [
+            ...new Set(
+              edges
+                .filter((e) => e.from === s.id && reached.get(e.to)?.has(target))
+                .map((e) => e.to),
+            ),
+          ].sort(),
+        }),
+      )
+    return { ...s, effects: [...s.effects, ...propagated] }
+  })
+}
+
+function randomGraph(random: () => number): { symbols: IRSymbol[]; edges: CallEdge[] } {
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T
+  const ids = Array.from({ length: 2 + Math.floor(random() * 5) }, (_, i) => `ts:n${i}.ts#f`)
+  const symbols = ids.map((id) =>
+    makeSymbol(id, {
+      effects:
+        random() < 0.4
+          ? Array.from({ length: 1 + Math.floor(random() * 2) }, (_, line) =>
+              localEffect({
+                id: "db.write",
+                target: pick(["t0", "t1", "t2"]),
+                confidence: pick(CONFIDENCES),
+                line: line + 1,
+              }),
+            )
+          : [],
+    }),
+  )
+  const edges: CallEdge[] = []
+  for (const from of ids) {
+    for (const to of ids) {
+      if (random() >= 0.35) continue
+      edges.push(edge(from, to, { confidence: pick(CONFIDENCES) }))
+      if (random() < 0.15) edges.push(edge(from, to, { confidence: pick(CONFIDENCES), line: 2 }))
+    }
+  }
+  return { symbols, edges }
+}
+
+describe("propagateEffects against a plain fixed-point iteration over the whole graph", () => {
+  it("gives every Symbol the effects, confidence and derivedFrom the iteration settles on", () => {
+    const random = seeded(20261018)
+    let trialsWithCycles = 0
+    for (let trial = 0; trial < 500; trial++) {
+      const { symbols, edges } = randomGraph(random)
+
+      const { symbols: out, stats } = propagateEffects({ symbols, edges })
+
+      expect(out, `trial ${trial}`).toEqual(expectedByFixedPoint(symbols, edges))
+      if (stats.maxSccSize > 1) trialsWithCycles += 1
+    }
+    expect(trialsWithCycles).toBeGreaterThan(250)
   })
 })
 
