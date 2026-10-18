@@ -67,13 +67,17 @@ export function resolveTarget(
     return null
   }
 
-  return (
-    resolveInFileScope(ctx, head, tail, trace) ??
-    resolveInImportScope(ctx, head, tail, trace) ??
-    (tail.length === 0
-      ? null
-      : (resolveInComponentScope(ctx, trace) ?? resolveInWorkspaceScope(ctx, trace)))
-  )
+  // Scoping has already chosen the declaration a bound head names, so a missing member is final:
+  // a same-named Symbol in another file is not a candidate.
+  const bound =
+    resolveInFileScope(ctx, head, tail, trace) ?? resolveInImportScope(ctx, head, tail, trace)
+  if (bound !== null) return bound.hit
+  if (tail.length === 0) return null
+  return resolveInComponentScope(ctx, trace) ?? resolveInWorkspaceScope(ctx, trace)
+}
+
+interface BoundHead {
+  hit: ResolutionHit | null
 }
 
 function resolveInFileScope(
@@ -81,12 +85,12 @@ function resolveInFileScope(
   head: string,
   tail: readonly string[],
   trace: ResolutionTrace,
-): ResolutionHit | null {
+): BoundHead | null {
   const file = ctx.caller.source.file
   const anchor = soleCandidate(ctx.run.table.topLevelByFile.get(file)?.get(head), trace)
   if (anchor === null) return null
   const id = tail.length === 0 ? anchor.id : memberId(ctx, file, head, tail)
-  return id === null ? null : { id, confidence: "high" }
+  return { hit: id === null ? null : { id, confidence: "high" } }
 }
 
 function memberId(
@@ -112,9 +116,11 @@ function resolveInImportScope(
   head: string,
   tail: readonly string[],
   trace: ResolutionTrace,
-): ResolutionHit | null {
+): BoundHead | null {
   const candidates = new Set<SymbolId>()
+  let declared = false
   const consider = (file: string, first: string, rest: readonly string[]) => {
+    if (ctx.run.table.topLevelByFile.get(file)?.has(first) === true) declared = true
     const id = memberId(ctx, file, first, rest)
     if (id !== null) candidates.add(id)
   }
@@ -137,12 +143,12 @@ function resolveInImportScope(
     }
   }
   const [only, ...others] = candidates
-  if (only === undefined) return null
   if (others.length > 0) {
     for (const id of candidates) trace.ambiguousCandidates.add(id)
-    return null
+  } else if (only !== undefined) {
+    return { hit: { id: only, confidence: "high" } }
   }
-  return { id: only, confidence: "high" }
+  return declared ? { hit: null } : null
 }
 
 function defaultExportsOf(ctx: ResolveTargetContext, file: string): string[] {

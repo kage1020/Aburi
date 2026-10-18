@@ -166,3 +166,40 @@ describe("scan — a call through the name of a class a namespace merged into", 
     expect(resolved("ts:src/g.ts#g")).toEqual(["ts:src/c.ts#C::m"])
   })
 })
+
+describe("scan — a call through the name of a class that lacks the member", () => {
+  it("stops at the class the name is bound to, and searches on only past a binding it cannot see", async () => {
+    await workspace.writeSource(
+      "src/audit-log.ts",
+      "export class Logger {\n  log(message: string) {\n    return message\n  }\n}\n",
+    )
+    await workspace.writeSource("src/base-logger.ts", "export class Logger extends Object {}\n")
+    await workspace.writeSource("src/barrel.ts", 'export { Logger } from "./audit-log"\n')
+    const callers: Record<string, string> = {
+      local: "class Logger extends Object {}",
+      relative: 'import { Logger } from "./base-logger"',
+      "through-barrel": 'import { Logger } from "./barrel"',
+      "through-package": 'import { Logger } from "@acme/logging"',
+    }
+    for (const [file, head] of Object.entries(callers)) {
+      const body = 'export function caller() {\n  return Logger.log("x")\n}\n'
+      await workspace.writeSource(`src/${file}.ts`, `${head}\n${body}`)
+    }
+
+    const { ir, unresolvedCalls } = await scanTypeScript(workspace.root)
+    const resolvedFrom = (file: string) =>
+      ir.symbols
+        .find((symbol) => symbol.id === `ts:src/${file}.ts#caller`)
+        ?.calls.map((call) => call.resolved)
+    expect(Object.keys(callers).map((file) => [file, resolvedFrom(file)])).toEqual([
+      ["local", [null]],
+      ["relative", [null]],
+      ["through-barrel", ["ts:src/audit-log.ts#Logger.log"]],
+      ["through-package", ["ts:src/audit-log.ts#Logger.log"]],
+    ])
+    expect(unresolvedCalls.map((d) => [d.symbolId, d.bucket])).toEqual([
+      ["ts:src/local.ts#caller", "no-match"],
+      ["ts:src/relative.ts#caller", "no-match"],
+    ])
+  })
+})
