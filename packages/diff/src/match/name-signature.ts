@@ -1,5 +1,6 @@
 import type { Symbol as IRSymbol } from "@aburi/types"
-import { signatureSimilarity } from "../signature"
+import { atLeast, quotient, type Ratio, WHOLE, weightedMean } from "../ratio"
+import { signatureSimilarityRatio } from "../signature"
 import { createNameScorer, lastSegment, type NameScorer, tokenizeName } from "../similarity"
 import {
   acceptInScoreOrder,
@@ -77,18 +78,22 @@ function collectCandidate(
   base: IRSymbol,
   head: IRSymbol,
   scorer: NameScorer,
-  memberFloor: number,
-  threshold: number,
+  memberFloor: Ratio,
+  threshold: Ratio,
   candidates: ScoredPair[],
 ): void {
   const member = scorer.member(base.name, head.name)
-  if (member < memberFloor) return
+  if (!atLeast(member, memberFloor)) return
   if (!scorer.ownersCompatible(base.name, head.name)) return
-  const score =
-    0.5 * member +
-    0.3 * signatureSimilarity(base.signature ?? null, head.signature ?? null) +
-    0.2 * OWNER_AXIS_SATISFIED
-  if (score >= threshold) candidates.push({ base, head, score })
+  const score = weightedMean([
+    { weight: MEMBER_WEIGHT, value: member },
+    {
+      weight: SIGNATURE_WEIGHT,
+      value: signatureSimilarityRatio(base.signature ?? null, head.signature ?? null),
+    },
+    { weight: OWNER_WEIGHT, value: OWNER_AXIS_SATISFIED },
+  ])
+  if (atLeast(score, threshold)) candidates.push({ base, head, score: quotient(score) })
 }
 
 function bucketKey(symbol: IRSymbol): string {
@@ -96,8 +101,13 @@ function bucketKey(symbol: IRSymbol): string {
   return `${symbol.kind}::${sig}`
 }
 
-function lowestUsefulMember(threshold: number): number {
-  return 2 * (threshold - 0.5)
+function lowestUsefulMember(threshold: Ratio): Ratio {
+  const totalWeight = MEMBER_WEIGHT + SIGNATURE_WEIGHT + OWNER_WEIGHT
+  return {
+    numerator:
+      totalWeight * threshold.numerator - (SIGNATURE_WEIGHT + OWNER_WEIGHT) * threshold.denominator,
+    denominator: MEMBER_WEIGHT * threshold.denominator,
+  }
 }
 
 interface Bucket {
@@ -112,13 +122,17 @@ function memberTokens(qname: string): readonly string[] {
   return tokens.length === 0 ? [NO_MEMBER_TOKENS] : tokens
 }
 
-const EXACT_MATCH_ONLY = 1
-const TWO_TOKEN_THRESHOLD = 0.95
-const DEFAULT_THRESHOLD = 0.85
+const EXACT_MATCH_ONLY: Ratio = WHOLE
+const TWO_TOKEN_THRESHOLD: Ratio = { numerator: 19, denominator: 20 }
+const DEFAULT_THRESHOLD: Ratio = { numerator: 17, denominator: 20 }
 
-const OWNER_AXIS_SATISFIED = 1
+const MEMBER_WEIGHT = 5
+const SIGNATURE_WEIGHT = 3
+const OWNER_WEIGHT = 2
 
-function thresholdFor(qname: string): number {
+const OWNER_AXIS_SATISFIED = WHOLE
+
+function thresholdFor(qname: string): Ratio {
   const tokens = tokenizeName(lastSegment(qname)).length
   if (tokens <= 1) return EXACT_MATCH_ONLY
   if (tokens === 2) return TWO_TOKEN_THRESHOLD

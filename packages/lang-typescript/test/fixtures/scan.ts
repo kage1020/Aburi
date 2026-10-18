@@ -1,5 +1,8 @@
+import { rm } from "node:fs/promises"
+import { join } from "node:path"
 import type { ScanResult } from "@aburi/core"
 import {
+  diffIRs,
   diffOfEditWith,
   type EditDiff,
   type PluginLineup,
@@ -7,7 +10,14 @@ import {
   scanWith,
 } from "@aburi/test-harness"
 import { recordingLogger, type ScratchWorkspace } from "@aburi/test-support"
-import type { Config, DiffResult, IR, LanguagePlugin, SymbolDelta } from "@aburi/types"
+import type {
+  Config,
+  DiffResult,
+  IR,
+  LanguagePlugin,
+  SymbolChange,
+  SymbolDelta,
+} from "@aburi/types"
 import { expect } from "vitest"
 import { langTypescriptPlugin } from "../../src/index"
 
@@ -51,6 +61,31 @@ export async function diffOfEdit(
   after: string,
 ): Promise<EditDiff["diff"]> {
   return (await editOf(workspace, file, before, after)).diff
+}
+
+/** Scan `before`, delete its files, write `after` in others, scan again, and diff the two. */
+export async function diffOfMove(
+  workspace: ScratchWorkspace,
+  before: Record<string, string>,
+  after: Record<string, string>,
+): Promise<DiffResult> {
+  for (const [file, text] of Object.entries(before)) await workspace.writeSource(file, text)
+  const baseIR = await scanWithoutWarnings(workspace.root)
+  for (const file of Object.keys(before)) await rm(join(workspace.root, file))
+  for (const [file, text] of Object.entries(after)) await workspace.writeSource(file, text)
+  const headIR = await scanWithoutWarnings(workspace.root)
+  return diffIRs(baseIR, headIR)
+}
+
+/** Every change, as status, names and the stage that paired it, in a stable order. */
+export function pairingOutcome(diff: DiffResult): string[] {
+  return diff.symbols.map(describePairing).sort()
+}
+
+function describePairing(change: SymbolChange): string {
+  if ("symbol" in change) return `${change.status} ${change.symbol.name}`
+  const pairing = `${change.status} ${change.before.name} -> ${change.after.name}`
+  return "rationale" in change ? `${pairing} (${change.rationale})` : pairing
 }
 
 /** Each Symbol the diff reports `changed`, by name, with its delta. */
