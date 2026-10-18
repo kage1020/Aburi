@@ -44,7 +44,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .version(version, "-v, --version")
     .option(
       "--log-level <level>",
-      "per-file log level: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn)",
+      "per-file log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info shows what warn does, and error none of it",
       parseLogLevel,
     )
     .exitOverride()
@@ -56,6 +56,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         stderr.write(str)
       },
     })
+    // Commander copies help settings into a subcommand when `.command()` creates it.
+    .configureHelp({ showGlobalOptions: true })
 
   const warn = (message: string): void => {
     stderr.write(`${message}\n`)

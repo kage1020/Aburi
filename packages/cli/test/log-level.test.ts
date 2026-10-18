@@ -98,12 +98,20 @@ describe.each<[string, string, Logged]>([
       "debug",
     ],
     [
-      "takes --log-level error written before the command",
+      "takes --log-level error, written before the command, over ABURI_LOG_LEVEL=debug",
       ["--log-level", "error"],
       [],
-      {},
+      { ABURI_LOG_LEVEL: "debug" },
       "none",
     ],
+    [
+      "takes --log-level info, which shows the same as the default",
+      [],
+      ["--log-level", "info"],
+      {},
+      "warn",
+    ],
+    ["ignores an ABURI_LOG_LEVEL it does not know", [], [], { ABURI_LOG_LEVEL: "loud" }, "warn"],
   ])("%s", async (_, before, after, env, shows) => {
     const lines = { warn: command.atWarn, debug: command.atDebug, none: [] }[shows]
     expect(await loggedBy([...before, ...command.argv, ...after], env)).toEqual({
@@ -123,5 +131,16 @@ describe("aburi --log-level", () => {
   it("is accepted by aburi init, which has no per-file log", async () => {
     const { code } = await runCliIn(workspace.root, ["init", "--log-level", "debug"])
     expect(code).toBe(EXIT.SUCCESS)
+  })
+
+  it.each([
+    "init",
+    "scan",
+    "diff",
+    "explain",
+  ])("is listed among the global options of `aburi %s --help`", async (command) => {
+    const { code, stdout } = await runCliIn(workspace.root, [command, "--help"])
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(stdout).toMatch(/Global Options:\n[\s\S]*--log-level <level>/)
   })
 })
