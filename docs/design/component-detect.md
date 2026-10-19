@@ -400,12 +400,12 @@ Implementation guidance:
 | CD34 | A component holding twelve `.ts` files and a link to a directory outside the workspace that holds twelve `.py` files | `languages` is `["ts"]` — the census does not walk through the link |
 | CD35 | `nx.json`, `apps/billing/project.json`, and `apps/alias` a link to `apps/billing` | One Component, rooted at `apps/billing` |
 | CD36 | `packages: ["packages/*"]`, `packages/billing/package.json`, and `packages/alias` a link to `packages/billing` | Two Components, rooted at `packages/alias` and `packages/billing`; no scanned file belongs to the one at `packages/alias` |
-| CD37 | `src/locked` or `.config/locked` cannot be listed and holds what one search looks for: twelve `.py` files for the language census, a `project.json` beside `nx.json`, or a `package.json` that `packages: ["src/*"]` (or `[".config/*"]`) declares | Detection ends with `scan-directory-unreadable` naming the directory, and `aburi init` exits 1 |
-| CD38 | The same, at `data/pg`, with `.gitignore` holding `pg/` or `data/` | Detection runs, passing over `data/pg`; with `respectGitignore` off it ends as in CD37 |
-| CD39 | Twelve `.ts` files in `src` and twelve `.py` files in `.config`, in `.git` or in `.yarn` | `languages` is `["py", "ts"]` for `.config`, and `["ts"]` for the other two |
-| CD40 | `nx.json` beside `libs/shared/project.json`, `.github/actions/deploy/project.json` and `.git/modules/vendored/project.json` | Two candidates, `.github/actions/deploy` and `libs/shared` |
-| CD41 | `packages: ["packages/*", ".github/actions/*"]` with a `package.json` in `packages/app`, `packages/.template` and `.github/actions/deploy` | Two candidates, `.github/actions/deploy` and `packages/app` |
-| CD42 | `.git/` and `libs/vendored/.git/` cannot be listed, beside what each of the three searches looks for in `src` | Detection runs: no search lists a `.git` directory |
+| CD41 | `src/locked` or `.config/locked` cannot be listed and holds what one search looks for: twelve `.py` files for the language census, a `project.json` beside `nx.json`, or a `package.json` that `packages: ["src/*"]` (or `[".config/*"]`) declares | Detection ends with `scan-directory-unreadable` naming the directory, and `aburi init` exits 1 |
+| CD42 | The same, at `data/pg`, with `.gitignore` holding `pg/` or `data/` | Detection runs, passing over `data/pg`; with `respectGitignore` off it ends as in CD41 |
+| CD43 | Twelve `.ts` files in `src` and twelve `.py` files in `.config`, in `.git` or in `.yarn` | `languages` is `["py", "ts"]` for `.config`, and `["ts"]` for the other two |
+| CD44 | `nx.json` beside `libs/shared/project.json`, `.github/actions/deploy/project.json` and `.git/modules/vendored/project.json` | Two candidates, `.github/actions/deploy` and `libs/shared` |
+| CD45 | `packages: ["packages/*", ".github/actions/*"]` with a `package.json` in `packages/app`, `packages/.template` and `.github/actions/deploy` | Two candidates, `.github/actions/deploy` and `packages/app` |
+| CD46 | `.git/` and `libs/vendored/.git/` cannot be listed, beside what each of the three searches looks for in `src` | Detection runs: no search lists a `.git` directory |
 
 ## 11. Design decisions
 
