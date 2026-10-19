@@ -160,7 +160,7 @@ along A → B → C:
 
 If a second path `A → D → C` exists with both edges `high`, that path yields `db.write @ high` on `A`. Merging both paths on the same `(db.write, prisma.invoice.create)` key gives `max(medium, high) = high`.
 
-Stated per Symbol, the two operators give a Symbol's confidence in an `(effectId, target)`, the value its callers combine with: the `max` of its own locally-detected entries for that key and, over each of its outgoing edges, `min(edgeConfidence, the callee's confidence in it)`. That holds inside a cycle as well (§6), so a call back into a caller opens no new path to an effect and raises no one's confidence in it. Given `X → A` (`high`), `A → B` (`low`) and a local `db.write` on `B` at `high`, `A` and `X` both get `db.write @ low`; adding `B → A` (`low`) leaves both at `low`, because the only path from either of them to the write still crosses `A → B`.
+Stated per Symbol, a Symbol's confidence in an `(effectId, target)`, the value its callers combine with, is that of its best path: over every path from the Symbol to a locally-detected entry for that key, the `min` of the entry's confidence and of every edge's confidence on the path, then the `max` over those paths. Equivalently, it is the least value that is at least each of its own locally-detected entries for that key and, over each of its outgoing edges, `min(edgeConfidence, the callee's confidence in it)`; inside a cycle that equation also has larger solutions, and the least one is meant. Because the §5.1 dedup keeps the Symbol's own entry, this value can exceed the confidence recorded on that entry. The definition applies inside a cycle as well (§6): a path that runs around a cycle is never better than the same path without the loop, so a call back into a caller cannot raise the caller's own confidence. Given `X → A` (`high`), `A → B` (`low`) and a local `db.write` on `B` at `high`, `A` and `X` both get `db.write @ low`; adding `B → A` (`low`) leaves both at `low`, because the only path from either of them to the write still crosses `A → B`.
 
 ### 5.4 Effect kind unioning key
 
@@ -178,7 +178,7 @@ The algorithm is:
 2. Compute strongly connected components via Tarjan's algorithm — `O(V + E)`, single pass, deterministic given a fixed iteration order.
 3. Condense the SCCs into a DAG.
 4. Process the DAG in reverse topological order (leaves first). For each SCC node, compute the union of the `(effectId, target)` keys of the local effects of every Symbol in the SCC and of every effect reaching the SCC from its outgoing edges in the DAG, each key with its `plugin` and `derivedBy` (§5.2).
-5. Every Symbol inside an SCC receives the same set of keys, each with the same `plugin` and `derivedBy`, but not necessarily the same confidence. A member's confidence in a key is its own, by §5.3: it starts from the member's locally-detected entries and from its edges that leave the SCC, whose callees step 4 has already settled, and then rises along the edges inside the SCC, each member taking `min(edgeConfidence, callee's confidence)` from every member it calls, until no confidence rises. A caller outside the SCC reads the confidence of the member it calls. Within the SCC, the local origin of each effect is preserved on `derivedFrom` (the direct callee that carried it into the current Symbol).
+5. Every member carries every key of the SCC, as its own locally-detected entry or as a propagated one, and a key's propagated entries have the same `plugin` and `derivedBy` on every member; `confidence` and `derivedFrom` are each member's own. A member's confidence in a key follows §5.3: it starts from the member's locally-detected entries and from its edges that leave the SCC, whose callees the sweep has already settled, and then rises along the edges inside the SCC, each member taking `min(edgeConfidence, callee's confidence)` from every member it calls, until no confidence rises. A caller outside the SCC reads the confidence of the member it calls. `derivedFrom` lists the member's direct callees, inside or outside the SCC, that carry the key (§5.2).
 
 Determinism inside the algorithm (see also §10):
 
@@ -187,9 +187,9 @@ Determinism inside the algorithm (see also §10):
 - When Tarjan produces SCCs, they are re-sorted by the smallest Symbol id inside each SCC before the reverse-topological sweep.
 - The reverse-topological sweep breaks ties by SCC id (= smallest Symbol id).
 
-Complexity is `O((V + E) log V)`. The graph walk itself is linear; the log factor comes from the ready-set ordering the §6 tie-break requires (a min-heap keyed on SCC index). A linear bound would mean giving up the deterministic tie-break, which §10 depends on. Step 5's iteration adds only a constant factor: a confidence only rises, through three levels, so an edge inside an SCC carries a given key at most three times.
+Complexity is `O((V + E) log V + K · (V + E) + V · K log K)`, where `K` is the number of distinct `(effectId, target)` keys. The graph walk itself is linear; the log factor comes from the ready-set ordering the §6 tie-break requires (a min-heap keyed on SCC index), the `K · (V + E)` term from carrying, across each edge, every key its callee holds, and the last term from sorting each Symbol's propagated entries into the order §8 fixes. A linear bound would mean giving up the deterministic tie-break, which §10 depends on. Step 5's iteration stays within the second term: a confidence only rises, through three levels, so an edge inside an SCC carries a given key at most three times.
 
-Alternative rejected — fixed-point iteration over all Symbols until no set grows: the fixed point exists and is the same result (the join and §5.3's `min`/`max` are monotone; domain is finite), but the iteration cost is non-linear in adversarial graphs, and stable iteration order still requires a deterministic schedule. The SCC condensation approach confines the iteration to the edges inside one SCC, where the three confidence levels bound it, and provides an explicit termination proof.
+Alternative rejected — fixed-point iteration over all Symbols until no set grows and no confidence rises: the fixed point exists and is the same result (the join and §5.3's `min`/`max` are monotone; domain is finite), but the iteration cost is non-linear in adversarial graphs. Condensation settles everything outside the SCCs in a single pass and computes keys, `plugin` and `derivedBy` once per SCC, so the only iteration left is confidence along the edges inside one SCC, which the three confidence levels bound, with an explicit termination proof (§7).
 
 ## 7. Termination
 
@@ -197,7 +197,7 @@ The domain of possible effect sets on each Symbol is a finite lattice: the unive
 
 The SCC-condensed DAG has finite depth. The reverse-topological sweep processes each SCC node exactly once. Within an SCC, the set of keys is computed once and assigned to every member: an edge inside the SCC cannot introduce a key that is not already in that set. Confidence is the one value iterated inside an SCC (§6 step 5), and the iteration ends because a member's confidence in a key only rises and has three levels to rise through, so it changes at most three times.
 
-Therefore the algorithm terminates in `O((V + E) log V)` steps for any input. No bounded-iteration fallback and no depth limit are required or specified.
+Therefore the algorithm terminates in `O((V + E) log V + K · (V + E) + V · K log K)` steps for any input, `K` being the number of distinct `(effectId, target)` keys (§6). No bounded-iteration fallback and no depth limit are required or specified.
 
 ## 8. Interaction with the 3-Layer Fingerprint
 
@@ -255,9 +255,9 @@ The pass matches [`call-resolution.md`](./call-resolution.md) §9's rigor.
 - The reverse-topological sweep processes SCCs in a deterministic order derived from the sort above.
 - When writing propagated entries back into `Symbol.effects[]`, they are stably sorted by `(effectId, target)` ascending. Locally-detected entries retain their call order per [`fingerprint.md`](./fingerprint.md) §4.7.
 - `derivedFrom` arrays are sorted ascending.
-- `confidence` combination is a pure function of inputs; `min` and `max` on the totally ordered `high > medium > low` lattice have no tiebreaks. Inside an SCC the iteration only raises confidences toward the one fixed point §5.3 defines, so the order it visits members in does not change the values it settles on.
+- `confidence` combination is a pure function of inputs; `min` and `max` on the totally ordered `high > medium > low` lattice have no tiebreaks. Inside an SCC the iteration starts from values some path supports and raises a confidence only to a value some path supports, so whatever order it visits members in, it stops at §5.3's least solution.
 
-Idempotence: `propagate(propagate(x)) === propagate(x)`. Once propagation has run, running it again with the same `CallEdge[]` reproduces the same `effects[]` byte-for-byte on every Symbol. This holds because the join is idempotent and the SCC condensation is a pure function of the input graph.
+Idempotence: `propagate(propagate(x)) === propagate(x)`. Once propagation has run, running it again with the same `CallEdge[]` reproduces the same `effects[]` byte-for-byte on every Symbol. This holds because the SCC condensation is a pure function of the input graph and the pass reads only its input's locally-detected entries: an entry with `propagated: true` is dropped and rebuilt, never counted as evidence for its key, so one left by an earlier run changes nothing, whatever its `confidence`.
 
 Locality: adding a new Symbol elsewhere in the workspace, or adding an edge that does not touch a given Symbol's transitive out-closure, does not change that Symbol's `effects[]`. This mirrors [`call-resolution.md`](./call-resolution.md) §9's locality guarantee.
 
@@ -279,15 +279,19 @@ Every implementation of the propagation pass MUST pass the following. IDs are pr
 |---|---|---|
 | PR4 | `A → B` edge confidence `high`, `B`'s local `db.write` confidence `medium` | Propagated entry on `A` has confidence `medium` (min along the single hop) |
 | PR5 | Two paths reach `A → … → C` with combined confidences `medium` and `high` respectively | Merged entry on `A` has confidence `high` (max across paths) |
+| PR5a | `X → A → B`, both `high`; `A` has a local `db.write` at `low`, `B` one at `high` | `X` gets `db.write @ high`: what `A`'s callers combine with is its best path's confidence, above the `low` on the entry `A` keeps (§5.1, §5.3) |
 
 ### 11.3 Cycles and shadowing
 
 | ID | Input | Expected |
 |---|---|---|
 | PR6 | SCC `{A, B, C}` with all edges internal to the SCC; only `C` has a local `db.write` | Every member of the SCC (`A`, `B`, `C`) ends with the same `(effectId, target)` keys, including the propagated `db.write` (except `C` where it stays local) |
-| PR6a | `X → A` (`high`), `A → B` (`low`), `B` has a local `db.write` at `high`; with and without the call back `B → A` (`low`). Through a scan: `Service.run` calls `Store.save`, which writes, by a namespace call resolved at component scope (`medium`), with and without `Store.save` calling `Service.run` back the same way | `A`'s and `X`'s propagated `db.write` is `low` either way (§5.3). In the scan, `Service.run`'s propagated `db.write` is `medium` either way |
+| PR6a | `X → A` (`high`), `A → B` (`low`), `B` has a local `db.write` at `high`; with and without the call back `B → A` (`low`). Through a scan: `Service.run` calls `Store.save`, which writes, by a namespace call resolved at component scope (`medium`), with and without `Store.save` calling `Service.run` back the same way | `A`'s and `X`'s propagated `db.write` is `low` either way (§5.3). In the scan, `Service.run`'s propagated `db.write` is `medium` either way, and the largest SCC has one Symbol without the call back and two with it |
 | PR6b | SCC `{A, B}` with `A → B` (`low`) and `B → A` (`high`); `B → C` (`high`), `C` has a local `db.write` at `high`; `X → A` and `Y → B`, both `high` | `A` and `X` get `db.write @ low`, `B` and `Y` get `db.write @ high`: the members share the key, not its confidence, and a caller outside the SCC reads the member it calls |
-| PR6c | Generated graphs of two to six Symbols with cycles, self-loops, parallel edges, mixed edge confidences and local effects at mixed confidences | Every Symbol's `effects[]`, `confidence` and `derivedFrom` included, equals what plain fixed-point iteration of §5.3 over the whole graph settles on (§12.2) |
+| PR6c | Generated graphs of two to six Symbols with cycles, self-loops, parallel edges, mixed edge confidences and local effects at mixed confidences | Every Symbol's `effects[]`, `confidence` and `derivedFrom` included, equals what plain fixed-point iteration of §5.3 over the whole graph settles on (§12.2); in more than 100 of 500 such graphs, two members of one SCC settle at different confidences in one target |
+| PR6d | SCC `{A, B}` with `A ↔ B` (`high`); `A → C` (`low`) and `B → C` (`high`), `C` has a local `db.write` at `high` | `A` gets `db.write @ high`, through `B`, over its own `low` call to `C` |
+| PR6e | SCC `{A, B}` with `A ↔ B` (`high`), `B` has a local `db.write` at `low`; `X → A` (`high`) | `A` and `X` get `db.write @ low`: strong calls around a cycle do not lift the write's own confidence |
+| PR6f | SCC `{A, B, C}` with `A → C`, `C → B` (both `high`) and `B → A` (`low`); `B` has a local `db.write` at `high`, `C` one at `low`; `X → A` (`high`) | `A` and `X` get `db.write @ high`, along `A → C → B`, although `C`'s own entry is `low` |
 | PR7 | Self-loop `A → A`; `A` has a local `db.write` | `A.effects[]` is unchanged (no duplicate propagated entry — the local entry already covers `(db.write, ...)`) |
 | PR8 | `A → B`, `B` has local `db.write`, `A` also has a local `db.write` on the same `target` | `A.effects[]` retains only the local entry; the propagated candidate on the same `(id, target)` is dropped (§5.1 dedup) |
 
@@ -304,9 +308,15 @@ Every implementation of the propagation pass MUST pass the following. IDs are pr
 | ID | Input | Expected |
 |---|---|---|
 | PR12 | Base: `B` has no effects, `A → B`. Head: `B` gained a local `db.write`; `A`'s body unchanged | Diff emits `A` with `status="changed"`, `delta.logicChanged=true`, `delta.effects.added` includes the propagated `db.write` with `propagated: true` and `derivedFrom=[B]` |
-| PR13 | Run propagation twice on the same input | Byte-identical `effects[]` on every Symbol (idempotence) |
+| PR13 | Run propagation again over its own output: for one edge, and for PR6c's generated graphs, also with every propagated `confidence` in that output raised to `high` | Byte-identical `effects[]` on every Symbol (idempotence): a propagated entry in the input is no evidence for its key (§10) |
 | PR14 | Shuffle the input `CallEdge[]` order and rerun | Byte-identical `effects[]` on every Symbol (determinism under input reordering) |
 | PR15 | Every propagated entry | `line` field is **absent** (omitted from the JSON output — not `null`, not a placeholder); locally-detected entries retain the plugin-set `line` |
+
+### 11.6 Cost
+
+| ID | Input | Expected |
+|---|---|---|
+| PR16 | Two sizes, eight times apart, of two graphs: Symbols mostly in singleton SCCs, one in five calling the next; and one cycle through every Symbol, its calls at mixed confidences, with a local `db.write` on one Symbol | The cost grows with the graph, not with its square (§6), the confidence iteration inside the cycle included |
 
 ## 12. Design Decisions
 
@@ -316,7 +326,7 @@ Effects describe **what a piece of code causes to happen**. The caller inherits 
 
 ### 12.2 Why SCC condensation over fixed-point iteration
 
-Both terminate on the same result because the join and §5.3's confidence combination are monotone over finite lattices. That holds only because condensation applies §5.3 inside an SCC too (§6 step 5), rather than giving every member one confidence for the whole SCC: a shared value would let a call back into a caller raise the caller's confidence in an effect the call opens no new path to, which fixed-point iteration never does. SCC condensation is `O((V + E) log V)` in one pass — linear apart from the ready-set ordering, with the iteration inside an SCC bounded by the three confidence levels — while fixed-point iteration is non-linear on adversarial graphs and still needs a deterministic schedule to satisfy [`overview.md`](./overview.md) §2 "diff stability". SCC condensation gives determinism, a near-linear cost bound, and an explicit termination proof — three properties for close to the same complexity.
+Both start from the locally-detected entries and only add keys and raise confidences, through monotone operators over finite lattices, so both terminate on §5.3's least solution. That holds only because condensation applies §5.3 inside an SCC too (§6 step 5), rather than giving every member one confidence for the whole SCC: a shared value would let a call back into a caller raise the caller's confidence above that of its best path, which fixed-point iteration never does. SCC condensation stays within the bound §6 states, the iteration inside an SCC bounded by the three confidence levels, while fixed-point iteration is non-linear on adversarial graphs. Condensation settles everything outside the SCCs in a single pass, computes keys, `plugin` and `derivedBy` once per SCC, and gives an explicit termination proof (§7), for close to the same complexity.
 
 ### 12.3 Why `(effectId, target)` as the merge key
 

@@ -1,10 +1,10 @@
-import type { SymbolId } from "@aburi/types"
+import type { Confidence, SymbolId } from "@aburi/types"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { CallEdge } from "../src/callgraph"
 import { type PropagateInput, propagateEffects } from "../src/propagate"
 import { reverseTopoOrder, type SccNode } from "../src/propagate-graph"
 import { makeSymbol } from "./fixtures/ir"
-import { edge } from "./fixtures/propagate"
+import { edge, localEffect } from "./fixtures/propagate"
 
 /** A condensed graph from each SCC's outgoing SCC indices; `reverseTopoOrder` reads nothing else. */
 function condensed(outSccs: readonly number[][]): SccNode[] {
@@ -51,17 +51,32 @@ describe("reverseTopoOrder", () => {
 })
 
 const SCALE = 8
-const SMALL = 10_000
 const MAX_RATIO = 40
 const OBVIOUS_RATIO = 60
 const TIMEOUT_MS = 300_000
 
+const idOf = (i: number): string => `ts:src/m${String(i).padStart(6, "0")}.ts#f`
+
 /** `total` symbols, one in five calling the next: mostly singleton SCCs, all ready at once. */
-function scaleGraph(total: number): PropagateInput {
-  const idOf = (i: number): string => `ts:src/m${String(i).padStart(6, "0")}.ts#f`
+function chainsGraph(total: number): PropagateInput {
   const symbols = Array.from({ length: total }, (_, i) => makeSymbol(idOf(i)))
   const edges: CallEdge[] = []
   for (let i = 0; i + 1 < total; i += 5) edges.push(edge(idOf(i), idOf(i + 1)))
+  return { symbols, edges }
+}
+
+const CONFIDENCES: readonly Confidence[] = ["high", "medium", "low"]
+
+/** `total` symbols calling round one cycle at mixed confidences, the first of them writing. */
+function ringGraph(total: number): PropagateInput {
+  const symbols = Array.from({ length: total }, (_, i) =>
+    makeSymbol(idOf(i), {
+      effects: i === 0 ? [localEffect({ id: "db.write", target: "x" })] : [],
+    }),
+  )
+  const edges = symbols.map((_, i) =>
+    edge(idOf(i), idOf((i + 1) % total), { confidence: CONFIDENCES[i % 3] as Confidence }),
+  )
   return { symbols, edges }
 }
 
@@ -71,12 +86,15 @@ function meanCost(input: PropagateInput, reps: number): number {
   return (performance.now() - started) / reps
 }
 
-describe("propagation scale", () => {
+describe.each<[string, (total: number) => PropagateInput, number]>([
+  ["mostly singleton SCCs", chainsGraph, 10_000],
+  ["one cycle", ringGraph, 2_000],
+])("propagation scale over %s", (_shape, graph, size) => {
   let small: PropagateInput
   let large: PropagateInput
   beforeAll(() => {
-    small = scaleGraph(SMALL)
-    large = scaleGraph(SMALL * SCALE)
+    small = graph(size)
+    large = graph(size * SCALE)
   }, TIMEOUT_MS)
 
   it("grows with the log of the graph, not with its square", { timeout: TIMEOUT_MS }, () => {

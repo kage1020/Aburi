@@ -31,10 +31,10 @@ function store(callBack: string[]): string {
 }
 
 describe("scan — a write reached through a namespace call the writer calls back", () => {
-  it.each([
-    ["without", []],
-    ["with", ["    if (n > 0) Service.run(n - 1)"]],
-  ])("keeps the caller's write at the call's medium, %s the call back", async (_case, callBack) => {
+  it.each<[string, string[], number]>([
+    ["without", [], 1],
+    ["with", ["    if (n > 0) Service.run(n - 1)"], 2],
+  ])("keeps the caller's write at the call's medium, %s the call back", async (_case, callBack, maxSccSize) => {
     await workspace.writeSource("a.ts", SERVICE)
     await workspace.writeSource("b.ts", store(callBack))
 
@@ -43,6 +43,7 @@ describe("scan — a write reached through a namespace call the writer calls bac
       effects: [prismaEffectsPlugin],
     })
 
+    expect(result.ir.stats.effectPropagation.maxSccSize).toBe(maxSccSize)
     expect(symbolById(result, "ts:a.ts#Service.run").effects).toMatchObject([
       {
         id: "db.write",

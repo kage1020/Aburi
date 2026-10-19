@@ -122,10 +122,10 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
       }
       for (const { to, confidence } of adjacency.get(memberId) ?? []) {
         if (sccOfNode.get(to) === sccIdx) continue
-        const carried =
+        const calleeReached =
           confidenceByNode.get(to) ??
           invariantFailure(`callee ${to} of ${memberId} swept after its caller`)
-        for (const [key, calleeConfidence] of carried) {
+        for (const [key, calleeConfidence] of calleeReached) {
           raise(reached, key, minConfidence(confidence, calleeConfidence))
         }
       }
@@ -175,40 +175,40 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
   for (const original of input.symbols) {
     const localEffects = original.effects.filter((e) => e.propagated !== true)
     const localKeys = localKeysBySymbol.get(original.id) ?? new Set()
-    const mySccIdx = sccOfNode.get(original.id)
-    const mySccAgg = mySccIdx !== undefined ? aggregateBySccIdx[mySccIdx] : undefined
+    const mySccIdx =
+      sccOfNode.get(original.id) ?? invariantFailure(`symbol ${original.id} has no SCC`)
+    const mySccAgg =
+      aggregateBySccIdx[mySccIdx] ?? invariantFailure(`aggregate missing for SCC ${mySccIdx}`)
     const reached =
       confidenceByNode.get(original.id) ?? invariantFailure(`symbol ${original.id} was never swept`)
     const outCallees = (adjacency.get(original.id) ?? []).map((edge) => edge.to)
 
     const propagatedEntries: Effect[] = []
-    if (mySccAgg !== undefined) {
-      for (const entry of mySccAgg.values()) {
-        const key = effectKey(entry.id, entry.target)
-        if (localKeys.has(key)) continue
-        const derivedFromSet = new Set<SymbolId>()
-        for (const callee of outCallees) {
-          const calleeSccIdx =
-            sccOfNode.get(callee) ??
-            invariantFailure(`out-callee ${callee} of ${original.id} has no SCC`)
-          const calleeAgg =
-            aggregateBySccIdx[calleeSccIdx] ??
-            invariantFailure(`aggregate missing for callee SCC ${calleeSccIdx}`)
-          if (calleeAgg.has(key)) derivedFromSet.add(callee)
-        }
-        if (derivedFromSet.size === 0) continue
-        const derivedFrom = [...derivedFromSet].sort(compareCodeUnit)
-        propagatedEntries.push({
-          id: entry.id,
-          target: entry.target,
-          plugin: entry.plugin,
-          confidence:
-            reached.get(key) ?? invariantFailure(`${original.id} reached ${key} at no confidence`),
-          derivedBy: entry.derivedBy,
-          propagated: true,
-          derivedFrom,
-        })
+    for (const entry of mySccAgg.values()) {
+      const key = effectKey(entry.id, entry.target)
+      if (localKeys.has(key)) continue
+      const derivedFromSet = new Set<SymbolId>()
+      for (const callee of outCallees) {
+        const calleeSccIdx =
+          sccOfNode.get(callee) ??
+          invariantFailure(`out-callee ${callee} of ${original.id} has no SCC`)
+        const calleeAgg =
+          aggregateBySccIdx[calleeSccIdx] ??
+          invariantFailure(`aggregate missing for callee SCC ${calleeSccIdx}`)
+        if (calleeAgg.has(key)) derivedFromSet.add(callee)
       }
+      if (derivedFromSet.size === 0) continue
+      const derivedFrom = [...derivedFromSet].sort(compareCodeUnit)
+      propagatedEntries.push({
+        id: entry.id,
+        target: entry.target,
+        plugin: entry.plugin,
+        confidence:
+          reached.get(key) ?? invariantFailure(`${original.id} reached ${key} at no confidence`),
+        derivedBy: entry.derivedBy,
+        propagated: true,
+        derivedFrom,
+      })
     }
     propagatedEntries.sort(
       (a, b) => compareCodeUnit(a.id, b.id) || compareCodeUnit(a.target, b.target),
