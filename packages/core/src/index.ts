@@ -35,8 +35,6 @@ export {
   ZERO_FINGERPRINT,
 } from "./fingerprint"
 export {
-  type BackslashSite,
-  backslashSite,
   DEFAULT_EXPORT_QNAME,
   type GrammarViolation,
   isComponentId,
@@ -158,6 +156,7 @@ export { computeWeaklyConnectedComponents } from "./wcc"
 export {
   type DetectManagersResult,
   detectManagers,
+  type UnnameableRoot,
   type UnresolvedDeclaration,
   type WorkspaceCandidate,
 } from "./workspace"

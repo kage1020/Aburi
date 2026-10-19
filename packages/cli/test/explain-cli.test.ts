@@ -65,16 +65,21 @@ describe("aburi explain — what the user reads", () => {
   })
 
   it.skipIf(process.platform === "win32").each([
-    ["src/weird\\name.ts", '"src/weird\\name.ts" holds a backslash'],
+    [
+      "src/weird\\name.ts",
+      '"src/weird\\name.ts" holds a backslash, and "/" is the only separator a Document path has',
+    ],
     [
       "d:data/x.ts",
-      '"d:data" opens with one letter and ":", which a Document path reads as a Windows drive',
+      '"d:data" opens with one ASCII letter and ":", which a Document path reads as a Windows drive',
     ],
   ])("says why no IR can name %s, with stdout empty", async (argument, why) => {
     const { code, stdout, stderr } = await explain({ symbols: [KEPT] }, argument)
     expect(code).toBe(EXIT.GATE)
     expect(stdout).toBe("")
-    expect(stderr).toContain(`Cannot answer "${argument}": no IR can name this file. ${why}`)
+    expect(stderr).toBe(
+      `Cannot answer "${argument}": no IR can name this file. ${why}, so nothing Aburi writes can refer to it. Rename it.\n`,
+    )
   })
 
   it("says exactly No matches when the document covered everything", async () => {

@@ -20,13 +20,17 @@ interface Lookup {
   document: DocumentShape
   argument: string
   onDisk?: readonly string[]
+  /** The directory the command runs in, relative to the workspace root. */
+  from?: string
   answer: Record<string, unknown>
 }
 
-async function lookUp({ document, argument, onDisk = [] }: Lookup) {
+async function lookUp({ document, argument, onDisk = [], from = "." }: Lookup) {
   await writeScannedWorkspace(workspace.root, document)
   for (const file of onDisk) await writeFileAt(workspace.root, file, "export const x = 1\n")
-  return runExplain({ cwd: workspace.root, argument, noRescan: true })
+  const cwd = resolve(workspace.root, from)
+  await mkdir(cwd, { recursive: true })
+  return runExplain({ cwd, argument, noRescan: true })
 }
 
 describe("runExplain — an argument holding `#` is looked up as a Symbol id", () => {
@@ -185,6 +189,19 @@ describe("runExplain — an argument holding `/` is looked up as a file", () => 
     expect(await lookUp(lookup)).toMatchObject(lookup.answer)
   })
 
+  it.runIf(process.platform === "win32")(
+    "looks up a path on another drive as outside the workspace",
+    async () => {
+      const other = /^q:/i.test(workspace.root) ? "R" : "Q"
+      const outcome = await lookUp({
+        document: { symbols: [KEPT] },
+        argument: `${other}:/elsewhere/kept.ts`,
+        answer: {},
+      })
+      expect(outcome).toMatchObject({ kind: "not-found", exitCode: EXIT.RUNTIME })
+    },
+  )
+
   it("reads a path typed in a subdirectory as relative to it, and looks it up from the root", async () => {
     await writeScannedWorkspace(workspace.root, LOST_ROUTE)
     await mkdir(resolve(workspace.root, "src"))
@@ -307,35 +324,95 @@ describe("runExplain — a path no Document can name", () => {
     expect(outcome.kind).toBe("unnameable")
   })
 
-  onPosix.each([
-    ["d:data/x.stub", "d:data"],
-    ["./a:notes.stub", "a:notes.stub"],
-  ])(
-    "does not answer for %s, whose first segment a Document path reads as a drive",
-    async (argument, prefix) => {
-      const outcome = await lookUp({
+  onPosix.each<[string, Lookup]>([
+    [
+      "does not answer for a path under a top-level directory that reads as a drive",
+      {
         document: { symbols: [KEPT] },
-        argument,
-        onDisk: [argument],
-        answer: {},
-      })
-
-      expect(outcome).toMatchObject({
-        kind: "unnameable",
-        reason: "drive-shaped-name",
-        unnameablePrefix: prefix,
-        exitCode: EXIT.GATE,
-      })
-    },
-  )
-
-  onPosix("looks up a colon after two letters as any file the document does not hold", async () => {
-    const outcome = await lookUp({
-      document: { symbols: [KEPT] },
-      argument: "./ab:notes.stub",
-      onDisk: ["ab:notes.stub"],
-      answer: {},
+        argument: "d:data/x.stub",
+        answer: { unnameablePrefix: "d:data" },
+      },
+    ],
+    [
+      "does not answer for a top-level file that reads as a drive",
+      {
+        document: { symbols: [KEPT] },
+        argument: "./a:notes.stub",
+        answer: { unnameablePrefix: "a:notes.stub" },
+      },
+    ],
+    [
+      "reads the first segment of the workspace-relative path, not of the argument",
+      {
+        document: { symbols: [KEPT] },
+        argument: "../a:notes.stub",
+        from: "src",
+        answer: { unnameablePrefix: "a:notes.stub" },
+      },
+    ],
+    [
+      "does not answer for a bare name on disk",
+      {
+        document: { symbols: [KEPT] },
+        argument: "a:notes.stub",
+        onDisk: ["a:notes.stub"],
+        answer: { unnameablePrefix: "a:notes.stub" },
+      },
+    ],
+    [
+      "names the prefix as the argument spells it, not as NFC does",
+      {
+        document: { symbols: [KEPT] },
+        argument: "./\u212A:notes.stub",
+        answer: { unnameablePrefix: "\u212A:notes.stub" },
+      },
+    ],
+  ])("%s", async (_, lookup) => {
+    expect(await lookUp(lookup)).toMatchObject({
+      kind: "unnameable",
+      reason: "drive-shaped-name",
+      exitCode: EXIT.GATE,
+      ...lookup.answer,
     })
-    expect(outcome).toMatchObject({ kind: "not-found", exitCode: EXIT.RUNTIME })
+  })
+
+  onPosix.each<[string, Lookup]>([
+    [
+      "looks up a colon after two letters as any file the document does not hold",
+      {
+        document: { symbols: [KEPT] },
+        argument: "./ab:notes.stub",
+        onDisk: ["ab:notes.stub"],
+        answer: { kind: "not-found", exitCode: EXIT.RUNTIME },
+      },
+    ],
+    [
+      "looks up a file below a subdirectory as any other, whatever the argument opens with",
+      {
+        document: { symbols: [KEPT] },
+        argument: "./a:notes.stub",
+        onDisk: ["src/a:notes.stub"],
+        from: "src",
+        answer: { kind: "not-found", exitCode: EXIT.RUNTIME },
+      },
+    ],
+    [
+      "hands a bare name that is not on disk on to the substring arm",
+      {
+        document: { symbols: [KEPT] },
+        argument: "a:notes.stub",
+        answer: { kind: "not-found", exitCode: EXIT.RUNTIME },
+      },
+    ],
+    [
+      "matches a static member, whose qualified name opens the way a drive does",
+      {
+        document: { symbols: [symbolFor("ts:src/a.ts#A::create")] },
+        argument: "A::create",
+        answer: { kind: "single", exitCode: EXIT.SUCCESS },
+      },
+    ],
+  ])("%s", async (_, lookup) => {
+    expect(await lookUp(lookup)).toMatchObject(lookup.answer)
   })
 })

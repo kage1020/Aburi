@@ -10,7 +10,7 @@ import {
 import type { LspEnrichmentStats } from "@aburi/types"
 import { assertNever } from "../errors"
 import { writeFullListing, writeListing } from "../listing"
-import { describeUnresolvedDeclarations } from "../unresolved-report"
+import { describeWorkspaceDetection } from "../unresolved-report"
 import type { WarnFn } from "../warn"
 import { SKIP_REASON_RANK } from "./scan-coverage"
 import type { CoverageFault, ScanReport } from "./scan-report"
@@ -35,12 +35,7 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   const sayIncident: SayIncident = (line) => {
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
-  for (const line of describeUnresolvedDeclarations(
-    report.unresolvedDeclarations,
-    report.fellBackToSingleComponent,
-  )) {
-    sayIncident(line)
-  }
+  for (const line of describeWorkspaceDetection(report)) sayIncident(line)
   reportCoverageFault(report.coverageFault, sayIncident)
   reportPluginNamedFrameworks(report.pluginNamedFrameworks, sayIncident)
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
@@ -224,6 +219,7 @@ function reportSkipped(
   }
 }
 
+/** One section per cause: a rename fixes any of them, but each takes its own ignore pattern. */
 function reportUnrepresentable(
   files: ScanReport["unrepresentableFiles"],
   sayIncident: SayIncident,
@@ -260,14 +256,13 @@ function reportUnrepresentable(
   reportUnnameable(
     driveShaped,
     (names) =>
-      `under ${names} top-level name(s) a Document path reads as a Windows drive: a path opening with one letter and ":" names a drive there, and a Document means the same on every platform, so no workspace-relative path can open that way. Rename each one below, or leave it out with ignore, which matches the name as printed.`,
+      `under ${names} top-level name(s) a Document path reads as a Windows drive: a path opening with one ASCII letter and ":" names a drive there, and a Document means the same on every platform, so no workspace-relative path can open that way. Rename each one below, or leave it out with ignore, which matches the name as printed.`,
     sayIncident,
     writeDetail,
   )
   reportColliding(colliding, sayIncident, writeDetail)
 }
 
-/** One section per cause, because the fix differs and nothing else tells them apart. */
 function reportUnnameable(
   files: readonly UnnameableFile[],
   why: (nameCount: number) => string,

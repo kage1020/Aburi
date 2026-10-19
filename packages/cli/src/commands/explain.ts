@@ -118,22 +118,23 @@ async function locate(
     if (claimed !== null) return missed(skippedByPath.get(claimed), "id", coverage)
   }
 
-  if (arg.includes("/")) {
-    const nativeRelative = relative(workspaceRoot, resolve(cwd, arg))
-    const documentPath = (
-      sep === "/" ? nativeRelative : nativeRelative.split(sep).join("/")
-    ).normalize("NFC")
-    // A path on another Windows drive comes back absolute: outside the workspace, not a name.
-    const unnameable = isAbsolute(nativeRelative) ? null : unnameableSite(documentPath)
-    if (unnameable !== null) {
-      return {
-        kind: "unnameable",
-        path: documentPath,
-        reason: unnameable.reason,
-        unnameablePrefix: unnameable.prefix,
-        exitCode: EXIT.GATE,
-      }
+  const nativeRelative = relative(workspaceRoot, resolve(cwd, arg))
+  const spelled = sep === "/" ? nativeRelative : nativeRelative.split(sep).join("/")
+  // A path on another Windows drive comes back absolute: outside the workspace, not a name.
+  const unnameable = isAbsolute(nativeRelative) ? null : unnameableSite(spelled)
+  // Without a `/` only a file on disk is a path: `A::create` is a qualified name to match.
+  if (unnameable !== null && (arg.includes("/") || (await pathExists(resolve(cwd, arg))))) {
+    return {
+      kind: "unnameable",
+      path: spelled,
+      reason: unnameable.reason,
+      unnameablePrefix: unnameable.prefix,
+      exitCode: EXIT.GATE,
     }
+  }
+
+  if (arg.includes("/")) {
+    const documentPath = spelled.normalize("NFC")
     const skipped = skippedByPath.get(documentPath)
     if (skipped !== undefined || (await pathExists(resolve(cwd, arg)))) {
       const inFile = ir.symbols.filter((s) => s.source.file === documentPath)

@@ -1,4 +1,3 @@
-import type { UnnameableSite } from "@aburi/core"
 import { Command } from "commander"
 import {
   collect,
@@ -19,7 +18,7 @@ import { assertNever, CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
-import { describeUnresolvedDeclarations } from "./unresolved-report"
+import { describeWorkspaceDetection, UNNAMEABLE_BECAUSE } from "./unresolved-report"
 import { VOCAB_DISCOVERED_FILENAME } from "./vocab-discovered"
 
 export interface RunCliOptions {
@@ -101,12 +100,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           if (report.suggestedPlugins.length > 0) {
             stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
           }
-          for (const line of describeUnresolvedDeclarations(
-            report.unresolvedDeclarations,
-            report.fellBackToSingleComponent,
-          )) {
-            stderr.write(`⚠ ${line}\n`)
-          }
+          for (const line of describeWorkspaceDetection(report)) stderr.write(`⚠ ${line}\n`)
           if (report.unmappedLanguages.length > 0) {
             stderr.write(
               `⚠ No language plugin ships for: ${report.unmappedLanguages.join(", ")}. ` +
@@ -340,12 +334,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     return handleError(error, stderr)
   }
   return capturedExitCode
-}
-
-const UNNAMEABLE_BECAUSE: Record<UnnameableSite["reason"], string> = {
-  "unspellable-name": 'holds a backslash, and "/" is the only separator a Document path has',
-  "drive-shaped-name":
-    'opens with one letter and ":", which a Document path reads as a Windows drive',
 }
 
 function coverageLine(doubt: CoverageDoubt): string {
