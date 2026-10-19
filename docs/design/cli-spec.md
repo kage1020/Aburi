@@ -1073,8 +1073,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 | CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
 | CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
-| CL35 | `aburi diff --base <ir> --head <ir>` or `aburi explain --ir <ir>` where the file opens with one byte order mark (U+FEFF) | Read as without it. Two of them, or one after the first character, is exit 2, `IR file "<path>" is not valid JSON` |
-| CL36 | `aburi scan` where `package.json` and `aburi.json` both open with one byte order mark | exit 0, the Component named after the `package.json` |
+| CL52 | `aburi diff --base <ir> --head <ir>` or `aburi explain --ir <ir>` where the file opens with one byte order mark (U+FEFF) | Read as without it. Two of them, or one after the first character, is exit 2, `IR file "<path>" is not valid JSON` |
+| CL53 | `aburi scan` where `package.json` and `aburi.json` both open with one byte order mark | exit 0, the Component named after the `package.json` |
 
 ## 18. Design Decisions
 
