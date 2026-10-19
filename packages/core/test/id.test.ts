@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { symbolIdParts } from "../src/id"
 import {
-  backslashSite,
   CoreError,
   type CoreErrorCode,
   DEFAULT_EXPORT_QNAME,
@@ -22,6 +21,7 @@ import {
   toDocumentPath,
   toPosixRelative,
   trySymbolId,
+  unnameableSite,
 } from "../src/index"
 import { WORKSPACE_PATH_CASES } from "./fixtures/paths"
 
@@ -156,16 +156,25 @@ describe("the shared path table", () => {
   })
 })
 
-describe("backslashSite", () => {
-  it.each<[string, ReturnType<typeof backslashSite>]>([
+describe("unnameableSite", () => {
+  it.each<[string, ReturnType<typeof unnameableSite>]>([
     ["src/a.ts", null],
-    ["src/a:b.ts", null],
     [".", null],
-    ["src/weird\\name.ts", { segment: "weird\\name.ts", prefix: "src/weird\\name.ts" }],
-    ["src/v\\1/util.ts", { segment: "v\\1", prefix: "src/v\\1" }],
-    ["a\\1/b\\2/c.ts", { segment: "a\\1", prefix: "a\\1" }],
-  ])("answers %j with the first segment holding one and the prefix up to it", (path, site) => {
-    expect(backslashSite(path)).toEqual(site)
+    ["ab:notes.ts", null],
+    ["src/x:y.ts", null],
+    ["src/weird\\name.ts", { reason: "unspellable-name", prefix: "src/weird\\name.ts" }],
+    ["src/v\\1/util.ts", { reason: "unspellable-name", prefix: "src/v\\1" }],
+    ["a\\1/b\\2/c.ts", { reason: "unspellable-name", prefix: "a\\1" }],
+    ["a:notes.ts", { reason: "drive-shaped-name", prefix: "a:notes.ts" }],
+    ["d:data/x.ts", { reason: "drive-shaped-name", prefix: "d:data" }],
+    ["x:/y.ts", { reason: "drive-shaped-name", prefix: "x:" }],
+    ["\u212A:notes.ts", { reason: "drive-shaped-name", prefix: "\u212A:notes.ts" }],
+    ["d:data/v\\1/x.ts", { reason: "drive-shaped-name", prefix: "d:data" }],
+    ["a:b\\c.ts", { reason: "unspellable-name", prefix: "a:b\\c.ts" }],
+  ])("answers %j with the prefix to rename, and agrees with toDocumentPath on it", (path, site) => {
+    expect(unnameableSite(path)).toEqual(site)
+    if (site === null) expect(() => toDocumentPath(path)).not.toThrow()
+    else expect(() => toDocumentPath(path)).toThrowError(CoreError)
   })
 })
 
