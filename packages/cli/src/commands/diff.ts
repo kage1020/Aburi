@@ -13,6 +13,7 @@ import {
   resolveOutputDir,
 } from "../artifact-paths"
 import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-load"
+import type { LogLevel } from "../env"
 import { CliError, errorMessage, internalFault, unplacedErrorCode } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
@@ -55,6 +56,7 @@ export interface DiffOptions {
   configPath?: string
   compact?: boolean
   maxBytes?: number
+  logLevel?: LogLevel
   git?: GitRunner
   warn?: WarnFn
 }
@@ -100,6 +102,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     cwd,
     git: options.git,
     compact: options.compact,
+    logLevel: options.logLevel,
     pinConfigOnce,
     warn,
   })

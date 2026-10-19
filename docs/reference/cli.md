@@ -13,6 +13,15 @@ aburi <command> [flags]
 
 `-v` / `--version` and `-h` / `--help` work anywhere and exit `0`.
 
+`--log-level debug|info|warn|error` works on every command too, before it or after it. It
+sets how much of the per-file log
+(`warn: Skipped src/legacy.ts: parse reported a non-recoverable error at 12:4 — …`) reaches
+stderr, from `aburi scan` and from the scans `aburi diff` and `aburi explain` run. That log
+writes only `warn:` and `debug:` lines, so the default, `warn`, and `info` both show the `warn:`
+lines, `debug` adds a line for every file extracted, and `error` shows none of it. Its lines
+name no scan; `aburi diff` writes the base's before the head's. The `⚠` warnings are printed
+whatever the level. Any other value exits `2`.
+
 An option that takes a value takes one. Given twice (`--config a.json --config b.json`), the
 command exits `2` and names it rather than keep one and drop the other without a word.
 `--ignore` and `--fail-on` add up instead. A flag, which takes no value, can be repeated, and of
@@ -36,6 +45,7 @@ CI gates on `3`.
 | Variable | Effect |
 |---|---|
 | `ABURI_CONFIG` | Config file path. The `--config` flag wins over it. |
+| `ABURI_LOG_LEVEL` | The same as `--log-level`, which wins over it. A value other than the four levels is ignored. |
 | `NO_COLOR` | Suppress colour output. |
 | `CI` | Makes `aburi scan` omit the timestamp, so identical commits produce identical bytes. |
 
@@ -132,7 +142,7 @@ unparseable file tells you something about your source, not about the scan.
 :::
 
 Every command that scans reports the same way. `aburi diff` runs two scans and
-labels each: the base by its ref, the head as `head (working tree)`.
+labels each one's `⚠` lines: the base by its ref, the head as `head (working tree)`.
 
 ---
 

@@ -6,6 +6,7 @@ import {
   deriveStrict,
   type OutputFormat,
   parseFormat,
+  parseLogLevel,
   parseMaxBytes,
   parsePath,
   refuseRepeatedValues,
@@ -15,7 +16,7 @@ import { type CoverageDoubt, runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
 import { runScan } from "./commands/scan"
 import { resolveConfigPath } from "./config-path"
-import { readEnv } from "./env"
+import { type LogLevel, readEnv } from "./env"
 import { assertNever, CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError } from "./fail-on"
@@ -43,6 +44,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .name("aburi")
     .description("Render meaningful code structure as IR for review")
     .version(version, "-v, --version")
+    .option(
+      "--log-level <level>",
+      "per-file log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info shows what warn does, and error none of it",
+      parseLogLevel,
+    )
     .exitOverride()
     .configureOutput({
       writeOut: (str) => {
@@ -52,10 +58,14 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         stderr.write(str)
       },
     })
+    // Commander copies help settings into a subcommand when `.command()` creates it.
+    .configureHelp({ showGlobalOptions: true })
 
   const warn = (message: string): void => {
     stderr.write(`${message}\n`)
   }
+  const logLevel = (): LogLevel | undefined =>
+    program.opts<{ logLevel?: LogLevel }>().logLevel ?? env.logLevel ?? undefined
   let capturedExitCode: ExitCode = EXIT.SUCCESS
   const runCommand = (command: () => Promise<ExitCode | undefined>): (() => Promise<void>) => {
     return async () => {
@@ -179,7 +189,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               suppressTimestamp: cmdOptions.timestamp === false || env.ci ? true : undefined,
               lsp: cmdOptions.lsp,
               strict: deriveStrict(cmdOptions),
-              logLevel: env.logLevel ?? undefined,
+              logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             incidents: { warn },
@@ -250,6 +260,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
                   : undefined,
               compact: cmdOptions.compact,
               maxBytes: cmdOptions.maxBytes,
+              logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             warn,
@@ -298,6 +309,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               outputPath: cmdOptions.output,
               noRescan: cmdOptions.rescan === undefined ? undefined : !cmdOptions.rescan,
               debugResolution: cmdOptions.debugResolution,
+              logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             warn,

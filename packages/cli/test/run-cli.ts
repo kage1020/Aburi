@@ -18,9 +18,13 @@ export interface CliRun {
   stderr: string
 }
 
-export async function runCliIn(cwd: string, argv: readonly string[]): Promise<CliRun> {
+export async function runCliIn(
+  cwd: string,
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv = {},
+): Promise<CliRun> {
   const stdout = new MemStream()
   const stderr = new MemStream()
-  const code = await runCli({ argv, cwd, stdout, stderr, env: {} })
+  const code = await runCli({ argv, cwd, stdout, stderr, env })
   return { code, stdout: stdout.text(), stderr: stderr.text() }
 }

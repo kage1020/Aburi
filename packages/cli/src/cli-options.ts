@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events"
 import { type Command, InvalidArgumentError } from "commander"
+import { isLogLevel, type LogLevel } from "./env"
 import { CliError } from "./errors"
 
 export type OutputFormat = "json" | "md" | "both"
@@ -17,6 +18,11 @@ export function definedOnly<T extends object>(
 export function parseFormat(value: string): OutputFormat {
   if (value === "json" || value === "md" || value === "both") return value
   throw new InvalidArgumentError(`--format must be one of: json | md | both`)
+}
+
+export function parseLogLevel(value: string): LogLevel {
+  if (isLogLevel(value)) return value
+  throw new InvalidArgumentError(`--log-level must be one of: debug | info | warn | error`)
 }
 
 export function parseMaxBytes(value: string): number {
