@@ -33,15 +33,26 @@ aburi --help / aburi -h                     # global help
 
 ## 3. Common Options
 
-Available on every command:
+Available on every command, unless the row says otherwise:
 
 | Option | Short | Meaning |
 |---|---|---|
-| `--cwd <path>` | — | Change the working directory (origin for config resolution) |
-| `--config <path>` | — | Explicitly specify the config file location |
-| `--log-level <level>` | — | `debug` / `info` / `warn` / `error` (default: `info`) |
-| `--no-color` | — | Disable colored output |
+| `--cwd <path>` | — | (planned) Change the working directory (origin for config resolution) |
+| `--config <path>` | — | Explicitly specify the config file location (§13). Taken by `scan`, `diff` and `explain`, after the command; `aburi init` has none |
+| `--log-level <level>` | — | `debug` / `info` / `warn` / `error`: the lowest level of the run's `Logger` lines (§5.6) that reach stderr. Written before the command or after it, and listed in every command's `--help` among the global options |
+| `--no-color` | — | (planned) Disable colored output |
 | `--help` | `-h` | Show command-specific help |
+
+The log level is resolved in this order, the first one set winning:
+
+```
+1. --log-level CLI flag
+2. ABURI_LOG_LEVEL env
+3. warn
+```
+
+A `--log-level` value other than the four levels exits `2`. An `ABURI_LOG_LEVEL` value other than
+them is ignored, as if the variable were unset.
 
 Top-level only:
 | Option | Short | Meaning |
@@ -281,13 +292,29 @@ printing them while the other two discard the report. A caller that supplies no 
 incident report.
 
 That is not the same as silence. The run's `Logger` is a separate channel — per file rather
-than per run, governed by `ABURI_LOG_LEVEL` (§11), and still writing to `process.stderr`
-whatever streams the caller injected. An embedded scan with no sink is quiet, not mute, and
-routing that channel to the caller is a known gap rather than something this contract covers.
+than per run, governed by `--log-level` (§3) and `ABURI_LOG_LEVEL` (§11), and still writing to
+`process.stderr` whatever streams the caller injected. The level is the command's rather than
+one scan's: `diff` hands it to both of its scans and `explain` to the one it rescans with, so no
+scan logs at a level the reader did not choose. An embedder passes it as `logLevel` to
+`runScan`, `runDiff` or `runExplain`, and gets `warn` without one. An embedded scan with no sink
+is quiet, not mute, and routing that channel to the caller is a known gap rather than something
+this contract covers.
 It is also why the files above are listed by the CLI itself rather than left to that channel:
 at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `unroutable` and an
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
 before extraction and are not logged at all, so the report is their only account.
+
+The reverse is a known gap: some things have only a `Logger` line, and Aburi's own packages write
+that channel at `warn` and `debug` only, so a reader who asks for `error` loses them. They are a
+language server that did not shut down
+(`[aburi:lsp] shutting down the <language> server failed (…); it may still be running`), why LSP
+was disabled for a language mid-run, and which files' `didOpen` failed — the `⚠` lines name the
+language, or count the files that fell back, and give no cause. `diff` adds the files past the
+listing's cap. A skipped file past a reason's first ten is named only in its scan's IR, which
+`diff` deletes before it exits, so unless the comparison names it — in `notCompared[]` when both
+scans skipped it, on an `unknown` entry when the other scan has Symbols from it — that scan's
+`warn: Skipped …` line is its only account, and for a reason decided before extraction there is
+none.
 
 §5.8's paragraph, the unreleased-tree line and the parse-error listing sit directly under the
 coverage line and above this census — ahead of everything that is recoverable from the artifact,
@@ -950,7 +977,7 @@ The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON
 | Variable | Meaning |
 |---|---|
 | `ABURI_CONFIG` | Config file path (equivalent to --config) |
-| `ABURI_LOG_LEVEL` | Equivalent to --log-level |
+| `ABURI_LOG_LEVEL` | Equivalent to --log-level, which wins over it (§3), except that a value other than the four levels is ignored rather than refused |
 | `NO_COLOR` | If set, disable coloring (standard convention) |
 | `FORCE_COLOR` | If set, force coloring on (standard convention) |
 | `CI` | If set, CI mode (§12) |
@@ -981,7 +1008,7 @@ Can also be enabled via an explicit `--ci` flag (for CI environments where the e
 6. autodetect (works with no config present)
 ```
 
-Passing `--cwd` changes the cwd and therefore the search origin.
+Passing `--cwd` (planned, §3) will change the cwd and therefore the search origin.
 
 `aburi diff` in ref mode runs this list **once**, against the invoking cwd, before it
 materialises the base worktree — and hands the single answer (an absolute path, or "nothing
@@ -1032,10 +1059,10 @@ Commands:
   vocab      Show registered extension vocabulary
 
 Common options:
-  --cwd <path>           Set working directory
+  --cwd <path>           Set working directory (planned)
   --config <path>        Override config file location
   --log-level <level>    debug | info | warn | error
-  --no-color             Disable colored output
+  --no-color             Disable colored output (planned)
   -h, --help             Show help for command
   -v, --version          Show version
 
@@ -1067,7 +1094,6 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL14 | Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
 | CL15 | `NO_COLOR=1 aburi scan` | No coloring |
 | CL16 | `CI=true aburi scan` | Progress animation suppressed |
-| CL17 | `--log-level debug aburi diff` on error | Stack trace on stderr |
 | CL18 | `aburi --config ./custom.json scan` | Uses the specified config |
 | CL19 | `aburi explain <name>` where a plugin threw during the rescan | exit 3, incident lines on stderr |
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
@@ -1086,6 +1112,10 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 | CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
 | CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
+| CL35 | `aburi scan`, `aburi diff main..HEAD`, or `aburi explain <name>` with no IR on disk, where each scanned tree holds a file that fails to parse | One `warn:` line per scan naming that file, so two from `diff`, and the same at `--log-level info` or with an `ABURI_LOG_LEVEL` other than the four levels; none at `ABURI_LOG_LEVEL=error`; the per-file `debug:` lines as well at `ABURI_LOG_LEVEL=debug`; `--log-level`, before the command or after it, wins over the variable whichever of the two is the more verbose |
+| CL36 | `aburi scan --log-level loud` | exit 2 naming the four levels |
+| CL37 | `aburi init --log-level debug` | exit 0: `init` accepts the flag, which has no per-file log there to govern |
+| CL38 | `aburi init --help`, `aburi scan --help`, `aburi diff --help` or `aburi explain --help` | `--log-level` listed under "Global Options" |
 | CL54 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3`, `2`), never `1`, and the other stream byte for byte. stdout into a file the disk refuses (`/dev/full`) still exits 1 |
 
 ## 18. Design Decisions
