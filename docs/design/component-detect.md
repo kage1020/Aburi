@@ -407,9 +407,9 @@ Implementation guidance:
 | CD34 | A component holding twelve `.ts` files and a link to a directory outside the workspace that holds twelve `.py` files | `languages` is `["ts"]` — the census does not walk through the link |
 | CD35 | `nx.json`, `apps/billing/project.json`, and `apps/alias` a link to `apps/billing` | One Component, rooted at `apps/billing` |
 | CD36 | `packages: ["packages/*"]`, `packages/billing/package.json`, and `packages/alias` a link to `packages/billing` | Two Components, rooted at `packages/alias` and `packages/billing`; no scanned file belongs to the one at `packages/alias` |
-| CD37 | `package.json#main: "./"`, or `exports: {".": "./src/ok.js", "./": "./"}` | No entry for the package directory: no `publicApi` key, or `publicApi = ["src/ok.js"]`. The IR satisfies its schema |
-| CD38 | `main`, `module`, `types` or `typings` set to `"."`, `"./."`, `"././"`, `"./lib/"`, `"/"`, `"/dist/index.mjs"`, `"C:/dist/index.d.ts"` or `"../shared/index.d.ts"`, or an `exports` folder mapping `"./lib/": "./lib/"` | No entry for any of them |
-| CD39 | `main: "././dist/index.js"`, `module: "./dist/./index.js"`, `types: "dist//index.js"` | publicApi = ["dist/index.js"] |
+| CD47 | `package.json#main: "./"`, or `exports: {".": "./src/ok.js", "./": "./"}` | No entry for the package directory: no `publicApi` key, or `publicApi = ["src/ok.js"]`. The IR satisfies its schema |
+| CD48 | `main`, `module`, `types` or `typings` set to `"."`, `"./."`, `"././"`, `"./lib/"`, `"/"`, `"/dist/index.mjs"`, `"C:/dist/index.d.ts"` or `"../shared/index.d.ts"`, or an `exports` folder mapping `"./lib/": "./lib/"` | No entry for any of them |
+| CD49 | `main: "././dist/index.js"`, `module: "./dist/./index.js"`, `types: "dist//index.js"` | publicApi = ["dist/index.js"] |
 
 ## 11. Design decisions
 
