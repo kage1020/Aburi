@@ -16,6 +16,8 @@ export const MERMAID_NODE_LIMIT = 100
 /** Ten rows keep the effect surface table short enough for a PR comment. */
 export const EFFECT_SURFACE_TOP_N = 10
 
+const NO_COMPONENT_EDGES = "_No Component edges recorded._"
+
 export interface ProjectWorkspaceOptions {
   suppressTimestamp?: boolean
 }
@@ -136,7 +138,7 @@ function renderDependencies(ir: IR): string[] {
     edgeNodes.add(d.to)
   }
   const unionNodeCount = new Set<string>([...sortedComponents.map((c) => c.id), ...edgeNodes]).size
-  if (unionNodeCount === 0) return ["_No inter-component dependencies._"]
+  if (unionNodeCount === 0) return [NO_COMPONENT_EDGES]
 
   const rows: string[] = []
   if (unionNodeCount <= MERMAID_NODE_LIMIT) {
@@ -158,19 +160,19 @@ function renderDependencies(ir: IR): string[] {
       `_Component graph omitted: ${unionNodeCount} nodes exceeds the render limit (${MERMAID_NODE_LIMIT}). See list below._`,
     )
   }
-  if (componentDeps.length > 0) {
-    rows.push("")
-    rows.push("Fallback list:")
-    rows.push("")
-    for (const d of sortDependencies(componentDeps)) {
-      rows.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})`)
-    }
+  rows.push("")
+  rows.push("Fallback list:")
+  rows.push("")
+  if (componentDeps.length === 0) rows.push(NO_COMPONENT_EDGES)
+  for (const d of sortDependencies(componentDeps)) {
+    rows.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})`)
   }
   return rows
 }
 
+/** Prefixed rather than checked against a keyword list, which changes with mermaid releases. */
 function sanitizeMermaidId(id: string): string {
-  return id.replace(/-/g, "_")
+  return `c_${id.replace(/-/g, "_")}`
 }
 
 function escapeMermaidLabel(label: string): string {
