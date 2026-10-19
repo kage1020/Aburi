@@ -27,6 +27,7 @@ export function scanReportWith(overrides: Partial<ScanReport>): ScanReport {
     undeclaredVocab: [],
     vocabDiscoveredPath: null,
     unresolvedDeclarations: [],
+    unnameableRoots: [],
     treeReleaseFailures: [],
     fellBackToSingleComponent: false,
     pluginNamedFrameworks: [],
