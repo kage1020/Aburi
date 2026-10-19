@@ -398,8 +398,8 @@ Implementation guidance:
 | CD34 | A component holding twelve `.ts` files and a link to a directory outside the workspace that holds twelve `.py` files | `languages` is `["ts"]` — the census does not walk through the link |
 | CD35 | `nx.json`, `apps/billing/project.json`, and `apps/alias` a link to `apps/billing` | One Component, rooted at `apps/billing` |
 | CD36 | `packages: ["packages/*"]`, `packages/billing/package.json`, and `packages/alias` a link to `packages/billing` | Two Components, rooted at `packages/alias` and `packages/billing`; no scanned file belongs to the one at `packages/alias` |
-| CD37 | `src/locked` cannot be listed and holds what one search looks for: twelve `.py` files for the language census, a `project.json` beside `nx.json`, or a `package.json` that `packages: ["src/*"]` declares | Detection ends with `scan-directory-unreadable` naming the directory, and `aburi init` exits 1 |
-| CD38 | The same, at `data/pg`, with `.gitignore` holding `pg/` or `data/` | Detection runs, passing over `data/pg`; with `respectGitignore` off it ends as in CD37 |
+| CD41 | `src/locked` cannot be listed and holds what one search looks for: twelve `.py` files for the language census, a `project.json` beside `nx.json`, or a `package.json` that `packages: ["src/*"]` declares | Detection ends with `scan-directory-unreadable` naming the directory, and `aburi init` exits 1 |
+| CD42 | The same, at `data/pg`, with `.gitignore` holding `pg/` or `data/` | Detection runs, passing over `data/pg`; with `respectGitignore` off it ends as in CD41 |
 
 ## 11. Design decisions
 
