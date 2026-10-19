@@ -1086,7 +1086,7 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 | CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
 | CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
-| CL35 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3`, `2`), never `1`, and the other stream byte for byte. stdout into a file the disk refuses (`/dev/full`) still exits 1 |
+| CL54 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3`, `2`), never `1`, and the other stream byte for byte. stdout into a file the disk refuses (`/dev/full`) still exits 1 |
 
 ## 18. Design Decisions
 
