@@ -3,6 +3,7 @@ import {
   CoreError,
   detectComponents,
   detectManagers,
+  type UnnameableRoot,
   type UnresolvedDeclaration,
 } from "@aburi/core"
 import type { Config } from "@aburi/types"
@@ -40,6 +41,7 @@ export interface InitReport {
   suggestedPlugins: readonly string[]
   unmappedLanguages: readonly string[]
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
+  unnameableRoots: readonly UnnameableRoot[]
   fellBackToSingleComponent: boolean
   unmappedFrameworks: readonly string[]
   overwrote: boolean
@@ -115,6 +117,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     unmappedLanguages: unmappedIds(languageSet, LANGUAGE_TO_PLUGIN),
     unmappedFrameworks: unmappedIds(frameworkSet, FRAMEWORK_TO_PLUGIN),
     unresolvedDeclarations: managers.unresolved,
+    unnameableRoots: managers.unnameableRoots,
     fellBackToSingleComponent: managers.workspaces.length === 0,
     overwrote: existing === "file",
     exitCode: EXIT.SUCCESS,

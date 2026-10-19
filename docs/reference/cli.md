@@ -129,9 +129,14 @@ unparseable file tells you something about your source, not about the scan.
   (the default). No output is written. Declare the value, or run with
   `--discover` to keep it and see the full list.
 - **A filename cannot be written down.** The analysis has no representation for
-  a path containing a backslash, and filenames differing in Unicode composition
-  alone collapse to one. The scan names both kinds on stderr. Rename them, or
+  a path containing a backslash, or for a top-level name that opens with one
+  ASCII letter and a colon (`a:notes.ts`, `d:data/`), which reads as a Windows
+  drive. Filenames differing in Unicode composition alone collapse to one. The
+  scan names each kind on stderr and still analyses the rest. Rename them, or
   exclude them with `ignore`, doubling the backslash in the glob pattern.
+- **A workspace package sits in such a directory.** It cannot be a component,
+  so the scan names it on stderr, even when it holds no source file. Rename the
+  directory. `aburi init` names it too, and still writes the config.
 :::
 
 Every command that scans reports the same way. `aburi diff` runs two scans and
@@ -288,7 +293,8 @@ Several matches exit `2` and print the candidates so you can requalify. No match
 exits `1`, and names how many files the analysis never read, since your match may
 sit in one of them. Ask about a file the analysis skipped and you get `3`
 instead. There is no answer to give, and "no matches" would claim more than the
-document can support.
+document can support. A file no analysis can name, such as `a:notes.ts`, also
+gets `3`, with the name to change.
 
 ```bash
 aburi explain submitOrder
