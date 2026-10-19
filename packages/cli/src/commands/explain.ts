@@ -4,6 +4,7 @@ import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/m
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { configuredOutputDir, pinConfig } from "../config-load"
+import type { LogLevel } from "../env"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { pathExists } from "../fs-probe"
@@ -23,6 +24,7 @@ export interface ExplainOptions {
   outputPath?: string
   noRescan?: boolean
   debugResolution?: boolean
+  logLevel?: LogLevel
   warn?: WarnFn
 }
 
@@ -241,6 +243,7 @@ async function readOrScanIR(
     command: "explain",
     format: "json",
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    ...(options.logLevel === undefined ? {} : { logLevel: options.logLevel }),
     ...(options.warn === undefined ? {} : { incidents: { warn: options.warn } }),
   }
   const report = await runScan(scanOptions)
