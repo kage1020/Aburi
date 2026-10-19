@@ -1,8 +1,8 @@
-import { mkdir } from "node:fs/promises"
+import { mkdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { EXIT } from "../src"
+import { EXIT, type ExitCode, IR_JSON_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
 import { TYPESCRIPT, writeConfig, writePackageJson } from "./workspace"
 
@@ -107,4 +107,64 @@ describe("aburi init — a manifest whose package patterns named no package", ()
 
     expect(stderr).not.toContain("named no package")
   })
+})
+
+const onPosix = it.skipIf(process.platform === "win32")
+
+const LEFT_OUT =
+  '⚠ pnpm package "a:pkg" (pnpm-workspace.yaml) is not a component and not on workspace.managers[].roots, and none of its files can be scanned: "a:pkg" opens with one ASCII letter and ":", which a Document path reads as a Windows drive, so no IR can name it. Rename it.'
+
+async function runIn(command: "scan" | "init") {
+  await workspace.writeSource("pnpm-workspace.yaml", 'packages:\n  - "*"\n')
+  if (command === "scan") await writeConfig(workspace.root, TYPESCRIPT)
+  const run = await runCliIn(workspace.root, [command])
+  const written = command === "scan" ? `out/${IR_JSON_FILENAME}` : "aburi.json"
+  const { components } = JSON.parse(await readFile(resolve(workspace.root, written), "utf8")) as {
+    components: { roots: string[] }[]
+  }
+  return { ...run, lines: run.stderr.split("\n"), roots: components.map((c) => c.roots) }
+}
+
+describe("aburi scan and aburi init — a workspace package no Document path can name", () => {
+  onPosix.each<["scan" | "init", string, ExitCode, boolean, string[][]]>([
+    ["scan", "a:pkg", EXIT.GATE, true, [["ok"]]],
+    ["scan", "odd", EXIT.SUCCESS, false, [["odd"], ["ok"]]],
+    ["init", "a:pkg", EXIT.SUCCESS, true, [["ok"]]],
+    ["init", "odd", EXIT.SUCCESS, false, [["odd"], ["ok"]]],
+  ])(
+    "aburi %s beside a kept package, with another at %s holding no source file",
+    async (command, directory, exitCode, named, roots) => {
+      await writePackageJson(resolve(workspace.root, "ok"), { name: "ok" })
+      await writeSources("ok/src")
+      await writePackageJson(resolve(workspace.root, directory), { name: "odd" })
+      await workspace.writeSource(`${directory}/README.md`, "# odd\n")
+
+      const run = await runIn(command)
+
+      expect(run.code).toBe(exitCode)
+      expect(run.lines.includes(LEFT_OUT)).toBe(named)
+      expect(run.stderr).not.toContain(FELL_BACK)
+      expect(run.roots).toEqual(roots)
+    },
+  )
+
+  onPosix.each<["scan" | "init", ExitCode]>([
+    ["scan", EXIT.GATE],
+    ["init", EXIT.SUCCESS],
+  ])(
+    "aburi %s says the repository fell back when that was the only package",
+    async (command, exitCode) => {
+      await writePackageJson(resolve(workspace.root, "a:pkg"), { name: "odd" })
+      await writeSources("a:pkg/src")
+
+      const run = await runIn(command)
+
+      expect(run.code).toBe(exitCode)
+      expect(run.lines).toContain(LEFT_OUT)
+      expect(run.lines).toContain(
+        "⚠ No other workspace package was found, so the whole repository is described as one component.",
+      )
+      expect(run.roots).toEqual([["."]])
+    },
+  )
 })
