@@ -14,6 +14,8 @@ const PRIVATE_NAME_PATTERN = /^#[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
 const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:)/
 
+const DRIVE_LETTER_PATTERN = /^[A-Za-z]:/
+
 const COMPONENT_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 export interface SymbolIdParts {
@@ -143,19 +145,26 @@ export function toDocumentPath(rawPath: string): string {
 
 const SYMBOL_ID_SEPARATORS = [":", "#"] as const
 
-export interface BackslashSite {
-  segment: string
+export interface UnnameableSite {
+  reason: "unspellable-name" | "drive-shaped-name"
   prefix: string
 }
 
-export function backslashSite(path: string): BackslashSite | null {
-  const segments = path.split("/")
-  for (const [index, segment] of segments.entries()) {
-    if (segment.includes("\\")) {
-      return { segment, prefix: segments.slice(0, index + 1).join("/") }
-    }
+export function unnameableSite(path: string): UnnameableSite | null {
+  const backslash = backslashPrefix(path)
+  const [head = ""] = path.split("/", 1)
+  // Tested after NFC, as the grammar reads it, but named as spelled, which is what `ignore` matches.
+  // A backslash in the same segment wins the tie: its `ignore` advice is the one that holds there.
+  if (backslash !== head && DRIVE_LETTER_PATTERN.test(toNfc(head))) {
+    return { reason: "drive-shaped-name", prefix: head }
   }
-  return null
+  return backslash === null ? null : { reason: "unspellable-name", prefix: backslash }
+}
+
+function backslashPrefix(path: string): string | null {
+  const segments = path.split("/")
+  const index = segments.findIndex((segment) => segment.includes("\\"))
+  return index < 0 ? null : segments.slice(0, index + 1).join("/")
 }
 
 export interface SymbolIdSeparatorSite {
@@ -256,7 +265,7 @@ export function posixSpellingViolation(value: string, subject: string): GrammarV
   if (value.length === 0) {
     return { code: "non-posix-path", message: `${subject} is empty`, value }
   }
-  if (backslashSite(value) !== null) {
+  if (backslashPrefix(value) !== null) {
     return {
       code: "non-posix-path",
       message: `${subject} "${value}" contains a backslash; "/" is the only separator a Document path has, so a native path must be converted before it reaches this rule, and a name holding one cannot be written here at all`,

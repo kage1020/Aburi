@@ -6,6 +6,7 @@ import { basename, resolve } from "node:path"
 import type { GitRenameMap } from "@aburi/diff"
 import type { IR } from "@aburi/types"
 import type { PinnedConfig } from "../config-load"
+import type { LogLevel } from "../env"
 import { CliError, errorMessage, internalFault } from "../errors"
 import { assertNotShallow, assertNotSparse, assertRefResolvable } from "../git/preflight"
 import { collectRenames } from "../git/renames"
@@ -36,6 +37,7 @@ export interface RevisionScanContext {
   cwd: string
   git: GitRunner | undefined
   compact: boolean | undefined
+  logLevel: LogLevel | undefined
   pinConfigOnce: () => Promise<PinnedConfig>
   warn: WarnFn
 }
@@ -72,6 +74,7 @@ export async function scanRevisions(
       pluginRefRoot: headWorkspaceRoot,
       ...(submoduleIgnore.length === 0 ? {} : { ignore: submoduleIgnore }),
       ...(context.compact === undefined ? {} : { compact: context.compact }),
+      ...(context.logLevel === undefined ? {} : { logLevel: context.logLevel }),
     })
 
   let worktreeAdded = false

@@ -6,6 +6,7 @@ import {
   deriveStrict,
   type OutputFormat,
   parseFormat,
+  parseLogLevel,
   parseMaxBytes,
 } from "./cli-options"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
@@ -13,12 +14,12 @@ import { type CoverageDoubt, runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
 import { runScan } from "./commands/scan"
 import { resolveConfigPath } from "./config-path"
-import { readEnv } from "./env"
+import { type LogLevel, readEnv } from "./env"
 import { assertNever, CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
-import { describeUnresolvedDeclarations } from "./unresolved-report"
+import { describeWorkspaceDetection, UNNAMEABLE_BECAUSE } from "./unresolved-report"
 import { VOCAB_DISCOVERED_FILENAME } from "./vocab-discovered"
 
 export interface RunCliOptions {
@@ -41,6 +42,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .name("aburi")
     .description("Render meaningful code structure as IR for review")
     .version(version, "-v, --version")
+    .option(
+      "--log-level <level>",
+      "per-file log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info shows what warn does, and error none of it",
+      parseLogLevel,
+    )
     .exitOverride()
     .configureOutput({
       writeOut: (str) => {
@@ -50,10 +56,14 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         stderr.write(str)
       },
     })
+    // Commander copies help settings into a subcommand when `.command()` creates it.
+    .configureHelp({ showGlobalOptions: true })
 
   const warn = (message: string): void => {
     stderr.write(`${message}\n`)
   }
+  const logLevel = (): LogLevel | undefined =>
+    program.opts<{ logLevel?: LogLevel }>().logLevel ?? env.logLevel ?? undefined
   let capturedExitCode: ExitCode = EXIT.SUCCESS
   const runCommand = (command: () => Promise<ExitCode | undefined>): (() => Promise<void>) => {
     return async () => {
@@ -100,12 +110,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           if (report.suggestedPlugins.length > 0) {
             stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
           }
-          for (const line of describeUnresolvedDeclarations(
-            report.unresolvedDeclarations,
-            report.fellBackToSingleComponent,
-          )) {
-            stderr.write(`⚠ ${line}\n`)
-          }
+          for (const line of describeWorkspaceDetection(report)) stderr.write(`⚠ ${line}\n`)
           if (report.unmappedLanguages.length > 0) {
             stderr.write(
               `⚠ No language plugin ships for: ${report.unmappedLanguages.join(", ")}. ` +
@@ -173,7 +178,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               suppressTimestamp: cmdOptions.timestamp === false || env.ci ? true : undefined,
               lsp: cmdOptions.lsp,
               strict: deriveStrict(cmdOptions),
-              logLevel: env.logLevel ?? undefined,
+              logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             incidents: { warn },
@@ -232,6 +237,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               failOn: cmdOptions.failOn,
               compact: cmdOptions.compact,
               maxBytes: cmdOptions.maxBytes,
+              logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             warn,
@@ -280,6 +286,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               outputPath: cmdOptions.output,
               noRescan: cmdOptions.rescan === undefined ? undefined : !cmdOptions.rescan,
               debugResolution: cmdOptions.debugResolution,
+              logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             warn,
@@ -307,7 +314,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               break
             case "unnameable":
               stderr.write(
-                `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" holds a backslash, and "/" is the only separator a Document path has, so nothing Aburi writes can refer to it. Rename it.\n`,
+                `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" ${UNNAMEABLE_BECAUSE[outcome.reason]}, so nothing Aburi writes can refer to it. Rename it.\n`,
               )
               break
             case "unknown": {

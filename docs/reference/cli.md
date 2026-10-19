@@ -13,6 +13,15 @@ aburi <command> [flags]
 
 `-v` / `--version` and `-h` / `--help` work anywhere and exit `0`.
 
+`--log-level debug|info|warn|error` works on every command too, before it or after it. It
+sets how much of the per-file log
+(`warn: Skipped src/legacy.ts: parse reported a non-recoverable error at 12:4 — …`) reaches
+stderr, from `aburi scan` and from the scans `aburi diff` and `aburi explain` run. That log
+writes only `warn:` and `debug:` lines, so the default, `warn`, and `info` both show the `warn:`
+lines, `debug` adds a line for every file extracted, and `error` shows none of it. Its lines
+name no scan; `aburi diff` writes the base's before the head's. The `⚠` warnings are printed
+whatever the level. Any other value exits `2`.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -29,6 +38,7 @@ CI gates on `3`.
 | Variable | Effect |
 |---|---|
 | `ABURI_CONFIG` | Config file path. The `--config` flag wins over it. |
+| `ABURI_LOG_LEVEL` | The same as `--log-level`, which wins over it. A value other than the four levels is ignored. |
 | `NO_COLOR` | Suppress colour output. |
 | `CI` | Makes `aburi scan` omit the timestamp, so identical commits produce identical bytes. |
 
@@ -119,13 +129,18 @@ unparseable file tells you something about your source, not about the scan.
   (the default). No output is written. Declare the value, or run with
   `--discover` to keep it and see the full list.
 - **A filename cannot be written down.** The analysis has no representation for
-  a path containing a backslash, and filenames differing in Unicode composition
-  alone collapse to one. The scan names both kinds on stderr. Rename them, or
+  a path containing a backslash, or for a top-level name that opens with one
+  ASCII letter and a colon (`a:notes.ts`, `d:data/`), which reads as a Windows
+  drive. Filenames differing in Unicode composition alone collapse to one. The
+  scan names each kind on stderr and still analyses the rest. Rename them, or
   exclude them with `ignore`, doubling the backslash in the glob pattern.
+- **A workspace package sits in such a directory.** It cannot be a component,
+  so the scan names it on stderr, even when it holds no source file. Rename the
+  directory. `aburi init` names it too, and still writes the config.
 :::
 
 Every command that scans reports the same way. `aburi diff` runs two scans and
-labels each: the base by its ref, the head as `head (working tree)`.
+labels each one's `⚠` lines: the base by its ref, the head as `head (working tree)`.
 
 ---
 
@@ -278,7 +293,8 @@ Several matches exit `2` and print the candidates so you can requalify. No match
 exits `1`, and names how many files the analysis never read, since your match may
 sit in one of them. Ask about a file the analysis skipped and you get `3`
 instead. There is no answer to give, and "no matches" would claim more than the
-document can support.
+document can support. A file no analysis can name, such as `a:notes.ts`, also
+gets `3`, with the name to change.
 
 ```bash
 aburi explain submitOrder
