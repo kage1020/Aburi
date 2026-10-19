@@ -15,9 +15,15 @@ export function chooseInputs(options: {
   head?: string | null
 }): DiffInputs {
   if (options.refSpec !== undefined && options.refSpec !== null && options.refSpec.length > 0) {
-    if (options.base !== undefined && options.base !== null) {
+    const fileOption =
+      options.base !== undefined && options.base !== null
+        ? "--base"
+        : options.head !== undefined && options.head !== null
+          ? "--head"
+          : null
+    if (fileOption !== null) {
       throw new CliError(
-        `--base cannot be combined with a ref spec argument. Use one or the other.`,
+        `${fileOption} cannot be combined with a ref spec argument. Use one or the other.`,
         "input-error",
       )
     }

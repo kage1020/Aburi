@@ -496,7 +496,7 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | Option | Meaning |
 |---|---|
 | `--base <path>` | Base IR file path (instead of a ref) |
-| `--head <path>` | Head IR file path |
+| `--head <path>` | Head IR file path (instead of a ref) |
 | `--output-dir <path>` | Destination for diff.json / diff.md / diff.full.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
 | `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
@@ -596,7 +596,7 @@ Everything else is passed on. `GIT_DIR` names the repository both scans are abou
 |---|---|
 | 0 | Diff computed successfully (regardless of whether differences exist) |
 | 1 | Computation error (invalid IR, git error, an output the disk refused) |
-| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on; an option that takes one value given twice, or a path given empty — §3) |
+| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing, or either beside a ref spec; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on; an option that takes one value given twice, or a path given empty — §3) |
 | 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
 
 The second cause is about greenness, not about counts. A file withdrawn during extraction is recorded in
@@ -1096,6 +1096,7 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL35 | `aburi diff … --fail-on changed --fail-on removed` over one changed Symbol, in either order; over a changed and a removed one, in either order | exit 3 in both orders, as `--fail-on changed,removed` gives, and `--fail-on removed --fail-on added`, or no `--fail-on` at all, exits 0; over both, the tripped line names the clause written first. An invalid occurrence beside a valid one (`--fail-on bogus --fail-on changed`, `--fail-on '' --fail-on changed`) exits 2 quoting that occurrence alone, before either IR is read and with an earlier report in the output directory left as it was. `runDiff` refuses `failOn: []` as it refuses `failOn: ""` |
 | CL36 | Any option that takes a value, other than `--ignore` and `--fail-on`, given twice on any command — `init --output`; `scan --output-dir`, `--format`, `--config`; `diff --base`, `--head`, `--output-dir`, `--format`, `--max-bytes`, `--config`; `explain --ir`, `--output`, `--config` — in either spelling (`--config=a.json --config a.json`), the same value twice included, and a second value the option refuses on its own (`scan --format json --format bogus`, `diff … --max-bytes 1000 --max-bytes 0`) | exit 2, `<option> is given more than once ("<first>", then "<second>"): pass one` on stderr, nothing on stdout, nothing written, and an earlier report left as it was. With the invalid value first (`scan --format bogus --format json`), that value's own error instead, at exit 2. `aburi scan --compact --compact` and `--no-timestamp --no-timestamp` run and exit 0; `--ignore a/** --ignore b/**` leaves out the files under both and exits 0; `--respect-gitignore` and `--no-respect-gitignore` together, in either order, over a config that sets `respectGitignore: false`: the one written last applies |
 | CL37 | An empty value for any option that takes a path — `init --output`; `scan --output-dir`, `--config`; `diff --base`, `--head`, `--output-dir`, `--config`; `explain --ir`, `--output`, `--config` — in either spelling (`--output-dir=`) | exit 2, `error: option '<option> <path>' argument '' is invalid. a path must not be empty` on stderr, nothing on stdout, nothing written, and an earlier report left as it was |
+| CL38 | `aburi diff main..HEAD --base b.json`, or `aburi diff main..HEAD --head h.json` | exit 2, `<option> cannot be combined with a ref spec argument. Use one or the other.`, naming the option given |
 
 ## 18. Design Decisions
 
