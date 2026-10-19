@@ -7,6 +7,7 @@ import {
   type OutputFormat,
   parseFormat,
   parseMaxBytes,
+  parsePath,
   refuseRepeatedValues,
 } from "./cli-options"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
@@ -69,7 +70,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
   program
     .command("init")
     .description("Generate aburi.json from autodetect")
-    .option("--output <path>", "output path (default: ./aburi.json)")
+    .option("--output <path>", "output path (default: ./aburi.json)", parsePath)
     .option("--force", "overwrite existing config")
     .option("--with-suggestions", "include plugin install suggestions as comments")
     .option("--respect-gitignore", "honour .gitignore while counting a component's languages")
@@ -126,7 +127,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
   program
     .command("scan")
     .description("Generate IR from the current workspace")
-    .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
+    .option(
+      "--output-dir <path>",
+      "output directory (default: config.output.dir, or out)",
+      parsePath,
+    )
     .option("--format <format>", "json | md | both (default: both)", parseFormat)
     .option("--no-md", "drop the Markdown output (conflicts with --format both/md)")
     .option("--no-json", "drop the IR JSON output (conflicts with --format both/json)")
@@ -135,7 +140,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--no-respect-gitignore", "ignore .gitignore patterns (overrides config)")
     .option("--compact", "compact JSON output")
     .option("--no-timestamp", "omit generatedAt from IR (default when running under CI env)")
-    .option("--config <path>", "config file path")
+    .option("--config <path>", "config file path", parsePath)
     .option("--lsp", "enable optional LSP enrichment (overrides config lsp.enabled=true)")
     .option("--no-lsp", "disable LSP enrichment (overrides config lsp.enabled=false)")
     .option("--strict", "stop at a value no plugin manifest declares (overrides config strict)")
@@ -195,9 +200,13 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .command("diff")
     .description("Compute the semantic diff between two IRs")
     .argument("[refspec]", "<base>..<head> ref spec")
-    .option("--base <path>", "base IR file")
-    .option("--head <path>", "head IR file")
-    .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
+    .option("--base <path>", "base IR file", parsePath)
+    .option("--head <path>", "head IR file", parsePath)
+    .option(
+      "--output-dir <path>",
+      "output directory (default: config.output.dir, or out)",
+      parsePath,
+    )
     .option("--format <format>", "json | md | both", parseFormat, "both")
     .option(
       "--fail-on <spec>",
@@ -211,7 +220,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       "cap diff.md at n UTF-8 bytes, shortening sections to names and then dropping them least-important-first (GitHub rejects a comment body over 65536)",
       parseMaxBytes,
     )
-    .option("--config <path>", "config file path")
+    .option("--config <path>", "config file path", parsePath)
     .action(
       (
         refspec: string | undefined,
@@ -235,7 +244,10 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               head: cmdOptions.head,
               outputDir: cmdOptions.outputDir,
               format: cmdOptions.format,
-              failOn: cmdOptions.failOn,
+              failOn:
+                cmdOptions.failOn !== undefined && cmdOptions.failOn.length > 0
+                  ? cmdOptions.failOn
+                  : undefined,
               compact: cmdOptions.compact,
               maxBytes: cmdOptions.maxBytes,
               configPath: resolveConfigPath(cmdOptions.config, env),
@@ -258,14 +270,14 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .command("explain")
     .description("Show a single Symbol's details")
     .argument("<id-or-pattern>", "Symbol id, file path, or substring pattern")
-    .option("--ir <path>", "existing IR file (skip auto-scan)")
-    .option("--output <path>", "write markdown to file instead of stdout")
+    .option("--ir <path>", "existing IR file (skip auto-scan)", parsePath)
+    .option("--output <path>", "write markdown to file instead of stdout", parsePath)
     .option("--no-rescan", "fail if IR is missing rather than scanning")
     .option(
       "--debug-resolution",
       "append the per-call resolution table (forces a rescan; incompatible with --ir / --no-rescan)",
     )
-    .option("--config <path>", "config file path")
+    .option("--config <path>", "config file path", parsePath)
     .action(
       (
         argument: string,
@@ -333,7 +345,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         })(),
     )
 
-  for (const command of program.commands) refuseRepeatedValues(command)
+  for (const command of [program, ...program.commands]) refuseRepeatedValues(command)
 
   try {
     await program.parseAsync(options.argv, { from: "user" })

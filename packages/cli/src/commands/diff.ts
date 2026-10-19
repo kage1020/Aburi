@@ -73,7 +73,7 @@ export interface DiffReport {
 export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
-  const failOn = [options.failOn ?? []].flat().flatMap((value) => parseFailOn(value))
+  const failOn = options.failOn === undefined ? [] : parseFailOnValues(options.failOn)
   if (
     options.maxBytes !== undefined &&
     (!Number.isInteger(options.maxBytes) || options.maxBytes <= 0)
@@ -139,6 +139,12 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     faultedScans,
     exitCode,
   }
+}
+
+function parseFailOnValues(failOn: string | readonly string[]): FailOnClause[] {
+  const values = [failOn].flat()
+  // No value at all is refused as an empty one is: either would leave the gate checking nothing.
+  return (values.length === 0 ? [""] : values).flatMap((value) => parseFailOn(value))
 }
 
 export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {

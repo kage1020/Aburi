@@ -13,10 +13,12 @@ aburi <command> [flags]
 
 `-v` / `--version` and `-h` / `--help` work anywhere and exit `0`.
 
-A flag that takes a value takes one. Given twice (`--config a.json --config b.json`), the
+An option that takes a value takes one. Given twice (`--config a.json --config b.json`), the
 command exits `2` and names it rather than keep one and drop the other without a word.
-`--ignore` and `--fail-on` add up instead. A flag without a value can be repeated, and of a
-`--x` / `--no-x` pair the last one written applies.
+`--ignore` and `--fail-on` add up instead. A flag, which takes no value, can be repeated, and of
+a `--x` / `--no-x` pair the last one written applies. An option that takes a path exits `2` on an
+empty one (`--config ""`, `--output-dir ""`) rather than read it as the option left out or as the
+working directory.
 
 ## Exit codes
 
@@ -24,7 +26,7 @@ command exits `2` and names it rather than keep one and drop the other without a
 |---|---|
 | `0` | Success, no gate tripped. |
 | `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output), an unexpected exception, or `explain` found no match. |
-| `2` | Bad invocation: an unknown flag, a flag that takes one value given twice, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
+| `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
 CI gates on `3`.
@@ -234,7 +236,7 @@ threshold, one occurrence trips the gate.
 --fail-on 'removed,changed:>20,api-changed'
 ```
 
-Repeating the flag adds its clauses after the earlier ones, so
+Repeating `--fail-on` adds its clauses after the earlier ones, so
 `--fail-on removed --fail-on 'changed:>20'` gates exactly as
 `--fail-on 'removed,changed:>20'` does.
 

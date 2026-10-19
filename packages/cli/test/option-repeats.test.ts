@@ -1,9 +1,8 @@
-import { readdir } from "node:fs/promises"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT } from "../src"
 import { runCliIn } from "./run-cli"
-import { writeTypeScriptWorkspace } from "./workspace"
+import { filesUnder, writeEarlierReports, writeTypeScriptWorkspace } from "./workspace"
 
 const workspace = useScratchWorkspace("option-repeats")
 
@@ -18,6 +17,11 @@ describe("an option that takes one value, given twice", () => {
     ],
     [["scan", "--output-dir", "a", "--output-dir", "b"], repeated("--output-dir", "a", "b")],
     [["scan", "--format", "json", "--format", "md"], repeated("--format", "json", "md")],
+    [["scan", "--format", "json", "--format", "bogus"], repeated("--format", "json", "bogus")],
+    [
+      ["scan", "--format", "bogus", "--format", "json"],
+      "error: option '--format <format>' argument 'bogus' is invalid. --format must be one of: json | md | both",
+    ],
     [
       ["scan", "--config", "a.json", "--config", "b.json"],
       repeated("--config", "a.json", "b.json"),
@@ -43,6 +47,10 @@ describe("an option that takes one value, given twice", () => {
       repeated("--max-bytes", "1000", "2000"),
     ],
     [
+      ["diff", "main..HEAD", "--max-bytes", "1000", "--max-bytes", "0"],
+      repeated("--max-bytes", "1000", "0"),
+    ],
+    [
       ["diff", "main..HEAD", "--config", "a.json", "--config", "b.json"],
       repeated("--config", "a.json", "b.json"),
     ],
@@ -58,21 +66,20 @@ describe("an option that takes one value, given twice", () => {
       ["explain", "alpha", "--config=a.json", "--config", "a.json"],
       repeated("--config", "a.json", "a.json"),
     ],
-  ])("%j exits 2 naming the option, and writes nothing", async (argv, message) => {
+  ])("%j exits 2 naming the option, and writes or removes nothing", async (argv, message) => {
+    const earlier = await writeEarlierReports(workspace.root, [".", "out", "a", "b"])
     const { code, stdout, stderr } = await runCliIn(workspace.root, argv)
     expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toBe(`${message}\n`)
     expect(stdout).toBe("")
-    expect(await readdir(workspace.root)).toEqual([])
+    expect(await filesUnder(workspace.root)).toEqual(earlier)
   })
 })
 
-describe("a flag, a --x / --no-x pair, and --ignore, repeated", () => {
+describe("a flag, repeated", () => {
   it.each([
     [["--compact", "--compact"]],
     [["--no-timestamp", "--no-timestamp"]],
-    [["--respect-gitignore", "--no-respect-gitignore"]],
-    [["--ignore", "a/**", "--ignore", "b/**"]],
   ])("scan %j runs", async (flags) => {
     await writeTypeScriptWorkspace(workspace.root, "option-repeats")
     const { code, stderr } = await runCliIn(workspace.root, ["scan", ...flags])

@@ -1,13 +1,13 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { call, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
+import { call, errorFrom, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, EXIT, runDiff } from "../src"
+import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, EXIT, FailOnParseError, runDiff } from "../src"
 import { pathExists } from "../src/fs-probe"
 import { diffDocuments, documentWith } from "./ir-documents"
 import { runCliIn } from "./run-cli"
-import { writeIRs } from "./workspace"
+import { filesUnder, writeEarlierReports, writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-files")
 
@@ -41,6 +41,22 @@ describe("aburi diff --base/--head", () => {
 
     expect(report.exitCode).toBe(EXIT.GATE)
     expect(report.triggered).toEqual({ clause: { token: "added", threshold: null }, observed: 1 })
+  })
+
+  it.each([
+    [[]],
+    [""],
+  ])("refuses --fail-on %j, a gate with no clause, before it removes an earlier report", async (failOn) => {
+    const earlier = await writeEarlierReports(workspace.root, ["out"])
+
+    const error = await errorFrom(FailOnParseError, () =>
+      runDiff({ cwd: workspace.root, base: "missing.json", head: "also.json", failOn }),
+    )
+
+    expect(error.message).toBe(
+      '--fail-on value "" is invalid: expected at least one clause; an empty --fail-on value would silently disable the CI gate.',
+    )
+    expect(await filesUnder(workspace.root)).toEqual(earlier)
   })
 
   it("names the tripped clause on stderr from the command line", async () => {

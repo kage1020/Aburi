@@ -11,6 +11,7 @@ import type { DiffResult, IR, SymbolChange, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   EXIT,
+  type ExitCode,
   evaluateClause,
   evaluateFailOn,
   FailOnParseError,
@@ -19,7 +20,7 @@ import {
 } from "../src"
 import { documentWith, symbolFor } from "./ir-documents"
 import { runCliIn } from "./run-cli"
-import { writeIRs } from "./workspace"
+import { filesUnder, writeEarlierReports, writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("fail-on")
 
@@ -232,17 +233,17 @@ describe("aburi diff --fail-on", () => {
     return { code, tripped: stderr.split("\n").filter((line) => line.startsWith("--fail-on")) }
   }
 
-  it.each([
-    [["--fail-on", "changed", "--fail-on", "removed"], EXIT.GATE],
-    [["--fail-on", "removed", "--fail-on", "changed"], EXIT.GATE],
-    [["--fail-on", "changed,removed"], EXIT.GATE],
-    [["--fail-on", "removed", "--fail-on", "added"], EXIT.SUCCESS],
-  ])("gates on every clause it is given: %j over one changed Symbol exits %i", async (gate, code) => {
+  const CHANGED_TRIPPED = "--fail-on changed tripped (observed: 1 changed)"
+
+  it.each<[string[], ExitCode, string[]]>([
+    [["--fail-on", "changed", "--fail-on", "removed"], EXIT.GATE, [CHANGED_TRIPPED]],
+    [["--fail-on", "removed", "--fail-on", "changed"], EXIT.GATE, [CHANGED_TRIPPED]],
+    [["--fail-on", "changed,removed"], EXIT.GATE, [CHANGED_TRIPPED]],
+    [["--fail-on", "removed", "--fail-on", "added"], EXIT.SUCCESS, []],
+    [[], EXIT.SUCCESS, []],
+  ])("gates on every clause it is given: %j over one changed Symbol exits %i and prints %j", async (gate, code, tripped) => {
     const run = await diffTo(documentWith({ symbols: [ALPHA_EDITED, BETA] }), gate)
-    expect(run.code).toBe(code)
-    expect(run.tripped).toEqual(
-      code === EXIT.GATE ? ["--fail-on changed tripped (observed: 1 changed)"] : [],
-    )
+    expect(run).toEqual({ code, tripped })
   })
 
   it.each([
@@ -270,7 +271,8 @@ describe("aburi diff --fail-on", () => {
       ["removed,", "changed"],
       '--fail-on value "removed," is invalid: clause 2 of 2 is empty; remove the extra comma or write the clause.',
     ],
-  ])("refuses the values %j at exit 2, quoting the one at fault, before reading either IR", async (values, says) => {
+  ])("refuses the values %j at exit 2, quoting the one at fault, before it reads either IR or removes an earlier report", async (values, says) => {
+    const earlier = await writeEarlierReports(workspace.root, ["out"])
     const { code, stderr } = await runCliIn(workspace.root, [
       "diff",
       "--base",
@@ -281,5 +283,6 @@ describe("aburi diff --fail-on", () => {
     ])
     expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toBe(`${says}\n`)
+    expect(await filesUnder(workspace.root)).toEqual(earlier)
   })
 })
