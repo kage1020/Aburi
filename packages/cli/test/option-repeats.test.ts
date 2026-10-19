@@ -66,6 +66,18 @@ describe("an option that takes one value, given twice", () => {
       ["explain", "alpha", "--config=a.json", "--config", "a.json"],
       repeated("--config", "a.json", "a.json"),
     ],
+    [
+      ["--log-level", "debug", "--log-level", "info", "scan"],
+      repeated("--log-level", "debug", "info"),
+    ],
+    [
+      ["--log-level", "debug", "scan", "--log-level", "info"],
+      repeated("--log-level", "debug", "info"),
+    ],
+    [
+      ["diff", "main..HEAD", "--log-level", "warn", "--log-level", "loud"],
+      repeated("--log-level", "warn", "loud"),
+    ],
   ])("%j exits 2 naming the option, and writes or removes nothing", async (argv, message) => {
     const earlier = await writeEarlierReports(workspace.root, [".", "out", "a", "b"])
     const { code, stdout, stderr } = await runCliIn(workspace.root, argv)
