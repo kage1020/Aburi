@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { toNfc } from "../codepoints"
-import { backslashSite, symbolIdSeparatorSite, toDocumentPath } from "../id"
+import { symbolIdSeparatorSite, toDocumentPath, type UnnameableSite, unnameableSite } from "../id"
 import { compareBy } from "../order"
 import { describeThrown, isVanishedFile } from "./faults"
 import { openGitignoreTree } from "./gitignore"
@@ -72,7 +72,7 @@ interface UnrepresentableBase {
 }
 
 export interface UnnameableFile extends UnrepresentableBase {
-  reason: "unspellable-name"
+  reason: UnnameableSite["reason"]
   unnameablePrefix: string
 }
 
@@ -123,11 +123,11 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
 
     if (gitignore !== null && (await gitignore.ignores(rawPath))) continue
 
-    const unnameable = backslashSite(rawPath)
+    const unnameable = unnameableSite(rawPath)
     if (unnameable !== null) {
       unrepresentableFiles.push({
         fsPath: rawPath,
-        reason: "unspellable-name",
+        reason: unnameable.reason,
         unnameablePrefix: unnameable.prefix,
       })
       continue
