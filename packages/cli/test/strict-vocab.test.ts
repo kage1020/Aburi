@@ -1,10 +1,11 @@
-import { readdir, readFile } from "node:fs/promises"
-import { resolve, sep } from "node:path"
+import { readFile } from "node:fs/promises"
+import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, runScan, VOCAB_DISCOVERED_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
+import { listTree } from "./workspace"
 
 const workspace = useScratchWorkspace("strict-vocab")
 
@@ -18,9 +19,8 @@ async function readRecord(): Promise<unknown> {
   )
 }
 
-async function listOutputs(): Promise<string[]> {
-  const entries = await readdir(resolve(workspace.root, "out"), { recursive: true })
-  return entries.map((entry) => entry.replaceAll(sep, "/")).sort()
+function listOutputs(): Promise<string[]> {
+  return listTree(resolve(workspace.root, "out"))
 }
 
 const ODD_TWICE = {

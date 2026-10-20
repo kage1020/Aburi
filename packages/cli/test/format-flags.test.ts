@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs"
-import { readdir } from "node:fs/promises"
-import { resolve, sep } from "node:path"
+import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it } from "vitest"
 import { EXIT } from "../src"
 import { runCliIn } from "./run-cli"
-import { writeTypeScriptWorkspace } from "./workspace"
+import { listTree, writeTypeScriptWorkspace } from "./workspace"
 
 const workspace = useScratchWorkspace("format-flags")
 
@@ -19,8 +18,7 @@ async function scan(
   const out = resolve(workspace.root, "out")
   const { code, stderr } = await runCliIn(workspace.root, ["scan", "--output-dir", out, ...flags])
   if (!existsSync(out)) return { code, stderr, wrote: null }
-  const wrote = (await readdir(out, { recursive: true })).map((entry) => entry.replaceAll(sep, "/"))
-  return { code, stderr, wrote: wrote.sort() }
+  return { code, stderr, wrote: await listTree(out) }
 }
 
 const IR = ["aburi.ir.json"]

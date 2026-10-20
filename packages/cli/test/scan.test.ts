@@ -1,5 +1,5 @@
-import { readdir, readFile } from "node:fs/promises"
-import { resolve, sep } from "node:path"
+import { readFile } from "node:fs/promises"
+import { resolve } from "node:path"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { beforeEach, describe, expect, it } from "vitest"
@@ -12,7 +12,7 @@ import {
   type ScanOptions,
 } from "../src"
 import { runCliIn } from "./run-cli"
-import { TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
+import { listTree, TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
 
 const workspace = useScratchWorkspace("scan")
 
@@ -196,10 +196,7 @@ describe("aburi scan — files skipped for a reason that is not a plugin throw",
 })
 
 describe("aburi scan's removals, when another command runs the scan", () => {
-  const outputs = async () =>
-    (await readdir(resolve(workspace.root, "out"), { recursive: true }))
-      .map((entry) => entry.replaceAll(sep, "/"))
-      .sort()
+  const outputs = () => listTree(resolve(workspace.root, "out"))
 
   it.each([
     "explain",
