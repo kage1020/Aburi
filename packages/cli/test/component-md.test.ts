@@ -44,7 +44,7 @@ describe("out/components/<id>.md", () => {
   })
 })
 
-describe("out/components/ after a Component is renamed", () => {
+describe("out/components/ after Components are renamed or removed", () => {
   const inComponents = (name: string) => resolve(workspace.root, "out", COMPONENTS_DIRNAME, name)
   const pages = async () => (await readdir(inComponents("."))).sort()
 
@@ -64,19 +64,20 @@ describe("out/components/ after a Component is renamed", () => {
     expect((await runScan({ cwd: workspace.root, format: "both" })).exitCode).toBe(EXIT.SUCCESS)
   }
 
-  const BEFORE = { alpha: "packages/alpha", beta: "packages/beta" }
+  const BEFORE = { alpha: "packages/alpha", beta: "packages/beta", delta: "packages/delta" }
   const AFTER = { alpha: "packages/alpha", gamma: "packages/beta" }
 
   it.each([
-    ["as the scan wrote it", (page: string) => page],
+    ["as the scan wrote them", (page: string) => page],
     [
-      "with CRLF line endings, as a Windows checkout has it",
+      "with CRLF line endings, as a Windows checkout has them",
       (page: string) => page.replaceAll("\n", "\r\n"),
     ],
-  ])("removes the page of the old id, %s", async (_, checkout) => {
+  ])("removes the page of every id the IR no longer holds, %s", async (_, checkout) => {
     await scanDeclaring(BEFORE)
-    const stale = inComponents("beta.md")
-    await writeFile(stale, checkout(await readFile(stale, "utf8")), "utf8")
+    for (const stale of ["beta.md", "delta.md"]) {
+      await writeFile(inComponents(stale), checkout(await readFile(inComponents(stale), "utf8")))
+    }
 
     await scanDeclaring(AFTER)
 
@@ -87,9 +88,10 @@ describe("out/components/ after a Component is renamed", () => {
     ["a file that is not Markdown", "beta.txt", "# Component: beta\n"],
     ["Markdown that opens with another heading", "index.md", "# Components\n\nSee the pages.\n"],
     ["a page whose heading names another Component", "beta-notes.md", "# Component: beta\n"],
+    ["a page whose heading continues past the id", "delta.md", "# Component: delta (archived)\n"],
     ["a page under a name no Component id takes", "Billing.md", "# Component: Billing\n"],
     ["a page in a subdirectory", "archive/beta.md", "# Component: beta\n"],
-    ["a directory named like a page", "delta.md/notes.md", "# Component: delta\n"],
+    ["a directory named like a page", "zeta.md/notes.md", "# Component: zeta\n"],
   ])("keeps %s beside the pages", async (_, name, contents) => {
     await scanDeclaring(BEFORE)
     await workspace.writeSource(`out/${COMPONENTS_DIRNAME}/${name}`, contents)
@@ -97,6 +99,6 @@ describe("out/components/ after a Component is renamed", () => {
     await scanDeclaring(AFTER)
 
     expect(await readFile(inComponents(name), "utf8")).toBe(contents)
-    expect(await pages()).not.toContain("beta.md")
+    expect(await pages()).toEqual(["alpha.md", "gamma.md", name.split("/")[0]].sort())
   })
 })

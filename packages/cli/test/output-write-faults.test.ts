@@ -1,4 +1,4 @@
-import { chmod, mkdir } from "node:fs/promises"
+import { chmod, mkdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
@@ -91,7 +91,20 @@ describe("aburi scan with an --output-dir that cannot hold the outputs", () => {
 
     expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(`aburi scan could not remove ${artefact} at ${under("out", filename)}`)
+    expect(stderr).toContain("a directory stands where an earlier run's file would be")
     expect(stderr).toContain("--output-dir")
+  })
+
+  it("keeps the IR an earlier run wrote when --format md stops at a page it cannot write", async () => {
+    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+    expect((await run("scan", "--format", "json")).code).toBe(EXIT.SUCCESS)
+    const earlier = await readFile(under("out", IR_JSON_FILENAME), "utf8")
+    await mkdir(under("out", WORKSPACE_MD_FILENAME))
+
+    const { code } = await run("scan", "--format", "md")
+
+    expect(code).toBe(EXIT.INPUT_ERROR)
+    expect(await readFile(under("out", IR_JSON_FILENAME), "utf8")).toBe(earlier)
   })
 
   it("names the component whose Markdown could not be written", async () => {
@@ -131,22 +144,48 @@ describe("aburi scan into a place the machine refuses", () => {
     expect(stderr).not.toContain("--output-dir")
   })
 
-  onPosixAsAUser("names the component whose page it may not remove", async () => {
-    await writeTypeScriptWorkspace(workspace.root, "write-fixture")
-    expect((await run("scan")).code).toBe(EXIT.SUCCESS)
-    const components = under("out", COMPONENTS_DIRNAME)
-    await chmod(components, 0o500)
+  onPosixAsAUser.each([
+    [
+      "a page it may not remove",
+      0o500,
+      ["--format", "json"],
+      'remove the Markdown for component "write-fixture"',
+      "write-fixture.md",
+    ],
+    ["a components directory it may not list", 0o300, [], "list the components directory", "."],
+  ])(
+    "reports %s as a runtime failure naming the step and the path",
+    async (_, mode, flags, failed, name) => {
+      await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+      expect((await run("scan")).code).toBe(EXIT.SUCCESS)
+      const components = under("out", COMPONENTS_DIRNAME)
+      await chmod(components, mode)
 
-    const { code, stderr } = await run("scan", "--format", "json").finally(() =>
-      chmod(components, 0o700),
-    )
+      const { code, stderr } = await run("scan", ...flags).finally(() => chmod(components, 0o700))
 
-    expect(code).toBe(EXIT.RUNTIME)
-    expect(stderr).toContain(
-      `aburi scan could not remove the Markdown for component "write-fixture" at ${resolve(components, "write-fixture.md")}`,
-    )
-    expect(stderr).toContain("EACCES")
-  })
+      expect(code).toBe(EXIT.RUNTIME)
+      expect(stderr).toContain(`aburi scan could not ${failed} at ${resolve(components, name)}`)
+      expect(stderr).toContain("EACCES")
+    },
+  )
+
+  onPosixAsAUser(
+    "reports a page it may not read as a runtime failure naming the step and the path",
+    async () => {
+      await writeTypeScriptWorkspace(workspace.root, "write-fixture")
+      const stale = under("out", COMPONENTS_DIRNAME, "stale.md")
+      await workspace.writeSource(`out/${COMPONENTS_DIRNAME}/stale.md`, "# Component: stale\n")
+      await chmod(stale, 0o200)
+
+      const { code, stderr } = await run("scan")
+
+      expect(code).toBe(EXIT.RUNTIME)
+      expect(stderr).toContain(
+        `aburi scan could not read the Markdown for component "stale" at ${stale}`,
+      )
+      expect(stderr).toContain("EACCES")
+    },
+  )
 
   it.skipIf(process.platform === "win32")(
     "reports any other refusal as the command's runtime failure, with the errno",
@@ -208,6 +247,7 @@ describe("aburi diff with an --output-dir that cannot hold the outputs", () => {
 
     expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(`aburi diff could not remove ${artefact} at ${under("out", filename)}`)
+    expect(stderr).toContain("a directory stands where an earlier run's file would be")
     expect(stderr).toContain("--output-dir")
   })
 

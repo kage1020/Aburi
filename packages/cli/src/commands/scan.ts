@@ -15,7 +15,7 @@ import {
   projectComponent,
   projectWorkspace,
 } from "@aburi/markdown-projection"
-import type { CallResolutionStats, ComponentId, Config, IR, ParseError } from "@aburi/types"
+import type { CallResolutionStats, ComponentId, Config, IR, Logger, ParseError } from "@aburi/types"
 import {
   COMPONENTS_DIRNAME,
   IR_JSON_FILENAME,
@@ -95,6 +95,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const command = options.command ?? "scan"
   const outputDir = resolveOutputDir(cwd, options.outputDir, config.output?.dir)
   await createOutputDir(command, outputDir)
+  const logger = createLogger(options.logLevel === undefined ? {} : { minimum: options.logLevel })
   let scanResult: ScanResult
   try {
     scanResult = await scan({
@@ -110,7 +111,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       })),
       components,
       generator: await readGeneratorInfo(),
-      logger: createLogger(options.logLevel === undefined ? {} : { minimum: options.logLevel }),
+      logger,
     })
   } catch (error) {
     if (error instanceof CoreError && error.code === "vocab-undeclared") {
@@ -121,7 +122,6 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const format = options.format ?? "both"
   const irPath = format === "md" ? null : await writeIR(command, outputDir, scanResult.ir, options)
-  if (irPath === null) await removeOutputFile(irOutput(command, outputDir))
   const undeclaredVocab = summarizeUndeclaredVocab(requireUndeclaredVocab(scanResult))
   const withdrawnByParse = new Set(
     scanResult.skipped.filter((file) => file.reason === "parse-failed").map((file) => file.path),
@@ -180,12 +180,14 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       report.componentMdPaths = await writeComponentMds(command, outputDir, scanResult.ir)
     }
     if (command === "scan") {
-      if (format === "json") await removeOutputFile(workspaceMdOutput(command, outputDir))
-      await removeComponentMdsExcept(command, outputDir, report.componentMdPaths)
       report.vocabDiscoveredPath = await updateVocabRecord(
         outputDir,
         isStrict(config) ? null : renderVocabDiscovered(undeclaredVocab, discoveredAt(options)),
+        logger,
       )
+      if (format === "md") await removeUnwritten(logger, irOutput(command, outputDir))
+      if (format === "json") await removeUnwritten(logger, workspaceMdOutput(command, outputDir))
+      await removeComponentMdsExcept(command, outputDir, report.componentMdPaths, logger)
     }
   } catch (error) {
     reportIncidents(report, options.incidents)
@@ -340,19 +342,32 @@ async function removeComponentMdsExcept(
   command: OutputCommand,
   outputDir: string,
   written: readonly string[],
+  logger: Logger,
 ): Promise<void> {
   const kept = new Set(written)
   const directory = {
     command,
-    artefact: "the Markdown of components this run does not write",
+    artefact: "the components directory",
     path: resolve(outputDir, COMPONENTS_DIRNAME),
   }
   for (const name of await listOutputFiles(directory)) {
     const id = name.endsWith(".md") ? name.slice(0, -".md".length) : ""
     if (!isComponentId(id)) continue
     const page = componentMdOutput(command, outputDir, id)
-    if (!kept.has(page.path)) await removeOutputFileOpeningWith(page, componentHeading(id))
+    if (!kept.has(page.path)) await removeUnwritten(logger, page, componentHeading(id))
   }
+}
+
+async function removeUnwritten(
+  logger: Logger,
+  output: OutputArtefact,
+  firstLine?: string,
+): Promise<void> {
+  const removed =
+    firstLine === undefined
+      ? await removeOutputFile(output)
+      : await removeOutputFileOpeningWith(output, firstLine)
+  if (removed) logger.info(`Removed ${output.artefact} at ${output.path}`)
 }
 
 function renderPage(artefact: string, render: () => string): string {
@@ -366,6 +381,7 @@ function renderPage(artefact: string, render: () => string): string {
 async function updateVocabRecord(
   outputDir: string,
   contents: string | null,
+  logger: Logger,
 ): Promise<string | null> {
   const record = {
     command: "scan" as const,
@@ -373,7 +389,7 @@ async function updateVocabRecord(
     path: resolve(outputDir, VOCAB_DISCOVERED_FILENAME),
   }
   if (contents === null) {
-    await removeOutputFile(record)
+    await removeUnwritten(logger, record)
     return null
   }
   await writeOutputFile(record, contents)

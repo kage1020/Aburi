@@ -124,7 +124,7 @@ describe("aburi scan with strict off", () => {
     expect(await readRecord()).toMatchObject({ discoveredAt: expect.any(String) })
   })
 
-  it("reports the values but writes no record for a diff's scan, which shares its directory", async () => {
+  it("reports the values but writes no record for the scan aburi diff runs", async () => {
     await writeStubWorkspace(workspace.root, ["odd.stub"], { strict: false })
 
     const report = await runScan({

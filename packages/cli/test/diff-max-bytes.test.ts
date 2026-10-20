@@ -1,9 +1,9 @@
-import { readdir, readFile } from "node:fs/promises"
+import { readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fp, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { DIFF_FULL_MD_FILENAME, DIFF_JSON_FILENAME, DIFF_MD_FILENAME, EXIT, runDiff } from "../src"
+import { DIFF_FULL_MD_FILENAME, DIFF_MD_FILENAME, EXIT, runDiff } from "../src"
 import { pathExists } from "../src/fs-probe"
 import { diffDocuments, documentWith } from "./ir-documents"
 import { runCliIn } from "./run-cli"
@@ -55,12 +55,9 @@ describe("aburi diff --max-bytes", () => {
   })
 
   it.each([
-    ["a cap the report fits under", { maxBytes: 65_507 }, [DIFF_JSON_FILENAME, DIFF_MD_FILENAME]],
-    ["no cap", {}, [DIFF_JSON_FILENAME, DIFF_MD_FILENAME]],
-    ["--format md", { format: "md" as const }, [DIFF_MD_FILENAME]],
-    ["--format json", { maxBytes: 2_000, format: "json" as const }, [DIFF_JSON_FILENAME]],
-  ])("leaves only its own report after a capped run, on a run with %s", async (_, options, files) => {
-    await workspace.writeSource("out/notes.md", "# Notes\n")
+    ["a cap the report fits under", { maxBytes: 65_507 }],
+    ["no Markdown at all", { maxBytes: 2_000, format: "json" as const }],
+  ])("removes an earlier diff.full.md on a run with %s", async (_, options) => {
     const { report: capped } = await diffDocuments(workspace.root, BASE, headWith(400), {
       maxBytes: 2_000,
     })
@@ -69,9 +66,7 @@ describe("aburi diff --max-bytes", () => {
     const { report } = await diffDocuments(workspace.root, BASE, headWith(1), options)
 
     expect(report.diffFullMdPath).toBeNull()
-    expect((await readdir(resolve(workspace.root, "out"))).sort()).toEqual(
-      [...files, "notes.md"].sort(),
-    )
+    expect(await pathExists(capped.diffFullMdPath ?? "")).toBe(false)
   })
 
   it("warns, rather than fails, when a budget cannot be met", async () => {

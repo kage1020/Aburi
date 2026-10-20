@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { call, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
 import type { CallResolutionStats, IR } from "@aburi/types"
@@ -70,6 +70,23 @@ describe("aburi diff --base/--head", () => {
     )
     expect(await pathExists(resolve(workspace.root, "out", DIFF_MD_FILENAME))).toBe(false)
     expect(await pathExists(resolve(workspace.root, "out", DIFF_JSON_FILENAME))).toBe(false)
+  })
+
+  it.each([
+    ["md", [DIFF_MD_FILENAME]],
+    ["json", [DIFF_JSON_FILENAME]],
+  ] as const)("leaves only what --format %s writes of an earlier capped report, beside the caller's own file", async (format, written) => {
+    await workspace.writeSource("out/notes.md", "# Notes\n")
+    const { report: capped } = await diffDocuments(workspace.root, EMPTY, ADDED_FOO, {
+      maxBytes: 10,
+    })
+    expect(await pathExists(capped.diffFullMdPath ?? "")).toBe(true)
+
+    await diffDocuments(workspace.root, EMPTY, ADDED_FOO, { format })
+
+    expect((await readdir(resolve(workspace.root, "out"))).sort()).toEqual(
+      [...written, "notes.md"].sort(),
+    )
   })
 })
 

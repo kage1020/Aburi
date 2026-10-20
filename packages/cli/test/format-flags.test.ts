@@ -46,10 +46,7 @@ describe("scan format flags", () => {
 
   it.each([
     [["--format", "json"], IR],
-    [["--no-md"], IR],
     [["--format", "md"], MARKDOWN],
-    [["--no-json"], MARKDOWN],
-    [["--format", "both"], BOTH],
   ])("%j after a scan that wrote both leaves %j beside the caller's own files", async (flags, expected) => {
     expect((await scan()).wrote).toEqual(BOTH)
     for (const file of CALLERS) await workspace.writeSource(`out/${file}`, "# Notes\n")

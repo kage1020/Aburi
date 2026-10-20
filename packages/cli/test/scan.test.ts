@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { readdir, readFile } from "node:fs/promises"
+import { resolve, sep } from "node:path"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it } from "vitest"
-import { CliError, EXIT, runScan, type ScanOptions } from "../src"
+import { CliError, COMPONENTS_DIRNAME, EXIT, runScan, type ScanOptions } from "../src"
 import { runCliIn } from "./run-cli"
 import { TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
 
@@ -162,5 +162,25 @@ describe("aburi scan — files skipped for a reason that is not a plugin throw",
     expect(report.skipped.map((s) => [s.path, s.reason])).toEqual([["src/big.ts", "over-size"]])
     expect(report.extractionFailures).toEqual([])
     expect(report.exitCode).toBe(EXIT.SUCCESS)
+  })
+})
+
+describe("aburi scan's removals, when another command runs the scan", () => {
+  const outputs = async () =>
+    (await readdir(resolve(workspace.root, "out"), { recursive: true }))
+      .map((entry) => entry.replaceAll(sep, "/"))
+      .sort()
+
+  it.each([
+    "explain",
+    "diff",
+  ] as const)("removes nothing an earlier scan wrote when %s's scan writes only Markdown", async (command) => {
+    await scan({ format: "both" })
+    await workspace.writeSource(`out/${COMPONENTS_DIRNAME}/stale.md`, "# Component: stale\n")
+    const earlier = await outputs()
+
+    await scan({ command, format: "md" })
+
+    expect(await outputs()).toEqual(earlier)
   })
 })
