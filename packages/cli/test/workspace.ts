@@ -1,6 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises"
-import { dirname, resolve } from "node:path"
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { dirname, posix, relative, resolve, sep } from "node:path"
 import type { IR } from "@aburi/types"
+import { DIFF_FULL_MD_FILENAME, DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../src"
 
 export const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
@@ -53,4 +54,32 @@ export async function writeIRs(
   await writeFile(paths.base, JSON.stringify(base), "utf8")
   await writeFile(paths.head, JSON.stringify(head), "utf8")
   return paths
+}
+
+/** The report an earlier `aburi diff` left in each of `directories`, by path relative to `root`. */
+export async function writeEarlierReports(
+  root: string,
+  directories: readonly string[],
+): Promise<Record<string, string>> {
+  const files: Record<string, string> = {}
+  for (const directory of directories) {
+    for (const filename of [DIFF_JSON_FILENAME, DIFF_MD_FILENAME, DIFF_FULL_MD_FILENAME]) {
+      const path = posix.join(directory, filename)
+      const content = `an earlier ${path}\n`
+      await writeFileAt(root, path, content)
+      files[path] = content
+    }
+  }
+  return files
+}
+
+/** Every file under `root`, by `/`-separated path relative to it, with its contents. */
+export async function filesUnder(root: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {}
+  for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    const path = resolve(entry.parentPath, entry.name)
+    files[relative(root, path).replaceAll(sep, "/")] = await readFile(path, "utf8")
+  }
+  return files
 }
