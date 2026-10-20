@@ -165,12 +165,14 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     undeclaredVocab,
     vocabDiscoveredPath: null,
     unresolvedDeclarations: managers.unresolved,
+    unnameableRoots: managers.unnameableRoots,
     fellBackToSingleComponent,
     pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
     exitCode:
       scanResult.extractionFailures.length > 0 ||
       coverageFault !== null ||
-      scanResult.unrepresentableFiles.length > 0
+      scanResult.unrepresentableFiles.length > 0 ||
+      managers.unnameableRoots.length > 0
         ? EXIT.GATE
         : EXIT.SUCCESS,
   }

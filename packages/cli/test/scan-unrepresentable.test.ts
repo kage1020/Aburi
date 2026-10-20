@@ -84,6 +84,45 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(said).toContain("    v\\1-a.stub")
     expect(said).toContain("    v\\1-b.stub")
   })
+
+  onPosix("gates on a top-level name that reads as a drive, and scans the rest", async () => {
+    const { report, said } = await scanStubs([
+      "ok.stub",
+      "a:notes.stub",
+      "d:data/x.stub",
+      "ab:notes.stub",
+    ])
+
+    expect(report.unrepresentableFiles).toEqual([
+      { fsPath: "a:notes.stub", reason: "drive-shaped-name", unnameablePrefix: "a:notes.stub" },
+      { fsPath: "d:data/x.stub", reason: "drive-shaped-name", unnameablePrefix: "d:data" },
+    ])
+    expect([report.totalFiles, report.parsedFiles, report.keptSymbols]).toEqual([2, 1, 1])
+    expect(report.skipped.map((file) => [file.path, file.reason])).toEqual([
+      ["ab:notes.stub", "unroutable"],
+    ])
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(report.irPath).not.toBeNull()
+    expect(said).toContain("    a:notes.stub")
+    expect(said).toContain("    d:data — a directory, and the 1 file(s) under it")
+  })
+
+  onPosix("scans a workspace one of whose packages sits under such a name", async () => {
+    await writeFileAt(workspace.root, "pnpm-workspace.yaml", "packages:\n  - '*'\n")
+    await writeFileAt(workspace.root, "a:pkg/package.json", JSON.stringify({ name: "odd" }))
+    await writeFileAt(workspace.root, "ok/package.json", JSON.stringify({ name: "ok" }))
+    const { report } = await scanStubs(["ok/x.stub", "a:pkg/x.stub"])
+
+    expect(report.unrepresentableFiles).toEqual([
+      { fsPath: "a:pkg/x.stub", reason: "drive-shaped-name", unnameablePrefix: "a:pkg" },
+    ])
+    expect(report.keptSymbols).toBe(1)
+    expect(report.exitCode).toBe(EXIT.GATE)
+    const ir = JSON.parse(
+      await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+    ) as { components: { roots: string[] }[] }
+    expect(ir.components.map((c) => c.roots)).toEqual([["ok"]])
+  })
 })
 
 const onCollidingFs = it.skipIf(process.platform === "darwin")

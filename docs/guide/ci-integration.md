@@ -207,7 +207,9 @@ Start narrow. A gate that fires on every pull request gets ignored within a week
 | `changed:>20` | The semantic change set is unusually large. |
 | `dropped-toggled:to-dropped:>10` | Somebody emptied many method bodies at once, the signature of a half-finished refactor. |
 
-Combine them with commas. The first clause that fires ends the evaluation.
+Combine them with commas, or on the command line by repeating `--fail-on`. The action's `fail-on`
+input is one string passed once, so commas are the only form it takes. The first clause that fires
+ends the evaluation.
 
 ```bash
 aburi diff main..HEAD --fail-on 'removed,changed:>20'

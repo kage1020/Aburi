@@ -1,8 +1,16 @@
 import { readdir, readFile } from "node:fs/promises"
 import { resolve, sep } from "node:path"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import type { IR } from "@aburi/types"
 import { beforeEach, describe, expect, it } from "vitest"
-import { CliError, COMPONENTS_DIRNAME, EXIT, runScan, type ScanOptions } from "../src"
+import {
+  CliError,
+  COMPONENTS_DIRNAME,
+  EXIT,
+  IR_JSON_FILENAME,
+  runScan,
+  type ScanOptions,
+} from "../src"
 import { runCliIn } from "./run-cli"
 import { TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
 
@@ -72,6 +80,28 @@ describe("aburi scan — what the caller and the config add", () => {
 
     expect(report.exitCode).toBe(EXIT.SUCCESS)
     expect(report.keptSymbols).toBe(1)
+  })
+
+  it("leaves out the files under every --ignore given on the command line", async () => {
+    await workspace.writeSource("a/x.ts", "export function x() { return 1 }\n")
+    await workspace.writeSource("b/y.ts", "export function y() { return 2 }\n")
+    await workspace.writeSource("src/keep.ts", "export function keep() { return 3 }\n")
+
+    const { code, stderr } = await runCliIn(workspace.root, [
+      "scan",
+      "--format",
+      "json",
+      "--ignore",
+      "a/**",
+      "--ignore",
+      "b/**",
+    ])
+
+    expect(code, stderr).toBe(EXIT.SUCCESS)
+    const ir = JSON.parse(
+      await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+    ) as IR
+    expect(ir.symbols.map((symbol) => symbol.id)).toEqual(["ts:src/keep.ts#keep"])
   })
 
   it("accepts an ordinary relative component root", async () => {
