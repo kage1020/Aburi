@@ -35,8 +35,6 @@ export {
   ZERO_FINGERPRINT,
 } from "./fingerprint"
 export {
-  type BackslashSite,
-  backslashSite,
   DEFAULT_EXPORT_QNAME,
   type GrammarViolation,
   isComponentId,
@@ -60,6 +58,8 @@ export {
   toDocumentPath,
   toPosixRelative,
   trySymbolId,
+  type UnnameableSite,
+  unnameableSite,
 } from "./id"
 export { DEFAULT_EXPORT_NAME, type ImportBinding, splitAliasedImportName } from "./import-edge"
 export { assertIRIntegrity, checkIRIntegrity, isCoreEffectId } from "./integrity"
@@ -156,6 +156,7 @@ export { computeWeaklyConnectedComponents } from "./wcc"
 export {
   type DetectManagersResult,
   detectManagers,
+  type UnnameableRoot,
   type UnresolvedDeclaration,
   type WorkspaceCandidate,
 } from "./workspace"
