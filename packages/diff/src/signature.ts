@@ -1,5 +1,5 @@
 import type { Signature } from "@aburi/types"
-import { NONE, quotient, type Ratio, WHOLE, weightedMean } from "./ratio"
+import { mean, NONE, quotient, type Ratio, WHOLE } from "./ratio"
 import { jaccardRatio } from "./similarity"
 
 export function signatureSimilarity(
@@ -23,11 +23,7 @@ export function signatureSimilarityRatio(
   )
   const outputsScore = compareOrderedTypes(baseSig.outputs, headSig.outputs)
   const throwsScore = jaccardRatio(baseSig.throws, headSig.throws)
-  return weightedMean([
-    { weight: 1, value: inputsScore },
-    { weight: 1, value: outputsScore },
-    { weight: 1, value: throwsScore },
-  ])
+  return mean([inputsScore, outputsScore, throwsScore])
 }
 
 function compareOrderedTypes(a: readonly string[], b: readonly string[]): Ratio {

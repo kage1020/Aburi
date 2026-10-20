@@ -187,9 +187,9 @@ for h in remainingHead:
   threshold = thresholdFor(h.name)                        # §3.4.3
   for b in bucket:
     if not ownersAreCompatible(b.name, h.name): continue  # §3.4.6, the owner gate
-    score = 0.5 * memberSimilarity(b.name, h.name)        # §3.4.1, the last segment
-          + 0.3 * signatureSimilarity(b.signature, h.signature)
-          + 0.2 * 1.0                                     # §3.4.6, satisfied by the gate
+    score = (5 * memberSimilarity(b.name, h.name)         # §3.4.1, the last segment
+           + 3 * signatureSimilarity(b.signature, h.signature)
+           + 2) / 10                                      # §3.4.6, satisfied by the gate
     if score >= threshold:                                # §3.4.3, in exact fractions
       candidates.append((b, h, score))
 
@@ -255,9 +255,9 @@ thresholdFor(headName):
 
 **The comparison is exact.** Every axis is a ratio of two counts — shared tokens over all tokens on the member axis (§3.4.1), agreeing positions over positions and shared throws over all throws on the signature axis (§3.4.2) — and every row is a fraction: 1, 19/20, 17/20. So the composite is kept as one fraction, `(5 × member + 3 × signature + 2 × 1) / 10` over those counts, and `score >= threshold` is decided by cross-multiplying integers. A score equal to its row therefore pairs, however it is made up.
 
-Summed in floating point, such a score landed a rounding error to either side of its row, and the test was `>` for some of them and `>=` for others. `0.5 * 3/4 + 0.3 * 11/12 + 0.2` and `0.5 * 7/10 + 0.3 + 0.2` are both `0.8499999999999999`: a member that gained a fourth token with one of four inputs retyped was `added` + `removed`, as was a pair at the member floor with an identical signature, while `0.5 + 0.3 * 1/2 + 0.2` came out `0.8500000000000001` and paired.
+Summed in floating point, such a score could land a rounding error to either side of its row, so the nominal `>=` behaved as `>` for some of them. `0.5 * 3/4 + 0.3 * 11/12 + 0.2` and `0.5 * 7/10 + 0.3 + 0.2` are both `0.8499999999999999`: a member that gained a fourth token with one of four inputs retyped was `added` + `removed`, as was a pair at the member floor with an identical signature, while `0.5 + 0.3 * 1/2 + 0.2` came out `0.8500000000000001` and paired.
 
-The integers are products of at most four counts — the member names' tokens and the two signatures' inputs, outputs and throws — and a few small constants, so a double holds them exactly while those four multiply to under 1.5 × 10^13: nearly two thousand of each at once. Stage 3's 0.85 bar (§3.3) needs none of this. Its score is a single quotient of two counts, and a double rounds such a quotient to the same value as 17/20 only when it is 17/20.
+The integers are products of at most four counts — the member names' token union, the input count, the output count and the throws union — and a few small constants, so a double holds them exactly while those four multiply to under 1.5 × 10^13: nearly two thousand of each at once. Stage 3's 0.85 bar (§3.3) needs none of this. Its score is a single quotient of two counts, and a double rounds such a quotient to the same value as 17/20 only when it is 17/20. Nor does the admissibility gate below, though `nameEvidence(name) > 1` is a sum of fractions: every term is a multiple of 1/6, so no sum falls between 1 and 7/6, and each combination that makes exactly 1 sums to exactly `1.0`.
 
 1.0 is the top of the scale and a reachable score: an identical member name and signature, past §3.4.6's gate, give `(5 + 3 + 2) / 10`, which is 1. The comparison is `score >= threshold`, so the first row pairs an unchanged `UserRepo.get` that moved file with an edited body — which stage 3 does not catch. The owner need not be identical, only compatible, so `UserRepo.get` → `UserRepos.get` reaches it too. Making it `>` would empty the row rather than tighten it.
 
@@ -1147,7 +1147,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19j | git renames `src/big.ts` → `src/billing.ts`; the head skips `src/billing.ts` (or the base skips `src/big.ts`, or both do) | the base Symbols are `unknown` with `absentFrom: "head"` and `lostPath: "src/billing.ts"` (or the head Symbols `unknown` with `absentFrom: "base"` and `lostPath: "src/big.ts"`), never `removed` / `added`; skipped on both sides, one `notCompared[]` entry with `path: "src/billing.ts"` and `basePath: "src/big.ts"` (§3.5.1, §6.3) |
 | DF19k | DF19j with the head skipping `src/billing.ts`, and the base holding an edge `ts:src/big.ts#Billing` → `ts:src/kept.ts#kept` | the edge is in `dependencies.unknown` with `absentFrom: "head"` and `lostFiles: [{ path: "src/billing.ts", … }]` — the head's name for the file, not the holder's `src/big.ts` — never in `removed` (§6.2.1) |
 | DF19l | A rename map handed to `buildDiff` sends two base paths onto one head path, or onto a path the base also skipped — git writes neither | the same `symbols[]` and `notCompared[]`, byte for byte, whatever order the map and the skip lists are in; a `notCompared[]` entry for each base record that reaches a head one (§3.5.1, §6.3) |
-| DF20 | A pair whose stage-4 composite equals its row exactly: member 3/4 with signature 11/12, and member 7/10 with an identical signature, at 0.85; an identical member with signature 5/6 at 0.95; an identical member and signature at 1.0. End to end, `AccountService.createUserAccount(a: string, b: number, c: Date, d: boolean)` moved file and renamed `createUserAccountRecord` with `d: Options` | paired, rationale: "name-signature" — the composite is a fraction compared exactly (§3.4.3); one step below (two of four inputs retyped, a member of 7/11, an input retyped at 0.95 or 1.0) added: 1, removed: 1 |
+| DF20 | A pair whose stage-4 composite equals its row exactly: member 3/4 with signature 11/12, and member 7/10 with an identical signature, at 0.85; an identical member with signature 5/6 at 0.95; an identical member and signature at 1.0. End to end, `AccountService.createUserAccount(a: string, b: number, c: Date, d: boolean)` moved file and renamed `createUserAccountRecord` with `d: Options` | paired, rationale: "name-signature" — the composite is a fraction compared exactly (§3.4.3); one step below (two of four inputs retyped, a member of 7/11, its only input retyped at 0.95 or 1.0) added: 1, removed: 1 |
 | DF20a | Two bases score the same composite for one head, made of different axes — one renamed its member (3/4, signature 11/12), the other kept it (1, signature 1/2) | the lower base id pairs, whichever of the two it is (§3.8) |
 
 ## 10.1 Diff schema compatibility policy

@@ -127,7 +127,7 @@ export function nameSimilarity(baseName: string, headName: string): number {
 }
 
 export function memberSimilarity(baseName: string, headName: string): number {
-  return quotient(memberJaccard(uncachedTokenSets, baseName, headName))
+  return quotient(memberJaccardRatio(uncachedTokenSets, baseName, headName))
 }
 
 export function ownersAreCompatible(baseName: string, headName: string): boolean {
@@ -155,7 +155,7 @@ function nameJaccard(tokenSets: TokenSets, baseName: string, headName: string): 
   return quotient(jaccardSets(tokenSets(baseName), tokenSets(headName)))
 }
 
-function memberJaccard(tokenSets: TokenSets, baseName: string, headName: string): Ratio {
+function memberJaccardRatio(tokenSets: TokenSets, baseName: string, headName: string): Ratio {
   return jaccardSets(tokenSets(lastSegment(baseName)), tokenSets(lastSegment(headName)))
 }
 
@@ -263,7 +263,7 @@ export function createNameScorer(): NameScorer {
   }
   return {
     name: (baseName, headName) => nameJaccard(tokenSets, baseName, headName),
-    member: (baseName, headName) => memberJaccard(tokenSets, baseName, headName),
+    member: (baseName, headName) => memberJaccardRatio(tokenSets, baseName, headName),
     ownersCompatible: (baseName, headName) =>
       ownersCompatible(ownerOf(baseName), ownerOf(headName), tokenSets),
   }

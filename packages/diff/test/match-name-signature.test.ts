@@ -130,11 +130,8 @@ describe("the score a pair must reach rises as the head's member name gets short
         signature: withInput("string", ["AuthError", "RateLimitError"]),
       }),
     ],
-    [
-      "a two-token member with one of two inputs retyped, scoring exactly 0.95",
-      method("src/a.ts", "UserRepo.getUser", "a", { signature: withInputs(["string", "Date"]) }),
-      method("src/b.ts", "UserRepo.getUser", "b", { signature: withInputs(["string", "number"]) }),
-    ],
+    // Summed in doubles, only these two 0.85 rows fell short of their threshold; the 1.0 and 0.95
+    // rows above come out exact either way.
     [
       "a three-token member that gained a fourth, with one of four inputs retyped, scoring exactly 0.85",
       method("src/a.ts", "AccountService.createUserAccount", "a", {

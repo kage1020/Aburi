@@ -41,14 +41,13 @@ export function matchStageNameSignature(
     if (!saysEnoughToPair(headSymbol.name)) continue
     const bucket = buckets.get(bucketKey(headSymbol))
     if (bucket === undefined) continue
-    const threshold = thresholdFor(headSymbol.name)
-    const memberFloor = lowestUsefulMember(threshold)
+    const row = rowFor(headSymbol.name)
     const tokens = memberTokens(headSymbol.name)
     let reach = 0
     for (const token of tokens) reach += bucket.byToken.get(token)?.length ?? 0
     if (reach >= bucket.members.length) {
       for (const baseSymbol of bucket.members) {
-        collectCandidate(baseSymbol, headSymbol, scorer, memberFloor, threshold, candidates)
+        collectCandidate(baseSymbol, headSymbol, scorer, row, candidates)
       }
       continue
     }
@@ -61,7 +60,7 @@ export function matchStageNameSignature(
         visited[position] = visitCount
         const baseSymbol = bucket.members[position]
         if (baseSymbol !== undefined) {
-          collectCandidate(baseSymbol, headSymbol, scorer, memberFloor, threshold, candidates)
+          collectCandidate(baseSymbol, headSymbol, scorer, row, candidates)
         }
       }
     }
@@ -78,12 +77,11 @@ function collectCandidate(
   base: IRSymbol,
   head: IRSymbol,
   scorer: NameScorer,
-  memberFloor: Ratio,
-  threshold: Ratio,
+  row: Row,
   candidates: ScoredPair[],
 ): void {
   const member = scorer.member(base.name, head.name)
-  if (!atLeast(member, memberFloor)) return
+  if (!atLeast(member, row.memberFloor)) return
   if (!scorer.ownersCompatible(base.name, head.name)) return
   const score = weightedMean([
     { weight: MEMBER_WEIGHT, value: member },
@@ -93,21 +91,12 @@ function collectCandidate(
     },
     { weight: OWNER_WEIGHT, value: OWNER_AXIS_SATISFIED },
   ])
-  if (atLeast(score, threshold)) candidates.push({ base, head, score: quotient(score) })
+  if (atLeast(score, row.threshold)) candidates.push({ base, head, score: quotient(score) })
 }
 
 function bucketKey(symbol: IRSymbol): string {
   const sig = symbol.signature === null || symbol.signature === undefined ? "no-sig" : "has-sig"
   return `${symbol.kind}::${sig}`
-}
-
-function lowestUsefulMember(threshold: Ratio): Ratio {
-  const totalWeight = MEMBER_WEIGHT + SIGNATURE_WEIGHT + OWNER_WEIGHT
-  return {
-    numerator:
-      totalWeight * threshold.numerator - (SIGNATURE_WEIGHT + OWNER_WEIGHT) * threshold.denominator,
-    denominator: MEMBER_WEIGHT * threshold.denominator,
-  }
 }
 
 interface Bucket {
@@ -122,17 +111,34 @@ function memberTokens(qname: string): readonly string[] {
   return tokens.length === 0 ? [NO_MEMBER_TOKENS] : tokens
 }
 
-const EXACT_MATCH_ONLY: Ratio = WHOLE
-const TWO_TOKEN_THRESHOLD: Ratio = { numerator: 19, denominator: 20 }
-const DEFAULT_THRESHOLD: Ratio = { numerator: 17, denominator: 20 }
-
 const MEMBER_WEIGHT = 5
 const SIGNATURE_WEIGHT = 3
 const OWNER_WEIGHT = 2
+const OTHER_AXES_WEIGHT = SIGNATURE_WEIGHT + OWNER_WEIGHT
+const TOTAL_WEIGHT = MEMBER_WEIGHT + OTHER_AXES_WEIGHT
 
 const OWNER_AXIS_SATISFIED = WHOLE
 
-function thresholdFor(qname: string): Ratio {
+interface Row {
+  readonly threshold: Ratio
+  readonly memberFloor: Ratio
+}
+
+function rowAt(threshold: Ratio): Row {
+  return {
+    threshold,
+    memberFloor: {
+      numerator: TOTAL_WEIGHT * threshold.numerator - OTHER_AXES_WEIGHT * threshold.denominator,
+      denominator: MEMBER_WEIGHT * threshold.denominator,
+    },
+  }
+}
+
+const EXACT_MATCH_ONLY = rowAt(WHOLE)
+const TWO_TOKEN_THRESHOLD = rowAt({ numerator: 19, denominator: 20 })
+const DEFAULT_THRESHOLD = rowAt({ numerator: 17, denominator: 20 })
+
+function rowFor(qname: string): Row {
   const tokens = tokenizeName(lastSegment(qname)).length
   if (tokens <= 1) return EXACT_MATCH_ONLY
   if (tokens === 2) return TWO_TOKEN_THRESHOLD

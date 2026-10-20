@@ -77,7 +77,7 @@ export async function diffOfMove(
   return diffIRs(baseIR, headIR)
 }
 
-/** Every change, as status, names and the stage that paired it, in a stable order. */
+/** Every change as status and names, with the stage that paired it where there is one, sorted. */
 export function pairingOutcome(diff: DiffResult): string[] {
   return diff.symbols.map(describePairing).sort()
 }

@@ -15,6 +15,15 @@ const accountService = (member: string, params: string, guard: string, call: str
     "",
   ].join("\n")
 
+const BASE = {
+  "src/old.ts": accountService(
+    "createUserAccount",
+    "a: string, b: number, c: Date, d: boolean",
+    "!a",
+    "a, b, c, d",
+  ),
+}
+
 describe("diff — pairing a method renamed and moved file on its name and signature", () => {
   it.each([
     [
@@ -35,25 +44,14 @@ describe("diff — pairing a method renamed and moved file on its name and signa
       ],
     ],
   ])("settles a three-token member that gained a fourth, with %s", async (_, headParams, expected) => {
-    const diff = await diffOfMove(
-      workspace,
-      {
-        "src/old.ts": accountService(
-          "createUserAccount",
-          "a: string, b: number, c: Date, d: boolean",
-          "!a",
-          "a, b, c, d",
-        ),
-      },
-      {
-        "src/new.ts": accountService(
-          "createUserAccountRecord",
-          headParams,
-          "!a || b < 0",
-          "a, b, c, d.flag",
-        ),
-      },
-    )
+    const diff = await diffOfMove(workspace, BASE, {
+      "src/new.ts": accountService(
+        "createUserAccountRecord",
+        headParams,
+        "!a || b < 0",
+        "a, b, c, d.flag",
+      ),
+    })
     expect(pairingOutcome(diff)).toEqual(expected)
   })
 })
