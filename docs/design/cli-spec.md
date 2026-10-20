@@ -59,6 +59,25 @@ Top-level only:
 |---|---|---|
 | `--version` | `-v` | Show version |
 
+Of the options the CLI declares, the global `--log-level` and those of `init`, `scan`, `diff` and
+`explain`, one that takes a value takes one. Given
+twice — `--config a.json --config b.json`, or `--format json --format=md` — the command exits 2
+before it reads or writes anything, naming the option and both values (`--config is given more than
+once ("a.json", then "b.json"): pass one`), the same value twice included, and a second value the
+option would refuse on its own as well (`--format json --format bogus`). When the first value is
+itself invalid, its own error is the one reported, at the same exit 2, since it is read before the
+second occurrence is reached. Keeping the last one would drop a setting the caller wrote without a
+word, as a repeated config key would ([`config.md`](./config.md) C19). Two options accumulate
+instead, each occurrence adding to the ones before it: `--ignore` (§5.2) and `--fail-on` (§6.7). A
+flag carries no value to lose and may be repeated, and of a `--x` / `--no-x` pair the one written
+last applies.
+
+Of those options, one that takes a path refuses an empty value, at exit 2 before anything is read or
+written (`error: option '--config <path>' argument '' is invalid. a path must not be empty`). Taken
+as written, `--config ""` would fall back to `ABURI_CONFIG` or a discovered config, and
+`--output-dir ""` would write into the working directory and remove the report `diff` finds there: a
+value the caller wrote, dropped without a word as a repeated one would be.
+
 ## 4. `aburi init`
 
 Generates `aburi.json` from autodetect results.
@@ -101,7 +120,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 |---|---|
 | 0 | Generation succeeded |
 | 1 | Autodetect failure (permissions, etc.) |
-| 2 | Existing file present without `--force`, or an `--output` that cannot hold a file — it names a directory, or a file stands on its parent path |
+| 2 | Existing file present without `--force`, an `--output` that cannot hold a file — it names a directory, or a file stands on its parent path — or `--output` given twice or empty (§3) |
 
 ### 4.6 stdout Example
 
@@ -177,7 +196,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
-| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
+| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), an option that takes one value given twice or a path given empty (§3), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
 | 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file or a workspace package the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
@@ -561,11 +580,11 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | Option | Meaning |
 |---|---|
 | `--base <path>` | Base IR file path (instead of a ref) |
-| `--head <path>` | Head IR file path |
+| `--head <path>` | Head IR file path (instead of a ref) |
 | `--output-dir <path>` | Destination for diff.json / diff.md / diff.full.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
 | `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
-| `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates) |
+| `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates). Repeatable: each occurrence adds its clauses after the earlier ones' (§6.7) |
 | `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, keeping sections most important first at their smallest (names only for a section of whole Symbols) and then growing the name lists back to full entries from the top ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped, and when the cap changed the report the uncapped one is written as `diff.full.md` beside it. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
 | `--quiet` | Limit stdout to a single final summary line |
 
@@ -661,7 +680,7 @@ Everything else is passed on. `GIT_DIR` names the repository both scans are abou
 |---|---|
 | 0 | Diff computed successfully (regardless of whether differences exist) |
 | 1 | Computation error (invalid IR, git error, an output the disk refused) |
-| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on) |
+| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing, or either beside a ref spec; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on; an option that takes one value given twice, or a path given empty — §3) |
 | 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
 
 The second cause is about greenness, not about counts. A file withdrawn during extraction is recorded in
@@ -765,6 +784,8 @@ aburi diff main..HEAD --fail-on changed,removed
 | Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |
 
 Multiple values may be given, comma-separated. Every segment must be a clause: an empty one (`added,`, `added,,removed`) exits 2, as a value with no clause at all does.
+
+`--fail-on` may also be repeated, so a script can write one clause per `--fail-on`: each occurrence adds its clauses after those of the occurrences before it, and `--fail-on changed --fail-on removed` gates exactly as `--fail-on changed,removed` does — the order included, which decides the clause a tripped gate names. Keeping only the last occurrence would leave the earlier clauses unchecked, and the run would pass on the change they were written to block. Each occurrence is read as a value of its own: an error quotes the one at fault and counts clauses within it (`--fail-on removed, --fail-on changed` exits 2 with `--fail-on value "removed," is invalid: clause 2 of 2 is empty; …`), and an empty occurrence exits 2 beside a valid one as it does alone. `runDiff`, which also takes the values as a list, refuses an empty one as it refuses an empty value, since either leaves the gate checking nothing.
 
 #### Uses of Direction-Specific fail-on
 
@@ -928,7 +949,7 @@ about one Symbol, and answering it with an inventory of the run buries it.
 |---|---|
 | 0 | Success |
 | 1 | The requested symbol was not found |
-| 2 | Multiple candidates; disambiguation required, or an `--output` that cannot hold a file |
+| 2 | Multiple candidates; disambiguation required, an `--output` that cannot hold a file, or an option that takes one value given twice or a path given empty (§3) |
 | 3 | The answer would not be safe: the scan this command ran did not exit clean (§5.6), the document names the file the question asked about as one it never analysed (§7.6), or that file is one no IR can name (§7.2) |
 
 Exit `3` outranks the other three, and the two routes to it are the same statement about
@@ -1176,6 +1197,10 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL36 | `aburi scan --log-level loud` | exit 2 naming the four levels |
 | CL37 | `aburi init --log-level debug` | exit 0: `init` accepts the flag, which has no per-file log there to govern |
 | CL38 | `aburi init --help`, `aburi scan --help`, `aburi diff --help` or `aburi explain --help` | `--log-level` listed under "Global Options" |
+| CL39 | `aburi diff … --fail-on changed --fail-on removed` over one changed Symbol, in either order; over a changed and a removed one, in either order | exit 3 in both orders, as `--fail-on changed,removed` gives, and `--fail-on removed --fail-on added`, or no `--fail-on` at all, exits 0; over both, the tripped line names the clause written first. An invalid occurrence beside a valid one (`--fail-on bogus --fail-on changed`, `--fail-on '' --fail-on changed`) exits 2 quoting that occurrence alone, before either IR is read and with an earlier report in the output directory left as it was. `runDiff` refuses `failOn: []` as it refuses `failOn: ""` |
+| CL40 | Any option that takes a value, other than `--ignore` and `--fail-on`, given twice on any command — `init --output`; `scan --output-dir`, `--format`, `--config`; `diff --base`, `--head`, `--output-dir`, `--format`, `--max-bytes`, `--config`; `explain --ir`, `--output`, `--config`; and `--log-level`, before the command, after it, or once on each side — in either spelling (`--config=a.json --config a.json`), the same value twice included, and a second value the option refuses on its own (`scan --format json --format bogus`, `diff … --max-bytes 1000 --max-bytes 0`) | exit 2, `<option> is given more than once ("<first>", then "<second>"): pass one` on stderr, nothing on stdout, nothing written, and an earlier report left as it was. With the invalid value first (`scan --format bogus --format json`), that value's own error instead, at exit 2. `aburi scan --compact --compact` and `--no-timestamp --no-timestamp` run and exit 0; `--ignore a/** --ignore b/**` leaves out the files under both and exits 0; `--respect-gitignore` and `--no-respect-gitignore` together, in either order, over a config that sets `respectGitignore: false`: the one written last applies |
+| CL41 | An empty value for any option that takes a path — `init --output`; `scan --output-dir`, `--config`; `diff --base`, `--head`, `--output-dir`, `--config`; `explain --ir`, `--output`, `--config` — in either spelling (`--output-dir=`) | exit 2, `error: option '<option> <path>' argument '' is invalid. a path must not be empty` on stderr, nothing on stdout, nothing written, and an earlier report left as it was |
+| CL42 | `aburi diff main..HEAD --base b.json`, or `aburi diff main..HEAD --head h.json` | exit 2, `<option> cannot be combined with a ref spec argument. Use one or the other.`, naming the option given |
 
 ## 18. Design Decisions
 
