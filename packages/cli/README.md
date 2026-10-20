@@ -48,7 +48,8 @@ changed the report the uncapped Markdown is written beside it as `diff.full.md`.
 
 ## `--fail-on` grammar
 
-Comma-separated clauses. Every clause supports an optional `:>N` count
+Comma-separated clauses, or one `--fail-on` per clause: a repeated `--fail-on` adds
+its clauses after the earlier ones. Every clause supports an optional `:>N` count
 threshold. Empty `--fail-on ""` is rejected (silent gate = green pipeline = bug), and so is
 an empty clause (`added,`, `added,,removed`).
 
@@ -64,7 +65,7 @@ Examples: `--fail-on removed`, `--fail-on changed:>5`, `--fail-on dropped-toggle
 |---|---|
 | `0` `SUCCESS` | Command finished, no gate tripped. |
 | `1` `RUNTIME` | Unexpected runtime failure (IO, unhandled exception). |
-| `2` `INPUT_ERROR` | Bad argv, missing / malformed input, ambiguous explain target, `--fail-on` grammar error. |
+| `2` `INPUT_ERROR` | Bad argv (an option that takes one value given twice, or an empty path, included), missing / malformed input, ambiguous explain target, `--fail-on` grammar error. |
 | `3` `GATE` | `--fail-on` clause tripped, a plugin failed to load or broke a contract that holds for every file (a value refused through its own registry, a Promise from `classify`), a scan the command ran did not exit clean, or the answer would not be safe — `aburi explain` against an IR that names the file in question as one it never analysed. |
 
 ## Install
