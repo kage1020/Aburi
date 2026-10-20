@@ -22,13 +22,20 @@ lines, `debug` adds a line for every file extracted, and `error` shows none of i
 name no scan; `aburi diff` writes the base's before the head's. The `⚠` warnings are printed
 whatever the level. Any other value exits `2`.
 
+An option that takes a value takes one. Given twice (`--config a.json --config b.json`), the
+command exits `2` and names it rather than keep one and drop the other without a word.
+`--ignore` and `--fail-on` add up instead. A flag, which takes no value, can be repeated, and of
+a `--x` / `--no-x` pair the last one written applies. An option that takes a path exits `2` on an
+empty one (`--config ""`, `--output-dir ""`) rather than read it as the option left out or as the
+working directory.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | Success, no gate tripped. |
 | `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output), an unexpected exception, or `explain` found no match. |
-| `2` | Bad invocation: an unknown flag, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
+| `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
 CI gates on `3`.
@@ -129,9 +136,14 @@ unparseable file tells you something about your source, not about the scan.
   (the default). No output is written. Declare the value, or run with
   `--discover` to keep it and see the full list.
 - **A filename cannot be written down.** The analysis has no representation for
-  a path containing a backslash, and filenames differing in Unicode composition
-  alone collapse to one. The scan names both kinds on stderr. Rename them, or
+  a path containing a backslash, or for a top-level name that opens with one
+  ASCII letter and a colon (`a:notes.ts`, `d:data/`), which reads as a Windows
+  drive. Filenames differing in Unicode composition alone collapse to one. The
+  scan names each kind on stderr and still analyses the rest. Rename them, or
   exclude them with `ignore`, doubling the backslash in the glob pattern.
+- **A workspace package sits in such a directory.** It cannot be a component,
+  so the scan names it on stderr, even when it holds no source file. Rename the
+  directory. `aburi init` names it too, and still writes the config.
 :::
 
 Every command that scans reports the same way. `aburi diff` runs two scans and
@@ -179,7 +191,7 @@ scanning.
 |---|---|
 | `<base>..<head>` | Ref-spec dispatch. A ref git cannot resolve exits `2`, and the message says whether that is because the directory is not a repository, the repository has no commits, or the name is unknown. |
 | `--base <path>` `--head <path>` | File-mode dispatch. Mutually exclusive with the ref-spec. |
-| `--fail-on <spec>` | The CI gate. See below. |
+| `--fail-on <spec>` | The CI gate. Repeatable. See below. |
 | `--output-dir <dir>` | Where to write. Falls back to `output.dir`, then `out`. Created if missing; a path a file already stands on exits `2` and names it. Any `diff.json`, `diff.md` or `diff.full.md` already there is removed before the comparison starts, so a run that fails leaves no earlier report to be mistaken for its own. |
 | `--format <fmt>` | `json`, `md`, or `both`. |
 | `--compact` | JSON without indentation. |
@@ -241,6 +253,10 @@ threshold, one occurrence trips the gate.
 --fail-on 'removed,changed:>20,api-changed'
 ```
 
+Repeating `--fail-on` adds its clauses after the earlier ones, so
+`--fail-on removed --fail-on 'changed:>20'` gates exactly as
+`--fail-on 'removed,changed:>20'` does.
+
 | Clause | Matches |
 |---|---|
 | `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` | Symbols with that status. |
@@ -255,7 +271,8 @@ Evaluation stops at the first clause that fires, which keeps CI logs short.
 :::
 
 Unknown tokens, comparators other than `>`, non-integer thresholds, an empty
-clause (`added,`, `added,,removed`), and an empty value all exit `2`. Aburi
+clause (`added,`, `added,,removed`), and an empty value all exit `2`, and with
+`--fail-on` repeated the message quotes the occurrence at fault. Aburi
 treats an empty gate as a mistake rather than as "no gate", because it would
 turn a regression into a green pipeline.
 
@@ -290,7 +307,8 @@ Several matches exit `2` and print the candidates so you can requalify. No match
 exits `1`, and names how many files the analysis never read, since your match may
 sit in one of them. Ask about a file the analysis skipped and you get `3`
 instead. There is no answer to give, and "no matches" would claim more than the
-document can support.
+document can support. A file no analysis can name, such as `a:notes.ts`, also
+gets `3`, with the name to change.
 
 ```bash
 aburi explain submitOrder

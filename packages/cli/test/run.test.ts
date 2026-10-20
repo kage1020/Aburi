@@ -46,6 +46,11 @@ describe("aburi diff — the arguments it needs", () => {
       ["main..HEAD", "--base", "./b.json"],
       "--base cannot be combined with a ref spec argument.",
     ],
+    [
+      "--head beside a ref spec",
+      ["main..HEAD", "--head", "./h.json"],
+      "--head cannot be combined with a ref spec argument.",
+    ],
   ])("refuses %s at exit 2", async (_, flags, says) => {
     const { code, stderr } = await run("diff", ...flags)
     expect(code).toBe(EXIT.INPUT_ERROR)

@@ -59,6 +59,25 @@ Top-level only:
 |---|---|---|
 | `--version` | `-v` | Show version |
 
+Of the options the CLI declares, the global `--log-level` and those of `init`, `scan`, `diff` and
+`explain`, one that takes a value takes one. Given
+twice — `--config a.json --config b.json`, or `--format json --format=md` — the command exits 2
+before it reads or writes anything, naming the option and both values (`--config is given more than
+once ("a.json", then "b.json"): pass one`), the same value twice included, and a second value the
+option would refuse on its own as well (`--format json --format bogus`). When the first value is
+itself invalid, its own error is the one reported, at the same exit 2, since it is read before the
+second occurrence is reached. Keeping the last one would drop a setting the caller wrote without a
+word, as a repeated config key would ([`config.md`](./config.md) C19). Two options accumulate
+instead, each occurrence adding to the ones before it: `--ignore` (§5.2) and `--fail-on` (§6.7). A
+flag carries no value to lose and may be repeated, and of a `--x` / `--no-x` pair the one written
+last applies.
+
+Of those options, one that takes a path refuses an empty value, at exit 2 before anything is read or
+written (`error: option '--config <path>' argument '' is invalid. a path must not be empty`). Taken
+as written, `--config ""` would fall back to `ABURI_CONFIG` or a discovered config, and
+`--output-dir ""` would write into the working directory and remove the report `diff` finds there: a
+value the caller wrote, dropped without a word as a repeated one would be.
+
 ## 4. `aburi init`
 
 Generates `aburi.json` from autodetect results.
@@ -101,7 +120,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 |---|---|
 | 0 | Generation succeeded |
 | 1 | Autodetect failure (permissions, etc.) |
-| 2 | Existing file present without `--force`, or an `--output` that cannot hold a file — it names a directory, or a file stands on its parent path |
+| 2 | Existing file present without `--force`, an `--output` that cannot hold a file — it names a directory, or a file stands on its parent path — or `--output` given twice or empty (§3) |
 
 ### 4.6 stdout Example
 
@@ -177,8 +196,8 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
-| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
-| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
+| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), an option that takes one value given twice or a path given empty (§3), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
+| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file or a workspace package the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
 
@@ -400,12 +419,12 @@ a claim about what gating does not change rather than about what a gated run alw
 
 ### 5.8 Files the Document cannot name
 
-Two things put a file beyond what a Document can name, and both end the same way: the file is
-not skippable — a skip entry is a path plus a reason, and it is the path that is missing — and not
-countable either, because invariant #21 holds `stats.skippedFiles`'s length to
+Three things put a file beyond what a Document can name, and all three end the same way: the
+file is not skippable — a skip entry is a path plus a reason, and it is the path that is missing —
+and not countable either, because invariant #21 holds `stats.skippedFiles`'s length to
 `totalFiles - parsedFiles`.
 
-**The first: a name a path cannot spell.** A filename may contain a backslash on any POSIX
+**The first cause: a name a path cannot spell.** A filename may contain a backslash on any POSIX
 filesystem, and a Document path may not: `/` is its only separator, so there is no way to write
 such a name down that a reader will not take for a directory boundary (ir-schema.md §14
 invariant #10).
@@ -453,7 +472,63 @@ disallowed one.
 `aburi explain` answers for one of these files without consulting the document, since no document
 could hold it: see §7.2.
 
-**The second cause: two names, one path.** A path is normalized on the way into the Document
+**The second cause: a top-level name that reads as a drive.** A path opening with one ASCII
+letter and `:` names a Windows drive, and invariant #10 refuses it as absolute on every platform,
+because a Document written on POSIX has to mean the same thing read on Windows. So `a:notes.ts`,
+and every file under a top-level directory `d:data/`, has no spelling either, though both are
+ordinary workspace-relative names on a POSIX filesystem. The test is on the first segment as the
+rule reads it, after normalization to NFC, so a name opening with U+212A KELVIN SIGN and `:` is
+one too — NFC turns that sign into `K` — and the listing prints the name as it is spelled on
+disk.
+
+A `:` anywhere else is the `unroutable` case §5.6 lists — `ab:notes.ts` and `src/x:y.ts` are
+recorded by path, since the rule admits them and only the Symbol id grammar refuses them — so the
+line between the two is drawn exactly where the rule draws it, and no name the walk accepts is one
+the rule then throws on.
+
+```
+⚠ 3 file(s) were left out of the IR and out of its counts, under 2 top-level name(s) a Document path reads as a Windows drive: a path opening with one ASCII letter and ":" names a drive there, and a Document means the same on every platform, so no workspace-relative path can open that way. Rename each one below, or leave it out with ignore, which matches the name as printed.
+    a:notes.ts
+    d:data — a directory, and the 2 file(s) under it
+```
+
+It exits `3`, lists one line per name with no cap, and blames a directory once, for the reasons
+given for the backslash above. Its own paragraph, because the `ignore` advice differs: picomatch
+gives `:` no meaning, and a pattern naming a directory excludes everything under it, so
+`a:notes.ts` and `d:data` exclude these as printed. Where one segment holds both a backslash and a
+drive, the backslash's paragraph names it, since doubling is then what the pattern needs; a
+drive-shaped directory with a backslash further down is named by the directory, the shallower of
+the two.
+
+A workspace package whose directory has no spelling — under either of the first two causes — is
+not a Component and not a `workspace.managers[].roots` entry, since no root could name it; the
+rest of the workspace is detected and scanned ([`component-detect.md`](./component-detect.md)
+§3.1.1). The paragraphs above list its files only when one of them is a file a language plugin
+claims, and a package holding nothing but its `package.json` and a README would otherwise leave no
+trace anywhere, so detection names the package itself, one line per package and per manifest of
+the detector that found it:
+
+```
+⚠ pnpm package "a:pkg" (pnpm-workspace.yaml) is not a component and not on workspace.managers[].roots, and none of its files can be scanned: "a:pkg" opens with one ASCII letter and ":", which a Document path reads as a Windows drive, so no IR can name it. Rename it.
+```
+
+The quoted name is the directory to rename, which is the package's own unless it sits below one:
+a package at `d:data/pkg` names `"d:data"`. Both are printed as spelled on disk. The line comes
+first among the incidents, beside a pattern that named no package, and like that one it is
+followed by the fallback's line when no other package was found
+([`component-detect.md`](./component-detect.md) §5):
+
+```
+⚠ No other workspace package was found, so the whole repository is described as one component.
+```
+
+`aburi scan` exits `3` for it, whether or not the package holds a source file, for the reason it
+exits `3` for a file: the Document leaves out something the workspace declared, and nothing in it
+says so. `aburi init` prints the same lines and exits `0`, as it does for a pattern that named no
+package: it writes a config rather than a Document, and the config it writes leaves the package
+out, which is what every scan of that workspace does too.
+
+**The third cause: two names, one path.** A path is normalized on the way into the Document
 (§1.2), and two names differing only in how they are composed normalize to the same string. The
 Document then has one path for two files, which is no name for either.
 
@@ -515,11 +590,11 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | Option | Meaning |
 |---|---|
 | `--base <path>` | Base IR file path (instead of a ref) |
-| `--head <path>` | Head IR file path |
+| `--head <path>` | Head IR file path (instead of a ref) |
 | `--output-dir <path>` | Destination for diff.json / diff.md / diff.full.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
 | `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
-| `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates) |
+| `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates). Repeatable: each occurrence adds its clauses after the earlier ones' (§6.7) |
 | `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, keeping sections most important first at their smallest (names only for a section of whole Symbols) and then growing the name lists back to full entries from the top ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped, and when the cap changed the report the uncapped one is written as `diff.full.md` beside it. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
 | `--quiet` | Limit stdout to a single final summary line |
 
@@ -615,7 +690,7 @@ Everything else is passed on. `GIT_DIR` names the repository both scans are abou
 |---|---|
 | 0 | Diff computed successfully (regardless of whether differences exist) |
 | 1 | Computation error (invalid IR, git error, an output the disk refused) |
-| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on) |
+| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing, or either beside a ref spec; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on; an option that takes one value given twice, or a path given empty — §3) |
 | 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
 
 The second cause is about greenness, not about counts. A file withdrawn during extraction is recorded in
@@ -629,12 +704,15 @@ comparison with a broken half is not evidence about the half that worked.
 
 It gates on the scan's exit code, not on a named incident, and the diagnostic wording is derived
 from what the scan actually reported so that a second reason arrives with the code right and the
-message still true. Two more have: a scan whose coverage collapsed (§5.7), and one that found a
-file the Document cannot name (§5.8). The second is named ahead of "discovered no file to read"
+message still true. Three more have: a scan whose coverage collapsed (§5.7), one that found a
+file the Document cannot name (§5.8), and one that found a workspace package it cannot name
+(§5.8). The file is named ahead of "discovered no file to read"
 and behind the other two faults, because an unnameable file leaves `totalFiles` — so a workspace
 whose whole candidate set is unnameable discovers nothing and that fault is this one's
 consequence, while leaving the denominator can only raise the parsed ratio and so cannot produce
-either of the others. A coverage collapse reddens a diff the
+either of the others. The package is named — `N workspace package(s) sit in directories no
+Document path can spell` — only when none of those is, since a file under it is one of the
+unnameable files the scan already counts. A coverage collapse reddens a diff the
 same way an extraction fault does, and names itself — `The base scan parsed none of the 1200
 file(s) it found` — rather than falling back to "did not exit clean". An extraction fault is named
 first when both apply, because a scan that withdrew every file has the coverage fault as a
@@ -717,6 +795,8 @@ aburi diff main..HEAD --fail-on changed,removed
 
 Multiple values may be given, comma-separated. Every segment must be a clause: an empty one (`added,`, `added,,removed`) exits 2, as a value with no clause at all does.
 
+`--fail-on` may also be repeated, so a script can write one clause per `--fail-on`: each occurrence adds its clauses after those of the occurrences before it, and `--fail-on changed --fail-on removed` gates exactly as `--fail-on changed,removed` does — the order included, which decides the clause a tripped gate names. Keeping only the last occurrence would leave the earlier clauses unchecked, and the run would pass on the change they were written to block. Each occurrence is read as a value of its own: an error quotes the one at fault and counts clauses within it (`--fail-on removed, --fail-on changed` exits 2 with `--fail-on value "removed," is invalid: clause 2 of 2 is empty; …`), and an empty occurrence exits 2 beside a valid one as it does alone. `runDiff`, which also takes the values as a list, refuses an empty one as it refuses an empty value, since either leaves the gate checking nothing.
+
 #### Uses of Direction-Specific fail-on
 
 `--fail-on dropped-toggled:to-kept` detects "symbols previously treated as dropped became kept". Useful for deliberate review of drop-rule relaxation.
@@ -763,11 +843,21 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 - **File path** — the string contains `/` and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file. A `#` in it does not disqualify it: the id form above is checked first and only claims the argument when it *is* one, and a file whose name holds an id separator is recorded in `stats.skippedFiles` precisely because no Symbol in it could be named
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
 
-A file path whose name holds a **backslash** is answered without consulting the document at
-all, with exit 3: no IR can name it (§5.8), so neither the skip list nor the file existing on
-disk says anything about it, and `No matches` would be a claim about the workspace when the
-absence is the format's. The same answer whether the run scanned or read an IR off disk, because
-it is decided from the argument.
+A file path whose workspace-relative path holds a **backslash**, or whose first segment reads as
+a **drive** (`d:data/x.ts`, `./a:notes.ts`), is answered without consulting the document at all,
+with exit 3: no IR can name it (§5.8), so neither the skip list nor the file existing on disk
+says anything about it, and `No matches` would be a claim about the workspace when the absence is
+the format's. The line on stderr says which of the two it is, naming the segment to rename as the
+argument spells it. The same answer whether the run scanned or read an IR off disk, because it is
+decided from the argument.
+
+The path tested is the workspace-relative one, not the argument: run from `src/`, `./a:notes.ts`
+is `src/a:notes.ts`, which a Document can name and which is looked up as any other file, while
+`../a:notes.ts` is the drive case. An argument without a `/` gets this answer too when it names a
+file on disk — `aburi explain a:notes.ts` beside that file — and otherwise keeps the rule above:
+`A::create`, a static member's qualified name, opens the way a drive does and names no file, so it
+is matched as a substring. On Windows an argument on another drive is outside the workspace rather
+than a name, and is looked up as any other path.
 
 #### 7.2.1 Exact Definition of Partial Matching
 
@@ -869,8 +959,8 @@ about one Symbol, and answering it with an inventory of the run buries it.
 |---|---|
 | 0 | Success |
 | 1 | The requested symbol was not found |
-| 2 | Multiple candidates; disambiguation required, or an `--output` that cannot hold a file |
-| 3 | The answer would not be safe: the scan this command ran did not exit clean (§5.6), or the document names the file the question asked about as one it never analysed (§7.6) |
+| 2 | Multiple candidates; disambiguation required, an `--output` that cannot hold a file, or an option that takes one value given twice or a path given empty (§3) |
+| 3 | The answer would not be safe: the scan this command ran did not exit clean (§5.6), the document names the file the question asked about as one it never analysed (§7.6), or that file is one no IR can name (§7.2) |
 
 Exit `3` outranks the other three, and the two routes to it are the same statement about
 different evidence. When the scan broke, every answer is suspect: a `single` hit may have had a
@@ -1098,7 +1188,11 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL21 | `aburi explain src/route.ts --ir <ir>` where that IR names `src/route.ts` in `stats.skippedFiles` | exit 3, the file and its skip reason on stderr, nothing on stdout |
 | CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
 | CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the name to rename on stderr, and the file not counted in `stats.totalFiles` |
+| CL23a | `aburi scan` in a workspace holding `a:notes.ts`, `d:data/x.ts` and `ab:notes.ts` beside `src/ok.ts` | exit 3, the IR written, `a:notes.ts` and `d:data` to rename on stderr and neither counted in `stats.totalFiles`; `ab:notes.ts`, like `src/x:y.ts`, is an `unroutable` skip |
+| CL23b | `aburi scan` in a pnpm or nx workspace one of whose packages sits at `a:pkg/`, holding a source file or only its `package.json` and a README | exit 3, a line naming the tool, `a:pkg`, the manifest and the reason on stderr; the other packages are Components and scanned, and `a:pkg` is none. A package at `odd/` in the same state is a Component that owns no file, and the scan exits 0. `aburi diff` with such a scan on one side exits 3, saying `N workspace package(s) sit in directories no Document path can spell` when nothing else faulted |
+| CL23c | `aburi init` in the workspace of CL23b | exit 0, the same line on stderr, and no `components[]` entry rooted at `a:pkg`. Where `a:pkg` is the only package, `aburi init` and `aburi scan` both follow the line with `No other workspace package was found, so the whole repository is described as one component.` |
 | CL24 | `aburi explain 'src/weird\name.ts'` where that file exists | exit 3, a line saying no IR can name it, nothing on stdout |
+| CL24a | `aburi explain d:data/x.ts`, `aburi explain ./a:notes.ts`, `aburi explain ../a:notes.ts` run from `src/`, or `aburi explain a:notes.ts` where that file exists | exit 3, a line saying no IR can name it because the name reads as a drive, nothing on stdout. `./ab:notes.ts`, and `./a:notes.ts` run from `src/`, are looked up as any other file; `A::create`, and a bare `a:notes.ts` that is not on disk, are matched as substrings |
 | CL25 | `aburi init --output config/aburi.jsonc` where `config/` does not exist | Creates the directory, writes the file, exit 0 |
 | CL26 | `aburi explain <id> --output docs/alpha.md` where `docs/` does not exist | Creates the directory, writes the Markdown, exit 0 |
 | CL27 | `aburi init` or `aburi explain` with an `--output` that names a directory, or whose parent path is an existing file | exit 2, the path and the remedy on stderr |
@@ -1113,6 +1207,10 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL36 | `aburi scan --log-level loud` | exit 2 naming the four levels |
 | CL37 | `aburi init --log-level debug` | exit 0: `init` accepts the flag, which has no per-file log there to govern |
 | CL38 | `aburi init --help`, `aburi scan --help`, `aburi diff --help` or `aburi explain --help` | `--log-level` listed under "Global Options" |
+| CL39 | `aburi diff … --fail-on changed --fail-on removed` over one changed Symbol, in either order; over a changed and a removed one, in either order | exit 3 in both orders, as `--fail-on changed,removed` gives, and `--fail-on removed --fail-on added`, or no `--fail-on` at all, exits 0; over both, the tripped line names the clause written first. An invalid occurrence beside a valid one (`--fail-on bogus --fail-on changed`, `--fail-on '' --fail-on changed`) exits 2 quoting that occurrence alone, before either IR is read and with an earlier report in the output directory left as it was. `runDiff` refuses `failOn: []` as it refuses `failOn: ""` |
+| CL40 | Any option that takes a value, other than `--ignore` and `--fail-on`, given twice on any command — `init --output`; `scan --output-dir`, `--format`, `--config`; `diff --base`, `--head`, `--output-dir`, `--format`, `--max-bytes`, `--config`; `explain --ir`, `--output`, `--config`; and `--log-level`, before the command, after it, or once on each side — in either spelling (`--config=a.json --config a.json`), the same value twice included, and a second value the option refuses on its own (`scan --format json --format bogus`, `diff … --max-bytes 1000 --max-bytes 0`) | exit 2, `<option> is given more than once ("<first>", then "<second>"): pass one` on stderr, nothing on stdout, nothing written, and an earlier report left as it was. With the invalid value first (`scan --format bogus --format json`), that value's own error instead, at exit 2. `aburi scan --compact --compact` and `--no-timestamp --no-timestamp` run and exit 0; `--ignore a/** --ignore b/**` leaves out the files under both and exits 0; `--respect-gitignore` and `--no-respect-gitignore` together, in either order, over a config that sets `respectGitignore: false`: the one written last applies |
+| CL41 | An empty value for any option that takes a path — `init --output`; `scan --output-dir`, `--config`; `diff --base`, `--head`, `--output-dir`, `--config`; `explain --ir`, `--output`, `--config` — in either spelling (`--output-dir=`) | exit 2, `error: option '<option> <path>' argument '' is invalid. a path must not be empty` on stderr, nothing on stdout, nothing written, and an earlier report left as it was |
+| CL42 | `aburi diff main..HEAD --base b.json`, or `aburi diff main..HEAD --head h.json` | exit 2, `<option> cannot be combined with a ref spec argument. Use one or the other.`, naming the option given |
 | CL55 | `aburi diff main..HEAD` with a `pluginOptions` key that names no loaded plugin (`config.md` C10) | The warning once, with no side label, while the base scan's own lines keep theirs; the exit code is the one the run has without the key |
 
 ## 18. Design Decisions
