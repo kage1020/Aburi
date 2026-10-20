@@ -21,7 +21,6 @@ export interface SccNode {
   id: string
   members: SymbolId[]
   outSccs: number[]
-  outEdgeConfidence: Map<number, Confidence>
 }
 
 export function buildAdjacency(
@@ -149,33 +148,41 @@ export function tarjanSCC(
 export function condense(
   sccs: readonly SymbolId[][],
   sccOfNode: ReadonlyMap<SymbolId, number>,
-  adj: ReadonlyMap<SymbolId, ReadonlyArray<{ to: SymbolId; confidence: Confidence }>>,
+  adj: ReadonlyMap<SymbolId, ReadonlyArray<{ to: SymbolId }>>,
 ): SccNode[] {
-  const nodes: SccNode[] = sccs.map((members, i) => ({
-    id: members[0] ?? String(i),
-    members: [...members],
-    outSccs: [],
-    outEdgeConfidence: new Map(),
-  }))
+  const outSccsOf = sccs.map(() => new Set<number>())
   for (const [from, neighbours] of adj) {
     const fromSccIdx = sccOfNode.get(from)
     if (fromSccIdx === undefined) continue
-    const fromScc = nodes[fromSccIdx]
-    if (fromScc === undefined) continue
-    for (const { to, confidence } of neighbours) {
+    const outSccs = outSccsOf[fromSccIdx]
+    if (outSccs === undefined) continue
+    for (const { to } of neighbours) {
       const toSccIdx = sccOfNode.get(to)
       if (toSccIdx === undefined || toSccIdx === fromSccIdx) continue
-      const prior = fromScc.outEdgeConfidence.get(toSccIdx)
-      fromScc.outEdgeConfidence.set(
-        toSccIdx,
-        prior === undefined ? confidence : maxConfidence(prior, confidence),
-      )
+      outSccs.add(toSccIdx)
     }
   }
-  for (const node of nodes) {
-    node.outSccs = [...node.outEdgeConfidence.keys()].sort((a, b) => a - b)
+  return sccs.map((members, i) => ({
+    id: members[0] ?? String(i),
+    members: [...members],
+    outSccs: [...(outSccsOf[i] ?? [])].sort((a, b) => a - b),
+  }))
+}
+
+export function callersWithinScc(
+  adj: ReadonlyMap<SymbolId, ReadonlyArray<{ to: SymbolId; confidence: Confidence }>>,
+  sccOfNode: ReadonlyMap<SymbolId, number>,
+): Map<SymbolId, Array<{ from: SymbolId; confidence: Confidence }>> {
+  const callers = new Map<SymbolId, Array<{ from: SymbolId; confidence: Confidence }>>()
+  for (const [from, neighbours] of adj) {
+    for (const { to, confidence } of neighbours) {
+      if (to === from || sccOfNode.get(to) !== sccOfNode.get(from)) continue
+      const bucket = callers.get(to)
+      if (bucket === undefined) callers.set(to, [{ from, confidence }])
+      else bucket.push({ from, confidence })
+    }
   }
-  return nodes
+  return callers
 }
 
 export function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
