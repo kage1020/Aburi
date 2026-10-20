@@ -1,5 +1,6 @@
 import { resolve } from "node:path"
 import {
+  describeThrown,
   detectManagers,
   isPluginSetFault,
   isStrict,
@@ -109,7 +110,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     })
   } catch (error) {
     if (isPluginSetFault(error)) {
-      throw new CliError(errorMessage(error), "plugin-error", { cause: error })
+      throw new CliError(describeThrown(error), "plugin-error", { cause: error })
     }
     throw error
   }

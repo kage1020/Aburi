@@ -1,7 +1,9 @@
+import { resolve } from "node:path"
 import { commitAll, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { EXIT } from "../src"
-import { EFFECTS_MANIFEST } from "./plugin-fakes"
+import { DIFF_JSON_FILENAME, EXIT, IR_JSON_FILENAME } from "../src"
+import { pathExists } from "../src/fs-probe"
+import { EFFECTS_MANIFEST, pluginModuleSource } from "./plugin-fakes"
 import { runCliIn } from "./run-cli"
 import { TYPESCRIPT, writeConfig } from "./workspace"
 
@@ -18,14 +20,13 @@ async function writeWorkspace(classify: string): Promise<void> {
   await workspace.writeSource("src/a.ts", "function g() {}\nexport function f() {\n  g()\n}\n")
   await workspace.writeSource(
     "effects-foo.mjs",
-    `export const plugin = {
-  manifest: ${JSON.stringify({ ...EFFECTS_MANIFEST, name: "effects-foo" })},
-  init: async () => {},
+    pluginModuleSource(
+      { ...EFFECTS_MANIFEST, name: "effects-foo" },
+      `  init: async () => {},
   classify: (call, ctx) => {
     ${classify}
-  },
-}
-`,
+  },`,
+    ),
   )
 }
 
@@ -49,13 +50,20 @@ describe("aburi scan — a fault in the plugin set raised while classifying", ()
       [],
       'Effect plugin "effects-foo" returned a Promise from classify()',
     ],
-  ])("exits 3 for %s, with its message", async (_, classify, flags, says) => {
+  ])("exits 3 for %s, with its message, writing nothing", async (_, classify, flags, says) => {
     await writeWorkspace(classify)
 
-    const { code, stderr } = await runCliIn(workspace.root, ["scan", "--format", "json", ...flags])
+    const { code, stdout, stderr } = await runCliIn(workspace.root, [
+      "scan",
+      "--format",
+      "json",
+      ...flags,
+    ])
 
     expect(code, stderr).toBe(EXIT.GATE)
     expect(stderr).toContain(says)
+    expect(stdout).toBe("")
+    expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(false)
   })
 
   it("exits 0 for the same plugin classifying the call as nothing", async () => {
@@ -64,21 +72,24 @@ describe("aburi scan — a fault in the plugin set raised while classifying", ()
     const { code, stderr } = await runCliIn(workspace.root, ["scan", "--format", "json"])
 
     expect(code, stderr).toBe(EXIT.SUCCESS)
+    expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(true)
   })
 })
 
 describe("every command that scans — a value refused through a plugin's registry", () => {
   it.each([
-    ["aburi explain", ["explain", "f"]],
-    ["aburi diff", ["diff", "main..HEAD"]],
-  ])("%s exits 3, with the refusal's message", async (_, argv) => {
+    ["aburi explain", ["explain", "f"], IR_JSON_FILENAME],
+    ["aburi diff", ["diff", "main..HEAD"], DIFF_JSON_FILENAME],
+  ])("%s exits 3, with the refusal's message, writing nothing", async (_, argv, filename) => {
     await writeWorkspace(REFUSE_THROUGH_REGISTRY)
     await initRepository(workspace.root)
     await commitAll(workspace.root)
 
-    const { code, stderr } = await runCliIn(workspace.root, argv)
+    const { code, stdout, stderr } = await runCliIn(workspace.root, argv)
 
     expect(code, stderr).toBe(EXIT.GATE)
     expect(stderr).toContain(REFUSED)
+    expect(stdout).toBe("")
+    expect(await pathExists(resolve(workspace.root, "out", filename))).toBe(false)
   })
 })

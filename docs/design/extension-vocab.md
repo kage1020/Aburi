@@ -183,6 +183,7 @@ The same applies to `fp:` / `oop:` / `meta:`: each sub-namespace is owned by exa
 | Two plugins declare prefixes of one kind (`effectPrefixes[]`, `extKindPrefixes[]` or `derivedByPrefixes[]`) where one nests under the other (`framework:acme` and `framework:acme:jobs`) | **startup error** |
 | One plugin declares two `extKindPrefixes[]`, or two `derivedByPrefixes[]`, where one nests under the other | **startup error**. Each list is compared with itself only: the same string in both lists, as every framework plugin writes it, is accepted |
 | Plugin A declares `extKinds[].id: "framework:acme:job"` and plugin B declares `extKindPrefixes: ["framework:acme"]` | **startup error** (B's prefix subsumes A's id) |
+| Two plugins with the same `name` and different manifests | **startup error** (an identical manifest is idempotent, V9) |
 | A `type` other than `effects` declares `x-*` | **startup error** |
 | A `type` other than `lang` declares `fp:*` / `oop:*` / `meta:*` | **startup error** |
 | A `type` other than `framework` declares `framework:*` | **startup error** |
@@ -190,6 +191,7 @@ The same applies to `fp:` / `oop:` / `meta:`: each sub-namespace is owned by exa
 | A `type: effects` plugin declares `extKinds` / `extKindPrefixes` / `frameworks` | **manifest validation error** (schema if/then) |
 | A `type: framework` plugin declares `effects` / `effectPrefixes`, or declares extKinds outside the `framework:` prefix | **manifest validation error** |
 | A `type: lang` plugin declares `effects` / `effectPrefixes` / `frameworks`, or declares extKinds outside `(fp\|oop\|meta):` | **manifest validation error** |
+| A manifest holding a value JSON cannot carry (such as `undefined`) | **manifest validation error** |
 
 Mitigation: forcing the plugin namespace via `x-<plugin-name>:` naturally resolves effect-id conflicts between third parties.
 
@@ -267,7 +269,7 @@ aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns th
 | V11a | One plugin declares two extKind prefixes or two derivedBy prefixes where one contains the other (`fp:pipe` and `fp:pipe:async`) | startup error. The same prefix written twice in one list is refused earlier, by the schema's `uniqueItems`; `register` itself leaves an exact repeat alone, since it cannot give a lookup two owners |
 | V12 | Emitting undeclared values under `aburi scan --discover` | warning only; recorded in `aburi-vocab-discovered.json` |
 | V13 | Treating `@Foo` as a boundary via Framework hints (§11.3) alone | OK; no plugin manifest required |
-| V14 | `aburi scan` with a plugin `aburi.json` lists whose manifest the registry refuses at startup (§6.1–§6.2): a prefix another listed plugin declared, a reserved namespace, a namespace its type may not own | exit 3 before extraction, stderr naming the config entry that loaded the plugin ahead of the registry's reason |
+| V14 | `aburi scan` with a plugin listed in `aburi.json` whose manifest the registry refuses at startup (§6.1–§6.2), for any of the refusals [`cli-spec.md`](./cli-spec.md) CL49 lists | exit 3 before extraction, stderr naming the config entry that loaded the plugin ahead of the registry's reason |
 
 ## 9.5 Manifest schema compatibility policy
 

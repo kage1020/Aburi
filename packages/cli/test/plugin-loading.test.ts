@@ -10,7 +10,8 @@ import {
   EFFECTS_MANIFEST,
   FAKE_EFFECTS_PLUGIN,
   FAKE_LANGUAGE_PLUGIN,
-  LANG_MANIFEST,
+  FRAMEWORK_MANIFEST,
+  pluginModuleSource,
 } from "./plugin-fakes"
 import { runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
@@ -20,10 +21,9 @@ const workspace = useScratchWorkspace("plugin-loading")
 
 const FRAMEWORK_CORE: FrameworkPlugin = {
   manifest: {
-    ...LANG_MANIFEST,
+    ...FRAMEWORK_MANIFEST,
     name: "framework-core",
-    type: "framework",
-    provides: { ...LANG_MANIFEST.provides, frameworks: ["core"] },
+    provides: { ...FRAMEWORK_MANIFEST.provides, frameworks: ["core"] },
   },
   init: async () => {},
   classifySymbol: () => null,
@@ -116,10 +116,7 @@ describe("loadPlugins — finding the plugin in a module", () => {
 
 describe("loadPlugins — frameworkHints", () => {
   it("registers each entry under framework:hint and runs it after the configured frameworks", async () => {
-    const fakeFramework: FrameworkPlugin = {
-      ...FRAMEWORK_CORE,
-      manifest: { ...LANG_MANIFEST, name: "framework-fake", type: "framework" },
-    }
+    const fakeFramework: FrameworkPlugin = { ...FRAMEWORK_CORE, manifest: FRAMEWORK_MANIFEST }
 
     const loaded = await load(
       { frameworks: ["framework-fake"] },
@@ -218,19 +215,12 @@ describe("loadPlugins — a manifest the registry refuses", () => {
   })
 })
 
-/** A framework plugin module; `extra` is JavaScript source for further manifest entries. */
-function frameworkModule(name: string, provides: Partial<Provides>, extra = ""): string {
-  const manifest = JSON.stringify({
-    ...FRAMEWORK_CORE.manifest,
-    name,
-    provides: { ...LANG_MANIFEST.provides, ...provides },
-  })
-  return `export const plugin = {
-  manifest: { ...${manifest}, ${extra} },
-  init: async () => {},
-  classifySymbol: () => null,
-}
-`
+function frameworkModule(name: string, provides: Partial<Provides>): string {
+  return pluginModuleSource(
+    { ...FRAMEWORK_MANIFEST, name, provides: { ...FRAMEWORK_MANIFEST.provides, ...provides } },
+    `  init: async () => {},
+  classifySymbol: () => null,`,
+  )
 }
 
 describe("aburi scan — a configured plugin that cannot be loaded", () => {
@@ -286,7 +276,9 @@ describe("aburi scan — a configured plugin that cannot be loaded", () => {
     [
       "holds a manifest value JSON cannot carry",
       ["./framework-odd.mjs"],
-      { "framework-odd.mjs": frameworkModule("framework-odd", {}, "homepage: undefined") },
+      {
+        "framework-odd.mjs": `${frameworkModule("framework-odd", {})}plugin.manifest.homepage = undefined\n`,
+      },
       'Plugin "./framework-odd.mjs" cannot be registered: Plugin manifest contains a non-JSON value (undefined) at $.homepage',
     ],
   ])("exits 3 for a plugin that %s, naming its config entry, before writing anything", async (_, frameworks, files, says) => {

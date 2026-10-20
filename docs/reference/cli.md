@@ -139,8 +139,9 @@ unparseable file tells you something about your source, not about the scan.
 - **A plugin threw** on a file, as opposed to declining it.
 - **A plugin broke a contract that holds for every file**: it returned a Promise
   from `classify`, stamped Symbol ids with no valid language prefix, or refused
-  a value through its own `ctx.registry` check. The run stops at the first one
-  and no output is written.
+  a value through `ctx.registry`. The run stops at the first one and no output
+  is written. `--discover` does not change this: a plugin that refuses a value
+  asked for the refusal itself.
 - **A plugin emitted a value its manifest does not declare**, in a strict run
   (the default). No output is written. Declare the value, or run with
   `--discover` to keep it and see the full list.
