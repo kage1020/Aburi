@@ -28,6 +28,18 @@ describe("aburi scan — whether .gitignore is honoured", () => {
       ["--respect-gitignore"],
       [KEPT],
     ],
+    [
+      "on under --no-respect-gitignore then --respect-gitignore, the one written last",
+      false,
+      ["--no-respect-gitignore", "--respect-gitignore"],
+      [KEPT],
+    ],
+    [
+      "off under --respect-gitignore then --no-respect-gitignore, the one written last",
+      false,
+      ["--respect-gitignore", "--no-respect-gitignore"],
+      [KEPT, IGNORED],
+    ],
   ])("is %s", async (_, respectGitignore, flags, symbols) => {
     await writePackageJson(workspace.root)
     await workspace.writeSource(".gitignore", "src/gen.ts\n")
