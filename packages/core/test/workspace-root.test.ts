@@ -29,9 +29,11 @@ describe("a directory is a workspace root when it holds a marker", () => {
     ["pyproject.toml", '[tool.uv.workspace]\nmembers = ["pkg-a"]\n'],
     ["pyproject.toml", '[tool.hatch.workspaces]\nmembers = ["pkg-a"]\n'],
     ["pyproject.toml", '[tool.poetry]\nname = "root"\n'],
-  ])("%s holding %j", async (file, content) => {
+  ])("%s holding %j, with or without a byte order mark opening it", async (file, content) => {
     await tree.writeSource(file, content)
+    expect(await rootFrom()).toBe(tree.root)
 
+    await tree.writeSource(file, `\uFEFF${content}`)
     expect(await rootFrom()).toBe(tree.root)
   })
 
@@ -45,16 +47,6 @@ describe("a directory is a workspace root when it holds a marker", () => {
     expect(await codeFrom()).toBe("workspace-root-not-found")
   })
 
-  it.each([
-    ["package.json", JSON.stringify({ name: "root", workspaces: ["apps/*"] })],
-    ["Cargo.toml", '[workspace]\nmembers = ["crate-a"]\n'],
-    ["pyproject.toml", '[tool.uv.workspace]\nmembers = ["pkg-a"]\n'],
-  ])("%s opening with a byte order mark", async (file, content) => {
-    await tree.writeSource(file, `\uFEFF${content}`)
-
-    expect(await rootFrom()).toBe(tree.root)
-  })
-
   it("resolves a relative cwd against the process's working directory", async () => {
     await tree.writeSource("turbo.json", "{}")
     await tree.mkdir("src")
@@ -66,6 +58,13 @@ describe("a directory is a workspace root when it holds a marker", () => {
 })
 
 describe("the walk upward", () => {
+  it("roots at an outer package.json#workspaces that opens with a byte order mark", async () => {
+    await tree.writeSource("package.json", '\uFEFF{ "workspaces": ["apps/*"] }')
+    await tree.writeSource("apps/billing/turbo.json", "{}")
+
+    expect(await rootFrom("apps", "billing")).toBe(tree.root)
+  })
+
   it("prefers the outermost marker over an inner package.json#workspaces", async () => {
     await tree.mkdir(".git")
     await tree.writePackage("apps/billing", { name: "billing", workspaces: ["lib/*"] })

@@ -3,6 +3,8 @@ import { stripUtf8Bom } from "@aburi/core"
 export type ModuleDirective = "client" | "server"
 
 export function detectModuleDirective(source: string): ModuleDirective | null {
+  // The parser skips a leading byte order mark, and a directive behind one is still the module's
+  // first statement.
   let remainder = stripUtf8Bom(source)
   while (true) {
     const trimmed = skipLeadingCommentsAndWhitespace(remainder)

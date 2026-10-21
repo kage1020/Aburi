@@ -12,7 +12,10 @@ export function toNfc(value: string): string {
 
 const UTF8_BOM = "\uFEFF"
 
-/** Windows editors open a UTF-8 file with one; Node's `require()`, npm and pnpm read past it. */
+/**
+ * PowerShell 5's `Out-File` and `Set-Content` open a file with one under `-Encoding utf8`; Node's
+ * `require()`, npm and pnpm read past it.
+ */
 export function stripUtf8Bom(text: string): string {
   return text.startsWith(UTF8_BOM) ? text.slice(UTF8_BOM.length) : text
 }

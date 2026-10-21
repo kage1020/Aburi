@@ -20,10 +20,11 @@ References:
   `components[].roots`, relative plugin refs) still resolves against the workspace root,
   and the scan still covers the whole workspace. `aburi scan` warns when the two differ.
 - Format: JSONC (comments allowed) or JSON
-- Encoding: UTF-8, LF. One byte order mark (U+FEFF) opening the file is read past, because Windows
-  editors write one and Node's `require()` and npm read past it; a second one, or one after the first
-  character, is a parse error (`config-parse-failed`). Line and column in a message count from after it,
-  as an editor shows them
+- Encoding: UTF-8, LF. One byte order mark (U+FEFF) opening the file is read past, because PowerShell
+  5's `Out-File` and `Set-Content` write one under `-Encoding utf8` and Node's `require()` and npm read
+  past it; a second one, or one after the first character, is a parse error (`config-parse-failed`).
+  Line and column in a message count from after it, as an editor shows them, and so does the offset of
+  a parse error
 - Indentation: 2 spaces
 
 Why JSONC is allowed: this is a human-authored config, so comments on each section carry value. Generated JSON must be passable to a parser by consumers as-is, so pure JSON is supported too.

@@ -134,7 +134,7 @@ describe("aburi scan — what the caller and the config add", () => {
   })
 })
 
-describe("aburi scan — files a Windows editor saved", () => {
+describe("aburi scan — files saved with a byte order mark", () => {
   it("reads a package.json and an aburi.json that open with a byte order mark", async () => {
     await workspace.writeSource("package.json", '\uFEFF{ "name": "demo", "version": "1.0.0" }\n')
     await workspace.writeSource("aburi.json", `\uFEFF${JSON.stringify(TYPESCRIPT)}\n`)

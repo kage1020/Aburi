@@ -215,17 +215,17 @@ describe("a manifest that cannot be read", () => {
     [
       "is not JSON",
       () => tree.writeSource("apps/billing/package.json", "{ broken"),
-      "package.json",
+      "package.json: Expected property name or '}' in JSON at position 2",
     ],
     [
       "opens with two byte order marks",
       () => tree.writeSource("apps/billing/package.json", '\uFEFF\uFEFF{ "name": "billing" }'),
-      "package.json",
+      "package.json: it opens with more than one byte order mark (U+FEFF)",
     ],
     [
       "has a byte order mark after its first character",
       () => tree.writeSource("apps/billing/package.json", '{\uFEFF "name": "billing" }'),
-      "package.json",
+      "package.json: Expected property name or '}' in JSON at position 1",
     ],
     ["the filesystem will not hand over", () => tree.mkdir("apps/billing/package.json"), "EISDIR"],
   ])("refuses a package manifest that %s", async (_case, write, detail) => {
