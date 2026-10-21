@@ -14,6 +14,7 @@ export type CoreErrorCode =
   | "language-routing-collision"
   | "scan-plugin-misconfigured"
   | "scan-gitignore-unreadable"
+  | "scan-directory-unreadable"
   | "scan-workspace-not-absolute"
   | "propagation-invariant-violated"
   | "lsp-config-invalid"

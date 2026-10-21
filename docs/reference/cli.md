@@ -34,7 +34,7 @@ working directory.
 | Code | Meaning |
 |---|---|
 | `0` | Success, no gate tripped. |
-| `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output), an unexpected exception, or `explain` found no match. |
+| `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output; a file or directory the scan may not read is named), an unexpected exception, or `explain` found no match. |
 | `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
@@ -81,7 +81,7 @@ a config file.
 | `--output <path>` | Write somewhere other than `./aburi.json`. Directories in the path are created if they are missing; a path that cannot hold a file — an existing directory, or a file sitting on its parent path — exits 2 and names it. |
 | `--force` | Overwrite an existing file. Without it, an existing file exits `2`. |
 | `--with-suggestions` | Add comments naming the plugin packages it detected but you have not installed. |
-| `--no-respect-gitignore` | Include git-ignored files when taking the language census. |
+| `--no-respect-gitignore` | Include git-ignored files when taking the language census, and git-ignored `project.json` files when finding nx projects. A git-ignored directory Aburi may not list then stops `init`. |
 
 ```bash
 aburi init
@@ -138,7 +138,17 @@ unparseable file tells you something about your source, not about the scan.
   `components[].roots` matched nothing, or no installed plugin claims any
   extension present. The output is still written.
 - **Coverage fell below `minParsedFileRatio`**, if you set one.
+- **A plugin could not be loaded.** It failed to import, or the registry refused
+  its manifest: a prefix or name another listed plugin already declared, a
+  reserved namespace, a namespace its type may not own. No output is written,
+  and the message names the entry in `aburi.json` that loaded it. A
+  `frameworkHints` entry the registry refuses exits `2` instead, naming the entry.
 - **A plugin threw** on a file, as opposed to declining it.
+- **A plugin broke a contract that holds for every file**: it returned a Promise
+  from `classify`, stamped Symbol ids with no valid language prefix, or refused
+  a value through `ctx.registry`. The run stops at the first one and no output
+  is written. `--discover` does not change this: a plugin that refuses a value
+  asked for the refusal itself.
 - **A plugin emitted a value its manifest does not declare**, in a strict run
   (the default). No output is written. Declare the value, or run with
   `--discover` to keep it and see the full list.

@@ -1,8 +1,8 @@
 import { resolve } from "node:path"
 import {
-  CoreError,
-  detectManagers,
+  describeThrown,
   isComponentId,
+  isPluginSetFault,
   isStrict,
   type ScanResult,
   scan,
@@ -45,7 +45,12 @@ import {
 } from "../vocab-discovered"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
-import { declaredComponents, pluginNamedFrameworks, resolveComponents } from "./scan-components"
+import {
+  declaredComponents,
+  pluginNamedFrameworks,
+  resolveComponents,
+  resolveManagers,
+} from "./scan-components"
 import { findCoverageFault } from "./scan-coverage"
 import { reportScanIncidents } from "./scan-incidents"
 import type { ScanReport } from "./scan-report"
@@ -87,7 +92,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   })
   requireLanguagePlugin(plugins.languages.length, loaded.source)
 
-  const managers = await detectManagers(workspaceRoot)
+  const managers = await resolveManagers(config, workspaceRoot)
   const components = await resolveComponents(config, workspaceRoot, plugins.languages)
   const fellBackToSingleComponent =
     declaredComponents(config) === undefined && managers.workspaces.length === 0
@@ -114,8 +119,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       logger,
     })
   } catch (error) {
-    if (error instanceof CoreError && error.code === "vocab-undeclared") {
-      throw new CliError(error.message, "plugin-error", { cause: error })
+    if (isPluginSetFault(error)) {
+      throw new CliError(describeThrown(error), "plugin-error", { cause: error })
     }
     throw error
   }

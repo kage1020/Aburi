@@ -109,6 +109,7 @@ export {
   DropCFilter,
   type DropCFilterInput,
 } from "./scan/drop-c"
+export { describeThrown, isPluginSetFault } from "./scan/faults"
 export {
   type ExtractedFile,
   type FilePipelineInput,
@@ -155,6 +156,7 @@ export {
 } from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {
+  type DetectManagersOptions,
   type DetectManagersResult,
   detectManagers,
   type UnnameableRoot,

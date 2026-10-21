@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, posix, relative, sep } from "node:path"
 import type { WorkspaceManager } from "@aburi/types"
-import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
 import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
 import { posixWorkspaceRelativeViolation, type UnnameableSite, unnameableSite } from "./id"
 import { compareBy, compareCodeUnit } from "./order"
 import { describeJsonType } from "./scan/faults"
+import { type GitignoreTree, openGitignoreTree } from "./scan/gitignore"
+import { walk } from "./scan/walk"
 import { pathExists, readJson } from "./workspace-fs"
 
 export interface DetectManagersResult {
@@ -24,6 +25,15 @@ export interface UnresolvedDeclaration {
   manifestPath: string
   /** Every string the manifest lists, including ones the resolver drops. */
   patterns: readonly string[]
+}
+
+export interface DetectManagersOptions {
+  /**
+   * Whether `.gitignore` is honoured, default `true`. The nx search honours it as nx does: a
+   * `project.json` it excludes is no project, and a directory it excludes may go unlisted.
+   * Declared package patterns never read it, as pnpm and npm do not.
+   */
+  respectGitignore?: boolean | undefined
 }
 
 /** A package directory no Document path can spell, left off `managers[].roots`. */
@@ -46,7 +56,11 @@ export interface WorkspaceCandidate {
   manifestPath: string
 }
 
-export async function detectManagers(workspaceRoot: string): Promise<DetectManagersResult> {
+export async function detectManagers(
+  workspaceRoot: string,
+  options: DetectManagersOptions = {},
+): Promise<DetectManagersResult> {
+  const gitignore = (options.respectGitignore ?? true) ? openGitignoreTree(workspaceRoot) : null
   const managers: WorkspaceManager[] = []
   const workspaces: WorkspaceCandidate[] = []
   const unresolved: UnresolvedDeclaration[] = []
@@ -63,14 +77,18 @@ export async function detectManagers(workspaceRoot: string): Promise<DetectManag
     }
   }
 
-  await Promise.all([
+  const searches = await Promise.allSettled([
     detectPnpm(workspaceRoot).then(merge),
     detectPackageJsonWorkspaces(workspaceRoot).then((managerScans) => {
       for (const managerScan of managerScans) merge(managerScan)
     }),
     detectTurbo(workspaceRoot).then(merge),
-    detectNx(workspaceRoot).then(merge),
+    detectNx(workspaceRoot, gitignore).then(merge),
   ])
+  const failures = searches.flatMap((search) =>
+    search.status === "rejected" ? [search.reason] : [],
+  )
+  if (failures.length > 0) throw firstFailure(failures)
 
   managers.sort(compareBy((manager) => manager.tool))
   for (const manager of managers) manager.roots.sort(compareCodeUnit)
@@ -89,6 +107,17 @@ export async function detectManagers(workspaceRoot: string): Promise<DetectManag
       compareCodeUnit(a.manifestPath, b.manifestPath),
   )
   return { managers, workspaces, unresolved, unnameableRoots }
+}
+
+// The searches run at once, so which of them fails first is timing; what the run reports is not.
+function firstFailure(failures: readonly unknown[]): unknown {
+  const unread = failures
+    .filter(
+      (failure): failure is CoreError =>
+        failure instanceof CoreError && failure.code === "scan-directory-unreadable",
+    )
+    .sort(compareBy((failure) => failure.value ?? ""))
+  return unread[0] ?? failures[0]
 }
 
 interface ManagerScan {
@@ -205,10 +234,13 @@ async function detectTurbo(root: string): Promise<ManagerScan | null> {
   return { tool: "turbo", candidates: [], manifestPath, declaredPatterns: [] }
 }
 
-async function detectNx(root: string): Promise<ManagerScan | null> {
+async function detectNx(
+  root: string,
+  gitignore: GitignoreTree | null,
+): Promise<ManagerScan | null> {
   const manifestPath = join(root, "nx.json")
   if (!(await pathExists(manifestPath))) return null
-  const projectFiles = await glob(["**/project.json"], {
+  const projectFiles = await walk(["**/project.json"], {
     cwd: root,
     ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
     onlyFiles: true,
@@ -216,9 +248,12 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
     // Discovery does not walk through a link, so a project found there would own no scanned file.
     followSymbolicLinks: false,
     deep: 10,
+    gitignore,
   })
   const candidates: WorkspaceCandidate[] = []
   for (const projectFile of projectFiles) {
+    if (gitignore !== null && (await gitignore.ignores(toRelativePosix(root, projectFile))))
+      continue
     const dir = dirname(projectFile)
     candidates.push({
       relativeRoot: toRelativePosix(root, dir),
@@ -239,13 +274,14 @@ async function resolveDeclaredPackages(
 ): Promise<WorkspaceCandidate[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
   // Links are followed because pnpm and npm follow them when they resolve these same patterns.
-  const manifests = await glob(manifestPatterns, {
+  const manifests = await walk(manifestPatterns, {
     cwd: workspaceRoot,
     ignore: ["**/node_modules/**", "**/.git/**"],
     onlyFiles: true,
     expandDirectories: false,
     absolute: true,
     deep: 10,
+    gitignore: null,
   })
   return manifests.map((manifestPath) => {
     const absoluteRoot = dirname(manifestPath)
