@@ -1,9 +1,10 @@
+import { stripUtf8Bom } from "@aburi/core"
+
 export type ModuleDirective = "client" | "server"
 
-/** Some editors prepend a BOM to UTF-8 sources; the parser skips it. */
-const UTF8_BOM = "﻿"
-
 export function detectModuleDirective(source: string): ModuleDirective | null {
+  // The parser skips a leading byte order mark, and a directive behind one is still the module's
+  // first statement.
   let remainder = stripUtf8Bom(source)
   while (true) {
     const trimmed = skipLeadingCommentsAndWhitespace(remainder)
@@ -14,10 +15,6 @@ export function detectModuleDirective(source: string): ModuleDirective | null {
     if (readStatement.body === "use server") return "server"
     remainder = readStatement.rest
   }
-}
-
-function stripUtf8Bom(source: string): string {
-  return source.startsWith(UTF8_BOM) ? source.slice(UTF8_BOM.length) : source
 }
 
 function skipLeadingCommentsAndWhitespace(source: string): string | null {

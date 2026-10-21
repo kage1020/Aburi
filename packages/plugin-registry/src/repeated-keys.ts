@@ -4,6 +4,17 @@ const PROTOTYPE_KEY = "__proto__"
 
 export const JSONC_PARSE_OPTIONS = { allowTrailingComma: true, disallowComments: false } as const
 
+const UTF8_BOM = "\uFEFF"
+
+/**
+ * PowerShell 5's `Out-File` and `Set-Content` open a file with one under `-Encoding utf8`, and
+ * `jsonc-parser` reads it as an invalid symbol. This package sits beside `@aburi/core` in the
+ * dependency graph, so it cannot share core's copy.
+ */
+export function stripUtf8Bom(text: string): string {
+  return text.startsWith(UTF8_BOM) ? text.slice(UTF8_BOM.length) : text
+}
+
 export interface RepeatedKey {
   readonly kind: "repeated" | "prototype-key"
   readonly key: string
