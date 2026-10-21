@@ -201,7 +201,24 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
 | 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), an option that takes one value given twice or a path given empty (§3), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
-| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file or a workspace package the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
+| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a fault in the plugin set that ends extraction, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file or a workspace package the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
+
+A manifest violation is any refusal by the registry while the configured plugins are registered
+([`extension-vocab.md`](./extension-vocab.md) §6.1–§6.2): an id, prefix or name another configured
+plugin already declared, a reserved namespace, a namespace the plugin's type may not own, a manifest
+value JSON cannot carry. The message names the config entry that loaded the plugin, ahead of the
+registry's reason, because the registry knows plugins by manifest name and a manifest name need
+appear nowhere in `aburi.json`. A `frameworkHints` entry the registry refuses is not a plugin fault:
+it is a config error (exit `2`) naming the entry, since the fix is in `aburi.json`.
+
+A fault in the plugin set is an error whose code says the plugin set, not the file, is at fault, so
+the core lets it end the run instead of withdrawing one file after another
+([`lang-plugin.md`](./lang-plugin.md) §7.2): `vocab-undeclared`, `scan-plugin-misconfigured` and
+`invalid-language-id`. The CLI recognises it by that code, as the core does, and never by the class
+carrying it. A plugin that refuses a value through the registry it is handed
+(`assertEffectDeclared` / `assertExtKindDeclared`, [`extension-vocab.md`](./extension-vocab.md) §7)
+raises the registry's error, the core's own vocabulary check raises the core's, and both are the same
+refusal.
 
 ### 5.5 stdout Example
 
@@ -1222,6 +1239,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL46 | A strict `aburi scan` stopping at an undeclared value (exit 3) after one that completed, or an `aburi scan --format md` stopping at a directory where `workspace.md` would go (exit 2) after an `aburi scan --format json` | The earlier run's IR, `workspace.md` and component pages are left as they were |
 | CL47 | `aburi explain <name>` with no IR on disk, after `aburi scan --format md`; `runScan` with `command: "explain"` or `"diff"` and `format: "md"`, after an `aburi scan` that wrote both beside a stale page | The scan it runs writes the IR beside the pages and removes none of them; the `runScan` call removes nothing, neither the IR nor the stale page |
 | CL48 | `aburi diff … --format json` or `--format md` after an `aburi diff --max-bytes` that wrote `diff.full.md` | Only the files that run writes are left of the report: no `diff.md` naming a `diff.full.md` that is gone, no earlier `diff.json`. The caller's own file in the output directory stays |
+| CL49 | `aburi scan` with a configured plugin that fails to import, or whose manifest the registry refuses (§5.4): a prefix another configured plugin declared, another configured plugin's name with a different manifest, a reserved namespace, a namespace its type may not own, a value JSON cannot carry | exit 3 before anything is written, stderr naming the config entry that loaded the plugin. A `frameworkHints` entry the registry refuses is exit 2, naming the entry |
+| CL50 | `aburi scan` where an effect plugin's `classify` refuses a value through `ctx.registry.assertEffectDeclared`, or returns a Promise | exit 3 with that error's message, nothing on stdout and no IR written, though the first is the registry's error and the second the core's. The first exits 3 under `--discover` too, since the registry does not read `strict`. `aburi explain` and `aburi diff` exit 3 for both, since they run the same scan, and `aburi diff` writes no report |
 | CL55 | `aburi diff main..HEAD` with a `pluginOptions` key that names no loaded plugin (`config.md` C10) | The warning once, with no side label, while the base scan's own lines keep theirs; the exit code is the one the run has without the key |
 
 ## 18. Design Decisions
