@@ -1,7 +1,9 @@
+import { rename } from "node:fs/promises"
 import { resolve } from "node:path"
 import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { EXIT, runExplain, runScan } from "../src"
+import { EXIT, IR_JSON_FILENAME, runExplain, runScan } from "../src"
+import { pathExists } from "../src/fs-probe"
 import { symbolFor, writeScannedWorkspace } from "./ir-documents"
 import { runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
@@ -69,6 +71,19 @@ describe("aburi explain with no IR on disk — the scan it runs", () => {
     expect(stderr).toContain("boom.stub: plugin exploded")
   })
 
+  it("writes its IR beside the Markdown an earlier scan wrote, and removes none of it", async () => {
+    await writeStubWorkspace(workspace.root, ["ok.stub"])
+    const scanned = await runScan({ cwd: workspace.root, format: "md" })
+
+    const outcome = await runExplain({ cwd: workspace.root, argument: "ok_stub" })
+
+    expect(outcome.kind).toBe("single")
+    expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(true)
+    for (const page of [scanned.workspaceMdPath, ...scanned.componentMdPaths]) {
+      expect(await pathExists(page ?? "")).toBe(true)
+    }
+  })
+
   it("names the withdrawal behind a No matches answer", async () => {
     await writeStubWorkspace(workspace.root, ["bad.stub", "ok.stub"])
     const { code, stderr } = await runCliIn(workspace.root, ["explain", "bad_stub"])
@@ -94,6 +109,20 @@ describe("aburi explain with an IR on disk", () => {
 
     expect(code).toBe(EXIT.SUCCESS)
     expect(stderr).toBe("")
+  })
+})
+
+describe("aburi explain --no-rescan after aburi scan --format md", () => {
+  it("finds no IR rather than answering from the one an earlier scan wrote", async () => {
+    await writeStubWorkspace(workspace.root, ["old.stub"])
+    await runScan({ cwd: workspace.root })
+    const lookUp = () => runExplain({ cwd: workspace.root, argument: "old_stub", noRescan: true })
+    expect((await lookUp()).kind).toBe("single")
+    await rename(resolve(workspace.root, "old.stub"), resolve(workspace.root, "new.stub"))
+
+    await runScan({ cwd: workspace.root, format: "md" })
+
+    await expect(lookUp()).rejects.toThrow("No IR file at")
   })
 })
 
