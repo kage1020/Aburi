@@ -42,7 +42,9 @@ them. Turn that off when you want to analyse build output on purpose:
 A directory Aburi may not list ends the run with exit 1 and names it, because every file
 under it would otherwise be missing from the analysis without a word. One that `.gitignore`
 excludes is passed over while `.gitignore` is honoured, as git passes over it, so a data
-directory a container owns does not stop a scan.
+directory a container owns does not stop a scan. The rule has to exclude the directory
+itself: `data/pg/*` leaves `data/pg` to be listed. A directory a `pnpm-workspace.yaml` or
+`workspaces` pattern names is the exception, because pnpm and npm never read `.gitignore`.
 
 ## Choose plugins
 
@@ -189,7 +191,7 @@ setting in CI.
 | Field | Default | Purpose |
 |---|---|---|
 | `ignore` | `[]` | Extra glob patterns to skip. |
-| `respectGitignore` | `true` | Honour `.gitignore` files. |
+| `respectGitignore` | `true` | Honour `.gitignore` files, in the scan and in finding components. |
 | `languages` | autodetect | Language plugins to load. |
 | `frameworks` | autodetect | Framework plugins to load. |
 | `effects` | autodetect | Effects plugins, in priority order. |

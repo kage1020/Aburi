@@ -1,23 +1,21 @@
 import { join, posix } from "node:path"
-import { errorFrom, type ListingFaults } from "@aburi/test-support"
+import { clearListingFaults, errorFrom, linkDirectory } from "@aburi/test-support"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { CoreError, detectComponents, detectManagers, discoverFiles } from "../../src"
 import { useWorkspaceTree } from "../fixtures/workspace"
 
-const faults = vi.hoisted<ListingFaults>(() => ({ codes: new Map(), refused: new Set() }))
+const faults = await vi.hoisted(async () =>
+  (await import("@aburi/test-support")).emptyListingFaults(),
+)
 
 vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs")>()
-  const { readdirFailingOn } = await import("@aburi/test-support")
-  return { ...actual, readdir: readdirFailingOn(actual, faults) }
+  const { fsFailingOn } = await import("@aburi/test-support")
+  return fsFailingOn(await importOriginal<typeof import("node:fs")>(), faults)
 })
 
 const tree = useWorkspaceTree("core-unlisted-directory")
 
-afterEach(() => {
-  faults.codes.clear()
-  faults.refused.clear()
-})
+afterEach(() => clearListingFaults(faults))
 
 function unlistable(directory: string, code = "EACCES"): string {
   const absolute = join(tree.root, directory)
@@ -37,36 +35,35 @@ const discovery: Walk = {
     discoverFiles({ workspaceRoot: tree.root, languageExtensions: [".ts"], ...options }),
 }
 
-describe.each<[string, Walk]>([
+const census: Walk = {
+  plant: (directory) => tree.writeLanguageFiles(directory, ".py"),
+  run: (options) => detectComponents({ workspaceRoot: tree.root, ...options }),
+}
+
+const nxSearch: Walk = {
+  plant: async (directory) => {
+    await tree.writeJson("nx.json", {})
+    await tree.writeJson(`${directory}/project.json`, { name: "b" })
+  },
+  run: (options) => detectManagers(tree.root, options),
+}
+
+const declaredPatterns: Walk = {
+  plant: async (directory) => {
+    await tree.writePnpmWorkspace(`${posix.dirname(directory)}/*`)
+    await tree.writePackage(directory, { name: "b" })
+  },
+  run: (options) => detectManagers(tree.root, options),
+}
+
+const WALKS: [string, Walk][] = [
   ["discovery", discovery],
-  [
-    "the language census",
-    {
-      plant: (directory) => tree.writeLanguageFiles(directory, ".py"),
-      run: (options) => detectComponents({ workspaceRoot: tree.root, ...options }),
-    },
-  ],
-  [
-    "the nx detector's search for project.json",
-    {
-      plant: async (directory) => {
-        await tree.writeJson("nx.json", {})
-        await tree.writeJson(`${directory}/project.json`, { name: "b" })
-      },
-      run: (options) => detectManagers(tree.root, options),
-    },
-  ],
-  [
-    "the resolution of declared package patterns",
-    {
-      plant: async (directory) => {
-        await tree.writePnpmWorkspace(`${posix.dirname(directory)}/*`)
-        await tree.writePackage(directory, { name: "b" })
-      },
-      run: (options) => detectManagers(tree.root, options),
-    },
-  ],
-])("a directory %s cannot list", (_, walk) => {
+  ["the language census", census],
+  ["the nx detector's search for project.json", nxSearch],
+  ["the resolution of declared package patterns", declaredPatterns],
+]
+
+describe.each(WALKS)("a directory %s cannot list", (_, walk) => {
   it("ends the run, naming the directory and the operating system's error", async () => {
     await walk.plant("src/locked")
     const locked = unlistable("src/locked")
@@ -77,13 +74,15 @@ describe.each<[string, Walk]>([
     expect(error.message).toContain(`"${locked}"`)
     expect(error.message).toContain("EACCES")
   })
+})
 
-  it.each([
-    ["itself", "pg/"],
-    ["a directory above it", "data/"],
-  ])("is passed over when .gitignore excludes %s", async (_excluded, rule) => {
+// Declared patterns never read .gitignore, as pnpm and npm do not.
+const GITIGNORE_WALKS = WALKS.filter(([, walk]) => walk !== declaredPatterns)
+
+describe.each(GITIGNORE_WALKS)("a directory %s cannot list but .gitignore excludes", (_, walk) => {
+  it("is passed over", async () => {
     await walk.plant("data/pg")
-    await tree.writeSource(".gitignore", `${rule}\n`)
+    await tree.writeSource(".gitignore", "pg/\n")
     const pg = unlistable("data/pg")
 
     await walk.run({})
@@ -91,9 +90,9 @@ describe.each<[string, Walk]>([
     expect(faults.refused).toContain(pg)
   })
 
-  it("ends the run when .gitignore excludes it but is not respected", async () => {
+  it("ends the run when .gitignore is not respected", async () => {
     await walk.plant("data/pg")
-    await tree.writeSource(".gitignore", "data/\n")
+    await tree.writeSource(".gitignore", "pg/\n")
     const pg = unlistable("data/pg")
 
     const error = await errorFrom(CoreError, () => walk.run({ respectGitignore: false }))
@@ -102,21 +101,160 @@ describe.each<[string, Walk]>([
   })
 })
 
-describe("a directory a declared pattern reaches outside the workspace", () => {
-  it("ends the run when it cannot be listed, whatever a .gitignore out there says", async () => {
+describe("which directories .gitignore excuses", () => {
+  it.each([
+    ["one under a directory it excludes", { ".gitignore": "data/\n" }],
+    ["one a deeper rule file excludes", { "data/.gitignore": "pg/\n" }],
+  ])("passes over %s", async (_, rules) => {
+    await discovery.plant("data/pg")
+    for (const [path, text] of Object.entries(rules)) await tree.writeSource(path, text)
+    const pg = unlistable("data/pg")
+
+    await discovery.run({})
+
+    expect(faults.refused).toContain(pg)
+  })
+
+  it.each([
+    ["excludes only what is in it", { ".gitignore": "data/pg/*\n" }],
+    ["is re-included by a deeper rule", { ".gitignore": "data/*\n", "data/.gitignore": "!pg/\n" }],
+  ])("ends the run for one that %s", async (_, rules) => {
+    await discovery.plant("data/pg")
+    for (const [path, text] of Object.entries(rules)) await tree.writeSource(path, text)
+    const pg = unlistable("data/pg")
+
+    const error = await errorFrom(CoreError, () => discovery.run({}))
+
+    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: pg })
+    expect(error.message).toContain("Exclude it in .gitignore, or let this process read it")
+  })
+
+  it("still names a directory it cannot list when an excused one sorts before it", async () => {
+    await discovery.plant("data/pg")
+    await discovery.plant("src/locked")
+    await tree.writeSource(".gitignore", "data/\n")
+    const pg = unlistable("data/pg")
+    const locked = unlistable("src/locked")
+
+    const error = await errorFrom(CoreError, () => discovery.run({}))
+
+    expect(error.value).toBe(locked)
+    expect(faults.refused).toContain(pg)
+  })
+
+  it("never excuses the workspace root, whatever .gitignore says", async () => {
+    await discovery.plant("src")
+    await tree.writeSource(".gitignore", "*\n!*.ts\n")
+    faults.codes.set(tree.root, "EACCES")
+
+    const error = await errorFrom(CoreError, () => discovery.run({}))
+
+    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: tree.root })
+  })
+})
+
+describe("a directory a declared pattern reaches", () => {
+  it("ends the run when it cannot be listed, though .gitignore excludes it", async () => {
+    await declaredPatterns.plant("data/pg")
+    await tree.writeSource(".gitignore", "data/\n")
+    const pg = unlistable("data/pg")
+
+    const error = await errorFrom(CoreError, () => detectManagers(tree.root))
+
+    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: pg })
+    expect(error.message).not.toContain(".gitignore")
+  })
+
+  it("ends the run outside the workspace too", async () => {
     await tree.writeSource("repo/pnpm-workspace.yaml", 'packages:\n  - "../outside/*"\n')
     await tree.writePackage("outside/pkg", { name: "pkg" })
-    await tree.writeSource(".gitignore", "outside/\n")
     const pkg = unlistable("outside/pkg")
 
     const error = await errorFrom(CoreError, () => detectManagers(join(tree.root, "repo")))
 
     expect(error).toMatchObject({ code: "scan-directory-unreadable", value: pkg })
   })
+
+  async function linkedPackage(): Promise<string> {
+    await tree.writePnpmWorkspace("packages/*")
+    await tree.writePackage("packages/bar", { name: "bar" })
+    await tree.writePackage("vendor/foo", { name: "foo" })
+    const link = join(tree.root, "packages", "foo")
+    await linkDirectory(join(tree.root, "vendor", "foo"), link)
+    return link
+  }
+
+  it.each([
+    "EACCES",
+    "EIO",
+    "EPERM",
+  ])("ends the run when a link to it cannot be resolved (%s), naming the link", async (code) => {
+    const link = await linkedPackage()
+    faults.links.set(link, code)
+
+    const error = await errorFrom(CoreError, () => detectManagers(tree.root))
+
+    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: link })
+    expect(error.message).toContain(`Link "${link}" could not be followed: ${code}`)
+  })
+
+  it("names the link when what it resolves to cannot be looked up", async () => {
+    const link = await linkedPackage()
+    faults.targets.set(join(tree.root, "vendor", "foo"), "EIO")
+
+    const error = await errorFrom(CoreError, () => detectManagers(tree.root))
+
+    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: link })
+  })
+
+  it.each([
+    "ENOENT",
+    "ELOOP",
+  ])("passes over a link that dangles or loops (%s), as every checkout does", async (code) => {
+    const link = await linkedPackage()
+    faults.links.set(link, code)
+
+    const result = await detectManagers(tree.root)
+
+    expect(faults.refused).toContain(link)
+    expect(result.workspaces.map((candidate) => candidate.relativeRoot)).toEqual(["packages/bar"])
+  })
+})
+
+describe("detectComponents", () => {
+  it("hands respectGitignore on to the manifest searches", async () => {
+    await nxSearch.plant("build")
+    await tree.writeSource(".gitignore", "build/\n")
+    const build = unlistable("build")
+
+    const error = await errorFrom(CoreError, () =>
+      detectComponents({ workspaceRoot: tree.root, respectGitignore: false }),
+    )
+
+    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: build })
+  })
+})
+
+describe("detectManagers", () => {
+  it("names the first directory in path order whichever search fails first", async () => {
+    await nxSearch.plant("a/locked")
+    await declaredPatterns.plant("apps/locked")
+    const first = unlistable("a/locked")
+    unlistable("apps/locked")
+
+    const error = await errorFrom(CoreError, () => detectManagers(tree.root))
+
+    expect(error.value).toBe(first)
+  })
 })
 
 describe("discovery's walk", () => {
-  it.each(["EIO", "EMFILE", "ELOOP"])("ends the run on %s, as on a permission", async (code) => {
+  it.each([
+    "EIO",
+    "EMFILE",
+    "ELOOP",
+    "EPERM",
+  ])("ends the run on %s, as on a permission", async (code) => {
     await discovery.plant("src/locked")
     const locked = unlistable("src/locked", code)
 
@@ -141,13 +279,14 @@ describe("discovery's walk", () => {
     expect(result.skipped).toEqual([])
   })
 
-  it("names the workspace root when the root itself cannot be listed", async () => {
-    await discovery.plant("src")
-    faults.codes.set(tree.root, "EACCES")
+  it("ends the run when an entry, not its directory, vanishes mid-listing", async () => {
+    await discovery.plant("src/gen")
+    const gen = join(tree.root, "src", "gen")
+    faults.vanishedEntries.set(gen, "x.ts")
 
     const error = await errorFrom(CoreError, () => discovery.run({}))
 
-    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: tree.root })
+    expect(error).toMatchObject({ code: "scan-directory-unreadable", value: gen })
   })
 
   it("never lists a directory the drop globs exclude", async () => {
@@ -175,5 +314,15 @@ describe("discovery's walk", () => {
     const error = await errorFrom(CoreError, () => discovery.run({}))
 
     expect(error.value).toBe(deep)
+  })
+
+  it("orders the paths it compares by code unit, as git does", async () => {
+    for (const directory of ["src/B", "src/a"]) await discovery.plant(directory)
+    unlistable("src/a")
+    const upper = unlistable("src/B")
+
+    const error = await errorFrom(CoreError, () => discovery.run({}))
+
+    expect(error.value).toBe(upper)
   })
 })
