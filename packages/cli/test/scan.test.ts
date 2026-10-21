@@ -134,6 +134,22 @@ describe("aburi scan — what the caller and the config add", () => {
   })
 })
 
+describe("aburi scan — files saved with a byte order mark", () => {
+  it("reads a package.json and an aburi.json that open with a byte order mark", async () => {
+    await workspace.writeSource("package.json", '\uFEFF{ "name": "demo", "version": "1.0.0" }\n')
+    await workspace.writeSource("aburi.json", `\uFEFF${JSON.stringify(TYPESCRIPT)}\n`)
+    await workspace.writeSource("src/ok.ts", "export function ok() { return 1 }\n")
+
+    const report = await scan()
+
+    expect(report).toMatchObject({ exitCode: EXIT.SUCCESS, keptSymbols: 1 })
+    const ir = JSON.parse(await readFile(report.irPath ?? "", "utf8")) as {
+      components: { id: string }[]
+    }
+    expect(ir.components.map((component) => component.id)).toEqual(["demo"])
+  })
+})
+
 describe("aburi scan — a file withdrawn during extraction", () => {
   const WITHDRAWN = "export const a\u{1F642} = 1\n"
 

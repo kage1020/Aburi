@@ -8,7 +8,7 @@ import Ajv2020, {
 } from "ajv/dist/2020.js"
 import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
 import { RegistryError } from "./errors"
-import { describeRepeatedKey, JSONC_PARSE_OPTIONS, scanKeys } from "./repeated-keys"
+import { describeRepeatedKey, JSONC_PARSE_OPTIONS, scanKeys, stripUtf8Bom } from "./repeated-keys"
 
 const ajv = new Ajv2020({
   strict: true,
@@ -42,8 +42,9 @@ function tryGetName(parsed: unknown): string[] {
 }
 
 export function parsePluginManifest(text: string, sourcePath: string): PluginManifest {
+  const body = stripUtf8Bom(text)
   const errors: ParseError[] = []
-  const parsed: unknown = parse(text, errors, JSONC_PARSE_OPTIONS)
+  const parsed: unknown = parse(body, errors, JSONC_PARSE_OPTIONS)
   if (errors.length > 0) {
     const summary = errors
       .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`)
@@ -54,7 +55,7 @@ export function parsePluginManifest(text: string, sourcePath: string): PluginMan
     })
   }
 
-  const scan = scanKeys(text)
+  const scan = scanKeys(body)
   if (scan.kind === "unreadable") {
     throw new Error("jsonc invariant violation: parse accepted a text scanKeys could not read")
   }
