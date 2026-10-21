@@ -524,7 +524,7 @@ Alternative rejected — Louvain community detection: modularity-optimising comm
 
 ### 14.2 Why no SCC pre-condensation is needed (contrast with effect-propagation.md §6)
 
-[`effect-propagation.md`](./effect-propagation.md) §6 condenses SCCs before its reverse-topological sweep because the sweep needs a DAG traversal to prove `O(V + E)` termination on a monotone lattice. Slice View has no lattice and no sweep — Union-Find on the undirected edge set is already `O((V + E) · α(V))` and terminates trivially. Directed cycles collapse into the same connected component as a natural consequence of undirection (§6.2). Pre-condensation would be dead code.
+[`effect-propagation.md`](./effect-propagation.md) §6 condenses SCCs before its reverse-topological sweep because the sweep needs a DAG traversal to prove termination on a monotone lattice within the bound its §7 states. Slice View has no lattice and no sweep — Union-Find on the undirected edge set is already `O((V + E) · α(V))` and terminates trivially. Directed cycles collapse into the same connected component as a natural consequence of undirection (§6.2). Pre-condensation would be dead code.
 
 ### 14.3 Why "no bridging via non-Node Symbols"
 

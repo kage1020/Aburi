@@ -16,9 +16,9 @@ aburi <command> [flags]
 `--log-level debug|info|warn|error` works on every command too, before it or after it. It
 sets how much of the per-file log
 (`warn: Skipped src/legacy.ts: parse reported a non-recoverable error at 12:4 — …`) reaches
-stderr, from `aburi scan` and from the scans `aburi diff` and `aburi explain` run. That log
-writes only `warn:` and `debug:` lines, so the default, `warn`, and `info` both show the `warn:`
-lines, `debug` adds a line for every file extracted, and `error` shows none of it. Its lines
+stderr, from `aburi scan` and from the scans `aburi diff` and `aburi explain` run. The default,
+`warn`, shows the `warn:` lines; `info` adds a line for each file `aburi scan` removes, `debug`
+a line for every file extracted as well, and `error` shows none of it. Its lines
 name no scan; `aburi diff` writes the base's before the head's. The `⚠` warnings are printed
 whatever the level. Any other value exits `2`.
 
@@ -101,7 +101,14 @@ aburi scan [--output-dir <dir>] [--format json|md|both] [--no-md|--no-json]
 ```
 
 Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
-`components/*.md`.
+`components/*.md`. After writing, it removes what an earlier run wrote there that this one
+does not: the output a `--format` leaves out, and the page of a component that has since been
+renamed or removed. `aburi.ir.json` and `workspace.md` are recognised by name alone, so a file
+of yours under either name goes too. A page in `components/` is recognised by its name and its
+first line both: it is Aburi's only when it is named after a component id and its first line is
+that component's `# Component: <id>` heading, so your own files there stay. A scan that fails
+before it has written everything removes nothing. `--log-level info` prints a line for each
+file removed.
 
 | Flag | Effect |
 |---|---|
