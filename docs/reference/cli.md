@@ -34,7 +34,7 @@ working directory.
 | Code | Meaning |
 |---|---|
 | `0` | Success, no gate tripped. |
-| `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output), an unexpected exception, or `explain` found no match. |
+| `1` | Runtime failure: an I/O error (a write the disk refused says which command and which output; a file or directory the scan may not read is named), an unexpected exception, or `explain` found no match. |
 | `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
@@ -82,7 +82,7 @@ a config file.
 | `--output <path>` | Write somewhere other than `./aburi.json`. Directories in the path are created if they are missing; a path that cannot hold a file — an existing directory, or a file sitting on its parent path — exits 2 and names it. |
 | `--force` | Overwrite an existing file. Without it, an existing file exits `2`. |
 | `--with-suggestions` | Add comments naming the plugin packages it detected but you have not installed. |
-| `--no-respect-gitignore` | Include git-ignored files when taking the language census. |
+| `--no-respect-gitignore` | Include git-ignored files when taking the language census, and git-ignored `project.json` files when finding nx projects. A git-ignored directory Aburi may not list then stops `init`. |
 
 ```bash
 aburi init

@@ -1,7 +1,6 @@
 import { resolve } from "node:path"
 import {
   describeThrown,
-  detectManagers,
   isComponentId,
   isPluginSetFault,
   isStrict,
@@ -46,7 +45,12 @@ import {
 } from "../vocab-discovered"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
-import { declaredComponents, pluginNamedFrameworks, resolveComponents } from "./scan-components"
+import {
+  declaredComponents,
+  pluginNamedFrameworks,
+  resolveComponents,
+  resolveManagers,
+} from "./scan-components"
 import { findCoverageFault } from "./scan-coverage"
 import { reportScanIncidents } from "./scan-incidents"
 import type { ScanReport } from "./scan-report"
@@ -88,7 +92,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   })
   requireLanguagePlugin(plugins.languages.length, loaded.source)
 
-  const managers = await detectManagers(workspaceRoot)
+  const managers = await resolveManagers(config, workspaceRoot)
   const components = await resolveComponents(config, workspaceRoot, plugins.languages)
   const fellBackToSingleComponent =
     declaredComponents(config) === undefined && managers.workspaces.length === 0

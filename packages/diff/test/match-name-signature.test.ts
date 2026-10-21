@@ -11,6 +11,11 @@ function stage4(base: readonly IRSymbol[], head: readonly IRSymbol[]): string[] 
 const withInput = (type: string, throws: string[] = []) =>
   sig({ inputs: [{ name: "id", type }], outputs: ["User"], throws })
 
+const withInputs = (types: string[], outputs = ["User"]) =>
+  sig({ inputs: types.map((type, i) => ({ name: `p${i}`, type })), outputs })
+
+const CREATE_INPUTS = ["string", "number", "Date", "boolean"]
+
 describe("stage 4 settles candidates in score order", () => {
   it("pairs an exact match rather than letting an earlier head consume it", () => {
     expect(
@@ -76,6 +81,27 @@ describe("stage 4 settles candidates in score order", () => {
     expect(changesBetween([...base].reverse(), [...head].reverse())).toEqual(expected)
   })
 
+  it.each([
+    ["the renamed member", "src/aaa.ts", "src/zzz.ts", "AccountService.createUserAccount"],
+    [
+      "the member that kept its name",
+      "src/zzz.ts",
+      "src/aaa.ts",
+      "AccountService.createUserAccountRecord",
+    ],
+  ])("settles an exact tie between scores made of different axes on the lower base id, when that is %s", (_, renamedAt, keptAt, winner) => {
+    const head = method("src/mid.ts", "AccountService.createUserAccountRecord", "z", {
+      signature: withInputs(CREATE_INPUTS),
+    })
+    const renamed = method(renamedAt, "AccountService.createUserAccount", "p", {
+      signature: withInputs(["string", "number", "Date", "Options"]),
+    })
+    const kept = method(keptAt, "AccountService.createUserAccountRecord", "q", {
+      signature: withInputs(["string", "number", "Options", "Flags"], ["Account"]),
+    })
+    expect(stage4([renamed, kept], [head])).toEqual([`${winner} -> ${head.name}`])
+  })
+
   it("refuses a pair without signatures, whose signature axis would score a free 1.0", () => {
     const noSignature = (file: string, seed: string) =>
       makeSymbol({
@@ -91,18 +117,34 @@ describe("stage 4 settles candidates in score order", () => {
 describe("the score a pair must reach rises as the head's member name gets shorter", () => {
   it.each([
     [
-      "a one-token member with an identical signature",
+      "a one-token member with an identical signature, scoring exactly 1.0",
       method("src/a.ts", "UserRepo.get", "a"),
       method("src/b.ts", "UserRepo.get", "b"),
     ],
     [
-      "a two-token member that gained a second throws",
+      "a two-token member that gained a second throws, scoring exactly 0.95",
       method("src/a.ts", "UserRepo.getUser", "a", {
         signature: withInput("string", ["AuthError"]),
       }),
       method("src/b.ts", "UserRepo.getUser", "b", {
         signature: withInput("string", ["AuthError", "RateLimitError"]),
       }),
+    ],
+    // Summed in doubles, only these two 0.85 rows fell short of their threshold; the 1.0 and 0.95
+    // rows above come out exact either way.
+    [
+      "a three-token member that gained a fourth, with one of four inputs retyped, scoring exactly 0.85",
+      method("src/a.ts", "AccountService.createUserAccount", "a", {
+        signature: withInputs(CREATE_INPUTS),
+      }),
+      method("src/b.ts", "AccountService.createUserAccountRecord", "b", {
+        signature: withInputs(["string", "number", "Date", "Options"]),
+      }),
+    ],
+    [
+      "a seven-token member that gained three more, with an identical signature, scoring exactly 0.85",
+      method("src/a.ts", "Repo.fetchUserAccountProfileFromRemoteCache", "a"),
+      method("src/b.ts", "Repo.fetchUserAccountProfileFromRemoteCacheWithRetryPolicy", "b"),
     ],
     [
       "a three-token member that gained its first throws",
@@ -130,6 +172,20 @@ describe("the score a pair must reach rises as the head's member name gets short
       "a two-token member that turned plural",
       method("src/a.ts", "UserRepo.getUser", "a"),
       method("src/b.ts", "UserRepo.getUsers", "b"),
+    ],
+    [
+      "a three-token member that gained a fourth, with two of four inputs retyped",
+      method("src/a.ts", "AccountService.createUserAccount", "a", {
+        signature: withInputs(CREATE_INPUTS),
+      }),
+      method("src/b.ts", "AccountService.createUserAccountRecord", "b", {
+        signature: withInputs(["string", "number", "Options", "Flags"]),
+      }),
+    ],
+    [
+      "a seven-token member that gained four more, with an identical signature",
+      method("src/a.ts", "Repo.fetchUserAccountProfileFromRemoteCache", "a"),
+      method("src/b.ts", "Repo.fetchUserAccountProfileFromRemoteCacheWithRetryPolicyOnce", "b"),
     ],
   ])("refuses %s", (_, base, head) => {
     expect(stage4([base], [head])).toEqual([])
