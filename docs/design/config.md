@@ -20,7 +20,11 @@ References:
   `components[].roots`, relative plugin refs) still resolves against the workspace root,
   and the scan still covers the whole workspace. `aburi scan` warns when the two differ.
 - Format: JSONC (comments allowed) or JSON
-- Encoding: UTF-8, LF
+- Encoding: UTF-8, LF. One byte order mark (U+FEFF) opening the file is read past, because PowerShell
+  5's `Out-File` and `Set-Content` write one under `-Encoding utf8` and Node's `require()` and npm read
+  past it; a second one, or one after the first character, is a parse error (`config-parse-failed`).
+  Line and column in a message count from after it, as an editor shows them, and so does the offset of
+  a parse error
 - Indentation: 2 spaces
 
 Why JSONC is allowed: this is a human-authored config, so comments on each section carry value. Generated JSON must be passable to a parser by consumers as-is, so pure JSON is supported too.
@@ -495,6 +499,7 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C20 | `languages: ["ts"]`, or `frameworks: ["nestjs"]` | Exit 2 before any plugin is imported, naming `lang-typescript` or `framework-nestjs` |
 | C21 | `components: [{ …, "frameworks": ["framework-nestjs"] }]` | Exit 0; stderr names the component and suggests `nestjs`; the IR carries `framework-nestjs` |
 | C21a | `components: [{ …, "frameworks": ["lang-typescript"] }]`, a plugin that provides no framework | Exit 0; stderr says to remove it or write the component's framework id |
+| C22 | A config that opens with one byte order mark (U+FEFF) | Loads as without it; a key named twice is reported at the column an editor shows. Two of them, or one after the first character, is `config-parse-failed` naming `InvalidSymbol` and its offset |
 
 ## 14.1 Config Schema Compatibility Policy
 

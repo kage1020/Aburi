@@ -38,10 +38,16 @@ describe("parseConfig", () => {
     expect(parseConfig(JSON.stringify(config), "inline")).toEqual(config)
   })
 
-  it("throws config-parse-failed on a lexical error, with the offset in the message and the parse errors as cause", async () => {
-    const caught = await errorFrom(ConfigError, () => parseConfig("{not json", "inline"))
+  it.each([
+    ["a lexical error", "{not json"],
+    ["two byte order marks opening it", `\uFEFF\uFEFF{ "strict": true }`],
+    ["a byte order mark after its first character", `{\uFEFF "strict": true }`],
+  ])("throws config-parse-failed on a config with %s, with the offset in the message and the parse errors as cause", async (_, text) => {
+    const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
     expect(caught.code).toBe("config-parse-failed")
-    expect(caught.message).toMatch(/offset \d+/)
+    expect(caught.message).toMatch(
+      /^Config at inline is not valid JSONC: InvalidSymbol at offset \d+/,
+    )
     expect(Array.isArray(caught.cause)).toBe(true)
     expect((caught.cause as unknown[]).length).toBeGreaterThan(0)
   })
@@ -143,6 +149,11 @@ describe("a key named twice in one object", () => {
       `{ "output": { "dir": "x", "dir": "y" } }`,
       'names "dir" twice in /output (again at line 1, column 27)',
     ],
+    [
+      "at the top level, behind a byte order mark",
+      `\uFEFF{ "ignore": ["a/**"], "ignore": ["b/**"] }`,
+      'names "ignore" twice in the top-level object (again at line 1, column 23)',
+    ],
   ])("refuses the config %s", async (_label, text, message) => {
     const caught = await errorFrom(ConfigError, () => parseConfig(text, "inline"))
     expect(caught.code).toBe("config-invalid")
@@ -189,8 +200,11 @@ describe("a key named twice in one object", () => {
 describe("readConfigFile", () => {
   const scratch = useScratchWorkspace("config")
 
-  it("reads, parses and validates a config from disk", async () => {
-    await scratch.writeSource("aburi.jsonc", VALID_JSONC)
+  it.each([
+    ["", VALID_JSONC],
+    [" that opens with a byte order mark", `\uFEFF${VALID_JSONC}`],
+  ])("reads, parses and validates a config%s from disk", async (_, text) => {
+    await scratch.writeSource("aburi.jsonc", text)
     const path = join(scratch.root, "aburi.jsonc")
     expect((await readConfigFile(path)).effects).toEqual(["effects-prisma", "effects-pino"])
   })
