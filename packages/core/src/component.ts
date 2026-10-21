@@ -19,19 +19,20 @@ import {
 } from "./component-manifest"
 import { makeLanguageId } from "./id"
 import { compareBy } from "./order"
-import { detectManagers, type WorkspaceCandidate } from "./workspace"
+import { type DetectManagersOptions, detectManagers, type WorkspaceCandidate } from "./workspace"
 
 const FALLBACK_LANGUAGE: LanguageId = makeLanguageId("ts")
 
-export interface DetectComponentsOptions {
+export interface DetectComponentsOptions extends DetectManagersOptions {
   /** Absolute. */
   workspaceRoot: string
   ignore?: readonly string[]
-  respectGitignore?: boolean
 }
 
 export async function detectComponents(options: DetectComponentsOptions): Promise<Component[]> {
-  const { workspaces } = await detectManagers(options.workspaceRoot, options)
+  const { workspaces } = await detectManagers(options.workspaceRoot, {
+    respectGitignore: options.respectGitignore,
+  })
   const mergedCandidates =
     workspaces.length === 0
       ? [rootCandidate(options.workspaceRoot)]

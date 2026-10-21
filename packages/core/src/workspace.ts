@@ -28,8 +28,12 @@ export interface UnresolvedDeclaration {
 }
 
 export interface DetectManagersOptions {
-  /** Whether a directory `.gitignore` excludes may go unlisted. Default `true`. */
-  respectGitignore?: boolean
+  /**
+   * Whether `.gitignore` is honoured, default `true`. The nx search honours it as nx does: a
+   * `project.json` it excludes is no project, and a directory it excludes may go unlisted.
+   * Declared package patterns never read it, as pnpm and npm do not.
+   */
+  respectGitignore?: boolean | undefined
 }
 
 /** A package directory no Document path can spell, left off `managers[].roots`. */
@@ -73,14 +77,18 @@ export async function detectManagers(
     }
   }
 
-  await Promise.all([
-    detectPnpm(workspaceRoot, gitignore).then(merge),
-    detectPackageJsonWorkspaces(workspaceRoot, gitignore).then((managerScans) => {
+  const searches = await Promise.allSettled([
+    detectPnpm(workspaceRoot).then(merge),
+    detectPackageJsonWorkspaces(workspaceRoot).then((managerScans) => {
       for (const managerScan of managerScans) merge(managerScan)
     }),
     detectTurbo(workspaceRoot).then(merge),
     detectNx(workspaceRoot, gitignore).then(merge),
   ])
+  const failures = searches.flatMap((search) =>
+    search.status === "rejected" ? [search.reason] : [],
+  )
+  if (failures.length > 0) throw firstFailure(failures)
 
   managers.sort(compareBy((manager) => manager.tool))
   for (const manager of managers) manager.roots.sort(compareCodeUnit)
@@ -99,6 +107,17 @@ export async function detectManagers(
       compareCodeUnit(a.manifestPath, b.manifestPath),
   )
   return { managers, workspaces, unresolved, unnameableRoots }
+}
+
+// The searches run at once, so which of them fails first is timing; what the run reports is not.
+function firstFailure(failures: readonly unknown[]): unknown {
+  const unread = failures
+    .filter(
+      (failure): failure is CoreError =>
+        failure instanceof CoreError && failure.code === "scan-directory-unreadable",
+    )
+    .sort(compareBy((failure) => failure.value ?? ""))
+  return unread[0] ?? failures[0]
 }
 
 interface ManagerScan {
@@ -162,10 +181,7 @@ function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): voi
   )
 }
 
-async function detectPnpm(
-  root: string,
-  gitignore: GitignoreTree | null,
-): Promise<ManagerScan | null> {
+async function detectPnpm(root: string): Promise<ManagerScan | null> {
   const manifestPath = join(root, "pnpm-workspace.yaml")
   if (!(await pathExists(manifestPath))) return null
   const text = await readFile(manifestPath, "utf8")
@@ -180,21 +196,18 @@ async function detectPnpm(
     )
   }
   const patterns = readPatternList(parsed, "packages", manifestPath)
-  const candidates = await resolveDeclaredPackages(root, patterns, "pnpm", gitignore)
+  const candidates = await resolveDeclaredPackages(root, patterns, "pnpm")
   return { tool: "pnpm", candidates, manifestPath, declaredPatterns: patterns }
 }
 
-async function detectPackageJsonWorkspaces(
-  root: string,
-  gitignore: GitignoreTree | null,
-): Promise<ManagerScan[]> {
+async function detectPackageJsonWorkspaces(root: string): Promise<ManagerScan[]> {
   const manifestPath = join(root, "package.json")
   if (!(await pathExists(manifestPath))) return []
   const parsed = await readJson(manifestPath)
   const patterns = extractWorkspacePatterns(parsed, manifestPath)
   if (patterns.length === 0) return []
   const tool = await detectJsPackageManagerTool(root)
-  const candidates = await resolveDeclaredPackages(root, patterns, tool, gitignore)
+  const candidates = await resolveDeclaredPackages(root, patterns, tool)
   return [{ tool, candidates, manifestPath, declaredPatterns: patterns }]
 }
 
@@ -241,6 +254,8 @@ async function detectNx(
   })
   const candidates: WorkspaceCandidate[] = []
   for (const projectFile of projectFiles) {
+    if (gitignore !== null && (await gitignore.ignores(toRelativePosix(root, projectFile))))
+      continue
     const dir = dirname(projectFile)
     candidates.push({
       relativeRoot: toRelativePosix(root, dir),
@@ -258,7 +273,6 @@ async function resolveDeclaredPackages(
   workspaceRoot: string,
   patterns: readonly string[],
   managerTool: string,
-  gitignore: GitignoreTree | null,
 ): Promise<WorkspaceCandidate[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
   // Links are followed and a wildcard does not match a leading dot, because pnpm and npm resolve
@@ -270,7 +284,7 @@ async function resolveDeclaredPackages(
     expandDirectories: false,
     absolute: true,
     deep: 10,
-    gitignore,
+    gitignore: null,
   })
   return manifests.map((manifestPath) => {
     const absoluteRoot = dirname(manifestPath)

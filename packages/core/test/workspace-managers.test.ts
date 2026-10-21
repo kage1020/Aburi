@@ -76,6 +76,24 @@ describe("detectManagers", () => {
     ])
   })
 
+  it.each([
+    ["leaves out a project.json .gitignore excludes, as nx does", {}, ["libs/shared"]],
+    [
+      "keeps a git-ignored project.json when .gitignore is not respected",
+      { respectGitignore: false },
+      ["build", "libs/shared"],
+    ],
+  ])("%s", async (_, options, roots) => {
+    await tree.writeJson("nx.json", {})
+    await tree.writeJson("libs/shared/project.json", {})
+    await tree.writeJson("build/project.json", {})
+    await tree.writeSource(".gitignore", "build/\n")
+
+    const result = await detectManagers(tree.root, options)
+
+    expect(result.managers).toEqual([{ tool: "nx", roots }])
+  })
+
   it("records turbo as a co-marker without emitting workspaces", async () => {
     await tree.writeJson("turbo.json", {})
 
