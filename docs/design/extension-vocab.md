@@ -134,6 +134,10 @@ aburi startup
 
 Plugins not listed in the config are not loaded. Explicit opt-in.
 
+A refusal at registration ends the run before extraction starts. `aburi scan` exits 3 and names the
+config entry that loaded the plugin ahead of the registry's reason ([`cli-spec.md`](./cli-spec.md)
+§5.4). A refused `frameworkHints` entry (§11.3) is a config error instead, exit 2, naming the entry.
+
 ## 5. Namespaces
 
 ### 5.1 Central reservations (no plugin may declare these)
@@ -179,6 +183,7 @@ The same applies to `fp:` / `oop:` / `meta:`: each sub-namespace is owned by exa
 | Two plugins declare prefixes of one kind (`effectPrefixes[]`, `extKindPrefixes[]` or `derivedByPrefixes[]`) where one nests under the other (`framework:acme` and `framework:acme:jobs`) | **startup error** |
 | One plugin declares two `extKindPrefixes[]`, or two `derivedByPrefixes[]`, where one nests under the other | **startup error**. Each list is compared with itself only: the same string in both lists, as every framework plugin writes it, is accepted |
 | Plugin A declares `extKinds[].id: "framework:acme:job"` and plugin B declares `extKindPrefixes: ["framework:acme"]` | **startup error** (B's prefix subsumes A's id) |
+| Two plugins with the same `name` and different manifests | **startup error** (an identical manifest is idempotent, V9) |
 | A `type` other than `effects` declares `x-*` | **startup error** |
 | A `type` other than `lang` declares `fp:*` / `oop:*` / `meta:*` | **startup error** |
 | A `type` other than `framework` declares `framework:*` | **startup error** |
@@ -186,6 +191,7 @@ The same applies to `fp:` / `oop:` / `meta:`: each sub-namespace is owned by exa
 | A `type: effects` plugin declares `extKinds` / `extKindPrefixes` / `frameworks` | **manifest validation error** (schema if/then) |
 | A `type: framework` plugin declares `effects` / `effectPrefixes`, or declares extKinds outside the `framework:` prefix | **manifest validation error** |
 | A `type: lang` plugin declares `effects` / `effectPrefixes` / `frameworks`, or declares extKinds outside `(fp\|oop\|meta):` | **manifest validation error** |
+| A manifest holding a value JSON cannot carry (such as `undefined`) | **manifest validation error** |
 
 Mitigation: forcing the plugin namespace via `x-<plugin-name>:` naturally resolves effect-id conflicts between third parties.
 
@@ -200,6 +206,8 @@ If a plugin's extraction logic generates an extKind / effect.id that the emittin
 This is a fail-safe against "a plugin silently starts using new vocabulary and breaks time-series comparison".
 
 Exception: with strict off (`config.strict: false`, `--no-strict` or `aburi scan --discover`) this is downgraded to a warning and recorded (§11.5). A value from a file whose Symbols do not reach the IR (withdrawn, or abandoned at its time budget) is not recorded, since the record names Symbols the Document would not hold.
+
+A plugin can also ask for the check itself, through the registry it is handed (`assertEffectDeclared` / `assertExtKindDeclared`, §7). The refusal then arrives as the registry's error rather than the core's, under the same code, and ends the run with exit 3 all the same: the code decides, not the class carrying it. The registry does not read `strict`, so strict off does not downgrade this one — the plugin asked for the refusal.
 
 ## 7. Registry API (consumer side)
 
@@ -253,6 +261,7 @@ aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns th
 | V4 | Declaring a central reservation (`core:foo`) | startup error |
 | V5 | `type: effects` declares `framework:foo:bar` | startup error |
 | V6 | Plugin extraction returns an undeclared effect id (strict mode) | extraction error |
+| V6a | A plugin's `classify` calls `ctx.registry.assertEffectDeclared` for an id no manifest declares | the run ends with exit 3, as for V6, though the error is the registry's rather than the core's — under `aburi scan --discover` too |
 | V7 | Plugin extraction returns an undeclared extKind (strict mode) | extraction error |
 | V8 | `name: stripe` declares the `x-acme:` prefix | manifest validation error |
 | V9 | Loading the same manifest twice | idempotent |
@@ -261,6 +270,7 @@ aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns th
 | V11a | One plugin declares two extKind prefixes or two derivedBy prefixes where one contains the other (`fp:pipe` and `fp:pipe:async`) | startup error. The same prefix written twice in one list is refused earlier, by the schema's `uniqueItems`; `register` itself leaves an exact repeat alone, since it cannot give a lookup two owners |
 | V12 | Emitting undeclared values under `aburi scan --discover` | warning only; recorded in `aburi-vocab-discovered.json` |
 | V13 | Treating `@Foo` as a boundary via Framework hints (§11.3) alone | OK; no plugin manifest required |
+| V14 | `aburi scan` with a plugin listed in `aburi.json` whose manifest the registry refuses at startup (§6.1–§6.2), for any of the refusals [`cli-spec.md`](./cli-spec.md) CL49 lists | exit 3 before extraction, stderr naming the config entry that loaded the plugin ahead of the registry's reason |
 
 ## 9.5 Manifest schema compatibility policy
 

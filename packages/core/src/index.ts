@@ -108,6 +108,7 @@ export {
   DropCFilter,
   type DropCFilterInput,
 } from "./scan/drop-c"
+export { describeThrown, isPluginSetFault } from "./scan/faults"
 export {
   type ExtractedFile,
   type FilePipelineInput,
