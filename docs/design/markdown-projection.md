@@ -31,8 +31,12 @@ out/
    └─ ts-apps-billing-src-InvoiceService-ts-InvoiceService-createInvoice.md
 ```
 
-- workspace.md: always a single file
-- `components/<id>.md`: one file per component (L1 + L2 combined)
+- workspace.md: always a single file, and removed by an `aburi scan --format json`
+- `components/<id>.md`: one file per component (L1 + L2 combined), and, after an `aburi scan`,
+  none for a component the IR does not hold: `aburi scan` removes the page of one renamed or
+  removed since, and every page under `--format json`, recognising a page by its name and its first
+  line, `# Component: <id>` (§5.1), so files of anyone else's in `components/` stay
+  ([`cli-spec.md`](./cli-spec.md) §5.3)
 - diff.md: generated only when `aburi diff` runs
 - diff.full.md: the same diff with no size cap, written only when `--max-bytes` changed `diff.md`
   and removed by every other `aburi diff` run (§6.4)
