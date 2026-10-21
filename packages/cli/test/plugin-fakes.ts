@@ -1,5 +1,12 @@
 import { makeLanguageId } from "@aburi/core"
-import type { EffectPlugin, EffectsManifest, LangManifest, LanguagePlugin } from "@aburi/types"
+import type {
+  EffectPlugin,
+  EffectsManifest,
+  FrameworkManifest,
+  LangManifest,
+  LanguagePlugin,
+  PluginManifest,
+} from "@aburi/types"
 
 export const LANG_MANIFEST: LangManifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
@@ -22,6 +29,21 @@ export const EFFECTS_MANIFEST: EffectsManifest = {
   name: "effects-fake",
   type: "effects",
   provides: { ...LANG_MANIFEST.provides, derivedByPrefixes: ["effects-plugin:fake"] },
+}
+
+export const FRAMEWORK_MANIFEST: FrameworkManifest = {
+  ...LANG_MANIFEST,
+  name: "framework-fake",
+  type: "framework",
+}
+
+/** The source of a plugin module: `members` is JavaScript for the fields beside `manifest`. */
+export function pluginModuleSource(manifest: PluginManifest, members: string): string {
+  return `export const plugin = {
+  manifest: ${JSON.stringify(manifest)},
+${members}
+}
+`
 }
 
 export const FAKE_LANGUAGE_PLUGIN: LanguagePlugin = {
