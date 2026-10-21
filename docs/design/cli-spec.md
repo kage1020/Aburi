@@ -33,20 +33,50 @@ aburi --help / aburi -h                     # global help
 
 ## 3. Common Options
 
-Available on every command:
+Available on every command, unless the row says otherwise:
 
 | Option | Short | Meaning |
 |---|---|---|
-| `--cwd <path>` | — | Change the working directory (origin for config resolution) |
-| `--config <path>` | — | Explicitly specify the config file location |
-| `--log-level <level>` | — | `debug` / `info` / `warn` / `error` (default: `info`) |
-| `--no-color` | — | Disable colored output |
+| `--cwd <path>` | — | (planned) Change the working directory (origin for config resolution) |
+| `--config <path>` | — | Explicitly specify the config file location (§13). Taken by `scan`, `diff` and `explain`, after the command; `aburi init` has none |
+| `--log-level <level>` | — | `debug` / `info` / `warn` / `error`: the lowest level of the run's `Logger` lines (§5.6) that reach stderr. Written before the command or after it, and listed in every command's `--help` among the global options |
+| `--no-color` | — | (planned) Disable colored output |
 | `--help` | `-h` | Show command-specific help |
+
+The log level is resolved in this order, the first one set winning:
+
+```
+1. --log-level CLI flag
+2. ABURI_LOG_LEVEL env
+3. warn
+```
+
+A `--log-level` value other than the four levels exits `2`. An `ABURI_LOG_LEVEL` value other than
+them is ignored, as if the variable were unset.
 
 Top-level only:
 | Option | Short | Meaning |
 |---|---|---|
 | `--version` | `-v` | Show version |
+
+Of the options the CLI declares, the global `--log-level` and those of `init`, `scan`, `diff` and
+`explain`, one that takes a value takes one. Given
+twice — `--config a.json --config b.json`, or `--format json --format=md` — the command exits 2
+before it reads or writes anything, naming the option and both values (`--config is given more than
+once ("a.json", then "b.json"): pass one`), the same value twice included, and a second value the
+option would refuse on its own as well (`--format json --format bogus`). When the first value is
+itself invalid, its own error is the one reported, at the same exit 2, since it is read before the
+second occurrence is reached. Keeping the last one would drop a setting the caller wrote without a
+word, as a repeated config key would ([`config.md`](./config.md) C19). Two options accumulate
+instead, each occurrence adding to the ones before it: `--ignore` (§5.2) and `--fail-on` (§6.7). A
+flag carries no value to lose and may be repeated, and of a `--x` / `--no-x` pair the one written
+last applies.
+
+Of those options, one that takes a path refuses an empty value, at exit 2 before anything is read or
+written (`error: option '--config <path>' argument '' is invalid. a path must not be empty`). Taken
+as written, `--config ""` would fall back to `ABURI_CONFIG` or a discovered config, and
+`--output-dir ""` would write into the working directory and remove the report `diff` finds there: a
+value the caller wrote, dropped without a word as a repeated one would be.
 
 ## 4. `aburi init`
 
@@ -90,7 +120,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 |---|---|
 | 0 | Generation succeeded |
 | 1 | Autodetect failure (permissions, etc.) |
-| 2 | Existing file present without `--force`, or an `--output` that cannot hold a file — it names a directory, or a file stands on its parent path |
+| 2 | Existing file present without `--force`, an `--output` that cannot hold a file — it names a directory, or a file stands on its parent path — or `--output` given twice or empty (§3) |
 
 ### 4.6 stdout Example
 
@@ -140,7 +170,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | Option | Meaning |
 |---|---|
 | `--output-dir <path>` | Output directory (default: `config.output.dir`, then `out`). Resolved against the working directory, as the config value is |
-| `--format <json\|md\|both>` | Output format (default: `both`) |
+| `--format <json\|md\|both>` | Output format (default: `both`). What the format leaves out is removed from the output directory, not left from an earlier run (§5.3) |
 | `--no-md` | Drops the Markdown output. Alone, equivalent to `--format json`. With `--no-json`, or with any `--format` that would have written Markdown (`md`, `both`), exit 2 |
 | `--no-json` | Drops the IR JSON output. Alone, equivalent to `--format md`. With `--no-md`, or with any `--format` that would have written JSON (`json`, `both`), exit 2 |
 | `--strict` / `--no-strict` | Override `config.strict` ([`config.md`](./config.md) §10). Strict stops at the first undeclared value with exit 3; off, the scan keeps every such value and writes `aburi-vocab-discovered.json` into the output directory ([`extension-vocab.md`](./extension-vocab.md) §11.5.1), an empty list included. A strict scan that completes removes a record an earlier run left, so no completed `scan` leaves one naming values that are declared now. `aburi diff` has neither flag: its scans take strictness from `config.strict` alone (CL8b) |
@@ -158,6 +188,10 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 3. Walk the workspace, parsing each file in parallel
 4. Extraction pipeline: drop list → tag propagation → effect classification → fingerprint → Symbol finalization
 5. Write `<output-dir>/aburi.ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md` — the IR first, because every page is derived from it: a page that fails to render leaves the IR on disk rather than taking it down too, and an IR the serializer refuses leaves no pages beside it. A page that fails to render is a bug in Aburi (exit `1`, §9) and names the page; the scan's incidents are reported before the command ends, as they are after a clean run
+   - **What this run does not write is removed**, once everything it writes is written, so the directory describes this run alone and not a mix of runs: the `aburi.ir.json` a `--format md` run leaves out, which `aburi explain --no-rescan` would otherwise answer from (§7.3); the `workspace.md` and every component page a `--format json` run leaves out; and, under any format, the page of a Component this IR does not hold — one renamed or removed since. A path that cannot be removed is refused like one that cannot be written, and so is a `components/` that cannot be listed or a page whose first line cannot be read. The message names the step that failed — `could not remove <artefact> at <path>`, `could not list the components directory at <path>`, `could not read the Markdown for component "<id>" at <path>` — and is exit `2` for a directory standing where a removed file would be, exit `1` for any other refusal. Each file `aburi scan` removes, the discovered-vocabulary record (§5.2) included, is logged as one `info:` line, `Removed <artefact> at <path>`, so the default level, `warn`, shows none of them (§5.6)
+   - **Only Aburi's own files are removed.** The output directory, and `components/` in particular, may hold files of the caller's — a README, notes, Markdown a person wrote, a subdirectory — and those stay, as `components/` itself does. `aburi.ir.json` and `workspace.md` are recognised by name alone, as `aburi diff` recognises its report (§6.4), so a file of the caller's under either name is removed with them. A component page is recognised by name and content both, since its name is any Component id: a regular file directly in `components/`, named `<id>.md` for a valid Component id ([`ir-schema.md`](./ir-schema.md) §4), that opens with the heading the page opens with, `# Component: <id>` ([`markdown-projection.md`](./markdown-projection.md) §5.1), and a line ending, LF or CRLF alike. A file whose name is no Component id, or whose first line is anything else — another heading, or that heading with more on its line — is not one. Reading that line is part of removing the page: the scan reads only as many bytes as the heading and a CRLF take, reading again until it has them or the file ends, and a failure to read is refused the same way
+   - **A run that stops before this step removes nothing, and a run writes before it removes.** A plugin that fails to load, a strict scan's undeclared value (exit `3`) or a file the scan could not read (exit `1`) leaves the earlier run's files as they were: together they still describe the last scan that completed, as the discovered-vocabulary record is removed only by a strict scan that completes (§5.2). So does a write that fails or a page that fails to render, since every removal follows the last write: a `--format md` run that cannot write `workspace.md` leaves the earlier `aburi.ir.json` where it was. The removals go one file at a time, so a run that fails at one of them has already removed those before it; nothing the run should have produced is lost, and the next run that completes removes the rest. `aburi diff` removes its earlier report before it starts instead (§6.4): its exit `3` is both the gate's and a plugin failure's, and a caller that reads the report after either would take an earlier one for its own
+   - These removals are `aburi scan`'s, whatever the format: a scan run for another command (`runScan` called with that `command`) removes nothing. The scan `aburi explain` runs (§7.4) writes the IR alone, and the scans `aburi diff` runs write into directories of their own
 6. Print a one-line final summary to stdout
 
 ### 5.4 Exit Codes
@@ -166,8 +200,8 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
-| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
-| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
+| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), an option that takes one value given twice or a path given empty (§3), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
+| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file or a workspace package the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
 
@@ -281,13 +315,30 @@ printing them while the other two discard the report. A caller that supplies no 
 incident report.
 
 That is not the same as silence. The run's `Logger` is a separate channel — per file rather
-than per run, governed by `ABURI_LOG_LEVEL` (§11), and still writing to `process.stderr`
-whatever streams the caller injected. An embedded scan with no sink is quiet, not mute, and
-routing that channel to the caller is a known gap rather than something this contract covers.
+than per run, governed by `--log-level` (§3) and `ABURI_LOG_LEVEL` (§11), and still writing to
+`process.stderr` whatever streams the caller injected. The level is the command's rather than
+one scan's: `diff` hands it to both of its scans and `explain` to the one it rescans with, so no
+scan logs at a level the reader did not choose. An embedder passes it as `logLevel` to
+`runScan`, `runDiff` or `runExplain`, and gets `warn` without one. An embedded scan with no sink
+is quiet, not mute, and routing that channel to the caller is a known gap rather than something
+this contract covers.
 It is also why the files above are listed by the CLI itself rather than left to that channel:
 at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `unroutable` and an
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
 before extraction and are not logged at all, so the report is their only account.
+
+The reverse is a known gap: some things have only a `Logger` line, and Aburi's own packages write
+that channel at `warn` and `debug` only, apart from the `info:` line `aburi scan` writes for each
+file it removes (§5.3), so a reader who asks for `error` loses them. They are a
+language server that did not shut down
+(`[aburi:lsp] shutting down the <language> server failed (…); it may still be running`), why LSP
+was disabled for a language mid-run, and which files' `didOpen` failed — the `⚠` lines name the
+language, or count the files that fell back, and give no cause. `diff` adds the files past the
+listing's cap. A skipped file past a reason's first ten is named only in its scan's IR, which
+`diff` deletes before it exits, so unless the comparison names it — in `notCompared[]` when both
+scans skipped it, on an `unknown` entry when the other scan has Symbols from it — that scan's
+`warn: Skipped …` line is its only account, and for a reason decided before extraction there is
+none.
 
 §5.8's paragraph, the unreleased-tree line and the parse-error listing sit directly under the
 coverage line and above this census — ahead of everything that is recoverable from the artifact,
@@ -363,12 +414,12 @@ a claim about what gating does not change rather than about what a gated run alw
 
 ### 5.8 Files the Document cannot name
 
-Two things put a file beyond what a Document can name, and both end the same way: the file is
-not skippable — a skip entry is a path plus a reason, and it is the path that is missing — and not
-countable either, because invariant #21 holds `stats.skippedFiles`'s length to
+Three things put a file beyond what a Document can name, and all three end the same way: the
+file is not skippable — a skip entry is a path plus a reason, and it is the path that is missing —
+and not countable either, because invariant #21 holds `stats.skippedFiles`'s length to
 `totalFiles - parsedFiles`.
 
-**The first: a name a path cannot spell.** A filename may contain a backslash on any POSIX
+**The first cause: a name a path cannot spell.** A filename may contain a backslash on any POSIX
 filesystem, and a Document path may not: `/` is its only separator, so there is no way to write
 such a name down that a reader will not take for a directory boundary (ir-schema.md §14
 invariant #10).
@@ -416,7 +467,63 @@ disallowed one.
 `aburi explain` answers for one of these files without consulting the document, since no document
 could hold it: see §7.2.
 
-**The second cause: two names, one path.** A path is normalized on the way into the Document
+**The second cause: a top-level name that reads as a drive.** A path opening with one ASCII
+letter and `:` names a Windows drive, and invariant #10 refuses it as absolute on every platform,
+because a Document written on POSIX has to mean the same thing read on Windows. So `a:notes.ts`,
+and every file under a top-level directory `d:data/`, has no spelling either, though both are
+ordinary workspace-relative names on a POSIX filesystem. The test is on the first segment as the
+rule reads it, after normalization to NFC, so a name opening with U+212A KELVIN SIGN and `:` is
+one too — NFC turns that sign into `K` — and the listing prints the name as it is spelled on
+disk.
+
+A `:` anywhere else is the `unroutable` case §5.6 lists — `ab:notes.ts` and `src/x:y.ts` are
+recorded by path, since the rule admits them and only the Symbol id grammar refuses them — so the
+line between the two is drawn exactly where the rule draws it, and no name the walk accepts is one
+the rule then throws on.
+
+```
+⚠ 3 file(s) were left out of the IR and out of its counts, under 2 top-level name(s) a Document path reads as a Windows drive: a path opening with one ASCII letter and ":" names a drive there, and a Document means the same on every platform, so no workspace-relative path can open that way. Rename each one below, or leave it out with ignore, which matches the name as printed.
+    a:notes.ts
+    d:data — a directory, and the 2 file(s) under it
+```
+
+It exits `3`, lists one line per name with no cap, and blames a directory once, for the reasons
+given for the backslash above. Its own paragraph, because the `ignore` advice differs: picomatch
+gives `:` no meaning, and a pattern naming a directory excludes everything under it, so
+`a:notes.ts` and `d:data` exclude these as printed. Where one segment holds both a backslash and a
+drive, the backslash's paragraph names it, since doubling is then what the pattern needs; a
+drive-shaped directory with a backslash further down is named by the directory, the shallower of
+the two.
+
+A workspace package whose directory has no spelling — under either of the first two causes — is
+not a Component and not a `workspace.managers[].roots` entry, since no root could name it; the
+rest of the workspace is detected and scanned ([`component-detect.md`](./component-detect.md)
+§3.1.1). The paragraphs above list its files only when one of them is a file a language plugin
+claims, and a package holding nothing but its `package.json` and a README would otherwise leave no
+trace anywhere, so detection names the package itself, one line per package and per manifest of
+the detector that found it:
+
+```
+⚠ pnpm package "a:pkg" (pnpm-workspace.yaml) is not a component and not on workspace.managers[].roots, and none of its files can be scanned: "a:pkg" opens with one ASCII letter and ":", which a Document path reads as a Windows drive, so no IR can name it. Rename it.
+```
+
+The quoted name is the directory to rename, which is the package's own unless it sits below one:
+a package at `d:data/pkg` names `"d:data"`. Both are printed as spelled on disk. The line comes
+first among the incidents, beside a pattern that named no package, and like that one it is
+followed by the fallback's line when no other package was found
+([`component-detect.md`](./component-detect.md) §5):
+
+```
+⚠ No other workspace package was found, so the whole repository is described as one component.
+```
+
+`aburi scan` exits `3` for it, whether or not the package holds a source file, for the reason it
+exits `3` for a file: the Document leaves out something the workspace declared, and nothing in it
+says so. `aburi init` prints the same lines and exits `0`, as it does for a pattern that named no
+package: it writes a config rather than a Document, and the config it writes leaves the package
+out, which is what every scan of that workspace does too.
+
+**The third cause: two names, one path.** A path is normalized on the way into the Document
 (§1.2), and two names differing only in how they are composed normalize to the same string. The
 Document then has one path for two files, which is no name for either.
 
@@ -478,11 +585,11 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | Option | Meaning |
 |---|---|
 | `--base <path>` | Base IR file path (instead of a ref) |
-| `--head <path>` | Head IR file path |
+| `--head <path>` | Head IR file path (instead of a ref) |
 | `--output-dir <path>` | Destination for diff.json / diff.md / diff.full.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
 | `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
-| `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates) |
+| `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates). Repeatable: each occurrence adds its clauses after the earlier ones' (§6.7) |
 | `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, keeping sections most important first at their smallest (names only for a section of whole Symbols) and then growing the name lists back to full entries from the top ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped, and when the cap changed the report the uncapped one is written as `diff.full.md` beside it. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
 | `--quiet` | Limit stdout to a single final summary line |
 
@@ -518,7 +625,7 @@ With refs (every git command these steps run gets the caller's environment as §
 4. Run `aburi scan` on the head (the original cwd)
    - Both scans root at the repository: the workspace-root walk stops at the first `.git` ([`component-detect.md`](./component-detect.md) §2.1, CD32), the head checkout's own `.git` (a directory or a file) on one side and the temporary worktree's `.git` file on the other. Rooted anywhere else, the two sides scan different trees (`component-detect.md` §11.1 has the layouts that did), so a base scan that roots anywhere but its worktree ends the run as a bug in Aburi (exit `1`, §9)
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
-6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.json`, `diff.md` or `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since each would describe another diff. So a run that stops before this step (a plugin that fails to load, a strict scan's undeclared value) leaves no report at all rather than an earlier one a caller would take for its own. A path there that cannot be removed is refused like one that cannot be written
+6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.json`, `diff.md` or `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since each would describe another diff: a `--format md` run leaves no `diff.json` of an earlier run's, and a `--format json` run no `diff.md`, so none naming a `diff.full.md` that is gone. So a run that stops before this step (a plugin that fails to load, a strict scan's undeclared value) leaves no report at all rather than an earlier one a caller would take for its own. A path there that cannot be removed is refused like one that cannot be written
 7. Print a one-line summary to stdout
 8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: from just after the temporary directory is created until this cleanup has finished, a listener for each removes the worktree and the temporary directory synchronously, then raises the same signal again, so on POSIX the exit status stays 128+N. On Windows a signal cannot be raised against the process again; the run exits with that same 128+N instead. A failed removal on this path is reported on stderr. The listener narrows the window rather than closing it: a signal sent to this process alone (not to its process group, as a terminal's Ctrl-C is) does not reach a `git worktree add` still running, and that child can finish registering the worktree after the cleanup has run, leaving it behind. `SIGKILL` cannot be caught, and leaves both behind; `SIGQUIT` and `SIGBREAK` are not handled either
 
@@ -578,7 +685,7 @@ Everything else is passed on. `GIT_DIR` names the repository both scans are abou
 |---|---|
 | 0 | Diff computed successfully (regardless of whether differences exist) |
 | 1 | Computation error (invalid IR, git error, an output the disk refused) |
-| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on) |
+| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing, or either beside a ref spec; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on; an option that takes one value given twice, or a path given empty — §3) |
 | 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
 
 The second cause is about greenness, not about counts. A file withdrawn during extraction is recorded in
@@ -592,12 +699,15 @@ comparison with a broken half is not evidence about the half that worked.
 
 It gates on the scan's exit code, not on a named incident, and the diagnostic wording is derived
 from what the scan actually reported so that a second reason arrives with the code right and the
-message still true. Two more have: a scan whose coverage collapsed (§5.7), and one that found a
-file the Document cannot name (§5.8). The second is named ahead of "discovered no file to read"
+message still true. Three more have: a scan whose coverage collapsed (§5.7), one that found a
+file the Document cannot name (§5.8), and one that found a workspace package it cannot name
+(§5.8). The file is named ahead of "discovered no file to read"
 and behind the other two faults, because an unnameable file leaves `totalFiles` — so a workspace
 whose whole candidate set is unnameable discovers nothing and that fault is this one's
 consequence, while leaving the denominator can only raise the parsed ratio and so cannot produce
-either of the others. A coverage collapse reddens a diff the
+either of the others. The package is named — `N workspace package(s) sit in directories no
+Document path can spell` — only when none of those is, since a file under it is one of the
+unnameable files the scan already counts. A coverage collapse reddens a diff the
 same way an extraction fault does, and names itself — `The base scan parsed none of the 1200
 file(s) it found` — rather than falling back to "did not exit clean". An extraction fault is named
 first when both apply, because a scan that withdrew every file has the coverage fault as a
@@ -680,6 +790,8 @@ aburi diff main..HEAD --fail-on changed,removed
 
 Multiple values may be given, comma-separated. Every segment must be a clause: an empty one (`added,`, `added,,removed`) exits 2, as a value with no clause at all does.
 
+`--fail-on` may also be repeated, so a script can write one clause per `--fail-on`: each occurrence adds its clauses after those of the occurrences before it, and `--fail-on changed --fail-on removed` gates exactly as `--fail-on changed,removed` does — the order included, which decides the clause a tripped gate names. Keeping only the last occurrence would leave the earlier clauses unchecked, and the run would pass on the change they were written to block. Each occurrence is read as a value of its own: an error quotes the one at fault and counts clauses within it (`--fail-on removed, --fail-on changed` exits 2 with `--fail-on value "removed," is invalid: clause 2 of 2 is empty; …`), and an empty occurrence exits 2 beside a valid one as it does alone. `runDiff`, which also takes the values as a list, refuses an empty one as it refuses an empty value, since either leaves the gate checking nothing.
+
 #### Uses of Direction-Specific fail-on
 
 `--fail-on dropped-toggled:to-kept` detects "symbols previously treated as dropped became kept". Useful for deliberate review of drop-rule relaxation.
@@ -726,11 +838,21 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 - **File path** — the string contains `/` and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file. A `#` in it does not disqualify it: the id form above is checked first and only claims the argument when it *is* one, and a file whose name holds an id separator is recorded in `stats.skippedFiles` precisely because no Symbol in it could be named
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
 
-A file path whose name holds a **backslash** is answered without consulting the document at
-all, with exit 3: no IR can name it (§5.8), so neither the skip list nor the file existing on
-disk says anything about it, and `No matches` would be a claim about the workspace when the
-absence is the format's. The same answer whether the run scanned or read an IR off disk, because
-it is decided from the argument.
+A file path whose workspace-relative path holds a **backslash**, or whose first segment reads as
+a **drive** (`d:data/x.ts`, `./a:notes.ts`), is answered without consulting the document at all,
+with exit 3: no IR can name it (§5.8), so neither the skip list nor the file existing on disk
+says anything about it, and `No matches` would be a claim about the workspace when the absence is
+the format's. The line on stderr says which of the two it is, naming the segment to rename as the
+argument spells it. The same answer whether the run scanned or read an IR off disk, because it is
+decided from the argument.
+
+The path tested is the workspace-relative one, not the argument: run from `src/`, `./a:notes.ts`
+is `src/a:notes.ts`, which a Document can name and which is looked up as any other file, while
+`../a:notes.ts` is the drive case. An argument without a `/` gets this answer too when it names a
+file on disk — `aburi explain a:notes.ts` beside that file — and otherwise keeps the rule above:
+`A::create`, a static member's qualified name, opens the way a drive does and names no file, so it
+is matched as a substring. On Windows an argument on another drive is outside the workspace rather
+than a name, and is looked up as any other path.
 
 #### 7.2.1 Exact Definition of Partial Matching
 
@@ -745,12 +867,12 @@ it is decided from the argument.
 |---|---|
 | `--output <path>` | Write to a file (default: stdout). The directories the path names are created, as `--output-dir` creates its own; a path that cannot hold a file — it names a directory, or a file stands on its parent path — is exit 2 |
 | `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `<output-dir>/aburi.ir.json` — `config.output.dir` when the config names one, otherwise `out` — starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
-| `--no-rescan` | Exit `2` when the lookup above finds no IR, instead of scanning. Staleness is not examined: an IR that is found is read whatever its age |
+| `--no-rescan` | Exit `2` when the lookup above finds no IR, instead of scanning. Staleness is not examined: an IR that is found is read whatever its age. An `aburi scan --format md` removes the IR an earlier run left in its output directory (§5.3), so a scan that wrote only pages leaves none to be read in its place |
 | `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
 
 ### 7.4 Behavior
 
-1. Read the IR (invoke `aburi scan` internally if missing)
+1. Read the IR (invoke `aburi scan` internally if missing). That scan writes the IR alone and removes nothing an earlier `aburi scan` wrote beside it (§5.3)
 2. Resolve the argument:
    - Full id → direct lookup
    - File → all Symbols in that file
@@ -832,8 +954,8 @@ about one Symbol, and answering it with an inventory of the run buries it.
 |---|---|
 | 0 | Success |
 | 1 | The requested symbol was not found |
-| 2 | Multiple candidates; disambiguation required, or an `--output` that cannot hold a file |
-| 3 | The answer would not be safe: the scan this command ran did not exit clean (§5.6), or the document names the file the question asked about as one it never analysed (§7.6) |
+| 2 | Multiple candidates; disambiguation required, an `--output` that cannot hold a file, or an option that takes one value given twice or a path given empty (§3) |
+| 3 | The answer would not be safe: the scan this command ran did not exit clean (§5.6), the document names the file the question asked about as one it never analysed (§7.6), or that file is one no IR can name (§7.2) |
 
 Exit `3` outranks the other three, and the two routes to it are the same statement about
 different evidence. When the scan broke, every answer is suspect: a `single` hit may have had a
@@ -937,7 +1059,7 @@ The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON
 | Variable | Meaning |
 |---|---|
 | `ABURI_CONFIG` | Config file path (equivalent to --config) |
-| `ABURI_LOG_LEVEL` | Equivalent to --log-level |
+| `ABURI_LOG_LEVEL` | Equivalent to --log-level, which wins over it (§3), except that a value other than the four levels is ignored rather than refused |
 | `NO_COLOR` | If set, disable coloring (standard convention) |
 | `FORCE_COLOR` | If set, force coloring on (standard convention) |
 | `CI` | If set, CI mode (§12) |
@@ -968,7 +1090,7 @@ Can also be enabled via an explicit `--ci` flag (for CI environments where the e
 6. autodetect (works with no config present)
 ```
 
-Passing `--cwd` changes the cwd and therefore the search origin.
+Passing `--cwd` (planned, §3) will change the cwd and therefore the search origin.
 
 `aburi diff` in ref mode runs this list **once**, against the invoking cwd, before it
 materialises the base worktree — and hands the single answer (an absolute path, or "nothing
@@ -1019,10 +1141,10 @@ Commands:
   vocab      Show registered extension vocabulary
 
 Common options:
-  --cwd <path>           Set working directory
+  --cwd <path>           Set working directory (planned)
   --config <path>        Override config file location
   --log-level <level>    debug | info | warn | error
-  --no-color             Disable colored output
+  --no-color             Disable colored output (planned)
   -h, --help             Show help for command
   -v, --version          Show version
 
@@ -1044,7 +1166,7 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL7 | `aburi scan --discover` | Records undeclared vocab, exit 0 |
 | CL8 | `aburi scan` strict + undeclared vocab | exit 3 |
 | CL8a | `aburi scan --strict --discover` | exit 2 |
-| CL8b | `aburi diff` with `strict: false` + undeclared vocab | Listed in each scan's incident report; no `aburi-vocab-discovered.json`, since both scans share one output directory |
+| CL8b | `aburi diff` with `strict: false` + undeclared vocab | Listed in each scan's incident report; no `aburi-vocab-discovered.json`, since only `aburi scan` writes or removes the record (§5.3): the scans `aburi diff` runs write their IRs alone |
 | CL8c | `aburi scan --discover`, then `aburi scan` once every value is declared | The second run exits 0 and removes `aburi-vocab-discovered.json` |
 | CL9 | `aburi diff main..HEAD --fail-on changed` with changes | exit 3 |
 | CL10 | `aburi diff` with missing arguments | exit 2 |
@@ -1054,7 +1176,6 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL14 | Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
 | CL15 | `NO_COLOR=1 aburi scan` | No coloring |
 | CL16 | `CI=true aburi scan` | Progress animation suppressed |
-| CL17 | `--log-level debug aburi diff` on error | Stack trace on stderr |
 | CL18 | `aburi --config ./custom.json scan` | Uses the specified config |
 | CL19 | `aburi explain <name>` where a plugin threw during the rescan | exit 3, incident lines on stderr |
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
@@ -1062,7 +1183,11 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL21 | `aburi explain src/route.ts --ir <ir>` where that IR names `src/route.ts` in `stats.skippedFiles` | exit 3, the file and its skip reason on stderr, nothing on stdout |
 | CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
 | CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the name to rename on stderr, and the file not counted in `stats.totalFiles` |
+| CL23a | `aburi scan` in a workspace holding `a:notes.ts`, `d:data/x.ts` and `ab:notes.ts` beside `src/ok.ts` | exit 3, the IR written, `a:notes.ts` and `d:data` to rename on stderr and neither counted in `stats.totalFiles`; `ab:notes.ts`, like `src/x:y.ts`, is an `unroutable` skip |
+| CL23b | `aburi scan` in a pnpm or nx workspace one of whose packages sits at `a:pkg/`, holding a source file or only its `package.json` and a README | exit 3, a line naming the tool, `a:pkg`, the manifest and the reason on stderr; the other packages are Components and scanned, and `a:pkg` is none. A package at `odd/` in the same state is a Component that owns no file, and the scan exits 0. `aburi diff` with such a scan on one side exits 3, saying `N workspace package(s) sit in directories no Document path can spell` when nothing else faulted |
+| CL23c | `aburi init` in the workspace of CL23b | exit 0, the same line on stderr, and no `components[]` entry rooted at `a:pkg`. Where `a:pkg` is the only package, `aburi init` and `aburi scan` both follow the line with `No other workspace package was found, so the whole repository is described as one component.` |
 | CL24 | `aburi explain 'src/weird\name.ts'` where that file exists | exit 3, a line saying no IR can name it, nothing on stdout |
+| CL24a | `aburi explain d:data/x.ts`, `aburi explain ./a:notes.ts`, `aburi explain ../a:notes.ts` run from `src/`, or `aburi explain a:notes.ts` where that file exists | exit 3, a line saying no IR can name it because the name reads as a drive, nothing on stdout. `./ab:notes.ts`, and `./a:notes.ts` run from `src/`, are looked up as any other file; `A::create`, and a bare `a:notes.ts` that is not on disk, are matched as substrings |
 | CL25 | `aburi init --output config/aburi.jsonc` where `config/` does not exist | Creates the directory, writes the file, exit 0 |
 | CL26 | `aburi explain <id> --output docs/alpha.md` where `docs/` does not exist | Creates the directory, writes the Markdown, exit 0 |
 | CL27 | `aburi init` or `aburi explain` with an `--output` that names a directory, or whose parent path is an existing file | exit 2, the path and the remedy on stderr |
@@ -1073,6 +1198,20 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 | CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
 | CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
+| CL35 | `aburi scan`, `aburi diff main..HEAD`, or `aburi explain <name>` with no IR on disk, where each scanned tree holds a file that fails to parse | One `warn:` line per scan naming that file, so two from `diff`, and the same at `--log-level info` or with an `ABURI_LOG_LEVEL` other than the four levels; none at `ABURI_LOG_LEVEL=error`; the per-file `debug:` lines as well at `ABURI_LOG_LEVEL=debug`; `--log-level`, before the command or after it, wins over the variable whichever of the two is the more verbose |
+| CL36 | `aburi scan --log-level loud` | exit 2 naming the four levels |
+| CL37 | `aburi init --log-level debug` | exit 0: `init` accepts the flag, which has no per-file log there to govern |
+| CL38 | `aburi init --help`, `aburi scan --help`, `aburi diff --help` or `aburi explain --help` | `--log-level` listed under "Global Options" |
+| CL39 | `aburi diff … --fail-on changed --fail-on removed` over one changed Symbol, in either order; over a changed and a removed one, in either order | exit 3 in both orders, as `--fail-on changed,removed` gives, and `--fail-on removed --fail-on added`, or no `--fail-on` at all, exits 0; over both, the tripped line names the clause written first. An invalid occurrence beside a valid one (`--fail-on bogus --fail-on changed`, `--fail-on '' --fail-on changed`) exits 2 quoting that occurrence alone, before either IR is read and with an earlier report in the output directory left as it was. `runDiff` refuses `failOn: []` as it refuses `failOn: ""` |
+| CL40 | Any option that takes a value, other than `--ignore` and `--fail-on`, given twice on any command — `init --output`; `scan --output-dir`, `--format`, `--config`; `diff --base`, `--head`, `--output-dir`, `--format`, `--max-bytes`, `--config`; `explain --ir`, `--output`, `--config`; and `--log-level`, before the command, after it, or once on each side — in either spelling (`--config=a.json --config a.json`), the same value twice included, and a second value the option refuses on its own (`scan --format json --format bogus`, `diff … --max-bytes 1000 --max-bytes 0`) | exit 2, `<option> is given more than once ("<first>", then "<second>"): pass one` on stderr, nothing on stdout, nothing written, and an earlier report left as it was. With the invalid value first (`scan --format bogus --format json`), that value's own error instead, at exit 2. `aburi scan --compact --compact` and `--no-timestamp --no-timestamp` run and exit 0; `--ignore a/** --ignore b/**` leaves out the files under both and exits 0; `--respect-gitignore` and `--no-respect-gitignore` together, in either order, over a config that sets `respectGitignore: false`: the one written last applies |
+| CL41 | An empty value for any option that takes a path — `init --output`; `scan --output-dir`, `--config`; `diff --base`, `--head`, `--output-dir`, `--config`; `explain --ir`, `--output`, `--config` — in either spelling (`--output-dir=`) | exit 2, `error: option '<option> <path>' argument '' is invalid. a path must not be empty` on stderr, nothing on stdout, nothing written, and an earlier report left as it was |
+| CL42 | `aburi diff main..HEAD --base b.json`, or `aburi diff main..HEAD --head h.json` | exit 2, `<option> cannot be combined with a ref spec argument. Use one or the other.`, naming the option given |
+| CL43 | `aburi scan` after one Component was renamed and another removed | The page of each id the IR no longer holds is removed, with LF or CRLF line endings, and on a filesystem that returns a few bytes per read; nothing else in `components/` goes. A file beside them that is not such a page stays: another extension, a first line naming another id or none, the heading with more on its line, a name no Component id takes, the same page in a subdirectory, or a directory named like a page |
+| CL44 | `aburi scan --format json` or `--format md` after an `aburi scan` that wrote both | Only what the format writes is left of Aburi's files: no `workspace.md` or component page under `json`, no `aburi.ir.json` under `md`, and so `aburi explain --no-rescan` exits 2 rather than answering from the earlier IR. The caller's files in the output directory and in `components/` stay. At `--log-level info`, one `info:` line names each file removed, the discovered-vocabulary record a strict scan removes included; at the default level, none |
+| CL45 | `aburi scan --format md` with a directory at `aburi.ir.json`, `--format json` with one at `workspace.md`, or a scan where the process may not remove a component page, list `components/` or read a stale page | exit 2 for a directory, naming the artefact, its path, that a directory stands where an earlier run's file would be, and `--output-dir`; exit 1 for the rest, naming the step that failed (remove, list or read), the page's component or the components directory, its path and the errno |
+| CL46 | A strict `aburi scan` stopping at an undeclared value (exit 3) after one that completed, or an `aburi scan --format md` stopping at a directory where `workspace.md` would go (exit 2) after an `aburi scan --format json` | The earlier run's IR, `workspace.md` and component pages are left as they were |
+| CL47 | `aburi explain <name>` with no IR on disk, after `aburi scan --format md`; `runScan` with `command: "explain"` or `"diff"` and `format: "md"`, after an `aburi scan` that wrote both beside a stale page | The scan it runs writes the IR beside the pages and removes none of them; the `runScan` call removes nothing, neither the IR nor the stale page |
+| CL48 | `aburi diff … --format json` or `--format md` after an `aburi diff --max-bytes` that wrote `diff.full.md` | Only the files that run writes are left of the report: no `diff.md` naming a `diff.full.md` that is gone, no earlier `diff.json`. The caller's own file in the output directory stays |
 
 ## 18. Design Decisions
 

@@ -1,4 +1,4 @@
-import type { Component, Dependency, Symbol as IRSymbol } from "@aburi/types"
+import type { Component, ComponentId, Dependency, Symbol as IRSymbol } from "@aburi/types"
 import {
   appendAll,
   callRow,
@@ -35,7 +35,7 @@ export function projectComponent(input: ProjectComponentInput): string {
   const droppedSymbols = symbols.filter((s) => s.dropped)
 
   const lines: string[] = []
-  lines.push(`# Component: ${component.id}`)
+  lines.push(componentHeading(component.id))
   lines.push("")
   lines.push(`**Name**: ${inlineCode(component.name)}`)
   lines.push(`**Roots**: ${joinCode(component.roots)}`)
@@ -100,6 +100,10 @@ export function projectComponent(input: ProjectComponentInput): string {
     )
   }
   return renderDocument(lines)
+}
+
+export function componentHeading(id: ComponentId): string {
+  return `# Component: ${id}`
 }
 
 function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {

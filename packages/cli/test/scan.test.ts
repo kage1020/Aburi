@@ -1,10 +1,18 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import type { IR } from "@aburi/types"
 import { beforeEach, describe, expect, it } from "vitest"
-import { CliError, EXIT, runScan, type ScanOptions } from "../src"
+import {
+  CliError,
+  COMPONENTS_DIRNAME,
+  EXIT,
+  IR_JSON_FILENAME,
+  runScan,
+  type ScanOptions,
+} from "../src"
 import { runCliIn } from "./run-cli"
-import { TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
+import { listTree, TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
 
 const workspace = useScratchWorkspace("scan")
 
@@ -72,6 +80,28 @@ describe("aburi scan — what the caller and the config add", () => {
 
     expect(report.exitCode).toBe(EXIT.SUCCESS)
     expect(report.keptSymbols).toBe(1)
+  })
+
+  it("leaves out the files under every --ignore given on the command line", async () => {
+    await workspace.writeSource("a/x.ts", "export function x() { return 1 }\n")
+    await workspace.writeSource("b/y.ts", "export function y() { return 2 }\n")
+    await workspace.writeSource("src/keep.ts", "export function keep() { return 3 }\n")
+
+    const { code, stderr } = await runCliIn(workspace.root, [
+      "scan",
+      "--format",
+      "json",
+      "--ignore",
+      "a/**",
+      "--ignore",
+      "b/**",
+    ])
+
+    expect(code, stderr).toBe(EXIT.SUCCESS)
+    const ir = JSON.parse(
+      await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+    ) as IR
+    expect(ir.symbols.map((symbol) => symbol.id)).toEqual(["ts:src/keep.ts#keep"])
   })
 
   it("accepts an ordinary relative component root", async () => {
@@ -162,5 +192,22 @@ describe("aburi scan — files skipped for a reason that is not a plugin throw",
     expect(report.skipped.map((s) => [s.path, s.reason])).toEqual([["src/big.ts", "over-size"]])
     expect(report.extractionFailures).toEqual([])
     expect(report.exitCode).toBe(EXIT.SUCCESS)
+  })
+})
+
+describe("aburi scan's removals, when another command runs the scan", () => {
+  const outputs = () => listTree(resolve(workspace.root, "out"))
+
+  it.each([
+    "explain",
+    "diff",
+  ] as const)("removes nothing an earlier scan wrote when %s's scan writes only Markdown", async (command) => {
+    await scan({ format: "both" })
+    await workspace.writeSource(`out/${COMPONENTS_DIRNAME}/stale.md`, "# Component: stale\n")
+    const earlier = await outputs()
+
+    await scan({ command, format: "md" })
+
+    expect(await outputs()).toEqual(earlier)
   })
 })
