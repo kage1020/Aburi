@@ -1,8 +1,9 @@
+import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { EXIT } from "../src"
+import { COMPONENTS_DIRNAME, EXIT, VOCAB_DISCOVERED_FILENAME, WORKSPACE_MD_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
-import { writeStubRepository } from "./stub-language"
+import { writeStubRepository, writeStubWorkspace } from "./stub-language"
 
 const workspace = useScratchWorkspace("log-level")
 
@@ -117,6 +118,27 @@ describe.each<[string, string, Logged]>([
     expect(await loggedBy([...before, ...command.argv, ...after], env)).toEqual({
       code: EXIT.SUCCESS,
       lines,
+    })
+  })
+})
+
+describe("aburi scan — the log of the files it removes", () => {
+  it.each([
+    ["one info: line for each at --log-level info", ["--log-level", "info"], true],
+    ["none of them at the default level", [], false],
+  ])("gives %s", async (_, flags, shown) => {
+    await writeStubWorkspace(workspace.root, ["ok.stub"])
+    expect((await runCliIn(workspace.root, ["scan", "--discover"])).code).toBe(EXIT.SUCCESS)
+    const out = (...segments: string[]) => resolve(workspace.root, "out", ...segments)
+    const removed = [
+      `info: Removed the discovered-vocabulary record at ${out(VOCAB_DISCOVERED_FILENAME)}\n`,
+      `info: Removed the workspace Markdown at ${out(WORKSPACE_MD_FILENAME)}\n`,
+      `info: Removed the Markdown for component "stub-fixture" at ${out(COMPONENTS_DIRNAME, "stub-fixture.md")}\n`,
+    ]
+
+    expect(await loggedBy(["scan", "--format", "json", ...flags], {})).toEqual({
+      code: EXIT.SUCCESS,
+      lines: shown ? removed : [],
     })
   })
 })
