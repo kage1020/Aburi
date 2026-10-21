@@ -155,6 +155,7 @@ export {
 } from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {
+  type DetectManagersOptions,
   type DetectManagersResult,
   detectManagers,
   type UnnameableRoot,

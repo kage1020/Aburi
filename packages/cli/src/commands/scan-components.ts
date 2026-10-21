@@ -1,6 +1,9 @@
 import {
   CoreError,
+  type CoreErrorCode,
+  type DetectManagersResult,
   detectComponents,
+  detectManagers,
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
@@ -17,6 +20,23 @@ export function declaredComponents(config: Partial<Config>): Config["components"
   return declared !== undefined && declared.length > 0 ? declared : undefined
 }
 
+export async function resolveManagers(
+  config: Partial<Config>,
+  workspaceRoot: string,
+): Promise<DetectManagersResult> {
+  try {
+    return await detectManagers(workspaceRoot, { respectGitignore: config.respectGitignore })
+  } catch (error) {
+    throw isUnreadableTree(error) ? componentResolutionFailure(error) : error
+  }
+}
+
+// The manager scan meets the tree before the census does, so a tree neither can read is reported
+// alike whichever meets it. A manifest fault the manager scan meets keeps its exit 1.
+export function isUnreadableTree(error: unknown): error is CoreError {
+  return error instanceof CoreError && UNREADABLE_TREE_CODES.has(error.code)
+}
+
 export async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
@@ -28,9 +48,7 @@ export async function resolveComponents(
     return await detectComponents({
       workspaceRoot,
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
-      ...(config.respectGitignore === undefined
-        ? {}
-        : { respectGitignore: config.respectGitignore }),
+      respectGitignore: config.respectGitignore,
     })
   } catch (error) {
     throw componentResolutionFailure(error)
@@ -74,7 +92,12 @@ function componentResolutionFailure(error: unknown): CliError {
   )
 }
 
-const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<string> = new Set([
+const UNREADABLE_TREE_CODES: ReadonlySet<CoreErrorCode> = new Set<CoreErrorCode>([
+  "scan-gitignore-unreadable",
+  "scan-directory-unreadable",
+])
+
+const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<CoreErrorCode> = new Set<CoreErrorCode>([
   "invalid-component-id",
   "invalid-language-id",
   "non-posix-path",

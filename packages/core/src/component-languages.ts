@@ -1,5 +1,4 @@
 import type { LanguageId } from "@aburi/types"
-import { glob } from "tinyglobby"
 import { toNfc } from "./codepoints"
 import type { DetectComponentsOptions } from "./component"
 import { makeLanguageId } from "./id"
@@ -7,6 +6,7 @@ import { compareCodeUnit } from "./order"
 import { CORE_IGNORE_PATTERNS } from "./scan/discover"
 import { openGitignoreTree } from "./scan/gitignore"
 import { fileExtension } from "./scan/route"
+import { walk } from "./scan/walk"
 
 const EXTENSION_TO_LANGUAGE: ReadonlyMap<string, string> = new Map([
   [".ts", "ts"],
@@ -43,7 +43,8 @@ export async function countLanguagesPerRoot(
   roots: readonly string[],
   options: Pick<DetectComponentsOptions, "ignore" | "respectGitignore">,
 ): Promise<Map<string, LanguageId[]>> {
-  const files = await glob(["**/*"], {
+  const gitignore = (options.respectGitignore ?? true) ? openGitignoreTree(workspaceRoot) : null
+  const files = await walk(["**/*"], {
     cwd: workspaceRoot,
     ignore: [...CORE_IGNORE_PATTERNS, ...(options.ignore ?? [])],
     onlyFiles: true,
@@ -51,8 +52,8 @@ export async function countLanguagesPerRoot(
     // The census must match discovery's walk, or `languages` names a language no scanned file has.
     followSymbolicLinks: false,
     deep: Math.max(...roots.map((root) => rootDepth(root) + LANGUAGE_SCAN_DEPTH)),
+    gitignore,
   })
-  const gitignore = (options.respectGitignore ?? true) ? openGitignoreTree(workspaceRoot) : null
 
   const counts = new Map<string, Map<LanguageId, number>>(roots.map((root) => [root, new Map()]))
   for (const file of files) {
