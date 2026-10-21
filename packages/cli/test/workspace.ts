@@ -73,6 +73,13 @@ export async function writeEarlierReports(
   return files
 }
 
+/** Every file and directory under `root`, by `/`-separated path relative to it, sorted. */
+export async function listTree(root: string): Promise<string[]> {
+  return (await readdir(root, { recursive: true }))
+    .map((entry) => entry.replaceAll(sep, "/"))
+    .sort()
+}
+
 /** Every file under `root`, by `/`-separated path relative to it, with its contents. */
 export async function filesUnder(root: string): Promise<Record<string, string>> {
   const files: Record<string, string> = {}
