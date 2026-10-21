@@ -4,6 +4,7 @@ import { useScratchWorkspace } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { beforeEach, describe, expect, it } from "vitest"
 import { EXIT, IR_JSON_FILENAME } from "../src"
+import { FRAMEWORK_MANIFEST, pluginModuleSource } from "./plugin-fakes"
 import { runCliIn } from "./run-cli"
 import { TYPESCRIPT, writeConfig } from "./workspace"
 
@@ -93,28 +94,17 @@ describe("aburi scan — a plugin name where a framework id belongs", () => {
   it("says nothing when the plugin's name is also the framework it provides", async () => {
     await workspace.writeSource(
       "plugins/acme.mjs",
-      `export const plugin = {
-  manifest: {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "acme-rpc",
-    version: "0.0.0",
-    type: "framework",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: ["acme-rpc"],
-    },
-  },
-  async init() {},
+      pluginModuleSource(
+        {
+          ...FRAMEWORK_MANIFEST,
+          name: "acme-rpc",
+          provides: { ...FRAMEWORK_MANIFEST.provides, frameworks: ["acme-rpc"] },
+        },
+        `  async init() {},
   classifySymbol() {
     return null
-  },
-}
-`,
+  },`,
+      ),
     )
 
     const { code, output } = await scanWith({

@@ -9,33 +9,18 @@ import {
 import type { Summary } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { type DiffOptions, EXIT, runDiff, runScan } from "../src"
+import { EFFECTS_MANIFEST, pluginModuleSource } from "./plugin-fakes"
 import { TYPESCRIPT, writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-config-pinning")
 
-const NOOP_EFFECTS_PLUGIN = `
-export const plugin = {
-  manifest: {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "effects-noop",
-    version: "0.0.0",
-    type: "effects",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  },
-  async init() {},
+const NOOP_EFFECTS_PLUGIN = pluginModuleSource(
+  { ...EFFECTS_MANIFEST, name: "effects-noop" },
+  `  async init() {},
   classify() {
     return null
-  },
-}
-`
+  },`,
+)
 
 const NO_CHANGE = { added: 0, removed: 0, changed: 0, moved: 0, unchanged: 2 }
 
