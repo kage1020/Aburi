@@ -41,7 +41,9 @@ same call wrapped over two lines or with a comment before `.memo` all give
 `framework:react:memo:React.memo`, and `memo(Inner)` gives
 `framework:react:memo:memo`. A receiver that is not a name is `<computed>`
 (`new Registry().memo(Inner)` gives `framework:react:memo:<computed>.memo`), so
-no entry carries the source's line breaks, indentation or comments.
+no entry carries the source's line breaks, indentation or comments. A hook's
+`hook-call` signal reads the name called the same way, so `React.useState(0)`
+wrapped after its `.` or with a comment there still counts.
 
 Not classified today (documented for completeness):
 

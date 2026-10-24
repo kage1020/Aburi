@@ -1,6 +1,6 @@
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { scanWith } from "@aburi/test-harness"
-import { useScratchWorkspace } from "@aburi/test-support"
+import { frameworkEntries, symbolNamed, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { reactFrameworkPlugin } from "../src/index"
 
@@ -78,20 +78,22 @@ describe("scan — React source shapes across .tsx and .jsx files", () => {
   })
 })
 
-describe("scan — a wrapper call's derivedBy", () => {
-  /** `"<extKind> <the plugin's derivedBy entries>"` for a const `X` that `initializer` initialises. */
-  async function classifiedConst(initializer: string): Promise<string> {
-    await workspace.writeSource("src/x.tsx", `export const X = ${initializer}\n`)
-    const { ir } = await scanWith(workspace.root, {
+describe("scan — a call's derivedBy", () => {
+  /** `"<extKind> <the plugin's derivedBy entries>"` for the Symbol `name` that `source` declares. */
+  async function classified(source: string, name: string): Promise<string> {
+    await workspace.writeSource("src/x.tsx", source)
+    const result = await scanWith(workspace.root, {
       languages: [langTypescriptPlugin],
       frameworks: [reactFrameworkPlugin],
     })
-    const symbol = ir.symbols.find((s) => s.name === "X")
-    if (symbol === undefined) throw new Error("no Symbol named X")
-    // The scan appends the framework plugin's entries after the language plugin's.
-    const own = symbol.derivedBy.findIndex((entry) => entry.startsWith("framework:react:"))
-    return [symbol.extKind, ...(own < 0 ? [] : symbol.derivedBy.slice(own))].join(" ")
+    const symbol = symbolNamed(result, name)
+    return [symbol.extKind, ...frameworkEntries(symbol, "framework:react:")].join(" ")
   }
+
+  const classifiedConst = (initializer: string) =>
+    classified(`export const X = ${initializer}\n`, "X")
+  const classifiedHook = (returned: string) =>
+    classified(`export function useCounter() {\n  return ${returned}\n}\n`, "useCounter")
 
   it.each([
     [
@@ -123,15 +125,28 @@ describe("scan — a wrapper call's derivedBy", () => {
     expect(await classifiedConst(oneLine)).toBe(expected)
   })
 
-  it("names a receiver that is a call by the name the call is made through", async () => {
-    expect(await classifiedConst("loadReact().memo(Inner)")).toBe(
-      "framework:react:memo framework:react:memo:loadReact.memo",
-    )
+  it.each([
+    ["whose dot ends a line", "React.\n    useState(0)"],
+    ["with a comment after its dot", "React./* a */useState(0)"],
+  ])("finds a hook call %s as its one-line spelling does", async (_label, written) => {
+    const expected =
+      "framework:react:hook framework:react:hook:naming framework:react:hook:hook-call"
+    expect(await classifiedHook(written)).toBe(expected)
+    expect(await classifiedHook("React.useState(0)")).toBe(expected)
   })
 
-  it("names a receiver that is not a name as computed", async () => {
-    expect(await classifiedConst("new Registry().memo(Inner)")).toBe(
+  it.each([
+    [
+      "a call by the name the call is made through",
+      "loadReact().memo(Inner)",
+      "framework:react:memo framework:react:memo:loadReact.memo",
+    ],
+    [
+      "something that is not a name as computed",
+      "new Registry().memo(Inner)",
       "framework:react:memo framework:react:memo:<computed>.memo",
-    )
+    ],
+  ])("names a receiver that is %s", async (_label, initializer, expected) => {
+    expect(await classifiedConst(initializer)).toBe(expected)
   })
 })

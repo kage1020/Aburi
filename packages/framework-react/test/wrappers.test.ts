@@ -12,12 +12,12 @@ describe("extractWrapperCall", () => {
   it("finds the outer wrapping call, not one inside its argument", async () => {
     expect(
       await wrapperOf("const X = forwardRef((p, r) => { useState(0); return <button ref={r} /> })"),
-    ).toEqual({ callee: "forwardRef", leaf: "forwardRef" })
+    ).toEqual({ name: "forwardRef", leaf: "forwardRef" })
   })
 
   it("names a member callee by its receiver beside its leaf", async () => {
     expect(await wrapperOf("const X = React.forwardRef((p, r) => null)")).toEqual({
-      callee: "React.forwardRef",
+      name: "React.forwardRef",
       leaf: "forwardRef",
     })
   })

@@ -79,7 +79,6 @@ export function calleeLeaf(callee: string): string {
 }
 
 export interface CalleeName {
-  /** The name the chain starts from and the name called: `app.get` for `app.route("/x").get`. */
   readonly name: string
   readonly leaf: string
 }
@@ -97,7 +96,7 @@ export function calleeName(callNode: SyntaxNode): CalleeName | null {
   return { name: `${chainRoot(object)}.${leaf}`, leaf }
 }
 
-const NAMED_ROOT_TYPES: ReadonlySet<string> = new Set(["identifier", "this", "super"])
+const NAMED_ROOT_TYPES: ReadonlySet<string> = new Set(["identifier", "this"])
 
 function chainRoot(node: SyntaxNode): string {
   let cursor = unwrapValue(node)
@@ -125,8 +124,8 @@ export function anyCallCalleeMatches(
   predicate: (leaf: string) => boolean,
 ): boolean {
   if (node.type === "call_expression") {
-    const callee = calleeText(node)
-    if (callee !== null && predicate(calleeLeaf(callee))) return true
+    const callee = calleeName(node)
+    if (callee !== null && predicate(callee.leaf)) return true
   }
   for (const child of node.namedChildren) {
     if (child !== null && anyCallCalleeMatches(child, predicate)) return true

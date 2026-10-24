@@ -52,7 +52,7 @@ function classifyConstSymbol(
   const confidence: Confidence = hasExpressImport(ctx) ? "high" : "medium"
   return {
     extKind: "framework:express:router",
-    derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:router:${routerCall.callee}`,
+    derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:router:${routerCall.name}`,
     confidence,
   }
 }
@@ -83,7 +83,7 @@ function classifyCallSymbol(
 }
 
 function classifyUseCall(
-  callee: string,
+  name: string,
   symbol: SymbolCandidate<OpaqueAstNode>,
   importAnchored: boolean,
 ): ExpressClassification | null {
@@ -93,7 +93,7 @@ function classifyUseCall(
   if (shape.hasErrorHandler) {
     return {
       extKind: "framework:express:error-middleware",
-      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:error-middleware:${callee};arity-4`,
+      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:error-middleware:${name};arity-4`,
       confidence: importAnchored ? "high" : "medium",
     }
   }
@@ -101,7 +101,7 @@ function classifyUseCall(
   if (isMountShape(shape)) {
     return {
       extKind: "framework:express:mount",
-      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:mount:${callee};router-identifier`,
+      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:mount:${name};router-identifier`,
       confidence: importAnchored ? "high" : "medium",
     }
   }
@@ -112,7 +112,7 @@ function classifyUseCall(
     const confidence: Confidence = shape.hasRegularHandler && importAnchored ? "high" : "medium"
     return {
       extKind: "framework:express:middleware",
-      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:middleware:${callee};${arity}`,
+      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:middleware:${name};${arity}`,
       confidence,
     }
   }

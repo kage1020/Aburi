@@ -1,10 +1,14 @@
-import { asSyntaxNode, calleeName, declaratorValue, lastQnameSegment } from "@aburi/core"
+import {
+  asSyntaxNode,
+  type CalleeName,
+  calleeName,
+  declaratorValue,
+  lastQnameSegment,
+} from "@aburi/core"
 
 export const EXPRESS_ROUTER_FACTORIES: ReadonlySet<string> = new Set(["Router"])
 
-export interface RouterCall {
-  readonly callee: string
-}
+export type RouterCall = CalleeName
 
 export function extractRouterCall(fullNode: unknown, name: string): RouterCall | null {
   const node = asSyntaxNode(fullNode)
@@ -13,6 +17,5 @@ export function extractRouterCall(fullNode: unknown, name: string): RouterCall |
   const initializer = declaratorValue(node, lastQnameSegment(name))
   if (initializer === null || initializer.type !== "call_expression") return null
   const callee = calleeName(initializer)
-  if (callee === null || !EXPRESS_ROUTER_FACTORIES.has(callee.leaf)) return null
-  return { callee: callee.name }
+  return callee !== null && EXPRESS_ROUTER_FACTORIES.has(callee.leaf) ? callee : null
 }

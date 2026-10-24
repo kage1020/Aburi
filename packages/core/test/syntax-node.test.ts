@@ -28,6 +28,16 @@ function callWith(callee: SyntaxNode | null): SyntaxNode {
   return node({ childForFieldName: (name) => (name === "function" ? callee : null) })
 }
 
+const identifier = (text: string) => node({ type: "identifier", text })
+const withFields = (type: string, fields: Record<string, SyntaxNode>) =>
+  node({ type, childForFieldName: (name) => fields[name] ?? null })
+const member = (object: SyntaxNode, property: string) =>
+  withFields("member_expression", {
+    object,
+    property: node({ type: "property_identifier", text: property }),
+  })
+const call = (callee: SyntaxNode) => withFields("call_expression", { function: callee })
+
 describe("calleeText", () => {
   it("returns the verbatim source of the `function` field", () => {
     const call = callWith(node({ type: "member_expression", text: 'app.route("/x").get' }))
@@ -80,15 +90,6 @@ describe("calleeLeaf", () => {
 })
 
 describe("calleeName", () => {
-  const identifier = (text: string) => node({ type: "identifier", text })
-  const withFields = (type: string, fields: Record<string, SyntaxNode>) =>
-    node({ type, childForFieldName: (name) => fields[name] ?? null })
-  const member = (object: SyntaxNode, property: string) =>
-    withFields("member_expression", {
-      object,
-      property: node({ type: "property_identifier", text: property }),
-    })
-  const call = (callee: SyntaxNode) => withFields("call_expression", { function: callee })
   const wrapped = (type: string, inner: SyntaxNode) =>
     node({ type, namedChildren: [node({ type: "comment", text: "/* c */" }), inner] })
 
@@ -105,6 +106,20 @@ describe("calleeName", () => {
       "a receiver behind wrappers and a comment",
       member(
         wrapped("parenthesized_expression", wrapped("as_expression", identifier("app"))),
+        "get",
+      ),
+      "app.get",
+      "get",
+    ],
+    [
+      "a chain behind wrappers past its first call",
+      member(
+        call(
+          member(
+            wrapped("parenthesized_expression", wrapped("as_expression", identifier("app"))),
+            "route",
+          ),
+        ),
         "get",
       ),
       "app.get",
@@ -269,25 +284,27 @@ describe("findFirstDescendantOfType", () => {
 
 describe("anyCallCalleeMatches", () => {
   const isGet = (leaf: string) => leaf === "get"
-  const call = (callee: string) => callWith(node({ type: "member_expression", text: callee }))
+  const routerCall = (method: string) => call(member(identifier("router"), method))
 
   it("accepts the node itself when it is a call whose callee leaf matches", () => {
-    expect(anyCallCalleeMatches(call('app.route("/x").get'), isGet)).toBe(true)
+    expect(
+      anyCallCalleeMatches(call(member(call(member(identifier("app"), "route")), "get")), isGet),
+    ).toBe(true)
   })
 
   it("accepts a matching call nested below other nodes", () => {
     const tree = node({
       type: "program",
-      namedChildren: [null, node({ type: "block", namedChildren: [call("router.get")] })],
+      namedChildren: [null, node({ type: "block", namedChildren: [routerCall("get")] })],
     })
 
     expect(anyCallCalleeMatches(tree, isGet)).toBe(true)
   })
 
   it.each([
-    ["a call whose callee leaf does not match", call("router.post")],
+    ["a call whose callee leaf does not match", routerCall("post")],
     ["a call with no callee", callWith(null)],
-    ["a node that is not a call", node({ type: "member_expression", text: "router.get" })],
+    ["a node that is not a call", member(identifier("router"), "get")],
   ])("rejects %s", (_case, tree) => {
     expect(anyCallCalleeMatches(tree, isGet)).toBe(false)
   })

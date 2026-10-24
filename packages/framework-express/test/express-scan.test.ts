@@ -1,6 +1,6 @@
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { scanWith } from "@aburi/test-harness"
-import { useScratchWorkspace } from "@aburi/test-support"
+import { frameworkEntries, useScratchWorkspace } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { expressFrameworkPlugin } from "../src/index"
@@ -17,9 +17,7 @@ async function scanWorkspace(): Promise<IR> {
 
 /** `"<extKind> <confidence> <derivedBy tags>"` for a classified Symbol. */
 function classification(s: IRSymbol): string {
-  // The scan appends the framework plugin's tags after the language plugin's.
-  const own = s.derivedBy.findIndex((tag) => tag.startsWith("framework:express:"))
-  return [s.extKind, s.confidence, ...s.derivedBy.slice(own)].join(" ")
+  return [s.extKind, s.confidence, ...frameworkEntries(s, "framework:express:")].join(" ")
 }
 
 /** `classification` per classified Symbol in `path`, sorted. */
@@ -31,10 +29,10 @@ function classifiedIn(ir: IR, path: string): string[] {
 }
 
 /**
- * The `classification` of the one call Symbol `source` produces, or `null` when it is unclassified.
- * Throws when there is not exactly one, so an abstention cannot pass because no call was extracted.
+ * The one call Symbol `source` produces. Throws when there is not exactly one, so an abstention
+ * cannot pass because no call was extracted.
  */
-async function callIn(source: string): Promise<string | null> {
+async function oneCallIn(source: string): Promise<IRSymbol> {
   await workspace.writeSource("src/app.ts", source)
   const ir = await scanWorkspace()
   const calls = ir.symbols.filter((s) => s.source.file === "src/app.ts" && s.kind === "call")
@@ -42,7 +40,24 @@ async function callIn(source: string): Promise<string | null> {
   if (call === undefined || calls.length > 1) {
     throw new Error(`expected one call Symbol, got: ${calls.map((s) => s.name)}`)
   }
+  return call
+}
+
+/** The `classification` of the one call Symbol `source` produces, or `null` when it is unclassified. */
+async function callIn(source: string): Promise<string | null> {
+  const call = await oneCallIn(source)
   return call.extKind === null ? null : classification(call)
+}
+
+/** `callIn`, for a call whose Express entry must name it as its `call-statement:` entry does. */
+async function namedCallIn(source: string): Promise<string | null> {
+  const call = await oneCallIn(source)
+  const [entry] = frameworkEntries(call, "framework:express:")
+  const statement = call.derivedBy.find((tag) => tag.startsWith("call-statement:"))
+  expect(entry?.replace(/^framework:express:[a-z-]+:/, "")).toBe(
+    statement?.slice("call-statement:".length),
+  )
+  return classification(call)
 }
 
 const inExpressApp = (line: string) =>
@@ -357,8 +372,8 @@ describe("scan — a call's derivedBy", () => {
       "framework:express:middleware high framework:express:middleware:app.use arity-3",
     ],
   ])("names %s as its one-line spelling does", async (_label, written, oneLine, expected) => {
-    expect(await callIn(inExpressApp(written))).toBe(expected)
-    expect(await callIn(inExpressApp(oneLine))).toBe(expected)
+    expect(await namedCallIn(inExpressApp(written))).toBe(expected)
+    expect(await namedCallIn(inExpressApp(oneLine))).toBe(expected)
   })
 
   it.each([
@@ -377,8 +392,13 @@ describe("scan — a call's derivedBy", () => {
       `express.Router().get("/users", listUsers)`,
       "framework:express:route high framework:express:route:express.get",
     ],
+    [
+      "a route chained past a call on a receiver cast to its type",
+      `;(app as Express).route("/users").get(listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
   ])("names %s by the name its chain starts from", async (_label, line, expected) => {
-    expect(await callIn(inExpressApp(line))).toBe(expected)
+    expect(await namedCallIn(inExpressApp(line))).toBe(expected)
   })
 
   it.each([
@@ -388,17 +408,7 @@ describe("scan — a call's derivedBy", () => {
       "express.Router",
     ],
     ["a factory on a receiver cast to its type", "(express as any).Router()", "express.Router"],
-    [
-      "a factory reached through require in single quotes",
-      "require('express').Router()",
-      "require.Router",
-    ],
-    [
-      "a factory reached through require in double quotes",
-      `require("express").Router()`,
-      "require.Router",
-    ],
-    ["a factory written on one line", "express.Router()", "express.Router"],
+    ["a factory reached through require", `require("express").Router()`, "require.Router"],
   ])("names a Router made by %s", async (_label, initializer, callee) => {
     expect(await routerIn(initializer)).toEqual([
       `framework:express:router high framework:express:router:${callee}`,
