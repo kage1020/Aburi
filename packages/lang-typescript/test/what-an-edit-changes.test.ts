@@ -66,6 +66,17 @@ const repository = (...overloads: string[]) =>
     "",
   ].join("\n")
 
+const registry = (...fields: string[]) =>
+  [
+    "export class Registry {",
+    ...fields.map((field) => `  ${field}`),
+    "  static {",
+    "    load()",
+    "  }",
+    "}",
+    "",
+  ].join("\n")
+
 const price = (guardNote: string, returnNote: string) =>
   [
     "export function price(qty: number, unit: number, member: boolean): number {",
@@ -164,6 +175,12 @@ describe("an edit outside every rule and signature is a syntax-only change", () 
       repository("string", "number"),
       repository("string"),
       ["Repository", "Repository.find"],
+    ],
+    [
+      "a field written beside a class's static block",
+      registry(),
+      registry("static items: string[] = []"),
+      ["Registry"],
     ],
   ])("reports %s", async (_label, before, after, names) => {
     const diff = await diffOfEdit(workspace, FILE, before, after)

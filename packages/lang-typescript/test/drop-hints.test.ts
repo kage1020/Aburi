@@ -1,6 +1,8 @@
+import { symbolById, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifySymbolDropHint } from "../src/index"
-import { hintOf, makeExtractionCtx, symbolOf } from "./fixtures/ctx"
+import { classOf, hintOf, makeExtractionCtx, parseErrorsOf, symbolOf } from "./fixtures/ctx"
+import { scanWithoutWarnings } from "./fixtures/scan"
 
 const B = (reason: string) => ({ reason, category: "B" })
 
@@ -49,6 +51,11 @@ describe("a class with no method is data", () => {
       "export class C { static readonly A = 1; b = 2 }",
       B("pure DTO"),
     ],
+    [
+      "static readonly literals and an index signature",
+      "export class C { static readonly A = 1; [key: string]: unknown }",
+      B("pure DTO"),
+    ],
     ["a method", "export class C { create() { return 1 } }", null],
     [
       "a method in a second declaration of the class",
@@ -56,6 +63,7 @@ describe("a class with no method is data", () => {
       null,
     ],
   ])("hints a class of %s", async (_label, source, hint) => {
+    expect(await parseErrorsOf(source)).toEqual([])
     expect(await hintOf(source, "ts:src/a.ts#C")).toEqual(hint)
   })
 
@@ -68,6 +76,91 @@ describe("a class with no method is data", () => {
     ["a DTO", "export class P { a: string = '' }\nexport interface P { m(): void }", B("pure DTO")],
   ])("reads only the class bodies of %s merged with an interface", async (_label, source, hint) => {
     expect(await hintOf(source, "ts:src/a.ts#P")).toEqual(hint)
+  })
+})
+
+describe("what a member beside a field makes of the class", () => {
+  // Without the semicolon, `id = ''` followed by a line opening with `[` reads as a subscript.
+  const FIELD = "  id = '';"
+
+  it.each([
+    ["a static block", "static { load() }"],
+    ["a getter", "get total() { return 0 }"],
+    ["a setter", "set total(n: number) {}"],
+    ["a constructor", "constructor() {}"],
+  ])("keeps a class of a field and %s", async (_label, member) => {
+    const source = classOf(FIELD, `  ${member}`)
+
+    expect(await parseErrorsOf(source)).toEqual([])
+    expect(await hintOf(source, "ts:src/a.ts#C")).toBeNull()
+  })
+
+  it.each([
+    ["an index signature", "[key: string]: unknown"],
+    ["a declared field", "declare total: number"],
+    ["an auto-accessor", "accessor total = 0"],
+    ["a field whose initializer calls", "seed = compute()"],
+    ["a comment", "// the rest is data"],
+  ])("still hints a class of a field and %s as a pure DTO", async (_label, member) => {
+    const source = classOf(FIELD, `  ${member}`)
+
+    expect(await parseErrorsOf(source)).toEqual([])
+    expect(await hintOf(source, "ts:src/a.ts#C")).toEqual(B("pure DTO"))
+  })
+
+  it.each([
+    ["a doc comment", "/** the second */"],
+    ["a line comment", "// the second"],
+    ["a stray semicolon", ";"],
+  ])("hints a class of constants and %s as pure constants", async (_label, member) => {
+    const source = classOf("  static readonly A = 1", `  ${member}`, "  static readonly B = 2")
+
+    expect(await parseErrorsOf(source)).toEqual([])
+    expect(await hintOf(source, "ts:src/a.ts#C")).toEqual(B("pure constants"))
+  })
+})
+
+describe("scan — a static block is code its class carries", () => {
+  const workspace = useScratchWorkspace("static-block")
+  const FIELD = "  static items: string[] = []"
+  const BLOCK = "  static {\n    prisma.user.deleteMany()\n  }"
+
+  async function scanRegistry(...members: string[]) {
+    const source = [
+      'import { PrismaClient } from "@prisma/client"',
+      "const prisma = new PrismaClient()",
+      "",
+      "export class Registry {",
+      ...members,
+      "}",
+      "",
+    ].join("\n")
+    await workspace.writeSource("src/registry.ts", source)
+    const registry = symbolById(
+      { ir: await scanWithoutWarnings(workspace.root) },
+      "ts:src/registry.ts#Registry",
+    )
+    const { dropped, dropReason, calls } = registry
+    return { dropped, dropReason, calls: calls.map((c) => c.target) }
+  }
+
+  it.each([
+    ["a field and a static block", [FIELD, BLOCK]],
+    ["a static block alone", [BLOCK]],
+  ])("keeps a class of %s, with the block's calls on it", async (_label, members) => {
+    expect(await scanRegistry(...members)).toEqual({
+      dropped: false,
+      dropReason: null,
+      calls: ["prisma.user.deleteMany"],
+    })
+  })
+
+  it("drops the class of the field alone as a pure DTO", async () => {
+    expect(await scanRegistry(FIELD)).toEqual({
+      dropped: true,
+      dropReason: "pure DTO",
+      calls: [],
+    })
   })
 })
 
