@@ -1,7 +1,7 @@
 import { symbolById, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifySymbolDropHint } from "../src/index"
-import { classOf, hintOf, makeExtractionCtx, symbolOf } from "./fixtures/ctx"
+import { classOf, hintOf, makeExtractionCtx, parseErrorsOf, symbolOf } from "./fixtures/ctx"
 import { scanWithoutWarnings } from "./fixtures/scan"
 
 const B = (reason: string) => ({ reason, category: "B" })
@@ -51,6 +51,11 @@ describe("a class with no method is data", () => {
       "export class C { static readonly A = 1; b = 2 }",
       B("pure DTO"),
     ],
+    [
+      "static readonly literals and an index signature",
+      "export class C { static readonly A = 1; [key: string]: unknown }",
+      B("pure DTO"),
+    ],
     ["a method", "export class C { create() { return 1 } }", null],
     [
       "a method in a second declaration of the class",
@@ -58,6 +63,7 @@ describe("a class with no method is data", () => {
       null,
     ],
   ])("hints a class of %s", async (_label, source, hint) => {
+    expect(await parseErrorsOf(source)).toEqual([])
     expect(await hintOf(source, "ts:src/a.ts#C")).toEqual(hint)
   })
 
@@ -74,13 +80,19 @@ describe("a class with no method is data", () => {
 })
 
 describe("what a member beside a field makes of the class", () => {
+  // Without the semicolon, `id = ''` followed by a line opening with `[` reads as a subscript.
+  const FIELD = "  id = '';"
+
   it.each([
     ["a static block", "static { load() }"],
     ["a getter", "get total() { return 0 }"],
     ["a setter", "set total(n: number) {}"],
     ["a constructor", "constructor() {}"],
   ])("keeps a class of a field and %s", async (_label, member) => {
-    expect(await hintOf(classOf("  id = ''", `  ${member}`), "ts:src/a.ts#C")).toBeNull()
+    const source = classOf(FIELD, `  ${member}`)
+
+    expect(await parseErrorsOf(source)).toEqual([])
+    expect(await hintOf(source, "ts:src/a.ts#C")).toBeNull()
   })
 
   it.each([
@@ -90,25 +102,21 @@ describe("what a member beside a field makes of the class", () => {
     ["a field whose initializer calls", "seed = compute()"],
     ["a comment", "// the rest is data"],
   ])("still hints a class of a field and %s as a pure DTO", async (_label, member) => {
-    expect(await hintOf(classOf("  id = ''", `  ${member}`), "ts:src/a.ts#C")).toEqual(
-      B("pure DTO"),
-    )
+    const source = classOf(FIELD, `  ${member}`)
+
+    expect(await parseErrorsOf(source)).toEqual([])
+    expect(await hintOf(source, "ts:src/a.ts#C")).toEqual(B("pure DTO"))
   })
 
   it.each([
     ["a doc comment", "/** the second */"],
     ["a line comment", "// the second"],
     ["a stray semicolon", ";"],
-  ])("still hints a class of constants and %s as pure constants", async (_label, member) => {
+  ])("hints a class of constants and %s as pure constants", async (_label, member) => {
     const source = classOf("  static readonly A = 1", `  ${member}`, "  static readonly B = 2")
 
+    expect(await parseErrorsOf(source)).toEqual([])
     expect(await hintOf(source, "ts:src/a.ts#C")).toEqual(B("pure constants"))
-  })
-
-  it("hints a class of constants and an index signature as a pure DTO", async () => {
-    const source = classOf("  static readonly A = 1", "  [key: string]: unknown")
-
-    expect(await hintOf(source, "ts:src/a.ts#C")).toEqual(B("pure DTO"))
   })
 })
 

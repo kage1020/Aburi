@@ -115,19 +115,19 @@ Excluded from the Markdown projection; shown only via `aburi explain <symbol>`.
 
 A class is a `pure DTO` when all of the following hold:
 
-- The body has no methods (including constructors; a shorthand-property constructor such as `class { constructor(public x: number) {}` is allowed) and no `static { … }` block
+- The body has no methods, constructors included (even one that only declares parameter properties, such as `constructor(public x: number) {}`), and no `static { … }` block
 - It has no boundary decorator (one that a framework plugin judged `boundary: true`)
-- The body consists solely of field declarations, beside which only index signatures and comments are written
+- The body declares at least one field, and every other member is an index signature or a comment
 
 A static block is behaviour, more plainly than a method: it runs, unconditionally, when the class is defined. Its calls are walked on the class (`lang-plugin.md` LP20a), the only Symbol that carries them, so dropping a class of fields and a static block as a DTO would take the block's calls and effects with it. Getters, setters and constructors are methods here, and so are a method signature and an abstract method, which declare behaviour without a body.
 
-An index signature (`[key: string]: unknown`) is part of the shape, so it leaves a class of fields a DTO. A comment is not a member at all and changes neither hint: a class of `static readonly` literals with a doc comment on each is still `pure constants`. An index signature is not a constant, so beside one that class is a `pure DTO`.
+An index signature (`[key: string]: unknown`) is part of the shape, so it leaves a class of fields a DTO. A `//` or `/* */` comment is not a member at all and changes neither hint: a class of `static readonly` literals with a doc comment on each is still `pure constants`. An index signature is not a constant, so beside one that class is a `pure DTO`.
 
 A field whose value is a function *the plugin recognises as one* is a method for this rule (`create = (d) => { … }`, `create = function (d) { … }`). It declares behaviour, not a shape, and a class written entirely that way is not a data model. The question is the field's value, not whether the member became a Symbol: a member the plugin could not name — a computed name, say — is still not data.
 
 The recognised set is the language plugin's, and it is narrower than "holds a function": a generator, or a function behind a wrapper (`handle = withAuth(() => …)`), reads as data here. A class of nothing else is dropped, and the calls the owner was carrying for it go with it, which is a loss rather than a filter. Widening the set is one decision for the plugin and not three, since the same predicate decides whether the member gets a Symbol at all.
 
-That is the only question a field's value is asked. Any other initializer, a call included (`seed = makeSeed()`, `static rows = db.load()`), leaves the member a field declaration, although it runs on construction or definition and is walked on the class: a class of such fields is a DTO, and those calls go with it, the same loss as the wrapper's.
+Being such a function is the only way a field's value keeps the class. Any other initializer, a call included (`seed = makeSeed()`, `static rows = db.load()`), leaves the member a field declaration, although it runs on construction or definition and is walked on the class: a class of such fields is a DTO, and those calls go with it, the same loss as the wrapper's.
 
 The core performs this determination, but each language plugin may add auxiliary rules for pure-DTO detection (e.g. `class-validator` decorators such as `@IsString` count as decoration; anything else is an ordinary determinant).
 

@@ -32,7 +32,6 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
   const bodies = bodyNodesOf(symbol).filter((body) => body.type === "class_body")
   if (bodies.length === 0) return null
 
-  let hasBehaviour = false
   let allStaticLiteral = true
   let hasAnyField = false
   for (const member of bodies.flatMap((body) => body.namedChildren)) {
@@ -42,15 +41,9 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
       case "method_signature":
       case "abstract_method_signature":
       case "class_static_block":
-        hasBehaviour = true
-        allStaticLiteral = false
-        break
+        return null
       case "public_field_definition":
-        if (functionValueOf(member) !== null) {
-          hasBehaviour = true
-          allStaticLiteral = false
-          break
-        }
+        if (functionValueOf(member) !== null) return null
         hasAnyField = true
         if (!isConstantLikeField(member)) allStaticLiteral = false
         break
@@ -61,12 +54,9 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
         break
     }
   }
-  if (!hasBehaviour && !hasAnyField) return null
-  if (!hasBehaviour && hasAnyField && allStaticLiteral) {
-    return { reason: "pure constants", category: "B" }
-  }
-  if (!hasBehaviour) return { reason: "pure DTO", category: "B" }
-  return null
+  if (!hasAnyField) return null
+  if (allStaticLiteral) return { reason: "pure constants", category: "B" }
+  return { reason: "pure DTO", category: "B" }
 }
 
 function isConstantLikeField(field: Node): boolean {
