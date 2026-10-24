@@ -1,5 +1,22 @@
 # @aburi/github-action
 
+## 0.5.0
+
+### Minor Changes
+
+- df99594: Breaking: a run whose checkout is neither the merge ref nor the pull request's head (a default `pull_request_target` checkout, for example) now fails with exit 2 instead of reporting a diff of the base branch. On the base branch, check out the pull request's head or merge ref; where the checkout already holds the pull request's code, set `refspec` to name both sides yourself.
+
+  With no `refspec`, a pull request is now compared against the tree its checkout grew from. The merge commit a plain `actions/checkout` gives a `pull_request` run is compared with its first parent, the base branch commit it was merged into, and a merge whose first parent is not on `origin/<base.ref>` is refused. A checkout of the pull request's head is compared with its merge base with the base branch: `origin/<base.ref>` as the clone fetched it, and `pull_request.base.sha`. Without that tracking ref the head is compared with its merge base with `base.sha` alone, and a warning says so. A pull request that has fallen behind its base branch is no longer charged with the base branch's newer changes, and both sides are the full SHAs of the trees compared.
+
+  A shallow clone, which `aburi diff` refuses anyway, now stops before the diff with exit 2 and a message that names what is checked out before saying the clone is shallow. An explicit `refspec` is trimmed and used as given, and one that spans more than one line is refused. `cli-exit-code` is set whenever the run fails, even before the diff: 2 for a rejected input or ref spec, 1 for a failed setup step. The step that resolves the ref spec now runs from `working-directory`, after the Node and pnpm setup.
+
+### Patch Changes
+
+- b7a7148: The composite action installs pnpm and Node with `pnpm/action-setup@v6` and `actions/setup-node@v7`, the versions this repository's own workflows use, and the README's workflow examples use the same action versions. The `fail-on` and `max-bytes` input descriptions point at the published CLI reference instead of repository paths.
+- cf6aeb1: `aburi diff` now removes the `diff.json` and `diff.md` an earlier run left in the output directory before it compares anything, as it already did `diff.full.md`. A run that stops first — a plugin that fails to load, a strict scan's undeclared value — leaves no report behind, instead of one describing some other diff.
+
+  The GitHub Action sets `diff-json-path` and `diff-md-path` only for a file this run wrote, and as absolute paths. The comment step used to run on every exit 3, including a plugin error's, and then failed on a missing `diff.md` or posted the one an earlier run left; it also prefixed the path with `working-directory`, so an absolute `output-dir` failed the upsert with ENOENT on a diff that had succeeded. An empty `output-dir` is now refused with exit 2, since the CLI would read it as the directory it runs in.
+
 ## 0.4.0
 
 ### Minor Changes

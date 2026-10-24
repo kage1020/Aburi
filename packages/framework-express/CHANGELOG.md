@@ -1,5 +1,76 @@
 # @aburi/framework-express
 
+## 0.4.0
+
+### Minor Changes
+
+- 5a7f848: Whether a file imports `express`, which decides between `high` and `medium` for every kept Symbol whose confidence reads the import, is now read from the file's parsed import edges instead of regular expressions over its text. A named import wrapped over several lines, as a formatter writes it, no longer drops the file's routes, middleware and Routers to `medium`, so reformatting an import is no longer reported as confidence changes; a commented-out `import express from "express"` no longer raises a non-Express file to `high`. An import of an `express/…` subpath and a re-export from `express` count too.
+
+  Where no edge names `express`, the text is still read, now as tokens, with comments skipped and string, template and regular-expression literals stepped over. It answers for CommonJS `const express = require("express")`, which produces no edge, and for an import the edges miss although it is written: one the parser lost to merge-conflict markers or junk after it, or one inside a `declare module` block. An import or `require` that is only a comment, or only text inside a string, no longer counts; a `require` with its specifier in backticks does. JSX text holding a quote or a backtick can still mislead that reading on the lines it spans.
+
+  `classifyExpressSymbol`, `hasExpressImport` and `ExpressFrameworkPlugin.classifySymbol` now take the `FrameworkClassifyContext` the scan already passed instead of `ExtractionContext`, so a caller that builds the context itself has to add the file's `imports`.
+
+  No fingerprint reads confidence, so no fingerprint moves. An IR scanned before this release, compared with one scanned after, reports a confidence change on every kept Symbol whose confidence reads the import, in a file whose answer changed: one with a wrapped import, an import or `require` left in a comment or quoted in a string, a `require` in backticks, an `express/…` subpath, or a re-export from `express`. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
+
+- c3797cb: A module-level call is now a `framework:express:route` only when it is handed a handler after its path, not whenever its method is `get`, `post`, `put`, `patch`, `delete` or `all`. `cache.delete("key")`, `settings.get("port")`, `url.searchParams.delete("x")`, `axios.post(url, { id })` and Express's own settings getter `app.get("env")` were classified as routes, at `medium` confidence in a file without an Express import, and adding an unrelated `import express` to such a file was reported as a confidence change. The first argument is taken as the path, and its shape is not checked, so `cache.put(key, value)` is still a route. At least one argument after it must be handler-shaped: an inline function, an identifier, a member path (`users.list`, `handlers["list"]`), a call (`asyncHandler(listUsers)`, `passport.authenticate("google", { scope })`), a choice between handlers (`isProd ? cached : live`, `custom || defaultHandler`, `options.handler ?? fallback`), or an array or spread of handlers. A chain that has called `.route(path)` with a literal path beginning with `/`, on any receiver, has written the path already, so `app.route("/users").get(listUsers)` needs the handler alone, and so does a call whose first argument is a spread (`app.get(...routeArgs)`). Arguments and the receiver chain are read through `as`, `satisfies`, `!` and parentheses, as `@aburi/lang-typescript` reads them to name the registration, and that now holds for `.use(...)` too: `app.use(logger as RequestHandler)` is middleware and `app.use("/api", apiRouter as Router)` a mount, as their bare spellings are. `hasRouteArguments` is exported.
+
+  The `api` fingerprint reads `extKind`, so it moves for every call this classifies differently. Most of the calls that lose `framework:express:route` were never routes, but these registrations lose it too and are no longer classified at all: a route whose only handler is awaited (`app.get("/x", await makeHandler())`), constructed (`app.get("/x", new AsyncHandler(listUsers))`) or written behind an old-style assertion (`app.get("/x", <RequestHandler>listUsers)`); a route registered on a name an `app.route(path)` call was bound to (`const r = app.route("/users")`, then `r.get(listUsers)`), which is shaped like `cache.get(key)` and which the plugin, reading one statement at a time, cannot tell apart from it; and an `app.route(...)` chain whose path is not a literal beginning with `/` (`app.route(USERS_PATH).get(listUsers)`). A `.use(...)` call whose argument is wrapped gains its kind. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains or loses those of them that have effects. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
+
+- b1d865d: A `Router()` is now read from the declarator of the Symbol being classified. A `const` Symbol's node is its whole declaration statement, and the first declarator in it was read whichever name was asked about, so in `export const router = express.Router(), API_PREFIX = "/api/v1"` every name became a `framework:express:router`, and a `Router()` declared second (`const limit = 10, adminRouter = express.Router()`, or CommonJS `var express = require('express'), router = express.Router()`) was never classified. A name destructured from a `Router()` call (`const { stack } = Router()`) is no longer a Router either, and a Router declared after another one (`const a = Router(), b = express.Router()`) is now named by its own callee in `derivedBy`. `extractRouterCall` now takes the Symbol's name as a second argument.
+
+  The `api` fingerprint reads `extKind`, so it moves for every name this reclassifies: a sibling of a leading `Router()` loses `framework:express:router`, a name destructured from one loses it too, and a `Router()` declared after another name gains it. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains or loses those of them that have effects. A Router declared after another Router keeps its kind; at most its `derivedBy` changes, which no fingerprint reads. A statement whose one declarator binds a plain name to a bare `Router()`, or to one in parentheses with no comment inside them, is read as before. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
+
+- 90fa1cb: A `Router()` initializer is now read through `as`, `satisfies` and `!` as well as parentheses, as the plugin already reads a route's arguments and receiver chain: `const router = express.Router() as express.Router`, `const r = Router() satisfies Router` and `const r = Router()!` are `framework:express:router`, as their bare spellings are, and so is a parenthesized `Router()` with a comment inside the parentheses (`const r = (/* api */ Router())`). None of them was classified.
+
+  The `api` fingerprint reads `extKind`, so it moves for each const this classifies. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface gains those of them that have effects. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
+
+### Patch Changes
+
+- b7a7148: The declaration files carry less JSDoc: comments that restated the code, and citations of design documents in the IR, diff, config and plugin schemas' descriptions, are gone. No behaviour changes.
+- d54a82a: Name module-level registrations by what they are written with, not by where they are written
+
+  A module-level registration with no quoted path (`app.use(cors())`, `app.use(authMw)`) is now named by the names its arguments carry (`app__use__cors__d0`, `app__use__authMw__d0`), and its path is read wherever it is written. Both used to fall back to a source-order ordinal (`app__use__d0`, `app__use__d1`, …), so inserting one registration above others renamed every later one, and `aburi diff` paired each with the body its id used to hold: adding `app.use(compression())` was reported as removing the authorization guard of the middleware below it.
+
+  - **The path.** A path written in backticks with no substitution (``app.get(`/users`, h)``) is the path it spells, as one in quotes is. A path written up the chain names the registration (`app.route('/a').get(h)` is `app__get__$a__d0`, where it was named by the handler, so every `app.route(…).get(h)` shared one stem). A comment or a wrapper in front of the path (`("/users")`, `"/users" as string`) no longer hides it. An empty path (`app.get("", h)`) is no path.
+  - **The names.** With no path, an identifier (`authMw`), a dotted reference (`express.json` → `express_json`), a call's callee (`cors()`), a constructor (`new Logger()`) or a spread (`...mws`) names the registration, several joined by `$`. Registrations whose arguments name nothing (an inline function) keep the ordinal among themselves.
+  - **Characters.** A name or a path outside ASCII keeps its characters, as the qualified-name grammar does: `app.use(認証)` and `app.use(圧縮)` both used to fold to `app__use____`. The segment is written in Unicode NFC.
+  - **`derivedBy`** carries `argument-names:<slug>` when the names named it, beside the existing `path-literal:<path>`; never both.
+
+  A substitution-free backtick argument is also a literal in `calls[].literalArgs`, so the literal-first-argument check in `@aburi/effects-drizzle` and `@aburi/effects-prisma` now reads it: ``router.delete(`/users/:id`, h)`` is no longer recorded as a Drizzle write, nor ``this.cache.items.delete(`session`)`` as a Prisma one.
+
+  `@aburi/framework-express` reads a mount's path the same way, so ``app.use(`/api`, apiRouter)`` is `framework:express:mount`, as its id says, where it was classified `middleware`. A comment between `use`'s arguments is no longer counted as one.
+
+  **Existing ids change once.** Every registration the old naming left to the ordinal — a path-less one, one whose path was in backticks or up the chain — and every one whose name or path holds a character outside ASCII gets a new id, so a diff against an IR written before this release reports each as removed and added one time. Rescan the base rather than comparing against a stored IR; `aburi diff <base>..<head>` scans both sides with this release and is unaffected. Measured by scanning before and after: the `nestjs-billing` fixture's 39 ids and the 23 ids of the Express sources the test suites scan (17 registrations, each with a quoted path or an inline handler) are identical; a conventional Express entry file — `helmet()`, `cors()`, `compression()`, `morgan(…)`, three `express.*` parsers, a router mount, a backtick health check, an `app.route(…)` chain, 404 and error handlers — changes 11 of its 14 registration ids, keeping the quoted mount, `app.set(…)` and `app.listen(…)`.
+
+- Updated dependencies [19ead65]
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [90fa1cb]
+- Updated dependencies [b7a7148]
+- Updated dependencies [9c21737]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [ad04fff]
+- Updated dependencies [1a56ce7]
+- Updated dependencies [f32e45b]
+- Updated dependencies [b7a7148]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [6be7d2e]
+- Updated dependencies [ad21560]
+- Updated dependencies [36fd72f]
+- Updated dependencies [6afef8b]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [d4fca12]
+- Updated dependencies [463d616]
+- Updated dependencies [47f8ef9]
+- Updated dependencies [65c758f]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.3.2
 
 ### Patch Changes

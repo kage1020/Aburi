@@ -1,5 +1,53 @@
 # @aburi/markdown-projection
 
+## 0.5.0
+
+### Minor Changes
+
+- b7a7148: Removes `inlineCodePath` and `inlineCodeValue`, the deprecated aliases of `inlineCode`; call `inlineCode` instead.
+
+  The Slice View note about unresolved calls and two refusal messages no longer cite design-doc sections. A Slice with no members is now refused instead of being left out of the Slice View without a word, and both of the Slice View's refusals throw `ProjectionInvariantError`, naming the field and the Slice, like the projection's other invariant violations.
+
+- 6068bca: `aburi scan` now removes what an earlier run left in the output directory and this run does not write. A Component renamed or removed since loses its `components/<id>.md`; the old page used to stay beside the current ones, so anything reading `components/*.md` read a Component the IR no longer held. `--format json` (or `--no-md`) removes `workspace.md` and the component pages, and `--format md` (or `--no-json`) removes `aburi.ir.json`, which `aburi explain --no-rescan` used to answer from, finding a Symbol under the name it had before a rename. `aburi.ir.json` and `workspace.md` are recognised by name alone, so a file of your own under either name goes too. In `components/` only Aburi's pages go: a page is a file named after a Component id whose first line is its `# Component: <id>` heading, so a README, notes or a subdirectory there stays.
+
+  Every removal comes after the run's last write, so a scan that stops before it has written everything removes nothing, and a `--format md` run that cannot write `workspace.md` keeps the earlier `aburi.ir.json`. A removal that fails ends the run with the files before it already removed; the next scan that completes removes the rest. A path that cannot be removed, a `components/` that cannot be listed and a page whose first line cannot be read are refused like a path that cannot be written, and the message names the step: `aburi scan could not list the components directory at …`, `could not read the Markdown for component "beta" at …`. A directory standing where an earlier run's file would be is described that way, by `aburi diff` too, rather than as one standing where the file would go. Only `aburi scan` removes anything: the scan `aburi explain` runs when it finds no IR, and `runScan` called with another `command`, remove nothing. `--log-level info` prints an `info: Removed <artefact> at <path>` line for each file removed, the discovered-vocabulary record a strict scan removes included.
+
+  `@aburi/markdown-projection` exports `componentHeading`, the line a component page opens with.
+
+  The IR and the pages are unchanged, so an IR scanned before this release, compared with one scanned after, reports nothing it did not before.
+
+- 47f8ef9: A file git renamed between the revisions and skipped by one scan now leaves its Symbols `unknown` instead of confidently `removed` or `added`. The skip was looked up only under the leftover's own path, while the other scan had recorded the file under its other name, so `src/big.ts → src/billing.ts` with `src/billing.ts` over the size cap at head reported every Symbol of `src/big.ts` as removed and tripped `--fail-on removed`.
+
+  - Such an entry carries the new optional `SymbolUnknown.lostPath` (`aburi.diff.v1`), the path the skipping scan recorded. `diff.md` names that path as this file's head (or base) name, where it used to name the other revision's path as the one skipped.
+  - Dependency edges get the same lookup, and their `lostFiles[].path` is the path the skipping scan recorded, not the holder's.
+  - A renamed file both scans skipped appears in `notCompared[]` under the head path, with the base path in the new optional `NotComparedFile.basePath`. `diff.md` and the stderr line name it as `base → head`.
+  - `diffDependencies` now requires `renames`. `RenameDirections` and `renameDirections` are exported to build it, and a caller with no rename information passes `renameDirections(null)`.
+
+### Patch Changes
+
+- 3499bce: The component diagram in `workspace.md` now writes every mermaid node id with a `c_` prefix, in node declarations and edges alike (`billing-api` → `c_billing_api`). Ids were written bare, and mermaid's flowchart grammar reads several valid component ids as keywords: a workspace package named `graph`, `flowchart`, `subgraph`, `end`, `style`, `class` or `interpolate`, or `click`, `call` or `href` at either end of an edge, made GitHub show a parse error in place of the whole diagram, and `click` at the start of an edge (`click --> api`) parsed as a click statement that dropped the edge. Component detection takes the id from `package.json#name`, or from the directory name when the manifest has none, so no configuration was needed to hit it.
+
+  The `Fallback list:` now follows every diagram, and the note that replaces a diagram past 100 nodes, also when the IR holds no Component edge, where it reads `_No Component edges recorded._`. It was emitted only when there was an edge, so a diagram that failed to render left no text form, and the note's "See list below." pointed at nothing. `aburi scan` writes Symbol edges only, so every scanned `workspace.md` with a component gains that list and sentence. A workspace with no component and no Component edge reads `_No Component edges recorded._` where it read `_No inter-component dependencies._`.
+
+  This change touches `workspace.md` alone: nothing in the IR, its fingerprints, the component pages or `diff.md` depends on the diagram's node ids or its list. A `workspace.md` kept under version control shows every node and edge line of its diagram changed once.
+
+- 36fd72f: A parameter's optional marker, default and rest marker now reach the `api` fingerprint. Each `Signature.inputs` entry can carry two new optional fields, written only when true: `optional` for a parameter written `a?: T` or with a default, and `rest` for `...ids: T[]`. The api fingerprint hashes them beside `type`, which stays the annotation alone; a rest parameter's `name` is now the bare binding (`ids` rather than `...ids`). Making an optional parameter required, dropping a default, or turning `T[]` into `...T[]` used to leave every fingerprint identical, so `aburi diff` reported no change and `--fail-on api-changed` passed. The diff now reports an api change and names the parameter under `signature.inputs modified`. The Markdown output prints the markers where TypeScript writes them (`a?: string`, `...ids: string[]`, and `limit?` for a default), and an untyped parameter as its name alone rather than `x: `. A parameter whose name a recovered parse left missing, such as `f(?: string)`, is named by the text the source wrote rather than by an empty string.
+
+  Functions with an optional, defaulted or rest parameter get a new `api` value once. A parameter with neither carries no new key, so its hash is byte-identical. Scanning this repository, 191 of its 2,714 kept Symbols moved `api`, and none moved `logic`, `syntax`, `calls[].resolved` or `dependencies[]`. Those can move in one narrow case: a function calls, by its bare name, a Symbol that one of its own rest parameters also names, as in `function run(...save) { save() }` with a `save` declared in or imported into the module. The bare name now shadows that Symbol, as any other parameter's name does, so the call no longer resolves to it. The edge and the effects it carried leave the function, and because `logic` is computed after effect propagation, callers that inherited those effects move `logic` too. An IR scanned before this release, compared with one scanned after, reports the affected Symbols as changed; rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides and is unaffected.
+
+- 3b60893: A Symbol paired across a change of name now shows its old name. Every delta body of a pair whose name changed opens with a `name` row; a move between files gives each path with its name in the Moved + Changed entry, the folded Moved list and a Slice member's follow-up line; and the pair's names-only rows say where it came from, `(from <old name> in <path>)` or `(from <old name> at L<line>)`, in API changes, Logic changes and Confidence changes as well as Moved + Changed, so the old name stays in the report whichever of those sections `--max-bytes` keeps. A change of the name's last segment explains the API flag, so the "no field-level detail" row no longer follows it.
+- 1739845: `projectDiff` with `maxBytes` (and `aburi diff --max-bytes`) now counts the size-cap note when choosing between a section's full and names-only forms. A section with one or two thin entries stays whole where that makes the report no larger, also below a names-only section, where it used to be named only in a longer report or omitted although it fit. A section is no longer left out while the finished report has room for it.
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [b7a7148]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [36fd72f]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+
 ## 0.4.0
 
 ### Minor Changes

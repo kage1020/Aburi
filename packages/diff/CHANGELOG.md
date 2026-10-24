@@ -1,5 +1,57 @@
 # @aburi/diff
 
+## 0.6.0
+
+### Minor Changes
+
+- 47f8ef9: A file git renamed between the revisions and skipped by one scan now leaves its Symbols `unknown` instead of confidently `removed` or `added`. The skip was looked up only under the leftover's own path, while the other scan had recorded the file under its other name, so `src/big.ts → src/billing.ts` with `src/billing.ts` over the size cap at head reported every Symbol of `src/big.ts` as removed and tripped `--fail-on removed`.
+
+  - Such an entry carries the new optional `SymbolUnknown.lostPath` (`aburi.diff.v1`), the path the skipping scan recorded. `diff.md` names that path as this file's head (or base) name, where it used to name the other revision's path as the one skipped.
+  - Dependency edges get the same lookup, and their `lostFiles[].path` is the path the skipping scan recorded, not the holder's.
+  - A renamed file both scans skipped appears in `notCompared[]` under the head path, with the base path in the new optional `NotComparedFile.basePath`. `diff.md` and the stderr line name it as `base → head`.
+  - `diffDependencies` now requires `renames`. `RenameDirections` and `renameDirections` are exported to build it, and a caller with no rename information passes `renameDirections(null)`.
+
+### Patch Changes
+
+- b7a7148: The errors `buildDiff` and `computeSlices` raise for a document that repeats a Symbol, Component or Dependency, or for a malformed Slice record, no longer cite design-doc sections; each says on its own why the input is refused.
+- 38317cb: The name-and-signature stage of the matcher now compares its score with the threshold in exact fractions. The score, `0.5 × member + 0.3 × signature + 0.2`, was summed in floating point, so a pair that scored exactly its row's threshold could land a rounding error to one side of it or the other. A method that moved file and gained a fourth name token with one of four parameters retyped (`createUserAccount(a: string, b: number, c: Date, d: boolean)` → `createUserAccountRecord(…, d: Options)`, exactly 0.85) scored `0.8499999999999999` and was reported as one `added` and one `removed`, tripping `--fail-on removed`, while other pairs at the same score rounded up and paired. Every term of the score is a ratio of two counts, so it is now kept as one fraction and compared with its row (1, 19/20 or 17/20) by cross-multiplying integers, and such a pair is one `moved+changed` with rationale `name-signature`. Two candidates whose scores are the same fraction now also tie, and the lower base id, then head id, settles them, where rounding used to choose.
+
+  The IR does not change, so no rescan is needed: two stored IRs compared with this release report these pairs as `moved+changed` where the previous release reported an addition and a removal. `signatureSimilarity` now returns its exact mean divided out once, which can differ from the previous value in the last bit; `jaccard`, `nameSimilarity` and `memberSimilarity` return what they did.
+
+- 36fd72f: A parameter's optional marker, default and rest marker now reach the `api` fingerprint. Each `Signature.inputs` entry can carry two new optional fields, written only when true: `optional` for a parameter written `a?: T` or with a default, and `rest` for `...ids: T[]`. The api fingerprint hashes them beside `type`, which stays the annotation alone; a rest parameter's `name` is now the bare binding (`ids` rather than `...ids`). Making an optional parameter required, dropping a default, or turning `T[]` into `...T[]` used to leave every fingerprint identical, so `aburi diff` reported no change and `--fail-on api-changed` passed. The diff now reports an api change and names the parameter under `signature.inputs modified`. The Markdown output prints the markers where TypeScript writes them (`a?: string`, `...ids: string[]`, and `limit?` for a default), and an untyped parameter as its name alone rather than `x: `. A parameter whose name a recovered parse left missing, such as `f(?: string)`, is named by the text the source wrote rather than by an empty string.
+
+  Functions with an optional, defaulted or rest parameter get a new `api` value once. A parameter with neither carries no new key, so its hash is byte-identical. Scanning this repository, 191 of its 2,714 kept Symbols moved `api`, and none moved `logic`, `syntax`, `calls[].resolved` or `dependencies[]`. Those can move in one narrow case: a function calls, by its bare name, a Symbol that one of its own rest parameters also names, as in `function run(...save) { save() }` with a `save` declared in or imported into the module. The bare name now shadows that Symbol, as any other parameter's name does, so the call no longer resolves to it. The edge and the effects it carried leave the function, and because `logic` is computed after effect propagation, callers that inherited those effects move `logic` too. An IR scanned before this release, compared with one scanned after, reports the affected Symbols as changed; rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides and is unaffected.
+
+- ad101d5: Slice View reads each base call edge in the ids its Nodes carry. A Symbol whose id changed between the revisions (a `moved+changed` relocated to another file or renamed within its own, or a `dropped-toggled` matched under a new id) used to lose every base-only edge from or to it, so a callee its caller stopped calling became a singleton. Such a Symbol now clusters through its base edges, as it does when its id stays the same.
+- Updated dependencies [19ead65]
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [90fa1cb]
+- Updated dependencies [b7a7148]
+- Updated dependencies [9c21737]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [ad04fff]
+- Updated dependencies [1a56ce7]
+- Updated dependencies [f32e45b]
+- Updated dependencies [b7a7148]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [6be7d2e]
+- Updated dependencies [ad21560]
+- Updated dependencies [36fd72f]
+- Updated dependencies [6afef8b]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [d4fca12]
+- Updated dependencies [463d616]
+- Updated dependencies [47f8ef9]
+- Updated dependencies [65c758f]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes
