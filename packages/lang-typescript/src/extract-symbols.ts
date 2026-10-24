@@ -20,7 +20,7 @@ import { readDecorators } from "./decorators"
 import {
   exportEvidence,
   isDefaultExport,
-  promoteDefaultExports,
+  promoteDetachedExports,
   topLevelVisibility,
 } from "./export-evidence"
 import { readLeadingJsDoc } from "./leading-jsdoc"
@@ -43,7 +43,7 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
   for (const stmt of root.namedChildren) {
     if (stmt !== null) visitStatement(stmt, ctx, [], out, callState)
   }
-  return promoteDefaultExports(root, out.list())
+  return promoteDetachedExports(root, out.list())
 }
 
 function visitStatement(
