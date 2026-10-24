@@ -88,6 +88,7 @@ export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   checkSymbolKindEnum(ir, violations)
   checkSymbolExtKindShape(ir, violations)
   checkPathsArePosix(ir, violations)
+  checkPublicApiSpelling(ir, violations)
   checkArraySortOrder(ir, violations)
   checkCallEdgeEndpoints(ir, violations)
   checkDependencyTupleUniqueness(ir, violations)
@@ -372,10 +373,12 @@ function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
     if (violation === null) continue
     out.push({ invariant: 10, subject: site.subject, message: violation.message })
   }
+}
 
+function checkPublicApiSpelling(ir: IR, out: IntegrityViolation[]): void {
   for (const component of ir.components) {
     for (const entry of component.publicApi ?? []) {
-      const violation = posixSpellingViolation(entry, "publicApi entry")
+      const violation = posixSpellingViolation(entry, "entry")
       if (violation === null) continue
       out.push({
         invariant: 10,

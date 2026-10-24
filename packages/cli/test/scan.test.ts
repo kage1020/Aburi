@@ -117,13 +117,24 @@ describe("aburi scan — what the caller and the config add", () => {
     expect((await scan()).exitCode).toBe(EXIT.SUCCESS)
   })
 
-  it("blames the config, not the IR, for a component root that leaves the workspace", async () => {
-    await declaredComponent({ roots: ["../shared"] })
+  it.each([
+    [
+      "a component root that leaves the workspace",
+      { roots: ["../shared"] },
+      'components[id=shared] root "../shared"',
+    ],
+    [
+      "a publicApi entry holding a backslash",
+      { roots: ["packages/shared"], publicApi: ["src\\index.ts"] },
+      'components[id=shared] publicApi entry "src\\index.ts"',
+    ],
+  ])("blames the config, not the IR, for %s", async (_what, component, named) => {
+    await declaredComponent(component)
 
     const error = await errorFrom(CliError, () => scan())
 
     expect(error.code).toBe("config-error")
-    expect(error.message).toContain("components[id=shared] root")
+    expect(error.message).toContain(named)
   })
 
   it("normalizes a component's publicApi patterns, as component detection does", async () => {
@@ -139,13 +150,15 @@ describe("aburi scan — what the caller and the config add", () => {
     expect(ir.components[0]?.publicApi).toEqual([`src/${decomposed.normalize("NFC")}.ts`])
   })
 
-  it("blames the config, not the IR, for a publicApi entry holding a backslash", async () => {
-    await declaredComponent({ roots: ["packages/shared"], publicApi: ["src\\index.ts"] })
+  it("carries a publicApi glob or Symbol id the IR schema admits as written, wherever it points", async () => {
+    const publicApi = ["../shared/**", "./src/**", "/abs/index.ts", "ts:src/a.ts#Invoice"]
+    await workspace.writeSource("packages/shared/index.ts", "export const shared = 1\n")
+    await declaredComponent({ roots: ["packages/shared"], publicApi })
 
-    const error = await errorFrom(CliError, () => scan())
+    const ir = JSON.parse(await readFile((await scan()).irPath ?? "", "utf8")) as IR
 
-    expect(error.code).toBe("config-error")
-    expect(error.message).toContain("components[id=shared] publicApi entry")
+    expect(ir.components[0]?.publicApi).toEqual(publicApi)
+    expect(irSchemaViolations(ir)).toEqual([])
   })
 })
 

@@ -166,27 +166,40 @@ describe("checkIRIntegrity", () => {
 })
 
 describe("checkIRIntegrity — publicApi entries", () => {
-  function withPublicApi(publicApi: string[]): IR {
+  function withPublicApi(byComponent: Record<string, string[]>): IR {
     return irWith((ir) => {
-      ir.components = [component({ id: "a", name: "a", publicApi })]
+      ir.components = Object.entries(byComponent).map(([id, publicApi]) =>
+        component({ id, name: id, publicApi }),
+      )
     })
   }
 
   it.each([
-    ["an empty entry", "", "is empty"],
-    ["an entry holding a backslash", "src\\index.ts", "contains a backslash"],
-  ])("refuses %s, as the schema does", (_what, entry, reason) => {
-    expect(checkIRIntegrity(withPublicApi([entry]))).toEqual([
-      {
-        invariant: 10,
-        subject: "components[id=a].publicApi",
-        message: expect.stringContaining(reason),
-      },
+    ["an empty entry", "", "entry is empty"],
+    [
+      "an entry holding a backslash",
+      "src\\index.ts",
+      'entry "src\\index.ts" contains a backslash; write "/" as the separator',
+    ],
+  ])("refuses %s, as the schema does", (_what, entry, message) => {
+    expect(checkIRIntegrity(withPublicApi({ a: [entry] }))).toEqual([
+      { invariant: 10, subject: "components[id=a].publicApi", message },
+    ])
+  })
+
+  it("refuses every such entry, past a clean one and in every component", () => {
+    const ir = withPublicApi({ a: ["lib/index.ts", "src\\index.ts"], b: [""] })
+
+    expect(checkIRIntegrity(ir).map((v) => v.subject)).toEqual([
+      "components[id=a].publicApi",
+      "components[id=b].publicApi",
     ])
   })
 
   it("holds an entry to no rule about where a path points, since it is a glob or a Symbol id", () => {
-    const ir = withPublicApi(["../shared/**", "./src/**", "/abs/index.ts", "ts:src/a.ts#Invoice"])
+    const ir = withPublicApi({
+      a: ["../shared/**", "./src/**", "/abs/index.ts", "ts:src/a.ts#Invoice"],
+    })
 
     expect(checkIRIntegrity(ir)).toEqual([])
   })

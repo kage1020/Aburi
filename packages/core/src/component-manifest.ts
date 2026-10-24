@@ -142,10 +142,10 @@ function collectFromExports(value: unknown, out: Set<string>): void {
 }
 
 function normalizePackagePath(raw: string | undefined | null): string | null {
-  if (typeof raw !== "string" || raw.startsWith("/") || raw.endsWith("/")) return null
-  const path = toNfc(raw)
-    .split("/")
-    .filter((segment) => segment.length > 0 && segment !== ".")
-    .join("/")
+  if (typeof raw !== "string" || raw.startsWith("/")) return null
+  const segments = toNfc(raw).split("/")
+  const last = segments[segments.length - 1]
+  if (last === "" || last === ".") return null
+  const path = segments.filter((segment) => segment.length > 0 && segment !== ".").join("/")
   return posixWorkspaceRelativeViolation(path) === null ? path : null
 }

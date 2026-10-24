@@ -123,7 +123,11 @@ describe("the public API from package.json", () => {
       { main: "./", module: ".", types: "./.", typings: "././" },
       [],
     ],
-    ["no entry for a value naming a directory inside it", { main: "./lib/", types: "lib/" }, []],
+    [
+      "no entry for a value naming a directory inside it",
+      { main: "./lib/", module: "./lib/.", types: "lib/", typings: "lib/." },
+      [],
+    ],
     [
       "the files of an exports map and not the folders it maps",
       { exports: { ".": "./src/ok.js", "./": "./", "./lib/": "./lib/" } },
@@ -139,11 +143,25 @@ describe("the public API from package.json", () => {
       },
       [],
     ],
+    ["no entry for a first segment read as a drive", { main: "a:index.js" }, []],
     [
-      "one entry for a path written with repeated or inner `.` segments or a doubled slash",
-      { main: "././dist/index.js", module: "./dist/./index.js", types: "dist//index.js" },
-      ["dist/index.js"],
+      "a first segment of two letters before a colon, which is no drive",
+      { main: "ab:index.js" },
+      ["ab:index.js"],
     ],
+    [
+      "no entry for a `..` segment that stays inside the package",
+      { exports: { ".": "dist/../index.js" } },
+      [],
+    ],
+    [
+      "no entry for a value that is not a string",
+      { main: 42, module: true, types: {}, typings: null },
+      [],
+    ],
+    ["one entry for a repeated leading `./`", { main: "././dist/index.js" }, ["dist/index.js"]],
+    ["one entry for an inner `.` segment", { module: "./dist/./index.js" }, ["dist/index.js"]],
+    ["one entry for a doubled slash", { types: "dist//index.js" }, ["dist/index.js"]],
     [
       "one entry for two spellings of one path, in NFC",
       { exports: { ".": `./src/${decomposed}.ts` }, main: `./src/${composed}.ts` },
