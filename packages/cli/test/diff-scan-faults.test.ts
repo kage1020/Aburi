@@ -47,19 +47,37 @@ describe("aburi diff — the two scans it ran", () => {
     expect(log.warnings.join("\n")).not.toContain("v1.1.0")
   })
 
-  it("says a pluginOptions key that names no loaded plugin once, unlabelled, though both sides load the plugins", async () => {
+  it.each([
+    {
+      base: "bad.stub",
+      exitCode: EXIT.SUCCESS,
+      faultedScans: [],
+      baseLine: '⚠ base ref "main": 1 file(s) could not be parsed and were left out of the IR.',
+    },
+    {
+      base: "boom.stub",
+      exitCode: EXIT.GATE,
+      faultedScans: ["base"],
+      baseLine:
+        '⚠ base ref "main": extraction-failed (1) — a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.',
+    },
+  ])("says a pluginOptions key that names no loaded plugin once and unlabelled, and exits as it would without the key, when the base holds $base", async ({
+    base,
+    exitCode,
+    faultedScans,
+    baseLine,
+  }) => {
     const { report, warnings } = await diffRevisions(
-      { base: ["bad.stub", "ok.stub"], head: ["ok.stub"] },
-      { config: { pluginOptions: { "effects-prsima": {} } } },
+      { base: [base, "ok.stub"], head: ["ok.stub"] },
+      { config: { pluginOptions: { "effects-prsima": {}, "lang-stub": {} } } },
     )
 
-    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    expect(report.exitCode).toBe(exitCode)
+    expect(report.faultedScans).toEqual(faultedScans)
     expect(warnings.filter((line) => line.includes("pluginOptions"))).toEqual([
       '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-stub); its options are ignored.',
     ])
-    expect(warnings).toContain(
-      '⚠ base ref "main": 1 file(s) could not be parsed and were left out of the IR.',
-    )
+    expect(warnings).toContain(baseLine)
   })
 
   it("gates on a plugin fault at either side and names which, with no clause triggered", async () => {

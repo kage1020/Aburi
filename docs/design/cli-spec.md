@@ -269,12 +269,14 @@ the IR says `framework-next` was a plugin's name ([config.md](./config.md) §6).
 
 The `pluginOptions` line follows it, one per key that names no loaded plugin
 ([config.md](./config.md) §5.4), for the same reason: the IR records the plugins that loaded but
-not the options the config gave. Of the report's `⚠` lines it is the only one that never carries
-a scan's label, and a command says it once however many scans it runs: it describes the config
-and the plugins loaded for it, not the tree a scan read, and `aburi diff`'s two scans load the
-same of both (§6.4 step 3, §6.4.1.5), so a label would pin it on one side and a second copy would
-say nothing new. The scans of one command share the set of lines already said, which `runScan`
-takes as `incidents.said`.
+not the options the config gave. Of the `⚠` lines a scan reports it is the only one that never
+carries a scan's label, and a command says it once however many scans it runs. The `frameworks`
+line keeps its label, and under `aburi diff` is said by each scan, because the value it names
+lands in that scan's IR (`components[].frameworks` carries it as written), so each copy
+describes something its side's artifact holds. A `pluginOptions` key reaches no artifact at all,
+and `aburi diff`'s two scans read the same config and load the same plugins (§6.4 step 3,
+§6.4.1.5), so a label would pin it on one side and a second copy would say nothing new. The scans
+of one command share the set of lines already said, which `runScan` takes as `incidents.said`.
 
 The parse-error line names its files, which nothing else does: mostly they are in the IR, so
 `stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
@@ -367,13 +369,13 @@ scans skipped it, on an `unknown` entry when the other scan has Symbols from it 
 `warn: Skipped …` line is its only account, and for a reason decided before extraction there is
 none.
 
-§5.8's paragraph, the unreleased-tree line and the parse-error listing sit directly under the
-coverage line and above this census — ahead of everything that is recoverable from the artifact,
-because they are the sections that are not. A sink that closes takes whatever is last, so what
-exists nowhere else goes first.
+§5.8's paragraph, the unreleased-tree line and the parse-error listing sit under the coverage,
+`frameworks` and `pluginOptions` lines and above this census — ahead of everything that is
+recoverable from the artifact, because they are the sections that are not. A sink that closes
+takes whatever is last, so what exists nowhere else goes first.
 
-A command that runs more than one scan labels them, after the glyph, with the scan the line
-came from:
+A command that runs more than one scan labels every line but the `pluginOptions` one (§5.6),
+after the glyph, with the scan the line came from:
 
 ```
 ⚠ base ref "main": 3 file(s) had recoverable parse errors.
@@ -648,7 +650,7 @@ With refs (every git command these steps run gets the caller's environment as §
 3. Run `aburi scan` on the base and store the IR temporarily
    - **Config used**: apply the **head-side `aburi.json`** to the base scan as well (the base is interpreted through the head's view; a stale config remaining in the base is ignored)
    - Rationale: using the config as of the base ref would make "config change = the entire IR changes", breaking the diff. Fixing the view to the head automatically resolves config differences
-   - A future `--base-config <path>` may be provided to override this (planned — see the [roadmap](../roadmap.md))
+   - A future `--base-config <path>` may be provided to override this (planned — see the [roadmap](../roadmap.md)). The two scans would then no longer read one config, and the `pluginOptions` line (§5.6) would be said by each, labelled by side
 4. Run `aburi scan` on the head (the original cwd)
    - Both scans root at the repository: the workspace-root walk stops at the first `.git` ([`component-detect.md`](./component-detect.md) §2.1, CD32), the head checkout's own `.git` (a directory or a file) on one side and the temporary worktree's `.git` file on the other. Rooted anywhere else, the two sides scan different trees (`component-detect.md` §11.1 has the layouts that did), so a base scan that roots anywhere but its worktree ends the run as a bug in Aburi (exit `1`, §9)
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
@@ -686,7 +688,7 @@ When scanning the base ref for `aburi diff <base>..<head>`, Aburi **shares the h
 - **Known limitation**: when the base ref's sources cannot be extracted with the head's plugins (e.g. the base uses syntax from an older framework version and the head's framework plugin only supports the newer one), parsing/extraction may fail
   - This is a consequence of the "IR generator is pinned to the head environment" design
   - On failure, the affected file is skipped with a warning log
-- The request "apply the base ref's contemporaneous plugin set" is under consideration as `--base-plugins <path>` for a future release (see the [roadmap](../roadmap.md))
+- The request "apply the base ref's contemporaneous plugin set" is under consideration as `--base-plugins <path>` for a future release (see the [roadmap](../roadmap.md)). The two scans would then no longer load one plugin set, and the `pluginOptions` line (§5.6) would be said by each, labelled by side
 
 #### 6.4.2 GitHub Actions Guidance
 
@@ -765,9 +767,9 @@ A file skipped by **both** scans produces no `unknown` entry — there are no Sy
 
 An IR that dropped files but predates `stats.skippedFiles` reports the count without the list, and `aburi diff` cannot then tell a lost file from a deleted one — it classifies every leftover as `added` / `removed`, which is the pre-field behaviour, and warns on **stderr** for each side that is in that state. It does not guess: inferring the list from `totalFiles > parsedFiles` would attach the doubt to whichever Symbols happened to be missing.
 
-Ref mode runs two scans, so both scans' incidents (§5.6) appear, labelled by side. The base is
-labelled by its ref; the head is labelled `head (working tree)` and never by the ref spec's head
-token, which §6.4 does not scan.
+Ref mode runs two scans, so both scans' incidents (§5.6) appear, labelled by side, apart from the
+`pluginOptions` line, which is said once and unlabelled. The base is labelled by its ref; the head
+is labelled `head (working tree)` and never by the ref spec's head token, which §6.4 does not scan.
 
 A file lost on **both** sides therefore produces each scan's account of it and then the diff's:
 each scan saying what it failed to read, and the diff saying the comparison never happened. That

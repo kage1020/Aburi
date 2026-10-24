@@ -191,7 +191,7 @@ function reportPluginNamedFrameworks(
   }
 }
 
-/** Unlabelled and said once: it is about the config and its plugins, which a command's scans share. */
+/** Not labelled: a pluginOptions key reaches no artifact, and every scan of one command reads the same config. */
 function reportUnmatchedPluginOptions(report: ScanReport, warn: WarnFn, said: Set<string>): void {
   const loaded = report.loadedPlugins.join(", ")
   for (const key of report.unmatchedPluginOptions) {

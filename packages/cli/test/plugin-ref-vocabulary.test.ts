@@ -17,7 +17,7 @@ beforeEach(async () => {
 async function scanWith(config: Record<string, unknown>) {
   await writeConfig(workspace.root, config)
   const { code, stdout, stderr } = await runCliIn(workspace.root, ["scan", "--no-timestamp"])
-  return { code, output: `${stderr}${stdout}` }
+  return { code, stderr, output: `${stderr}${stdout}` }
 }
 
 async function componentFrameworks(): Promise<unknown> {
@@ -118,7 +118,7 @@ describe("aburi scan — a plugin name where a framework id belongs", () => {
   })
 })
 
-describe("aburi scan — a pluginOptions key that names no loaded plugin", () => {
+describe("aburi scan — pluginOptions keys and the plugins it loaded", () => {
   const PRISMA = { ...TYPESCRIPT, effects: ["effects-prisma"] }
   const unmatched = (key: string, loaded: string) =>
     `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}); its options are ignored.`
@@ -126,12 +126,12 @@ describe("aburi scan — a pluginOptions key that names no loaded plugin", () =>
   it.each([
     [
       "warns about a misspelled plugin name",
-      { ...PRISMA, pluginOptions: { "effects-prsima": { treatExtendsAsTx: true } } },
+      { ...PRISMA, pluginOptions: { "effects-prsima": {} } },
       [unmatched("effects-prsima", "lang-typescript, effects-prisma")],
     ],
     [
       "warns about a plugin no list enables",
-      { ...TYPESCRIPT, pluginOptions: { "effects-prisma": { treatExtendsAsTx: true } } },
+      { ...TYPESCRIPT, pluginOptions: { "effects-prisma": {} } },
       [unmatched("effects-prisma", "lang-typescript")],
     ],
     [
@@ -147,22 +147,23 @@ describe("aburi scan — a pluginOptions key that names no loaded plugin", () =>
     ],
     [
       "says nothing about a loaded plugin's name",
-      { ...PRISMA, pluginOptions: { "effects-prisma": { treatExtendsAsTx: true } } },
+      { ...PRISMA, pluginOptions: { "effects-prisma": {} } },
       [],
     ],
     [
-      "says nothing about the name a frameworkHints entry is loaded under",
+      "lists the plugins in load order, a frameworkHints entry's last, and says nothing about its name",
       {
-        ...TYPESCRIPT,
+        ...PRISMA,
+        frameworks: ["framework-nestjs"],
         frameworkHints: [{ name: "acme", decorators: {} }],
-        pluginOptions: { "hint-acme": {} },
+        pluginOptions: { "hint-acme": {}, "effects-prsima": {} },
       },
-      [],
+      [unmatched("effects-prsima", "lang-typescript, framework-nestjs, effects-prisma, hint-acme")],
     ],
-  ])("%s, and exits 0", async (_, config, expected) => {
-    const { code, output } = await scanWith(config)
+  ])("%s, on stderr alone, and exits 0", async (_, config, expected) => {
+    const { code, stderr, output } = await scanWith(config)
 
     expect(code, output).toBe(EXIT.SUCCESS)
-    expect(output.split("\n").filter((line) => line.includes("pluginOptions"))).toEqual(expected)
+    expect(stderr).toBe(expected.map((line) => `${line}\n`).join(""))
   })
 })

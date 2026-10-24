@@ -68,7 +68,7 @@ instead.
 
 Order matters in `effects` alone. The first plugin to recognise a call wins, so
 put your project-specific plugins first. Options for an individual plugin go
-under `pluginOptions`, keyed by plugin name:
+under `pluginOptions`, keyed by the plugin's manifest name:
 
 ```jsonc
 {
@@ -78,9 +78,9 @@ under `pluginOptions`, keyed by plugin name:
 }
 ```
 
-A key that names no plugin the scan loaded, misspelled or missing from the three
-lists, gets a warning on stderr naming the plugins that did load, and its options
-are ignored.
+A key that is not the manifest name of a plugin the scan loaded (a misspelling,
+or a plugin none of the three lists enables) gets a warning on stderr naming the
+plugins that did load, and its options are ignored.
 
 ## Define components
 

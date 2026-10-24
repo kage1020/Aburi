@@ -73,7 +73,10 @@ export interface ScanOptions {
   incidents?: {
     warn: WarnFn
     label?: string
-    /** Shared by the scans of one command, which load one config and one plugin set. */
+    /**
+     * The pluginOptions lines an earlier scan of the same command already said. Share one set only
+     * across scans that read one config and load one plugin set.
+     */
     said?: Set<string>
   }
 }
