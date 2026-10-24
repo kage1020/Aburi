@@ -1,12 +1,7 @@
+import { unwrapValue } from "@aburi/core"
 import type { SymbolCandidate, Visibility } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import {
-  findChild,
-  hasChildOfType,
-  hasExportModifier,
-  statementParent,
-  unwrapValue,
-} from "./ast-helpers"
+import { findChild, hasChildOfType, hasExportModifier, statementParent } from "./ast-helpers"
 import { hasPrivateName } from "./class-members"
 
 const EXPORT_DEFAULT = "export-default"

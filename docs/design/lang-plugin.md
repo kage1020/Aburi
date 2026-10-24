@@ -438,6 +438,8 @@ A framework plugin receives the following inputs:
 - the file's `ImportEdge[]`, on `FrameworkClassifyContext` (§4.5)
 - the framework declaration of the owning component
 
+A `const`'s `fullNode` is its whole declaration statement, shared by every name it declares; a plugin reads one name's initializer from the declarator that binds it.
+
 Against these it may:
 - override `decorator.boundary`
 - fill in `Symbol.extKind` (e.g. `framework:nestjs:controller`)
