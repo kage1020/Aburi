@@ -22,14 +22,29 @@ function documentWithout(key: string): string {
 }
 
 describe("readIR", () => {
-  it("reads back a document it can trust", async () => {
-    await writeFileAt(workspace.root, "aburi.ir.json", JSON.stringify(DOCUMENT))
+  it.each([
+    ["", JSON.stringify(DOCUMENT)],
+    [" from a file that opens with a byte order mark", `\uFEFF${JSON.stringify(DOCUMENT)}`],
+  ])("reads back a document it can trust%s", async (_, contents) => {
+    await writeFileAt(workspace.root, "aburi.ir.json", contents)
     expect(await readIR(resolve(workspace.root, "aburi.ir.json"))).toEqual(DOCUMENT)
   })
 
   it.each([
     ["a file that is not there", null, "input-error", "Failed to read IR file"],
     ["text that is not JSON", "{ not json", "input-error", "is not valid JSON"],
+    [
+      "text with two byte order marks",
+      `\uFEFF\uFEFF${JSON.stringify(DOCUMENT)}`,
+      "input-error",
+      "is not valid JSON",
+    ],
+    [
+      "text with a byte order mark after its first character",
+      `{\uFEFF${JSON.stringify(DOCUMENT).slice(1)}`,
+      "input-error",
+      "is not valid JSON",
+    ],
     ["JSON that is not an object", "[]", "config-error", "is not an object at the root"],
     [
       "an object of another format",

@@ -3,6 +3,7 @@ import {
   describeRepeatedKey,
   JSONC_PARSE_OPTIONS,
   scanKeys,
+  stripUtf8Bom,
 } from "@aburi/plugin-registry/repeated-keys"
 import configSchema from "@aburi/schema/aburi.config.v1.json" with { type: "json" }
 import type { Config } from "@aburi/types"
@@ -32,8 +33,9 @@ function getErrno(value: unknown): string {
 }
 
 export function parseConfig(text: string, sourcePath: string): Config {
+  const body = stripUtf8Bom(text)
   const errors: ParseError[] = []
-  const parsed: unknown = parse(text, errors, CONFIG_PARSE_OPTIONS)
+  const parsed: unknown = parse(body, errors, CONFIG_PARSE_OPTIONS)
   if (errors.length > 0) {
     const summary = errors
       .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset} (len ${e.length})`)
@@ -45,7 +47,7 @@ export function parseConfig(text: string, sourcePath: string): Config {
     )
   }
 
-  rejectRepeatedKeys(text, sourcePath)
+  rejectRepeatedKeys(body, sourcePath)
 
   if (!validate(parsed)) {
     const ajvErrors = validate.errors ?? []

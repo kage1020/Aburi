@@ -1,5 +1,6 @@
 import { open, readFile, stat } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve, sep } from "node:path"
+import { stripUtf8Bom } from "./codepoints"
 import { CoreError } from "./errors"
 import { isVanishedFile } from "./scan/faults"
 import { pathExists, readJson } from "./workspace-fs"
@@ -144,12 +145,12 @@ async function packageJsonDeclaresWorkspaces(path: string): Promise<boolean> {
 }
 
 async function tomlContainsWorkspaceSection(path: string): Promise<boolean> {
-  const text = await readFile(path, "utf8")
+  const text = stripUtf8Bom(await readFile(path, "utf8"))
   return /^\s*\[workspace\]/m.test(text) || /^\s*\[workspace\.members\]/m.test(text)
 }
 
 async function pyprojectDeclaresWorkspace(path: string): Promise<boolean> {
-  const text = await readFile(path, "utf8")
+  const text = stripUtf8Bom(await readFile(path, "utf8"))
   return (
     /^\s*\[tool\.uv\.workspace\]/m.test(text) ||
     /^\s*\[tool\.hatch\.workspaces\]/m.test(text) ||

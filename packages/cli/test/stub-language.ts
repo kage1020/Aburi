@@ -1,6 +1,7 @@
 import { rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { commitAll, initRepository } from "@aburi/test-support"
+import { LANG_MANIFEST, pluginModuleSource } from "./plugin-fakes"
 import { writeConfig, writeFileAt, writePackageJson } from "./workspace"
 
 /**
@@ -8,26 +9,9 @@ import { writeConfig, writeFileAt, writePackageJson } from "./workspace"
  * parse, `notree` parses to nothing, `noisy` and `warn` parse with recoverable errors, `boom`
  * throws in extraction, `odd` emits an undeclared extKind and `twin` two Symbols with one id.
  */
-export const STUB_PLUGIN = `
-const manifest = {
-  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-  name: "lang-stub",
-  version: "0.0.0",
-  type: "lang",
-  engines: { aburi: "*" },
-  provides: {
-    effects: [],
-    effectPrefixes: [],
-    extKinds: [],
-    extKindPrefixes: [],
-    derivedByPrefixes: [],
-    frameworks: [],
-  },
-}
-
-export const plugin = {
-  manifest,
-  languageId: "stub",
+export const STUB_PLUGIN = pluginModuleSource(
+  { ...LANG_MANIFEST, name: "lang-stub" },
+  `  languageId: "stub",
   fileExtensions: [".stub"],
   capabilities: {
     hasDecorators: false,
@@ -97,9 +81,8 @@ export const plugin = {
     return ctx.file.path.includes("twin") ? [at(1), at(7)] : [at(1)]
   },
   walkBody: () => ({ rules: [], calls: [] }),
-  normalizeAst: () => "stub-ast",
-}
-`
+  normalizeAst: () => "stub-ast",`,
+)
 
 /** A workspace configured with only the stub plugin, holding `files`, each containing its own name. */
 export async function writeStubWorkspace(

@@ -49,7 +49,7 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
   for (const { field, ref, specifier } of refs) {
     const module = await tryImport(importFn, specifier, ref)
     const plugin = pickPlugin(module, ref)
-    registerManifest(registry, plugin.manifest)
+    registerManifest(registry, plugin.manifest, ref)
     routePlugin(plugin, field, loaded, ref)
   }
   for (const plugin of options.syntheticPlugins ?? []) {
@@ -123,12 +123,14 @@ function registerHint(registry: VocabRegistry, manifest: PluginManifest): void {
   }
 }
 
-function registerManifest(registry: VocabRegistry, manifest: PluginManifest): void {
+function registerManifest(registry: VocabRegistry, manifest: PluginManifest, ref: string): void {
   try {
     registry.register(manifest)
   } catch (error) {
     if (!(error instanceof RegistryError)) throw error
-    throw new CliError(error.message, "plugin-error", { cause: error })
+    throw new CliError(`Plugin "${ref}" cannot be registered: ${error.message}`, "plugin-error", {
+      cause: error,
+    })
   }
 }
 

@@ -1,3 +1,4 @@
+import { seeded } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { type Arrangement, arrangeWithin, type Section, type Shown } from "../src/diff/size-cap"
 
@@ -36,14 +37,6 @@ function shownForms(section: Section): Shown[] {
   const forms: Shown[] = [{ kind: "full" }]
   if (section.short !== undefined) forms.push({ kind: "short", lines: section.short })
   return forms
-}
-
-function seeded(seed: number): () => number {
-  let state = seed
-  return () => {
-    state = (state * 48271) % 2147483647
-    return state / 2147483647
-  }
 }
 
 function randomSections(random: () => number, longest: number): Section[] {

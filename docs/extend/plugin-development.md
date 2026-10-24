@@ -65,7 +65,8 @@ Key rules:
   `aburi.json` to your plugin.
 
 Two plugins declaring the same `extKind` id make the registry throw at register
-time. We chose a loud failure over a silent takeover.
+time. We chose a loud failure over a silent takeover. `aburi scan` then exits `3`
+and names the entry in `aburi.json` that loaded the refused plugin.
 
 ## Language plugin
 
@@ -158,9 +159,11 @@ backwards is caught rather than shipped as an empty IR.
 A throw is recorded as `reason: "extraction-failed"` along with what you threw.
 The exception is an error whose `code` names a fault in the plugin set rather
 than in the file, such as `scan-plugin-misconfigured`, `invalid-language-id`, or
-`vocab-undeclared`. Those are re-thrown and end the run immediately, because
-they would otherwise repeat for every file and report the workspace as broken
-instead of the plugin.
+`vocab-undeclared`. Those are re-thrown and end the run immediately with exit
+`3`, because they would otherwise repeat for every file and report the workspace
+as broken instead of the plugin. The code decides, not the class: a refusal from
+`ctx.registry.assertEffectDeclared` is the registry's error, and it ends the run
+the same way.
 :::
 
 ## Framework plugin
