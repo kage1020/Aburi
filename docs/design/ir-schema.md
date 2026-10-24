@@ -7,7 +7,11 @@ The JSON Schema at `schema/aburi.ir.v1.json` is the single source of truth; this
 
 ## 1. File Format, Ordering, and Key Presence
 
-- Format: JSON (UTF-8, LF)
+- Format: JSON (UTF-8, LF), written with no byte order mark. An IR read back from a path the user
+  names (`aburi diff --base/--head`, `aburi explain --ir`) may have been re-saved by PowerShell 5's
+  `Out-File` or `Set-Content` under `-Encoding utf8`, which add one, so one opening the file is read
+  past, and the position a parse error names counts from after it; a second one, or one after the
+  first character, is not JSON
 - Indentation: 2 spaces (default), single line with `--compact`
 - Top-level keys: ascending, by UTF-16 code unit
 - Array ordering (fixed for diff stability):
@@ -613,7 +617,7 @@ Guaranteed by Aburi internals. Item 20 restates the schema's own structural requ
 7. `effects[].id` is in the §9.1 core vocabulary or carries an `x-<plugin>:` prefix
 8. `kind` is in the §5.1 enum
 9. `extKind` is `null` or of the form `<namespace>(:<segment>)+` (at least 2 segments, arbitrarily deep)
-10. Every path — `symbols[].source.file`, `components[].roots[]`, `workspace.managers[].roots[]` — is non-empty, POSIX (forward slash, no backslash), not absolute, free of `..` segments, and free of `.` segments except for the bare `.` that names the workspace root. `workspace.root` anchors every path in the Document, so one that ascends past it names something the Document has no way to be about; and `./src/a.ts` beside `src/a.ts` is one file with two spellings, which by §3.1 is one file with two Symbol ids that #1 cannot see as a duplicate. This is the rule `makeSymbolId` applies on the way out, shared rather than restated, so the paths Aburi writes and the paths it accepts are one set. A consequence worth stating: a file whose *name* holds a backslash — legal on a POSIX filesystem — has no spelling in a Document at all, not even as a `stats.skippedFiles[].path`, so the scan leaves it out of `totalFiles` as well and reports it only to the caller. That is unlike `:` and `#`, which this rule admits and only §3.1 refuses, which is why a file those disqualify is still recorded by path
+10. Every path — `symbols[].source.file`, `components[].roots[]`, `workspace.managers[].roots[]` — is non-empty, POSIX (forward slash, no backslash), not absolute, free of `..` segments, and free of `.` segments except for the bare `.` that names the workspace root. `workspace.root` anchors every path in the Document, so one that ascends past it names something the Document has no way to be about; and `./src/a.ts` beside `src/a.ts` is one file with two spellings, which by §3.1 is one file with two Symbol ids that #1 cannot see as a duplicate. This is the rule `makeSymbolId` applies on the way out, shared rather than restated, so the paths Aburi writes and the paths it accepts are one set. A consequence worth stating: a file whose *name* holds a backslash — legal on a POSIX filesystem — has no spelling in a Document at all, not even as a `stats.skippedFiles[].path`, so the scan leaves it out of `totalFiles` as well and reports it only to the caller. The same goes for a file whose first segment opens with one ASCII letter and `:` (`a:notes.ts`, or anything under a directory `d:data/`): this rule reads that as a Windows drive, and keeps reading it so on POSIX, because a Document written there has to mean the same thing read on Windows. That is unlike `:` and `#` anywhere else (`ab:notes.ts`, `src/x:y.ts`), which this rule admits and only §3.1 refuses, which is why a file those disqualify is still recorded by path
 11. The array-ordering conventions (§1) are satisfied
 12. If `dependencies[].via` is `"call"`, both `from` and `to` are symbol ids present in `symbols[].id` (strengthens #4 for call edges — a call edge with a component-id endpoint or a dangling symbol id is rejected outright)
 13. Within `dependencies[]`, the triple `(from, to, via)` is unique — the same directed edge cannot be recorded twice

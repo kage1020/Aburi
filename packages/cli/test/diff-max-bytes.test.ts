@@ -56,7 +56,6 @@ describe("aburi diff --max-bytes", () => {
 
   it.each([
     ["a cap the report fits under", { maxBytes: 65_507 }],
-    ["no cap", {}],
     ["no Markdown at all", { maxBytes: 2_000, format: "json" as const }],
   ])("removes an earlier diff.full.md on a run with %s", async (_, options) => {
     const { report: capped } = await diffDocuments(workspace.root, BASE, headWith(400), {

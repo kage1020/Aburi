@@ -1,6 +1,7 @@
 import type {
   SkippedFile,
   TreeReleaseFailure,
+  UnnameableRoot,
   UnrepresentableFile,
   UnresolvedDeclaration,
 } from "@aburi/core"
@@ -51,6 +52,7 @@ export interface ScanReport {
   undeclaredVocab: readonly DiscoveredVocabItem[]
   vocabDiscoveredPath: string | null
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
+  unnameableRoots: readonly UnnameableRoot[]
   fellBackToSingleComponent: boolean
   pluginNamedFrameworks: readonly PluginNamedFramework[]
   exitCode: ExitCode
