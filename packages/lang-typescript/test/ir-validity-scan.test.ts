@@ -88,3 +88,25 @@ describe("scan — a workspace whose entities are declared more than once", () =
     expect(() => assertIRIntegrity(result.ir)).not.toThrow()
   })
 })
+
+describe("scan — source under dot directories", () => {
+  it("scans a file under a dot directory like any other, .git apart, into a valid document", async () => {
+    await workspace.writeSource("src/a.ts", "export function a() { return 1 }\n")
+    await workspace.writeSource(
+      ".github/actions/deploy/src/main.ts",
+      "export function run() { return 1 }\n",
+    )
+    await workspace.writeSource(".storybook/main.ts", "export function config() { return 1 }\n")
+    await workspace.writeSource(".git/hooks/pre-commit.ts", "export function hook() { return 1 }\n")
+
+    const { ir } = await scanTypeScript(workspace.root)
+
+    expect(ir.symbols.map((symbol) => symbol.id)).toEqual([
+      "ts:.github/actions/deploy/src/main.ts#run",
+      "ts:.storybook/main.ts#config",
+      "ts:src/a.ts#a",
+    ])
+    expect([ir.stats.totalFiles, ir.stats.parsedFiles]).toEqual([3, 3])
+    expect(irSchemaViolations(JSON.parse(serializeCanonical(ir)))).toEqual([])
+  })
+})

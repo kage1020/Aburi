@@ -245,6 +245,8 @@ async function detectNx(
     ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
     onlyFiles: true,
     absolute: true,
+    // Nx looks for projects in dot directories, and discovery scans them.
+    dot: true,
     // Discovery does not walk through a link, so a project found there would own no scanned file.
     followSymbolicLinks: false,
     deep: 10,
@@ -273,7 +275,8 @@ async function resolveDeclaredPackages(
   managerTool: string,
 ): Promise<WorkspaceCandidate[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
-  // Links are followed because pnpm and npm follow them when they resolve these same patterns.
+  // Links are followed and a wildcard does not match a leading dot, because pnpm and npm resolve
+  // these same patterns that way.
   const manifests = await walk(manifestPatterns, {
     cwd: workspaceRoot,
     ignore: ["**/node_modules/**", "**/.git/**"],
