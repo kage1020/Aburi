@@ -209,7 +209,7 @@ describe("a changed Symbol's rule, effect and call rows", () => {
           ],
         },
       },
-      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from ts:src/repository.ts#Repository.save]\n",
+      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from `ts:src/repository.ts#Repository.save`]\n",
     ],
     [
       "a removed call by target and line",

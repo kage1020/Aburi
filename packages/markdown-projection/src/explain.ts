@@ -161,9 +161,9 @@ function renderDroppedExplain(symbol: IRSymbol): string {
   lines.push(
     `**File**: ${inlineCode(`${symbol.source.file}:${symbol.source.startLine}-${symbol.source.endLine}`)}`,
   )
-  lines.push(`**Drop reason**: ${requireDropReason(symbol)}`)
+  lines.push(`**Drop reason**: ${inlineCode(requireDropReason(symbol))}`)
   lines.push("")
   lines.push("_(dropped symbols carry no rules / effects / calls / fingerprint by IR contract.)_")
   lines.push("")
-  return renderDocument(lines, { collapseBlankRuns: false })
+  return renderDocument(lines)
 }

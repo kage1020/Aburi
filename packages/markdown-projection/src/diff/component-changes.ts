@@ -1,12 +1,12 @@
 import type { Component, DiffResult } from "@aburi/types"
-import { compareStrings, inlineCode } from "../format"
+import { compareStrings, inlineCode, joinCode } from "../format"
 
 export function renderComponentChanges(diff: DiffResult): string[] {
   const rows: string[] = []
   if (diff.components.added.length > 0) {
     rows.push("### Added")
     for (const c of [...diff.components.added].sort((a, b) => compareStrings(a.id, b.id))) {
-      rows.push(`- ${inlineCode(c.id)} — roots: ${c.roots.map((r) => inlineCode(r)).join(", ")}`)
+      rows.push(`- ${inlineCode(c.id)} — roots: ${joinCode(c.roots)}`)
     }
     rows.push("")
   }

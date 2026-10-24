@@ -10,6 +10,7 @@ import {
   fingerprintLine,
   inlineCode,
   isSymbolIdEndpoint,
+  joinCode,
   orderEffects,
   orderFilesAscending,
   orderSymbolsWithinFile,
@@ -36,7 +37,7 @@ export function projectComponent(input: ProjectComponentInput): string {
   const lines: string[] = []
   lines.push(componentHeading(component.id))
   lines.push("")
-  lines.push(`**Name**: ${component.name}`)
+  lines.push(`**Name**: ${inlineCode(component.name)}`)
   lines.push(`**Roots**: ${joinCode(component.roots)}`)
   lines.push(`**Languages**: ${component.languages.join(", ")}`)
   if ((component.frameworks ?? []).length > 0) {
@@ -69,7 +70,9 @@ export function projectComponent(input: ProjectComponentInput): string {
     lines.push("")
     for (const d of sortDependencies(componentLevelDeps)) {
       const effectTag = d.effect === null ? "" : ` [${d.effect}]`
-      lines.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})${effectTag}`)
+      lines.push(
+        `- ${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)})${effectTag}`,
+      )
     }
     if (symbolLevelDeps.length > 0) {
       if (componentLevelDeps.length > 0) lines.push("")
@@ -94,7 +97,7 @@ export function projectComponent(input: ProjectComponentInput): string {
       droppedFoldout(
         [...droppedSymbols]
           .sort((a, b) => compareStrings(a.id, b.id))
-          .map((s) => `${inlineCode(s.id)} — ${requireDropReason(s)}`),
+          .map((s) => `${inlineCode(s.id)} — ${inlineCode(requireDropReason(s))}`),
       ),
     )
   }
@@ -103,10 +106,6 @@ export function projectComponent(input: ProjectComponentInput): string {
 
 export function componentHeading(id: ComponentId): string {
   return `# Component: ${id}`
-}
-
-function joinCode(items: readonly string[]): string {
-  return items.map((item) => inlineCode(item)).join(", ")
 }
 
 function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {
