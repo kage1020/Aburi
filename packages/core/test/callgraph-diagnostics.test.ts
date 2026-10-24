@@ -127,6 +127,20 @@ describe("unresolved calls are bucketed by cause", () => {
       candidates: ["ts:src/one.ts#helper", "ts:src/two.ts#helper"],
     },
     {
+      cause:
+        "two default exports of the module a default import names, each with the member, over a same-named member in the caller's component",
+      target: "U.save",
+      callees: [
+        makeSymbol("ts:src/x.ts#A", { kind: "class", derivedBy: ["export-default"] }),
+        makeSymbol("ts:src/x.ts#A.save", { kind: "method" }),
+        makeSymbol("ts:src/x.ts#B", { kind: "class", derivedBy: ["export-default"] }),
+        makeSymbol("ts:src/x.ts#B.save", { kind: "method" }),
+        makeSymbol("ts:src/z.ts#U.save", { kind: "method", component: "billing" }),
+      ],
+      imports: importsOf("src/a.ts", { source: "./x", symbols: ["default as U"] }),
+      candidates: ["ts:src/x.ts#A.save", "ts:src/x.ts#B.save"],
+    },
+    {
       cause: "two Symbols of that name in the caller's component",
       target: "User.save",
       callees: competingSaves(),
