@@ -55,5 +55,7 @@ export interface ScanReport {
   unnameableRoots: readonly UnnameableRoot[]
   fellBackToSingleComponent: boolean
   pluginNamedFrameworks: readonly PluginNamedFramework[]
+  loadedPlugins: readonly string[]
+  unmatchedPluginOptions: readonly string[]
   exitCode: ExitCode
 }
