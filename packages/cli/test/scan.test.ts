@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
+import { errorFrom, irSchemaViolations, useScratchWorkspace } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { beforeEach, describe, expect, it } from "vitest"
 import {
@@ -12,7 +12,13 @@ import {
   type ScanOptions,
 } from "../src"
 import { runCliIn } from "./run-cli"
-import { listTree, TYPESCRIPT, writeConfig, writeTypeScriptWorkspace } from "./workspace"
+import {
+  listTree,
+  TYPESCRIPT,
+  writeConfig,
+  writePackageJson,
+  writeTypeScriptWorkspace,
+} from "./workspace"
 
 const workspace = useScratchWorkspace("scan")
 
@@ -111,13 +117,24 @@ describe("aburi scan — what the caller and the config add", () => {
     expect((await scan()).exitCode).toBe(EXIT.SUCCESS)
   })
 
-  it("blames the config, not the IR, for a component root that leaves the workspace", async () => {
-    await declaredComponent({ roots: ["../shared"] })
+  it.each([
+    [
+      "a component root that leaves the workspace",
+      { roots: ["../shared"] },
+      'components[id=shared] root "../shared"',
+    ],
+    [
+      "a publicApi entry holding a backslash",
+      { roots: ["packages/shared"], publicApi: ["src\\index.ts"] },
+      'components[id=shared] publicApi entry "src\\index.ts"',
+    ],
+  ])("blames the config, not the IR, for %s", async (_what, component, named) => {
+    await declaredComponent(component)
 
     const error = await errorFrom(CliError, () => scan())
 
     expect(error.code).toBe("config-error")
-    expect(error.message).toContain("components[id=shared] root")
+    expect(error.message).toContain(named)
   })
 
   it("normalizes a component's publicApi patterns, as component detection does", async () => {
@@ -131,6 +148,39 @@ describe("aburi scan — what the caller and the config add", () => {
       components: { publicApi?: string[] }[]
     }
     expect(ir.components[0]?.publicApi).toEqual([`src/${decomposed.normalize("NFC")}.ts`])
+  })
+
+  it("carries a publicApi glob or Symbol id the IR schema admits as written, wherever it points", async () => {
+    const publicApi = ["../shared/**", "./src/**", "/abs/index.ts", "ts:src/a.ts#Invoice"]
+    await workspace.writeSource("packages/shared/index.ts", "export const shared = 1\n")
+    await declaredComponent({ roots: ["packages/shared"], publicApi })
+
+    const ir = JSON.parse(await readFile((await scan()).irPath ?? "", "utf8")) as IR
+
+    expect(ir.components[0]?.publicApi).toEqual(publicApi)
+    expect(irSchemaViolations(ir)).toEqual([])
+  })
+})
+
+describe("aburi scan — a package.json value that names the package directory", () => {
+  it.each<[string, Record<string, unknown>, string[] | undefined]>([
+    ['"main": "./"', { main: "./" }, undefined],
+    [
+      'the folder mapping "./": "./" in exports',
+      { exports: { ".": "./src/ok.js", "./": "./" } },
+      ["src/ok.js"],
+    ],
+  ])("writes no publicApi entry for %s, and the IR satisfies its schema", async (_value, manifest, publicApi) => {
+    await writePackageJson(workspace.root, { name: "scan-fixture", ...manifest })
+
+    const report = await scan()
+
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    const ir = JSON.parse(await readFile(report.irPath ?? "", "utf8")) as {
+      components: { publicApi?: string[] }[]
+    }
+    expect(ir.components.map((component) => component.publicApi)).toEqual([publicApi])
+    expect(irSchemaViolations(ir)).toEqual([])
   })
 })
 

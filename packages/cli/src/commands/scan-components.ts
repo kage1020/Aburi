@@ -4,9 +4,11 @@ import {
   type DetectManagersResult,
   detectComponents,
   detectManagers,
+  type GrammarViolation,
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
+  posixSpellingViolation,
   posixWorkspaceRelativeViolation,
 } from "@aburi/core"
 import type { Component, Config, LanguagePlugin } from "@aburi/types"
@@ -60,12 +62,16 @@ function componentFromConfig(entry: NonNullable<Config["components"]>[number]): 
   const component: Component = {
     id: makeComponentId(entry.id),
     name: entry.name ?? entry.id,
-    roots: entry.roots.map((root) => assertWorkspaceRelative(root, entry.id)),
+    roots: entry.roots.map((root) =>
+      assertSpelling(root, `components[id=${entry.id}] root`, posixWorkspaceRelativeViolation),
+    ),
     languages: languages.length > 0 ? languages : [makeLanguageId("ts")],
     description: entry.description ?? null,
   }
   if (entry.publicApi !== undefined && entry.publicApi.length > 0) {
-    component.publicApi = entry.publicApi.map((pattern) => pattern.normalize("NFC"))
+    component.publicApi = entry.publicApi.map((pattern) =>
+      assertSpelling(pattern, `components[id=${entry.id}] publicApi entry`, posixSpellingViolation),
+    )
   }
   if (entry.frameworks !== undefined && entry.frameworks.length > 0) {
     component.frameworks = [...entry.frameworks]
@@ -73,12 +79,13 @@ function componentFromConfig(entry: NonNullable<Config["components"]>[number]): 
   return component
 }
 
-function assertWorkspaceRelative(root: string, componentId: string): string {
-  const normalized = root.normalize("NFC")
-  const violation = posixWorkspaceRelativeViolation(
-    normalized,
-    `components[id=${componentId}] root`,
-  )
+function assertSpelling(
+  value: string,
+  subject: string,
+  violationOf: (value: string, subject: string) => GrammarViolation | null,
+): string {
+  const normalized = value.normalize("NFC")
+  const violation = violationOf(normalized, subject)
   if (violation !== null) throw new CoreError(violation.message, violation)
   return normalized
 }

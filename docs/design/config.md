@@ -222,6 +222,8 @@ When not specified explicitly, the core Component autodetect infers them from `p
 
 Each field has the same shape as [`ir-schema.md`](./ir-schema.md) §4. **However, `languages` may be omitted on the config side** (when omitted, autodetect fills it in). `name` may also be omitted on the config side, in which case the autodetect result (`package.json#name`, etc.) is used. In the schema, both are required on the IR Component; the config Component is lenient.
 
+A `publicApi` entry is carried into the IR as written, in NFC, so one the IR schema refuses is refused here, with exit 2 naming the component, before anything is scanned: an entry holding a backslash, which this schema admits and the IR's does not. A root the IR cannot record is refused the same way.
+
 `frameworks` holds framework ids (`nestjs`, what a plugin's `provides.frameworks[]` or the
 detector names), not plugin names. A value that is a plugin's own name (`framework-nestjs`),
 of a loaded plugin or a first-party one, is kept as written and reported on stderr with the
@@ -500,6 +502,7 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C21 | `components: [{ …, "frameworks": ["framework-nestjs"] }]` | Exit 0; stderr names the component and suggests `nestjs`; the IR carries `framework-nestjs` |
 | C21a | `components: [{ …, "frameworks": ["lang-typescript"] }]`, a plugin that provides no framework | Exit 0; stderr says to remove it or write the component's framework id |
 | C22 | A config that opens with one byte order mark (U+FEFF) | Loads as without it; a key named twice is reported at the column an editor shows. Two of them, or one after the first character, is `config-parse-failed` naming `InvalidSymbol` and its offset |
+| C23 | `components: [{ …, "publicApi": ["src\\index.ts"] }]` | Exit 2 naming the component and the entry |
 
 ## 14.1 Config Schema Compatibility Policy
 
