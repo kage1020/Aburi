@@ -45,7 +45,7 @@ the effects they perform.
 - rules removed:
   - guard: `session.user.role !== 'admin'` (L14)
 - effects added:
-  - db.write: `prisma.auditLog.create` (L31)
+  - db.write: `prisma.auditLog.create` (L31) [effects-prisma]
 ```
 
 That deleted guard is a single red line somewhere in the raw diff. Aburi gives
