@@ -1,9 +1,12 @@
-import type {
-  ExtractionContext,
-  OpaqueAstNode,
-  SymbolCandidate,
-  SymbolClassification,
-  SymbolKind,
+import {
+  EXPORT_CLAUSE_DERIVED_BY_PREFIX,
+  EXPORT_DEFAULT_DERIVED_BY,
+  EXPORT_KEYWORD_DERIVED_BY,
+  type ExtractionContext,
+  type OpaqueAstNode,
+  type SymbolCandidate,
+  type SymbolClassification,
+  type SymbolKind,
 } from "@aburi/types"
 import { type AppRouterFile, recognizeAppRouterFile } from "./app-router"
 import { detectModuleDirective, type ModuleDirective } from "./directives"
@@ -35,10 +38,8 @@ export function classifyNextSymbol(
   return classifyComponentSymbol(symbol, file, ctx)
 }
 
-/** Next calls the handler either way; a `const` is one whose value the language plugin cannot see into. */
+/** A handler the language plugin cannot see to be a function (a destructuring, a call's result) is a `const`; Next calls it all the same. */
 const ROUTE_HANDLER_KINDS: ReadonlySet<SymbolKind> = new Set<SymbolKind>(["function", "const"])
-
-const EXPORT_CLAUSE_PREFIX = "export-clause:"
 
 function classifyRouteSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -56,12 +57,14 @@ function classifyRouteSymbol(
   )
 }
 
-/** The keyword exports a declaration under its whole qname, so a namespace's `N.GET` is no module export. */
+/** `export-keyword` on a namespace member exports it from the namespace, not the module; matching the whole qname keeps `N.GET` from reading as a verb. */
 function exportedNames(symbol: SymbolCandidate<OpaqueAstNode>): string[] {
   const names = new Set<string>()
-  if (symbol.derivedBy.includes("export-keyword")) names.add(symbol.name)
+  if (symbol.derivedBy.includes(EXPORT_KEYWORD_DERIVED_BY)) names.add(symbol.name)
   for (const token of symbol.derivedBy) {
-    if (token.startsWith(EXPORT_CLAUSE_PREFIX)) names.add(token.slice(EXPORT_CLAUSE_PREFIX.length))
+    if (token.startsWith(EXPORT_CLAUSE_DERIVED_BY_PREFIX)) {
+      names.add(token.slice(EXPORT_CLAUSE_DERIVED_BY_PREFIX.length))
+    }
   }
   return [...names]
 }
@@ -72,7 +75,7 @@ function classifyComponentSymbol(
   ctx: ExtractionContext,
 ): SymbolClassification | null {
   if (symbol.kind !== "function") return null
-  if (!symbol.derivedBy.includes("export-default")) return null
+  if (!symbol.derivedBy.includes(EXPORT_DEFAULT_DERIVED_BY)) return null
   return withDirective(
     {
       extKind: `framework:next:${file.role}`,

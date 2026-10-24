@@ -33,6 +33,9 @@ the plugin reads the export, not the declaration's name:
 | `async function POST() {}` with `export { POST }` | `POST` |
 | `const handler = NextAuth(options)` with `export { handler as GET, handler as POST }` | `GET` and `POST`, both on the one Symbol `handler` |
 | `function OPTIONS() {}`, not exported | none |
+| `function GET() {}` with `export type { GET }` | none: a type-only export is erased at runtime |
+| `export { GET, POST } from "@/auth"` (Auth.js v5 beta) | none: a re-export declares nothing in the route file, so there is no Symbol to classify |
+| `function GET() {}` with CommonJS `module.exports = { GET }` | none: only ESM exports are read |
 
 A declaration exported only as `default`, or from inside a namespace, is not a route either.
 The handler is a `function` Symbol where the language plugin can see its value is a function,
@@ -41,6 +44,12 @@ and a `const` where it cannot (a destructuring, a call's result). Both get the o
 `baseKind` is `function`, what Next.js calls, and the Symbol's `kind` stays the language
 plugin's reading. Export clauses are read by `@aburi/lang-typescript`, which records the name
 each clause exports a declaration under.
+
+The verbs a route serves are recorded in `derivedBy`, which no fingerprint reads, so `aburi diff`
+does not report a clause-exported handler gaining or losing a verb
+(`export { handler as GET }` becoming `export { handler as GET, handler as DELETE }`). A handler
+exported by its keyword is named by its verb, so changing the verb reports it as removed and
+added.
 
 Component roles accept both React (`.tsx` / `.jsx`) and non-React (`.ts` / `.js`)
 extensions. `route.*` intentionally does **not** accept `.tsx` / `.jsx`: route

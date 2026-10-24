@@ -3,18 +3,18 @@ import { byId, symbolOf, symbolsOf } from "./fixtures/ctx"
 
 describe("an export clause", () => {
   it.each([
-    ["a function", "function f() {}\nexport { f }", "#f", "function"],
-    ["a class", "class f {}\nexport { f }", "#f", "class"],
-    ["a const", "const f = 1\nexport { f }", "#f", "const"],
-    ["an arrow const", "const f = () => 1\nexport { f }", "#f", "function"],
-    ["a call-initialised const", "const f = wrap(() => 1)\nexport { f }", "#f", "const"],
-    ["a destructured binding", "const { f } = m\nexport { f }", "#f", "const"],
-    ["an interface", "interface f { a: number }\nexport { f }", "#f", "interface"],
-    ["a type alias", "type f = number\nexport { f }", "#f", "type"],
-    ["an enum", "enum f { A }\nexport { f }", "#f", "enum"],
-    ["a namespace", "namespace f { const a = 1 }\nexport { f }", "#f", "namespace"],
-  ])("exports %s under its own name", async (_label, source, suffix, kind) => {
-    const symbol = byId(await symbolsOf(source), suffix)
+    ["a function", "function f() {}\nexport { f }", "function"],
+    ["a class", "class f {}\nexport { f }", "class"],
+    ["a const", "const f = 1\nexport { f }", "const"],
+    ["an arrow const", "const f = () => 1\nexport { f }", "function"],
+    ["a call-initialised const", "const f = wrap(() => 1)\nexport { f }", "const"],
+    ["a destructured binding", "const { f } = m\nexport { f }", "const"],
+    ["an interface", "interface f { a: number }\nexport { f }", "interface"],
+    ["a type alias", "type f = number\nexport { f }", "type"],
+    ["an enum", "enum f { A }\nexport { f }", "enum"],
+    ["a namespace", "namespace f { const a = 1 }\nexport { f }", "namespace"],
+  ])("exports %s under its own name", async (_label, source, kind) => {
+    const symbol = byId(await symbolsOf(source), "#f")
 
     expect(symbol.kind).toBe(kind)
     expect(symbol.visibility).toBe("public")
@@ -29,8 +29,8 @@ describe("an export clause", () => {
     ],
     [
       "under several names, in the order the clauses write them",
-      "const handler = make()\nexport { handler as GET }\nexport { handler as POST, handler }",
-      ["export-clause:GET", "export-clause:POST", "export-clause:handler"],
+      "const handler = make()\nexport { handler as POST }\nexport { handler as GET, handler }",
+      ["export-clause:POST", "export-clause:GET", "export-clause:handler"],
     ],
     [
       "under a string name",
@@ -55,6 +55,11 @@ describe("an export clause", () => {
     [
       "with a type-only specifier",
       "type handler = number\nexport { type handler }",
+      ["export-clause:handler"],
+    ],
+    [
+      "with a type-only clause and a value clause, saying so once",
+      "function handler() {}\nexport type { handler }\nexport { handler }",
       ["export-clause:handler"],
     ],
     [
@@ -99,8 +104,8 @@ describe("an export clause", () => {
     ["names another module's binding", 'const x = 1\nexport { x } from "./y"', "ts:src/a.ts#x"],
     [
       "renames another module's binding",
-      'const x = 1\nexport { y as x } from "./y"',
-      "ts:src/a.ts#x",
+      'const y = 1\nexport { y as x } from "./y"',
+      "ts:src/a.ts#y",
     ],
     [
       "exports the namespace a declaration is written in",
@@ -121,6 +126,20 @@ describe("an export clause", () => {
     const symbol = await symbolOf(source, id)
 
     expect(symbol.derivedBy.filter((token) => token.startsWith("export-"))).toEqual([])
+  })
+
+  it.each([
+    ["a type-only clause", "function handler() {}\nexport type { handler as GET }", "#handler"],
+    ["a type-only specifier", "const handler = 1\nexport { type handler as GET }", "#handler"],
+    ["a type-only clause naming a class", "class Shape {}\nexport type { Shape }", "#Shape"],
+    ["a type-only default export", "function Page() {}\nexport type { Page as default }", "#Page"],
+  ])("does not export a value through %s, which is erased at runtime", async (_label, source, suffix) => {
+    const symbol = byId(await symbolsOf(source), suffix)
+
+    expect([
+      symbol.visibility,
+      symbol.derivedBy.filter((token) => token.startsWith("export-")),
+    ]).toEqual(["internal", []])
   })
 
   it("declares nothing for a name it re-exports from an import", async () => {

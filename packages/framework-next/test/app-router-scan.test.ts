@@ -128,12 +128,32 @@ describe("scan — App Router special files", () => {
       ['import { handlers } from "@/auth"', "export const { GET, POST } = handlers"],
       "GET",
     ],
+    [
+      "a function a route file exports only through a type-only clause",
+      "app/api/users/route.ts",
+      ["async function handler() { return new Response('ok') }", "export type { handler as GET }"],
+      "handler",
+    ],
+    [
+      "a verb-named function a route file exports through CommonJS",
+      "app/api/users/route.js",
+      ["function GET() { return new Response('ok') }", "module.exports = { GET }"],
+      "GET",
+    ],
   ])("does not classify %s", async (_label, file, lines, name) => {
     await workspace.writeSource(file, [...lines, ""].join("\n"))
 
     const result = await scanWorkspace()
 
     expect(symbolById(result, `ts:${file}#${name}`).extKind).toBeNull()
+  })
+
+  it("finds no route in a route file that only re-exports its verbs", async () => {
+    await workspace.writeSource("app/api/auth/route.ts", 'export { GET, POST } from "@/auth"\n')
+
+    const { ir } = await scanWorkspace()
+
+    expect(ir.symbols.filter((symbol) => symbol.extKind === "framework:next:route")).toEqual([])
   })
 
   it("tags a page in a 'use client' module with both its role and the directive", async () => {

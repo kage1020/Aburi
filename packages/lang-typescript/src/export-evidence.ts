@@ -1,5 +1,12 @@
 import { DEFAULT_EXPORT_NAME } from "@aburi/core"
-import type { SymbolCandidate, Visibility } from "@aburi/types"
+import {
+  EXPORT_CLAUSE_DERIVED_BY_PREFIX,
+  EXPORT_DEFAULT_DERIVED_BY,
+  EXPORT_KEYWORD_DERIVED_BY,
+  type SymbolCandidate,
+  type SymbolKind,
+  type Visibility,
+} from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import {
   findChild,
@@ -11,15 +18,9 @@ import {
 import { hasPrivateName } from "./class-members"
 import { readStaticString } from "./string-escape"
 
-const EXPORT_DEFAULT = "export-default"
-
-const EXPORT_KEYWORD = "export-keyword"
-
-const EXPORT_CLAUSE = "export-clause"
-
 export function exportEvidence(node: Node): string[] {
-  if (isDefaultExport(node)) return [EXPORT_DEFAULT]
-  return hasExportModifier(node) ? [EXPORT_KEYWORD] : []
+  if (isDefaultExport(node)) return [EXPORT_DEFAULT_DERIVED_BY]
+  return hasExportModifier(node) ? [EXPORT_KEYWORD_DERIVED_BY] : []
 }
 
 export function topLevelVisibility(node: Node): Visibility {
@@ -57,20 +58,39 @@ export function promoteDetachedExports(
   const exported = detachedExportsByLocalName(root)
   if (exported.size === 0) return candidates
   return candidates.map((candidate): SymbolCandidate<Node> => {
-    const tokens = candidate.kind === "call" ? undefined : exported.get(candidate.name)
-    const added = tokens?.filter((token) => !candidate.derivedBy.includes(token)) ?? []
+    if (candidate.kind === "call") return candidate
+    const added = (exported.get(candidate.name) ?? [])
+      .filter((name) => !name.typeOnly || TYPE_ONLY_KINDS.has(candidate.kind))
+      .map((name) => name.token)
+      .filter((token) => !candidate.derivedBy.includes(token))
     if (added.length === 0) return candidate
     return { ...candidate, visibility: "public", derivedBy: [...candidate.derivedBy, ...added] }
   })
 }
 
-function detachedExportsByLocalName(root: Node): ReadonlyMap<string, readonly string[]> {
-  const exported = new Map<string, string[]>()
-  const record = (local: string, as: string): void => {
-    const token = as === DEFAULT_EXPORT_NAME ? EXPORT_DEFAULT : `${EXPORT_CLAUSE}:${as}`
-    const tokens = exported.get(local)
-    if (tokens === undefined) exported.set(local, [token])
-    else if (!tokens.includes(token)) tokens.push(token)
+// A type-only export is erased: it exports a declaration that is only a type, and no value.
+const TYPE_ONLY_KINDS: ReadonlySet<SymbolKind> = new Set<SymbolKind>(["interface", "type"])
+
+interface ExportedName {
+  readonly token: string
+  readonly typeOnly: boolean
+}
+
+function detachedExportsByLocalName(root: Node): ReadonlyMap<string, readonly ExportedName[]> {
+  const exported = new Map<string, ExportedName[]>()
+  const record = (local: string, as: string, typeOnly: boolean): void => {
+    const token =
+      as === DEFAULT_EXPORT_NAME
+        ? EXPORT_DEFAULT_DERIVED_BY
+        : `${EXPORT_CLAUSE_DERIVED_BY_PREFIX}${as}`
+    let names = exported.get(local)
+    if (names === undefined) {
+      names = []
+      exported.set(local, names)
+    }
+    const index = names.findIndex((name) => name.token === token)
+    if (index < 0) names.push({ token, typeOnly })
+    else if (!typeOnly) names[index] = { token, typeOnly }
   }
   for (const stmt of root.namedChildren) {
     if (stmt === null || stmt.type !== "export_statement") continue
@@ -78,13 +98,14 @@ function detachedExportsByLocalName(root: Node): ReadonlyMap<string, readonly st
     if (stmt.childForFieldName("source") !== null) continue
     const clause = findChild(stmt, "export_clause")
     if (clause !== null) {
+      const typeOnlyClause = hasChildOfType(stmt, "type")
       for (const specifier of clause.namedChildren) {
         if (specifier === null || specifier.type !== "export_specifier") continue
         const local = specifier.childForFieldName("name")
         if (local === null || local.type !== "identifier") continue
-        const alias = specifier.childForFieldName("alias")
-        const as = alias === null ? local.text : moduleExportName(alias)
-        if (as !== null) record(local.text, as)
+        const as = moduleExportName(specifier.childForFieldName("alias") ?? local)
+        const typeOnly = typeOnlyClause || hasChildOfType(specifier, "type")
+        if (as !== null) record(local.text, as, typeOnly)
       }
       continue
     }
@@ -92,7 +113,7 @@ function detachedExportsByLocalName(root: Node): ReadonlyMap<string, readonly st
     const value = stmt.childForFieldName("value")
     if (value === null) continue
     const inner = unwrapValue(value)
-    if (inner.type === "identifier") record(inner.text, DEFAULT_EXPORT_NAME)
+    if (inner.type === "identifier") record(inner.text, DEFAULT_EXPORT_NAME, false)
   }
   return exported
 }

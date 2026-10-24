@@ -40,15 +40,9 @@ describe("classifyNextSymbol — App Router special files", () => {
 
   it.each<[string, string, SymbolShape, string[]]>([
     [
-      "a const destructured from another value",
+      "a const exported by its keyword",
       "GET",
       { kind: "const", derivedBy: ["destructured-binding", "export-keyword"] },
-      ["GET"],
-    ],
-    [
-      "a const a call initialises",
-      "GET",
-      { kind: "const", derivedBy: ["call-argument-function", "export-keyword"] },
       ["GET"],
     ],
     ["a function an export clause names", "POST", { derivedBy: ["export-clause:POST"] }, ["POST"]],
@@ -63,6 +57,12 @@ describe("classifyNextSymbol — App Router special files", () => {
       "GET",
       { derivedBy: ["export-keyword", "export-clause:HEAD"] },
       ["GET", "HEAD"],
+    ],
+    [
+      "a function exported by its keyword and by a clause under the same verb",
+      "GET",
+      { derivedBy: ["export-keyword", "export-clause:GET"] },
+      ["GET"],
     ],
   ])("makes %s a route for each verb the module exports it as", (_label, name, shape, verbs) => {
     const file = "app/api/users/route.ts"
