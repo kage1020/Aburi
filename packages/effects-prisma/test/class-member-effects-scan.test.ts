@@ -65,6 +65,20 @@ describe.each([
   })
 })
 
+function writeBoot(className: string, module: string, args = ""): Promise<void> {
+  return workspace.writeSource(
+    "src/boot.ts",
+    [
+      `import { ${className} } from "${module}"`,
+      "",
+      `export function boot(${args === "" ? "" : `${args}: any`}) {`,
+      `  return new ${className}(${args})`,
+      "}",
+      "",
+    ].join("\n"),
+  )
+}
+
 describe("scan — constructing a class", () => {
   it("resolves the instantiation to the class, and nothing to the constructor", async () => {
     await workspace.writeSource(
@@ -106,17 +120,7 @@ describe("scan — constructing a class", () => {
         "",
       ].join("\n"),
     )
-    await workspace.writeSource(
-      "src/boot.ts",
-      [
-        'import { Seeder } from "./seeder"',
-        "",
-        "export function boot(prisma: any) {",
-        "  return new Seeder(prisma)",
-        "}",
-        "",
-      ].join("\n"),
-    )
+    await writeBoot("Seeder", "./seeder", "prisma")
 
     const result = await scanWorkspace()
 
@@ -125,6 +129,35 @@ describe("scan — constructing a class", () => {
     ])
     expect(symbolById(result, "ts:src/boot.ts#boot").effects).toMatchObject([
       { id: "db.write", propagated: true, derivedFrom: ["ts:src/seeder.ts#Seeder"] },
+    ])
+  })
+
+  it("keeps a static block's write on a class of fields, so instantiating it says so", async () => {
+    await workspace.writeSource(
+      "src/registry.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "",
+        "const prisma = new PrismaClient()",
+        "",
+        "export class Registry {",
+        "  static items: string[] = []",
+        "  static {",
+        "    prisma.user.deleteMany()",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    await writeBoot("Registry", "./registry")
+
+    const result = await scanWorkspace()
+
+    expect(symbolById(result, "ts:src/registry.ts#Registry").effects.map((e) => e.id)).toEqual([
+      "db.write",
+    ])
+    expect(symbolById(result, "ts:src/boot.ts#boot").effects).toMatchObject([
+      { id: "db.write", propagated: true, derivedFrom: ["ts:src/registry.ts#Registry"] },
     ])
   })
 })
