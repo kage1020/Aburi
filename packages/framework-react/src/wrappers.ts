@@ -19,6 +19,7 @@ export interface WrapperCall {
 export function extractWrapperCall(fullNode: unknown, name: string): WrapperCall | null {
   const node = asSyntaxNode(fullNode)
   if (node === null) return null
+  // `lastQnameSegment` throws on a broken qname; that is a language-plugin bug not to swallow.
   const call = declaratorValue(node, lastQnameSegment(name))
   if (call === null || call.type !== "call_expression") return null
   const callee = calleeText(call)

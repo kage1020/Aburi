@@ -23,18 +23,19 @@ export function findNamedChildOfType(node: SyntaxNode, typeName: string): Syntax
   return null
 }
 
-export function declaratorValue(statement: SyntaxNode, binding: string): SyntaxNode | null {
+export function declaratorValue(statement: SyntaxNode, name: string): SyntaxNode | null {
   for (const child of statement.namedChildren) {
     if (child === null || child.type !== "variable_declarator") continue
     const declared = child.childForFieldName("name")
-    if (declared === null || declared.type !== "identifier" || declared.text !== binding) continue
+    if (declared === null || declared.type !== "identifier" || declared.text !== name) continue
     const value = child.childForFieldName("value")
     return value === null ? null : unwrapValue(value)
   }
   return null
 }
 
-// `<T>x` is left out because lang-typescript does not read through it either.
+// lang-typescript names Symbols through this reader too, so a framework's role and the Symbol's name
+// read the same initializer. `<T>x` is left out because Symbol naming does not read through it.
 const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "parenthesized_expression",
   "as_expression",
@@ -42,7 +43,9 @@ const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "non_null_expression",
 ])
 
-export function unwrapValue(node: SyntaxNode): SyntaxNode {
+export function unwrapValue<
+  N extends { readonly type: string; readonly namedChildren: readonly (N | null)[] },
+>(node: N): N {
   let cursor = node
   while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
     const inner = cursor.namedChildren.find((child) => child !== null && child.type !== "comment")

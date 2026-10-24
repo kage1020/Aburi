@@ -1,5 +1,6 @@
 export { formatCallResolutionLine } from "./call-resolution"
 export {
+  componentHeading,
   type ProjectComponentInput,
   projectComponent,
   renderSymbolBlock,

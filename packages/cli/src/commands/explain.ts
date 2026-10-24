@@ -1,9 +1,10 @@
-import { dirname, join, relative, resolve, sep } from "node:path"
-import { backslashSite, symbolIdFile } from "@aburi/core"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { symbolIdFile, type UnnameableSite, unnameableSite } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { configuredOutputDir, pinConfig } from "../config-load"
+import type { LogLevel } from "../env"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { pathExists } from "../fs-probe"
@@ -23,6 +24,7 @@ export interface ExplainOptions {
   outputPath?: string
   noRescan?: boolean
   debugResolution?: boolean
+  logLevel?: LogLevel
   warn?: WarnFn
 }
 
@@ -43,7 +45,13 @@ export type ExplainOutcome =
     }
   | { kind: "ambiguous"; candidates: readonly IRSymbol[]; exitCode: ExitCode }
   | { kind: "not-found"; exitCode: ExitCode; coverage: CoverageDoubt | null }
-  | { kind: "unnameable"; path: string; unnameablePrefix: string; exitCode: ExitCode }
+  | {
+      kind: "unnameable"
+      path: string
+      reason: UnnameableSite["reason"]
+      unnameablePrefix: string
+      exitCode: ExitCode
+    }
   | {
       kind: "unknown"
       exitCode: typeof EXIT.GATE
@@ -112,20 +120,23 @@ async function locate(
     if (claimed !== null) return missed(skippedByPath.get(claimed), "id", coverage)
   }
 
-  if (arg.includes("/")) {
-    const nativeRelative = relative(workspaceRoot, resolve(cwd, arg))
-    const documentPath = (
-      sep === "/" ? nativeRelative : nativeRelative.split(sep).join("/")
-    ).normalize("NFC")
-    const unnameable = backslashSite(documentPath)
-    if (unnameable !== null) {
-      return {
-        kind: "unnameable",
-        path: documentPath,
-        unnameablePrefix: unnameable.prefix,
-        exitCode: EXIT.GATE,
-      }
+  const nativeRelative = relative(workspaceRoot, resolve(cwd, arg))
+  const spelled = sep === "/" ? nativeRelative : nativeRelative.split(sep).join("/")
+  // A path on another Windows drive comes back absolute: outside the workspace, not a name.
+  const unnameable = isAbsolute(nativeRelative) ? null : unnameableSite(spelled)
+  // Without a `/` only a file on disk is a path: `A::create` is a qualified name to match.
+  if (unnameable !== null && (arg.includes("/") || (await pathExists(resolve(cwd, arg))))) {
+    return {
+      kind: "unnameable",
+      path: spelled,
+      reason: unnameable.reason,
+      unnameablePrefix: unnameable.prefix,
+      exitCode: EXIT.GATE,
     }
+  }
+
+  if (arg.includes("/")) {
+    const documentPath = spelled.normalize("NFC")
     const skipped = skippedByPath.get(documentPath)
     if (skipped !== undefined || (await pathExists(resolve(cwd, arg)))) {
       const inFile = ir.symbols.filter((s) => s.source.file === documentPath)
@@ -241,6 +252,7 @@ async function readOrScanIR(
     command: "explain",
     format: "json",
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    ...(options.logLevel === undefined ? {} : { logLevel: options.logLevel }),
     ...(options.warn === undefined ? {} : { incidents: { warn: options.warn } }),
   }
   const report = await runScan(scanOptions)

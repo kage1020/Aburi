@@ -1,22 +1,26 @@
 import {
   changed,
   emptySummary,
+  fp,
   makeDiff,
   makeSymbol,
   movedChanged,
   useScratchWorkspace,
 } from "@aburi/test-support"
-import type { DiffResult, SymbolChange, SymbolUnknown } from "@aburi/types"
+import type { DiffResult, IR, SymbolChange, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   EXIT,
+  type ExitCode,
   evaluateClause,
   evaluateFailOn,
   FailOnParseError,
   formatTriggered,
   parseFailOn,
 } from "../src"
+import { documentWith, symbolFor } from "./ir-documents"
 import { runCliIn } from "./run-cli"
+import { filesUnder, writeEarlierReports, writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("fail-on")
 
@@ -211,17 +215,74 @@ describe("evaluateFailOn — which clause trips", () => {
 })
 
 describe("aburi diff --fail-on", () => {
-  it("refuses a value with no clause at exit 2, before reading either IR", async () => {
+  const ALPHA = symbolFor("ts:src/a.ts#alpha")
+  const BETA = symbolFor("ts:src/b.ts#beta")
+  const ALPHA_EDITED = { ...ALPHA, fingerprint: fp("bbb") }
+  const BASE = documentWith({ symbols: [ALPHA, BETA] })
+
+  async function diffTo(head: IR, gate: readonly string[]) {
+    const paths = await writeIRs(workspace.root, BASE, head)
+    const { code, stderr } = await runCliIn(workspace.root, [
+      "diff",
+      "--base",
+      paths.base,
+      "--head",
+      paths.head,
+      ...gate,
+    ])
+    return { code, tripped: stderr.split("\n").filter((line) => line.startsWith("--fail-on")) }
+  }
+
+  const CHANGED_TRIPPED = "--fail-on changed tripped (observed: 1 changed)"
+
+  it.each<[string[], ExitCode, string[]]>([
+    [["--fail-on", "changed", "--fail-on", "removed"], EXIT.GATE, [CHANGED_TRIPPED]],
+    [["--fail-on", "removed", "--fail-on", "changed"], EXIT.GATE, [CHANGED_TRIPPED]],
+    [["--fail-on", "changed,removed"], EXIT.GATE, [CHANGED_TRIPPED]],
+    [["--fail-on", "removed", "--fail-on", "added"], EXIT.SUCCESS, []],
+    [[], EXIT.SUCCESS, []],
+  ])("gates on every clause it is given: %j over one changed Symbol exits %i and prints %j", async (gate, code, tripped) => {
+    const run = await diffTo(documentWith({ symbols: [ALPHA_EDITED, BETA] }), gate)
+    expect(run).toEqual({ code, tripped })
+  })
+
+  it.each([
+    ["changed", "removed"],
+    ["removed", "changed"],
+  ])("reads --fail-on %s --fail-on %s in that order, naming the first that trips", async (first, second) => {
+    const run = await diffTo(documentWith({ symbols: [ALPHA_EDITED] }), [
+      "--fail-on",
+      first,
+      "--fail-on",
+      second,
+    ])
+    expect(run.code).toBe(EXIT.GATE)
+    expect(run.tripped).toEqual([`--fail-on ${first} tripped (observed: 1 ${first})`])
+  })
+
+  const EMPTY_VALUE =
+    '--fail-on value "" is invalid: expected at least one clause; an empty --fail-on value would silently disable the CI gate.'
+
+  it.each([
+    [[""], EMPTY_VALUE],
+    [["", "changed"], EMPTY_VALUE],
+    [["bogus", "changed"], '--fail-on value "bogus" is invalid: unknown token "bogus"'],
+    [
+      ["removed,", "changed"],
+      '--fail-on value "removed," is invalid: clause 2 of 2 is empty; remove the extra comma or write the clause.',
+    ],
+  ])("refuses the values %j at exit 2, quoting the one at fault, before it reads either IR or removes an earlier report", async (values, says) => {
+    const earlier = await writeEarlierReports(workspace.root, ["out"])
     const { code, stderr } = await runCliIn(workspace.root, [
       "diff",
       "--base",
       "./missing.json",
       "--head",
       "./also.json",
-      "--fail-on",
-      "",
+      ...values.flatMap((value) => ["--fail-on", value]),
     ])
     expect(code).toBe(EXIT.INPUT_ERROR)
-    expect(stderr).toContain('--fail-on value "" is invalid: expected at least one clause')
+    expect(stderr).toBe(`${says}\n`)
+    expect(await filesUnder(workspace.root)).toEqual(earlier)
   })
 })

@@ -19,6 +19,7 @@ const QUOTED_RULE_LENGTH = 60
 
 export interface GitignoreTree {
   ignores(path: string): Promise<boolean>
+  ignoresDirectory(path: string): Promise<boolean>
 }
 
 export function openGitignoreTree(workspaceRoot: string): GitignoreTree {
@@ -89,6 +90,10 @@ class GitignoreDescent implements GitignoreTree {
     const lastSlash = path.lastIndexOf("/")
     if (lastSlash >= 0 && (await this.#directoryExcluded(path.slice(0, lastSlash)))) return true
     return (await this.#decide(path, "file")) === "ignored"
+  }
+
+  ignoresDirectory(path: string): Promise<boolean> {
+    return this.#directoryExcluded(path)
   }
 
   async #directoryExcluded(directory: string): Promise<boolean> {

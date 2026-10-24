@@ -1,4 +1,4 @@
-import type { SkippedFile, UnrepresentableFile } from "@aburi/core"
+import type { SkippedFile, UnnameableRoot, UnrepresentableFile } from "@aburi/core"
 import { makeLanguageId } from "@aburi/core"
 import type { LspEnrichmentStats } from "@aburi/types"
 import { describe, expect, it } from "vitest"
@@ -36,6 +36,10 @@ function skippedFiles(
 
 function unspellable(fsPath: string, unnameablePrefix: string): UnrepresentableFile {
   return { fsPath, reason: "unspellable-name", unnameablePrefix }
+}
+
+function driveShaped(fsPath: string, unnameablePrefix: string): UnrepresentableFile {
+  return { fsPath, reason: "drive-shaped-name", unnameablePrefix }
 }
 
 describe("reportScanIncidents — what a scan with nothing to report says", () => {
@@ -200,6 +204,24 @@ describe("reportScanIncidents — files no Document path can name", () => {
     ])
   })
 
+  it("names a top-level name read as a drive under a paragraph of its own, whose ignore advice differs", () => {
+    const lines = incidentLinesFrom({
+      unrepresentableFiles: [
+        driveShaped("d:data/x.ts", "d:data"),
+        driveShaped("d:data/y.ts", "d:data"),
+        driveShaped("a:notes.ts", "a:notes.ts"),
+        unspellable("odd\\name.ts", "odd\\name.ts"),
+      ],
+    })
+    expect(lines).toEqual([
+      '⚠ 1 file(s) were left out of the IR and out of its counts, under 1 name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.',
+      "    odd\\name.ts",
+      '⚠ 3 file(s) were left out of the IR and out of its counts, under 2 top-level name(s) a Document path reads as a Windows drive: a path opening with one ASCII letter and ":" names a drive there, and a Document means the same on every platform, so no workspace-relative path can open that way. Rename each one below, or leave it out with ignore, which matches the name as printed.',
+      "    a:notes.ts",
+      "    d:data — a directory, and the 2 file(s) under it",
+    ])
+  })
+
   it("puts them above the census that is recoverable from the IR", () => {
     const lines = incidentLinesFrom({
       totalFiles: 1,
@@ -221,6 +243,44 @@ describe("reportScanIncidents — files no Document path can name", () => {
     })
     expect(lines).toHaveLength(13)
     expect(lines.join("\n")).not.toContain("more")
+  })
+})
+
+describe("reportScanIncidents — a workspace package no Document path can name", () => {
+  const BELOW_A_DRIVE: UnnameableRoot = {
+    tool: "pnpm",
+    manifestPath: "pnpm-workspace.yaml",
+    relativeRoot: "d:data/pkg",
+    reason: "drive-shaped-name",
+    unnameablePrefix: "d:data",
+  }
+  const WITH_A_BACKSLASH: UnnameableRoot = {
+    tool: "nx",
+    manifestPath: "nx.json",
+    relativeRoot: "libs/x\\pkg",
+    reason: "unspellable-name",
+    unnameablePrefix: "libs/x\\pkg",
+  }
+
+  it.each<[string, boolean, readonly string[]]>([
+    ["beside the packages that were kept", false, []],
+    [
+      "and that the repository fell back to one component",
+      true,
+      [
+        "⚠ No other workspace package was found, so the whole repository is described as one component.",
+      ],
+    ],
+  ])("names each one and the directory to rename, %s", (_, fellBackToSingleComponent, notice) => {
+    const lines = incidentLinesFrom({
+      unnameableRoots: [BELOW_A_DRIVE, WITH_A_BACKSLASH],
+      fellBackToSingleComponent,
+    })
+    expect(lines).toEqual([
+      '⚠ pnpm package "d:data/pkg" (pnpm-workspace.yaml) is not a component and not on workspace.managers[].roots, and none of its files can be scanned: "d:data" opens with one ASCII letter and ":", which a Document path reads as a Windows drive, so no IR can name it. Rename it.',
+      '⚠ nx package "libs/x\\pkg" (nx.json) is not a component and not on workspace.managers[].roots, and none of its files can be scanned: "libs/x\\pkg" holds a backslash, and "/" is the only separator a Document path has, so no IR can name it. Rename it.',
+      ...notice,
+    ])
   })
 })
 

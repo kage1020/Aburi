@@ -169,7 +169,7 @@ describe("declaratorValue", () => {
     ["its declarator has no initializer", statement(declarator(identifier("Ctx"), null))],
     [
       "only a destructuring pattern binds it",
-      statement(declarator(node({ type: "object_pattern", text: "{ Ctx }" }), first)),
+      statement(declarator(node({ type: "object_pattern", text: "Ctx" }), first)),
     ],
   ])("returns null for a name when %s", (_label, declaration) => {
     expect(declaratorValue(declaration, "Ctx")).toBeNull()

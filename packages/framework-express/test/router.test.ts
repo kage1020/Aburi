@@ -27,7 +27,7 @@ describe("extractRouterCall", () => {
       ["r Router"],
     ],
     [
-      "a parenthesized `Router()` after a comment",
+      "a parenthesized `Router()` with a comment inside the parentheses",
       `import { Router } from "express"\nconst r = (/* api */ Router())\n`,
       ["r Router"],
     ],

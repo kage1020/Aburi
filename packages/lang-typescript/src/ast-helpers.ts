@@ -1,3 +1,4 @@
+import { unwrapValue } from "@aburi/core"
 import type { ExtractionContext, SymbolCandidate, WrittenSourceRange } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 
@@ -22,23 +23,6 @@ export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSour
 export function functionValueOf(node: Node): Node | null {
   const value = node.childForFieldName("value")
   return value === null ? null : asFunctionValue(value)
-}
-
-const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
-  "parenthesized_expression",
-  "as_expression",
-  "satisfies_expression",
-  "non_null_expression",
-])
-
-export function unwrapValue(node: Node): Node {
-  let cursor: Node = node
-  while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
-    const inner = firstNonCommentChild(cursor)
-    if (inner === null) return cursor
-    cursor = inner
-  }
-  return cursor
 }
 
 export function asFunctionValue(node: Node): Node | null {

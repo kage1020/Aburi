@@ -1,3 +1,5 @@
+import { NONE, quotient, type Ratio, WHOLE } from "./ratio"
+
 export function tokenizeName(input: string): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -83,16 +85,20 @@ export function nameEvidence(qname: string): number {
 }
 
 export function jaccard(a: readonly string[], b: readonly string[]): number {
+  return quotient(jaccardRatio(a, b))
+}
+
+export function jaccardRatio(a: readonly string[], b: readonly string[]): Ratio {
   return jaccardSets(new Set(a), new Set(b))
 }
 
-function jaccardSets(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
-  if (a.size === 0 && b.size === 0) return 1
-  if (a.size === 0 || b.size === 0) return 0
+function jaccardSets(a: ReadonlySet<string>, b: ReadonlySet<string>): Ratio {
+  if (a.size === 0 && b.size === 0) return WHOLE
+  if (a.size === 0 || b.size === 0) return NONE
   const [small, large] = a.size <= b.size ? [a, b] : [b, a]
   let intersection = 0
   for (const token of small) if (large.has(token)) intersection++
-  return intersection / (a.size + b.size - intersection)
+  return { numerator: intersection, denominator: a.size + b.size - intersection }
 }
 
 export function jaccardTokens(a: string, b: string): number {
@@ -121,7 +127,7 @@ export function nameSimilarity(baseName: string, headName: string): number {
 }
 
 export function memberSimilarity(baseName: string, headName: string): number {
-  return memberJaccard(uncachedTokenSets, baseName, headName)
+  return quotient(memberJaccardRatio(uncachedTokenSets, baseName, headName))
 }
 
 export function ownersAreCompatible(baseName: string, headName: string): boolean {
@@ -146,10 +152,10 @@ function pluralises(singular: string, plural: string): boolean {
 }
 
 function nameJaccard(tokenSets: TokenSets, baseName: string, headName: string): number {
-  return jaccardSets(tokenSets(baseName), tokenSets(headName))
+  return quotient(jaccardSets(tokenSets(baseName), tokenSets(headName)))
 }
 
-function memberJaccard(tokenSets: TokenSets, baseName: string, headName: string): number {
+function memberJaccardRatio(tokenSets: TokenSets, baseName: string, headName: string): Ratio {
   return jaccardSets(tokenSets(lastSegment(baseName)), tokenSets(lastSegment(headName)))
 }
 
@@ -234,7 +240,7 @@ function dotOrEnd(owner: string): number {
 
 export interface NameScorer {
   name(baseName: string, headName: string): number
-  member(baseName: string, headName: string): number
+  member(baseName: string, headName: string): Ratio
   ownersCompatible(baseName: string, headName: string): boolean
 }
 
@@ -257,7 +263,7 @@ export function createNameScorer(): NameScorer {
   }
   return {
     name: (baseName, headName) => nameJaccard(tokenSets, baseName, headName),
-    member: (baseName, headName) => memberJaccard(tokenSets, baseName, headName),
+    member: (baseName, headName) => memberJaccardRatio(tokenSets, baseName, headName),
     ownersCompatible: (baseName, headName) =>
       ownersCompatible(ownerOf(baseName), ownerOf(headName), tokenSets),
   }
