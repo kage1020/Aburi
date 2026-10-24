@@ -160,12 +160,72 @@ describe("a directory only nx claims", () => {
   })
 })
 
+describe("a manifest that opens with a byte order mark", () => {
+  const ACME_A = JSON.stringify({ name: "@acme/a" })
+
+  it.each<[string, () => Promise<void>, string]>([
+    [
+      "a package's package.json",
+      async () => {
+        await tree.writePnpmWorkspace("packages/*")
+        await tree.writeSource("packages/a/package.json", `\uFEFF${ACME_A}`)
+      },
+      "acme-a",
+    ],
+    [
+      "an nx project.json",
+      async () => {
+        await tree.writeJson("nx.json", {})
+        await tree.writeSource("apps/billing/project.json", '\uFEFF{ "name": "billing-web" }')
+      },
+      "billing-web",
+    ],
+    [
+      "the root package.json declaring workspaces",
+      async () => {
+        await tree.writeSource("package.json", '\uFEFF{ "workspaces": ["packages/*"] }')
+        await tree.writeSource("packages/a/package.json", ACME_A)
+      },
+      "acme-a",
+    ],
+    [
+      "the root package.json of a single project",
+      () => tree.writeSource("package.json", '\uFEFF{ "name": "demo", "version": "1.0.0" }'),
+      "demo",
+    ],
+    [
+      "pnpm-workspace.yaml",
+      async () => {
+        await tree.writeSource("pnpm-workspace.yaml", "\uFEFFpackages:\n  - 'packages/*'\n")
+        await tree.writeSource("packages/a/package.json", ACME_A)
+      },
+      "acme-a",
+    ],
+  ])("reads %s as it reads one without", async (_case, write, id) => {
+    await write()
+
+    const components = await detectComponents({ workspaceRoot: tree.root })
+
+    expect(components.map((component) => component.id)).toEqual([id])
+  })
+})
+
 describe("a manifest that cannot be read", () => {
   it.each<[string, () => Promise<void>, string]>([
     [
       "is not JSON",
       () => tree.writeSource("apps/billing/package.json", "{ broken"),
-      "package.json",
+      "package.json: Expected property name or '}' in JSON at position 2",
+    ],
+    [
+      "opens with two byte order marks",
+      () => tree.writeSource("apps/billing/package.json", '\uFEFF\uFEFF{ "name": "billing" }'),
+      "package.json: it opens with more than one byte order mark (U+FEFF)",
+    ],
+    [
+      "has a byte order mark after its first character",
+      () => tree.writeSource("apps/billing/package.json", '{\uFEFF "name": "billing" }'),
+      "package.json: Expected property name or '}' in JSON at position 1",
     ],
     ["the filesystem will not hand over", () => tree.mkdir("apps/billing/package.json"), "EISDIR"],
   ])("refuses a package manifest that %s", async (_case, write, detail) => {

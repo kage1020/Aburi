@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs"
-import { readdir } from "node:fs/promises"
-import { resolve, sep } from "node:path"
+import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it } from "vitest"
 import { EXIT } from "../src"
 import { runCliIn } from "./run-cli"
-import { writeTypeScriptWorkspace } from "./workspace"
+import { listTree, writeTypeScriptWorkspace } from "./workspace"
 
 const workspace = useScratchWorkspace("format-flags")
 
@@ -19,13 +18,13 @@ async function scan(
   const out = resolve(workspace.root, "out")
   const { code, stderr } = await runCliIn(workspace.root, ["scan", "--output-dir", out, ...flags])
   if (!existsSync(out)) return { code, stderr, wrote: null }
-  const wrote = (await readdir(out, { recursive: true })).map((entry) => entry.replaceAll(sep, "/"))
-  return { code, stderr, wrote: wrote.sort() }
+  return { code, stderr, wrote: await listTree(out) }
 }
 
 const IR = ["aburi.ir.json"]
 const MARKDOWN = ["components", "components/format-flags.md", "workspace.md"]
 const BOTH = [...IR, ...MARKDOWN].sort()
+const CALLERS = ["components/notes.md", "notes.md"]
 
 describe("scan format flags", () => {
   it.each([
@@ -41,6 +40,19 @@ describe("scan format flags", () => {
     const { code, wrote } = await scan(...flags)
     expect(code).toBe(EXIT.SUCCESS)
     expect(wrote).toEqual(expected)
+  })
+
+  it.each([
+    [["--format", "json"], IR],
+    [["--format", "md"], MARKDOWN],
+  ])("%j after a scan that wrote both leaves %j beside the caller's own files", async (flags, expected) => {
+    expect((await scan()).wrote).toEqual(BOTH)
+    for (const file of CALLERS) await workspace.writeSource(`out/${file}`, "# Notes\n")
+
+    const { code, wrote } = await scan(...flags)
+
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(wrote).toEqual([...new Set([...expected, "components", ...CALLERS])].sort())
   })
 
   it.each([

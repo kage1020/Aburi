@@ -19,7 +19,7 @@ import type { ReadFile } from "../lsp"
 import { buildComponentAttribution } from "./attribute"
 import type { DiscoveredFile, SkippedFile } from "./discover"
 import { buildDropCFilter } from "./drop-c"
-import { describeThrown, errorCode, isVanishedFile } from "./faults"
+import { describeThrown, errorCode, isPluginSetFault, isVanishedFile } from "./faults"
 import { runFilePipeline, type TreeReleaseFailure } from "./pipeline"
 import type { LanguageRouter } from "./route"
 import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
@@ -263,17 +263,6 @@ function describeIdFault(symbols: readonly IRSymbol[], path: string): string | n
     here.set(symbol.id, symbol)
   }
   return null
-}
-
-const PLUGIN_SET_FAULT_CODES: ReadonlySet<string> = new Set([
-  "scan-plugin-misconfigured",
-  "invalid-language-id",
-  "vocab-undeclared",
-])
-
-function isPluginSetFault(error: unknown): boolean {
-  const code = errorCode(error)
-  return code !== null && PLUGIN_SET_FAULT_CODES.has(code)
 }
 
 async function loadSourceFile(

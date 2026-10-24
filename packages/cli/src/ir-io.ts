@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { assertIRIntegrity } from "@aburi/core"
+import { assertIRIntegrity, stripUtf8Bom } from "@aburi/core"
 import type { IR } from "@aburi/types"
 import { CliError, errorMessage } from "./errors"
 
@@ -16,7 +16,7 @@ export async function readIR(path: string): Promise<IR> {
   }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(stripUtf8Bom(raw))
   } catch (error) {
     throw new CliError(
       `IR file "${path}" is not valid JSON: ${errorMessage(error)}`,
