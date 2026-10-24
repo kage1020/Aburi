@@ -1,12 +1,7 @@
+import { unwrapValue } from "@aburi/core"
 import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import {
-  asFunctionValue,
-  findChild,
-  firstNonCommentChild,
-  makeSourceRange,
-  unwrapValue,
-} from "./ast-helpers"
+import { asFunctionValue, findChild, firstNonCommentChild, makeSourceRange } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
 import { readStaticString } from "./string-escape"
 
@@ -103,7 +98,7 @@ export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration
 function* spineCalls(call: Node): Iterable<Node> {
   let cursor: Node | null = call
   while (cursor !== null) {
-    const step = unwrapValue(cursor)
+    const step: Node = unwrapValue(cursor)
     if (step.type === "call_expression") {
       yield step
       cursor = step.childForFieldName("function")

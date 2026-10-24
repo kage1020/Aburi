@@ -58,7 +58,7 @@ function classifyFunctionSymbol(
 }
 
 function classifyConstSymbol(symbol: SymbolCandidate<OpaqueAstNode>): ReactClassification | null {
-  const call = extractWrapperCall(symbol.fullNode)
+  const call = extractWrapperCall(symbol.fullNode, symbol.name)
   if (call === null) return null
   if (isContextCall(call)) {
     return {

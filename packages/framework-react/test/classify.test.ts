@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { classifyReactSymbol } from "../src/index"
-import { candidateNamed, makeCandidate, makeCtx } from "./fixtures/symbol"
+import { candidateNamed, candidatesOf, makeCandidate, makeCtx } from "./fixtures/symbol"
 
 async function classified(source: string, name: string) {
   return classifyReactSymbol(await candidateNamed(source, name), makeCtx("src/f.tsx", source))
@@ -132,5 +132,120 @@ describe("classifyReactSymbol", () => {
     "namespace",
   ] as const)("returns null for a %s", (kind) => {
     expect(classifyReactSymbol(makeCandidate({ kind, name: "X" }), makeCtx())).toBeNull()
+  })
+})
+
+describe("classifyReactSymbol — a const read from its own initializer", () => {
+  /** `"<name> <extKind> <derivedBy>"` per const Symbol, `"<name> -"` for one with no role, sorted. */
+  async function constRoles(source: string, path = "src/f.tsx"): Promise<string[]> {
+    const ctx = makeCtx(path, source)
+    return (await candidatesOf(source, path))
+      .filter((candidate) => candidate.kind === "const")
+      .map((candidate) => {
+        const role = classifyReactSymbol(candidate, ctx)
+        return role === null
+          ? `${candidate.name} -`
+          : `${candidate.name} ${role.extKind} ${role.derivedBy}`
+      })
+      .sort()
+  }
+
+  it.each([
+    [
+      "a wrapper declared first",
+      `export const ThemeContext = createContext("light"), DEFAULT_THEME = "light"`,
+      [
+        "DEFAULT_THEME -",
+        "ThemeContext framework:react:context framework:react:context:createContext",
+      ],
+    ],
+    [
+      "a wrapper declared second",
+      "export const PAGE_SIZE = 20, Row = memo((props: { id: string }) => <li>{props.id}</li>)",
+      ["PAGE_SIZE -", "Row framework:react:memo framework:react:memo:memo"],
+    ],
+    [
+      "a wrapper declared after another call",
+      "export const theme = getTheme(), Ctx = createContext(null)",
+      ["Ctx framework:react:context framework:react:context:createContext", "theme -"],
+    ],
+    [
+      "two wrappers",
+      "export const A = memo(X), B = React.forwardRef(Y)",
+      [
+        "A framework:react:memo framework:react:memo:memo",
+        "B framework:react:forward-ref framework:react:forward-ref:React.forwardRef",
+      ],
+    ],
+    [
+      "`memo(forwardRef(...))` declared second",
+      "export const size = 1, Fancy = memo(forwardRef((p, r) => <b ref={r} />))",
+      ["Fancy framework:react:memo framework:react:memo:memo", "size -"],
+    ],
+    [
+      "a wrapper declared second in a namespace",
+      "export namespace ui {\n  export const size = 1, Row = memo(Inner)\n}",
+      ["ui.Row framework:react:memo framework:react:memo:memo", "ui.size -"],
+    ],
+    [
+      "a wrapper beside a call that wraps one",
+      "export const Row = memo(Impl), Themed = withTheme(memo(Impl))",
+      ["Row framework:react:memo framework:react:memo:memo", "Themed -"],
+    ],
+  ])("gives each name in a statement its own role: %s", async (_label, source, roles) => {
+    expect(await constRoles(source)).toEqual(roles)
+  })
+
+  it.each([
+    [
+      "nested in an array",
+      `export const routes = [{ path: "/", element: memo(() => <div />) }]`,
+      "routes",
+    ],
+    [
+      "inside an object literal's function",
+      "export const handlers = { save: () => forwardRef(() => null) }",
+      "handlers",
+    ],
+    ["as an object literal's value", "export const views = { list: memo(List) }", "views"],
+    ["handed to `new`", "export const holder = new Holder(memo(Impl))", "holder"],
+    ["in one branch of a conditional", "export const Row = flag ? memo(Impl) : Impl", "Row"],
+  ])("gives no role to a const holding a wrapper %s", async (_label, source, name) => {
+    expect(await constRoles(source)).toEqual([`${name} -`])
+  })
+
+  it("gives no role to a name destructured from a wrapper call", async () => {
+    expect(await constRoles("export const { displayName } = memo(Impl)")).toEqual(["displayName -"])
+  })
+
+  it.each([
+    ["`as`", "export const Row = memo(Impl) as typeof Impl"],
+    ["`satisfies`", "export const Row = memo(Impl) satisfies ComponentType"],
+    ["`!`", "export const Row = memo(Impl)!"],
+    ["parentheses", "export const Row = (memo(Impl))"],
+  ])("reads a wrapper through %s", async (_label, source) => {
+    expect(await constRoles(source)).toEqual(["Row framework:react:memo framework:react:memo:memo"])
+  })
+
+  it.each([
+    [
+      "type arguments on the call",
+      "export const Ctx = React.createContext<Theme | null>(null)",
+      "Ctx framework:react:context framework:react:context:React.createContext",
+    ],
+    [
+      "a type annotation on the name",
+      'export const Ctx: React.Context<string> = createContext("light")',
+      "Ctx framework:react:context framework:react:context:createContext",
+    ],
+  ])("reads a wrapper call declared with %s", async (_label, source, role) => {
+    expect(await constRoles(source)).toEqual([role])
+  })
+
+  it.each([
+    ['export const Ctx = <Context<string>>createContext("light")', "Ctx"],
+    ["export const Row = <any>memo(Inner)", "Row"],
+  ])("gives no role to a wrapper behind an old-style type assertion: %s", async (source, name) => {
+    expect(await constRoles(source, "src/f.ts")).toEqual([`${name} -`])
   })
 })

@@ -4,9 +4,11 @@ import {
   asSyntaxNode,
   calleeLeaf,
   calleeText,
+  declaratorValue,
   findFirstDescendantOfType,
   findNamedChildOfType,
   type SyntaxNode,
+  unwrapValue,
 } from "../src/syntax-node"
 
 function node(overrides: Partial<SyntaxNode> = {}): SyntaxNode {
@@ -94,6 +96,83 @@ describe("findNamedChildOfType", () => {
     })
 
     expect(findNamedChildOfType(parent, "identifier")).toBeNull()
+  })
+})
+
+describe("unwrapValue", () => {
+  const value = node({ text: "memo(Inner)" })
+  const wrapped = (type: string, ...namedChildren: SyntaxNode[]) => node({ type, namedChildren })
+
+  it.each([
+    ["parentheses", wrapped("parenthesized_expression", value)],
+    ["`as`", wrapped("as_expression", value, node({ type: "type_query" }))],
+    ["`satisfies`", wrapped("satisfies_expression", value, node({ type: "type_identifier" }))],
+    ["`!`", wrapped("non_null_expression", value)],
+    [
+      "several wrappers",
+      wrapped(
+        "non_null_expression",
+        wrapped("as_expression", wrapped("parenthesized_expression", value)),
+      ),
+    ],
+    [
+      "a comment inside parentheses",
+      wrapped("parenthesized_expression", node({ type: "comment" }), value),
+    ],
+  ])("reads through %s to the value", (_label, outer) => {
+    expect(unwrapValue(outer)).toBe(value)
+  })
+
+  it("does not read through `<T>x`", () => {
+    const assertion = wrapped("type_assertion", node({ type: "type_arguments" }), value)
+    expect(unwrapValue(assertion)).toBe(assertion)
+  })
+
+  it("stops at the wrapper holding only a comment", () => {
+    const empty = wrapped("parenthesized_expression", node({ type: "comment" }))
+    expect(unwrapValue(wrapped("non_null_expression", empty))).toBe(empty)
+  })
+})
+
+describe("declaratorValue", () => {
+  const identifier = (text: string) => node({ type: "identifier", text })
+  const declarator = (name: SyntaxNode, value: SyntaxNode | null) =>
+    node({
+      type: "variable_declarator",
+      childForFieldName: (field) => (field === "name" ? name : field === "value" ? value : null),
+    })
+  const statement = (...declarators: (SyntaxNode | null)[]) =>
+    node({ type: "lexical_declaration", namedChildren: declarators })
+  const first = node({ text: "createContext(null)" })
+  const second = node({ text: "memo(Inner)" })
+
+  it("returns the value of the declarator binding the name, wherever it is in the statement", () => {
+    const declaration = statement(
+      declarator(identifier("Ctx"), first),
+      null,
+      declarator(identifier("Row"), second),
+    )
+    expect(declaratorValue(declaration, "Ctx")).toBe(first)
+    expect(declaratorValue(declaration, "Row")).toBe(second)
+  })
+
+  it("reads the value through its wrappers", () => {
+    const asCast = node({
+      type: "as_expression",
+      namedChildren: [second, node({ type: "type_query" })],
+    })
+    expect(declaratorValue(statement(declarator(identifier("Row"), asCast)), "Row")).toBe(second)
+  })
+
+  it.each([
+    ["no declarator binds it", statement(declarator(identifier("Row"), second))],
+    ["its declarator has no initializer", statement(declarator(identifier("Ctx"), null))],
+    [
+      "only a destructuring pattern binds it",
+      statement(declarator(node({ type: "object_pattern", text: "Ctx" }), first)),
+    ],
+  ])("returns null for a name when %s", (_label, declaration) => {
+    expect(declaratorValue(declaration, "Ctx")).toBeNull()
   })
 })
 

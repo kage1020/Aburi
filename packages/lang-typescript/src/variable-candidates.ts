@@ -1,12 +1,7 @@
+import { unwrapValue } from "@aburi/core"
 import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import {
-  asFunctionValue,
-  hasChildOfType,
-  makeSourceRange,
-  nameFieldText,
-  unwrapValue,
-} from "./ast-helpers"
+import { asFunctionValue, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
 import { inlineHandlers } from "./call-symbols"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
