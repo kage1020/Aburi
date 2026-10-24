@@ -63,7 +63,12 @@ function describeScanFault(report: ScanReport): string {
   }
   const alsoUnnameable =
     unnameable === 0 ? "" : ` (and ${unnameable} more have names no Document path can spell)`
-  if (fault === null) return "it did not exit clean"
+  if (fault === null) {
+    const packages = report.unnameableRoots.length
+    return packages === 0
+      ? "it did not exit clean"
+      : `${packages} workspace package(s) sit in directories no Document path can spell`
+  }
   switch (fault.kind) {
     case "nothing-discovered":
       return "it discovered no file to read"

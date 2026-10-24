@@ -1,4 +1,6 @@
-import { InvalidArgumentError } from "commander"
+import { EventEmitter } from "node:events"
+import { type Command, InvalidArgumentError } from "commander"
+import { isLogLevel, type LogLevel } from "./env"
 import { CliError } from "./errors"
 
 export type OutputFormat = "json" | "md" | "both"
@@ -18,6 +20,11 @@ export function parseFormat(value: string): OutputFormat {
   throw new InvalidArgumentError(`--format must be one of: json | md | both`)
 }
 
+export function parseLogLevel(value: string): LogLevel {
+  if (isLogLevel(value)) return value
+  throw new InvalidArgumentError(`--log-level must be one of: debug | info | warn | error`)
+}
+
 export function parseMaxBytes(value: string): number {
   if (!/^[1-9][0-9]*$/.test(value)) {
     throw new InvalidArgumentError(`--max-bytes must be a positive integer (got "${value}")`)
@@ -29,8 +36,39 @@ export function parseMaxBytes(value: string): number {
   return parsed
 }
 
+export function parsePath(value: string): string {
+  if (value.length === 0) throw new InvalidArgumentError("a path must not be empty")
+  return value
+}
+
 export function collect(value: string, accumulator: string[]): string[] {
   return [...accumulator, value]
+}
+
+export function refuseRepeatedValues(command: Command): void {
+  const quoted = (value: string | null) => (value === null ? "no value" : `"${value}"`)
+  for (const option of command.options) {
+    const takesValue = option.required || option.optional
+    // An option that accumulates is meant to be given once per value.
+    if (!takesValue || option.variadic || Array.isArray(option.defaultValue)) continue
+    const flag = option.long ?? option.flags
+    let first: string | null | undefined
+    // Ahead of commander's own listener, so a second value its parser rejects is still reported
+    // as a repeat. Command is an EventEmitter, though its typings declare only `on`.
+    EventEmitter.prototype.prependListener.call(
+      command,
+      `option:${option.name()}`,
+      (value: string | null) => {
+        if (first !== undefined) {
+          throw new CliError(
+            `${flag} is given more than once (${quoted(first)}, then ${quoted(value)}): pass one`,
+            "input-error",
+          )
+        }
+        first = value
+      },
+    )
+  }
 }
 
 export function deriveStrict(cmdOptions: {
