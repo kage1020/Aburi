@@ -1,5 +1,5 @@
 import type { ArrayDelta, SignatureDelta, SymbolDelta } from "@aburi/types"
-import { formatInput, inlineCode, propagatedFromSuffix } from "../format"
+import { formatInput, inlineCode, joinCode, propagatedFromSuffix } from "../format"
 import type { ChangedEntry } from "./partition"
 
 export function renderDeltaBody(change: ChangedEntry): string[] {
@@ -248,10 +248,7 @@ function renderStringList(values: readonly unknown[]): string {
 }
 
 function appendInlineRow(rows: string[], label: string, values: readonly unknown[]): void {
-  const rendered = values
-    .filter((v): v is string => typeof v === "string")
-    .map((s) => inlineCode(s))
-    .join(", ")
+  const rendered = joinCode(values.filter((v): v is string => typeof v === "string"))
   if (rendered === "") return
   rows.push(`- ${label}: ${rendered}`)
 }

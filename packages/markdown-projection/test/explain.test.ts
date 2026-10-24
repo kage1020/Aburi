@@ -8,11 +8,11 @@ import {
   rule,
   sig,
   symbolId,
-  zeroFp,
 } from "@aburi/test-support"
 import type { UnresolvedCallDiagnostic } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectSymbolExplain } from "../src"
+import { droppedSymbol } from "./fixtures"
 import { headings, sectionOf } from "./markdown"
 
 const CALLER_ID = symbolId("ts:src/ctl.ts#Ctl.route")
@@ -83,18 +83,8 @@ describe("projectSymbolExplain — a kept Symbol", () => {
 })
 
 describe("projectSymbolExplain — a dropped Symbol", () => {
-  const dto = (dropReason: string) =>
-    makeSymbol({
-      id: "ts:src/a.ts#Dto",
-      name: "Dto",
-      kind: "class",
-      dropped: true,
-      dropReason,
-      fingerprint: zeroFp(),
-    })
-
   it("shows the drop reason in place of the axis sections", () => {
-    expect(projectSymbolExplain(dto("pure DTO"))).toBe(
+    expect(projectSymbolExplain(droppedSymbol("ts:src/a.ts#Dto", "pure DTO"))).toBe(
       [
         "# `Dto` *(class)* — dropped",
         "",

@@ -2,6 +2,7 @@ import {
   changed,
   component,
   decorator,
+  dependency,
   effect,
   makeDiff,
   makeIR,
@@ -9,9 +10,8 @@ import {
   rule,
   sig,
   symbolId,
-  zeroFp,
 } from "@aburi/test-support"
-import type { Symbol as IRSymbol } from "@aburi/types"
+import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   callRow,
@@ -26,7 +26,13 @@ import {
   ruleRow,
   tableCell,
 } from "../src"
-import { LONG_CONDITION, namedSymbol, projectChanges } from "./fixtures"
+import {
+  componentPage,
+  droppedSymbol,
+  LONG_CONDITION,
+  namedSymbol,
+  projectChanges,
+} from "./fixtures"
 import { sectionOf, shownText } from "./markdown"
 
 const THROWN_TEMPLATE = `new Error(\`unknown kind: \${k}\`)`
@@ -249,13 +255,13 @@ describe("table cells keep their column count", () => {
 })
 
 describe("a value written into a row of the report", () => {
-  const VALUE = "ts:src/_x_/<T>/`y`\n## z.ts#f"
-  const SHOWN = "ts:src/_x_/<T>/`y` ## z.ts#f"
+  // Not shaped like a Symbol id, so as an edge endpoint it stays a component-level one.
+  const VALUE = "src/_x_/*x*/<T>/`y`/~~s~~\n## z"
+  const SHOWN = "src/_x_/*x*/<T>/`y`/~~s~~ ## z"
 
-  const handler = (overrides: Omit<Parameters<typeof makeSymbol>[0], "id" | "name">) =>
-    makeSymbol({ id: "ts:src/a.ts#handler", name: "handler", ...overrides })
-  const dropped = (dropReason: string): IRSymbol =>
-    handler({ kind: "class", dropped: true, dropReason, fingerprint: zeroFp() })
+  const handler = (overrides: Parameters<typeof namedSymbol>[1]) =>
+    namedSymbol("handler", overrides)
+  const dropped = (dropReason: string) => droppedSymbol("ts:src/handler.ts#handler", dropReason)
   const propagatedFrom = (source: string) =>
     effect({
       id: "db.write",
@@ -265,7 +271,25 @@ describe("a value written into a row of the report", () => {
       derivedFrom: [source],
     })
   const page = (symbols: IRSymbol[], name = "Billing") =>
-    projectComponent({ component: component({ id: "billing", name }), symbols, dependencies: [] })
+    componentPage(symbols, { of: component({ id: "billing", name }) })
+  const edgePage = (from: string) =>
+    componentPage([], { dependencies: [dependency({ from, to: "billing" })] })
+  const edgeList = (from: string) => {
+    const md = projectWorkspace(
+      makeIR({
+        components: [component({ id: "billing", name: "Billing" })],
+        dependencies: [dependency({ from, to: "billing" })],
+      }),
+    )
+    return md.slice(md.indexOf("Fallback list:"))
+  }
+  const generatedBy = (
+    generator: Partial<IR["generator"]>,
+    generatedAt = "2026-01-02T03:04:05Z",
+  ) => {
+    const ir = makeIR()
+    return projectWorkspace({ ...ir, generator: { ...ir.generator, ...generator }, generatedAt })
+  }
   const titled = (refs: { base?: string; head?: string }) => {
     const diff = makeDiff()
     return projectDiff({
@@ -275,8 +299,15 @@ describe("a value written into a row of the report", () => {
     })
   }
 
-  it("is one CommonMark rewrites when it is written bare", () => {
-    expect(shownText(`- ${VALUE}`)).not.toContain(SHOWN)
+  it.each([
+    "_x_",
+    "*x*",
+    "<T>",
+    "`y`",
+    "a\n## z",
+    "~~s~~",
+  ])("%j is rewritten by CommonMark when written bare", (hazard) => {
+    expect(shownText(`- ${hazard}`)).not.toContain(hazard.replace("\n", " "))
   })
 
   it.each<[string, (value: string) => string]>([
@@ -309,6 +340,11 @@ describe("a value written into a row of the report", () => {
         ]),
     ],
     ["a Component name", (value) => page([], value)],
+    ["a component-level edge endpoint on the component page", edgePage],
+    ["a component-level edge endpoint in the workspace edge list", edgeList],
+    ["the generator name in the workspace header", (value) => generatedBy({ name: value })],
+    ["the generator version in the workspace header", (value) => generatedBy({ version: value })],
+    ["the generation time in the workspace header", (value) => generatedBy({}, value)],
     ["the base ref in the diff title", (value) => titled({ base: value })],
     ["the head ref in the diff title", (value) => titled({ head: value })],
     ["a drop reason on the component page", (value) => page([dropped(value)])],
@@ -325,7 +361,17 @@ describe("a value written into a row of the report", () => {
         ]),
     ],
     ["a drop reason in explain", (value) => projectSymbolExplain(dropped(value))],
-  ])("shows %s as written, its line break as a space", (_, render) => {
+  ])("keeps %s as written, its line break as a space", (_, render) => {
     expect(shownText(render(VALUE))).toContain(SHOWN)
+  })
+
+  it.each([
+    ["0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"],
+    ["0123abc", "0123abc"],
+    ["abc123", "`abc123`"],
+    ["0123ABC", "`0123ABC`"],
+    ["feat/_wip_", "`feat/_wip_`"],
+  ])("writes the head ref %j in the diff title as %s", (ref, shown) => {
+    expect(titled({ head: ref }).split("\n")[0]).toBe(`# Aburi diff: \`main\`..${shown}`)
   })
 })

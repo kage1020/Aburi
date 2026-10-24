@@ -70,7 +70,9 @@ export function projectComponent(input: ProjectComponentInput): string {
     lines.push("")
     for (const d of sortDependencies(componentLevelDeps)) {
       const effectTag = d.effect === null ? "" : ` [${d.effect}]`
-      lines.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})${effectTag}`)
+      lines.push(
+        `- ${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)})${effectTag}`,
+      )
     }
     if (symbolLevelDeps.length > 0) {
       if (componentLevelDeps.length > 0) lines.push("")

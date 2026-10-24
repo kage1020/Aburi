@@ -33,7 +33,7 @@ export function fitsInline(value: string): boolean {
   return !value.includes("\n") && value.length <= INLINE_CODE_MAX_LENGTH
 }
 
-const LINE_ENDING = /\r\n|\r|\n/
+export const LINE_ENDING = /\r\n|\r|\n/
 
 export function fencedBlock(source: string, indent = ""): string {
   const fence = "`".repeat(Math.max(MIN_BLOCK_FENCE, longestBacktickRun(source) + 1))

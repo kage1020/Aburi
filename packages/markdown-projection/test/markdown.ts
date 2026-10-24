@@ -20,11 +20,12 @@ export function sectionOf(markdown: string, heading: string): string[] {
   return lines.slice(start, end === -1 ? undefined : end)
 }
 
+/** `html: true`, as GitHub drops an unknown tag like `<T>`; escaped, it would decode back and hide that loss. */
 const commonMark = new MarkdownIt({ html: true })
 
 const ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"' }
 
-/** The text a reader sees. Raw HTML is on, as on GitHub, so a tag inside a value drops out of it. */
+/** markdown-it strikes through on `~~` only, where GitHub also takes a single `~`. */
 export function shownText(markdown: string): string {
   return commonMark
     .render(markdown)

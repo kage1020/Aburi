@@ -41,7 +41,7 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     )
   }
   const heading = [
-    `# Aburi diff: ${inlineCode(diff.base.ref)}..${inlineCode(diff.head.ref)}`,
+    `# Aburi diff: ${titleRef(diff.base.ref)}..${titleRef(diff.head.ref)}`,
     "",
     `**Summary**: ${summaryLine(diff)}`,
     "",
@@ -102,6 +102,13 @@ export function projectDiffSummaryLine(diff: DiffResult): string {
     `+${summary.added} -${summary.removed} ~${summary.changed} ↔${summary.moved} ⤴${summary.movedChanged}`,
     diff,
   )
+}
+
+/** Hex admits no Markdown, and GitHub links a bare commit SHA, which it does not inside a span. */
+const COMMIT_SHA = /^[0-9a-f]{7,40}$/
+
+function titleRef(ref: string): string {
+  return COMMIT_SHA.test(ref) ? ref : inlineCode(ref)
 }
 
 function summaryLine(diff: DiffResult): string {
