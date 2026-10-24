@@ -7,7 +7,7 @@ export {
   resolveCallGraph,
 } from "./callgraph"
 export { type SerializeOptions, serializeCanonical } from "./canonical"
-export { describeCodePoints } from "./codepoints"
+export { describeCodePoints, stripUtf8Bom } from "./codepoints"
 export { countBy, groupBy } from "./collections"
 export {
   __testing as __testing_component,
@@ -49,6 +49,7 @@ export {
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  posixSpellingViolation,
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
   type SegmentOptions,
@@ -149,9 +150,11 @@ export {
   asSyntaxNode,
   calleeLeaf,
   calleeText,
+  declaratorValue,
   findFirstDescendantOfType,
   findNamedChildOfType,
   type SyntaxNode,
+  unwrapValue,
 } from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {

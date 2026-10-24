@@ -51,7 +51,7 @@ The **caller's file path** is the anchor; resolution is always evaluated in the 
 
 ## 4. Untyped Resolution Rules
 
-The untyped tier resolves callees by **name binding**, not by type. It runs five ordered steps; the first step to return a match wins.
+The untyped tier resolves callees by **name binding**, not by type. It runs five ordered steps; the first step to return a match wins. A step that binds the leading identifier to a declaration whose members it can see, or to an import under a name the declaration does not have, ends the search even when it finds no match there (§4.3, §4.4).
 
 ### 4.1 Step order
 
@@ -63,7 +63,7 @@ The untyped tier resolves callees by **name binding**, not by type. It runs five
 5. Workspace scope — cross-component match against a globally-unique qname (§4.6)
 ```
 
-Steps 1–3 handle same-file / directly-imported calls. Steps 4–5 catch cases where the language plugin's normalized `target` already includes enough qualification to disambiguate (e.g. `PricingService.calculateTotal`) but the receiver has no explicit import in the caller's file.
+Steps 1–3 handle same-file / directly-imported calls. Steps 4–5 catch cases where the language plugin's normalized `target` already includes enough qualification to disambiguate (e.g. `PricingService.calculateTotal`) but the leading identifier is bound to no declaration whose members the resolver can see: nothing in the caller's file declares or imports it, the file declares it as a value that comes from elsewhere (§4.3), or a named import that keeps the exported name reaches no module declaring it, as through a bare specifier or a barrel re-exporting it (§4.4).
 
 ### 4.2 Step 1: local scope
 
@@ -80,6 +80,19 @@ Rationale: promoting a locally-scoped identifier to a Symbol id would produce fa
 If `name` matches a top-level `Symbol.name` in the same file (Symbol id → `<lang>:<caller.file>#<name>`), emit `resolved = that Symbol.id` with `confidence = high`.
 
 For dotted targets (`name.method`), the file-scope match is against `name` first; if `name` resolves to a Symbol in the same file, `resolved` is set to the member the rest of the target names, when that Symbol exists. A dot in the target joins a receiver to a member, and the member's qualified name uses the separator its receiver gives it: read through a class's name, a member is on the static side, which [`ir-schema.md`](./ir-schema.md) §3.2 spells `::`. So each step takes `<receiver>::<segment>` when that Symbol is kept and `<receiver>.<segment>` otherwise: `C.m` reaches `C::m` over an instance member `C.m`, and `C.Inner.g` reaches `C::Inner.g`. If the member Symbol is absent (dynamic method, method inherited from a base class, etc.), `resolved` stays `null` (do not fabricate ids for methods that never appear in the Symbol table).
+
+The search ends there, member or not, when `name` is a declaration whose members are Symbols of the file: a class, an enum or a namespace that is not an `ambient-declaration`, or a `const` holding an object literal (`derivedBy` carrying `object-literal-initializer`, [`lang-plugin.md`](./lang-plugin.md) LP7d). A member such a declaration lacks is declared nowhere, so no later step is consulted, and a same-named member of another file is not a candidate: in a file that declares `class Logger {}`, `Logger.log()` stays `null`, bucketed `no-match` (§8.1), however many other files declare a `Logger.log`. The declaration may be a dropped Symbol, such as a class of fields alone ([`drop-list.md`](./drop-list.md) §4.2): dropping it keeps it out of `resolved`, not out of what its name means, so the search ends there too, and a kept member it has is still reached.
+
+Any other declaration of `name` leaves a missing member to the later steps, because its members may be declared in another file:
+
+- an `ambient-declaration`, since `declare class Tracker { … }` or `declare const Tracker: { … }` says the value is defined elsewhere;
+- a `destructured-binding` (`const { userService } = require('./user-service')`);
+- a function;
+- a `const` whose value the resolver cannot see. `const userService = require('./user-service')` is one: a `require()` produces no `ImportEdge`. `const Logger = makeLogger()` is another, and the IR cannot tell the two apart, so a same-named member of another file is reached through either.
+
+An interface or a type alias binds no value and is not looked at. A class written below an interface of the same name is folded into a Symbol of the interface's kind ([`lang-plugin.md`](./lang-plugin.md) §4.3.1), so `Logger.log()` there goes on to the later steps as well.
+
+Ending the search takes exactly one kept top-level Symbol named `name`, or none kept and a dropped declaration. Two kept leave the step without an answer, their ids recorded as `ambiguous` candidates, and the search goes on.
 
 Import scope (§4.4) composes a dotted tail past the imported name the same way. Component and workspace scope (§4.5, §4.6) compare the whole target with `Symbol.name` verbatim and compose nothing, so a static member is reached only through file or import scope.
 
@@ -99,9 +112,21 @@ Sub-cases:
 | `import Default from './y'`, `import { default as Default } from './y'` | `name = Default` → resolve to the module's default export: `<lang>:<resolved-file>#<default>` when it is anonymous, `<lang>:<resolved-file>#makeApp` when it is `export default function makeApp`; a named export called `Default` is not taken |
 | `import type { X } from './y'` | ignored (type-only imports produce no runtime edge) |
 | `import('./y')` (dynamic) | ignored at the target site; recorded as a `via: import` component edge only |
-| bare specifier `'lodash'` | out-of-workspace — `resolved` stays `null`, confidence `high` (this is a definite external, not a failure) |
+| bare specifier `'lodash'` | out-of-workspace — `resolved` stays `null`, confidence `high` (this is a definite external, not a failure); a qualified target through a named import that keeps the exported name goes on to Step 4 |
 
 A default export is reached only as one of those two Symbols, and four spellings of one are not. `export { connect as default }` is an export clause, which the TypeScript plugin does not read ([`lang-plugin.md`](./lang-plugin.md) LP6a), so nothing marks `connect` as the default export. A default export that is a value rather than a declaration (`export default withAuth(Page)`, `export default { Page }`) has no Symbol. An anonymous `export default class` has no member Symbols for a dotted tail to reach, since `<default>::run` is not a qualified name ([`ir-schema.md`](./ir-schema.md) §3.2). And a default re-exported from another module (`export { default } from './impl'`) leads to the re-exporting file, which §8.3 does not see past. Each leaves the call `null`, bucketed `no-match`. Reading the binding as a named import would reach `connect` in the first, but only because the importer happened to write the declaration's own name; the same reading takes the wrong Symbol wherever the names part (CR5c).
+
+An import ends the search as file scope does (§4.3), member or not, in two cases:
+
+- **It binds `name` under a name the declaration does not have.** That covers an alias (`import { Logger as B }`), a default import (`import L from …`) and a namespace import (`import * as ns from …`). Steps 4–5 compare the target as written, so `B.log`, `L.log` or `ns.Logger.log` could only match a namesake there, never the declaration the import reaches. So `B.log()` through `import { Logger as B } from './barrel'` stays `null` where the barrel only re-exports `Logger`. So does `L.log()` through a default import of a module with no default export, or of an anonymous `export default class`. The rule holds for a bare specifier too, where the call is bucketed `external` (§8.1).
+- **It keeps the exported name, and its module declares that name as §4.3 requires**, kept or dropped. So where `base-logger.ts` declares a `Logger` class with no `log`, `Logger.log()` through `import { Logger } from './base-logger'` stays `null`, bucketed `no-match`.
+
+A named import that keeps the exported name and reaches no such declaration goes on to Step 4 (§4.5). The target then spells the declaration's own name, so Steps 4–5 can find it. That happens for:
+
+- a bare specifier, which §4.4.1 does not resolve to a file. Steps 4–5 are how a call into a workspace package reaches the Symbol it names;
+- a relative specifier that resolves to no file the scan has a Symbol in;
+- a module that does not itself declare the name, such as a barrel re-exporting it (§11.6);
+- a module that declares it as a value the resolver cannot see, such as `export const Logger = makeLogger()`.
 
 Resolving `./y` to a Symbol file requires the file-path normalizer defined in §4.4.1.
 
@@ -112,19 +137,19 @@ For a specifier `'./y'` (or `'../y'`, `'@workspace-alias/foo'`) in file `apps/bi
 1. **Relative** (`./` or `../` prefix, or exactly `.` or `..`) — resolve against the caller's file directory.
    - A specifier that names a directory outright — one whose last segment is empty, `.` or `..` (`.`, `..`, `./`, `../`, `./y/..`) — probes only that directory's `index.<ext>` (step 3's directory form), never `<dir>.<ext>`. TypeScript resolves these to the index outside ESM mode and not at all inside it; the resolver carries no per-file module mode, so it always takes the former. A directory's `package.json#main`, which TypeScript consults before `index`, is not read: the resolver reads no filesystem state
    - A specifier written with an emitted-JavaScript extension first probes the sources that compile to it, in TypeScript's order less its declaration files: `.js` → `.ts`, `.tsx`, `.js`, `.jsx`; `.jsx` → `.tsx`, `.ts`, `.jsx`, `.js`; `.mjs` → `.mts`, `.mjs`; `.cjs` → `.cts`, `.cjs`. Under `node16`/`nodenext` a relative import of `repo.ts` has to be written `./repo.js`, and TypeScript resolves it to `repo.ts` even when a `repo.js` sits beside it. The written extension is always probed, in its place in the row; the others only when they are in the resolver's probe list (step 3). When none of them names a file, step 3 carries on from `<path>.<ext>`
-2. **Path alias** — apply the mapping table read from the language plugin's config at startup:
+2. **Path alias** — not implemented yet: the resolver applies no mapping table, so a path alias or a workspace package name is a bare specifier to it (§4.4), bucketed `external` (§8.1). The step is to apply the mapping table read from the language plugin's config at startup:
    - For TypeScript: the `paths` field of the caller's nearest `tsconfig.json` (Node16/NodeNext resolution semantics), plus each workspace package name declared in `pnpm-workspace.yaml` / `workspaces` / `turbo.json`.
    - For other languages: the equivalent lookup surface the plugin declares (out of scope here).
 3. **Extension probing** — the probe list is `ResolveCallGraphInput.fileExtensions`: dot-less extensions (`ts`, where a language plugin's `fileExtensions` in [`lang-plugin.md`](./lang-plugin.md) §4.1 writes `.ts`), the standard TypeScript / JavaScript set unless a caller sets it. Try the path as written, then `<path>.<ext>` in the list's order, then `<path>/index.<ext>` in the same order. A specifier that names a directory (step 1) skips straight to `<path>/index.<ext>`; a specifier with an emitted extension has step 1's sources tried in place of the path as written, ahead of the other two. The path as written is tried whatever the probe list holds.
 4. **Symbol table hit** — confirm the resolved absolute path (workspace-relativized to POSIX) exists as a Symbol id prefix in `symbolTable`. If not, `resolved` stays `null`, `confidence` = `high` (a definite miss).
 
-The mapping table is built once per `aburi scan` invocation from the config already loaded by [`config.md`](./config.md) and the workspace-manager information already produced by [`component-detect.md`](./component-detect.md) §3; the resolver reads it, never re-parses `tsconfig.json` or workspace manifests. Determinism follows: no filesystem race can influence which candidate wins because the candidate order is fixed by step 1's table and the probe list, no candidate is checked against the filesystem (only against `symbolTable`), and the mapping table is deterministic input.
+Step 2's mapping table is to be built once per `aburi scan` invocation from the config already loaded by [`config.md`](./config.md) and the workspace-manager information already produced by [`component-detect.md`](./component-detect.md) §3; the resolver will read it, never re-parse `tsconfig.json` or workspace manifests. Determinism follows: no filesystem race can influence which candidate wins because the candidate order is fixed by step 1's table and the probe list, no candidate is checked against the filesystem (only against `symbolTable`), and the mapping table is deterministic input.
 
 ### 4.5 Step 4: component scope
 
-If steps 1–3 did not produce a match but `target` is a **qualified name** (`ClassName.method` or `Namespace.ClassName.method`), search `symbolTable` for a Symbol whose `name` equals `target` and whose `component` equals the caller's `component`.
+If steps 1–3 did not find the declaration the leading identifier is bound to (§4.3, §4.4) and `target` is a **qualified name** (`ClassName.method` or `Namespace.ClassName.method`), search `symbolTable` for a Symbol whose `name` equals `target` and whose `component` equals the caller's `component`.
 
-- **Unique match** → `resolved` = that Symbol.id, `confidence = medium`. The identifier is unambiguous within the boundary but there was no explicit import — this is either a legitimate cross-file same-component call (e.g. re-exported via a barrel) or an inheritance-style reference.
+- **Unique match** → `resolved` = that Symbol.id, `confidence = medium`. The target is unambiguous within the boundary, but no declaration the resolver can see vouches for it. The head is either imported under the declaration's own name from a module that does not declare it (a barrel, a workspace package), declared as a value whose origin the resolver cannot see, or not bound at all.
 - **Multiple matches** → do not resolve. `resolved` stays `null`, `confidence = medium` (ambiguity is real). Record the candidates for reporting (§8).
 - **No match** → fall through to Step 5.
 
@@ -268,7 +293,7 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 | `external` | resolved to a bare specifier import | `lodash.sortBy(...)` |
 | `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint | `getRepo().save(...)`, `items[0].save(...)` |
 | `ambiguous` | multiple candidates | two `User.save` in different components with no explicit import |
-| `no-match` | no candidate found | typo, or callee not in workspace and not imported |
+| `no-match` | no candidate found | typo, a member the declaration a call is bound to does not declare, or callee not in workspace and not imported |
 
 #### Bucket precedence
 
@@ -278,7 +303,7 @@ A single call can fit several descriptions at once — a parameter that happens 
 2. `dynamic` — the receiver is not a name: an expression receiver reported by the language plugin — which includes a property addressed through brackets with something that is not a name, `items[0].save()` ([`lang-plugin.md`](./lang-plugin.md) §4.4) — or `this` / `super` with no *usable* LSP hint (§4.7) — no hint at all, or one the LSP tier declined (§5.2). `this.save()` is filed here because in the untyped tier the receiver's identity is a runtime property of the class hierarchy, exactly like `getRepo().save()`; there is no name for the resolver to look up. The bucket therefore does not separate a call site the type layer never spoke about from one whose hint was refused; `stats.lspEnrichment.hintsRejected` ([`lsp-enrichment.md`](./lsp-enrichment.md) §7.2) is where that distinction is recorded, per run rather than per call site.
 3. `ambiguous` — some tier found the callee and refused to choose between candidates (§7.1). The competing Symbol ids are recorded, deduplicated and lex-sorted.
 4. `external` — the head of the target is bound in the caller's file by an import whose specifier is not relative. §4.4.1 resolves relative specifiers only, so such a callee is out of reach by construction rather than by accident.
-5. `no-match` — nothing matched anywhere.
+5. `no-match` — nothing matched anywhere, or the search ended at the declaration the head is bound to, which lacks the member (§4.3, §4.4).
 
 The order is part of the contract: changing it would move counts between buckets on an unchanged workspace.
 
@@ -312,14 +337,14 @@ The per-call detail — which line, which bucket, which candidates — is **not*
 ### 8.2 Determinism under partial failures
 
 - LSP timeout on a specific call → that call falls back to the untyped tier's answer. It does not degrade any other call site's confidence.
-- Missing `symbolTable` entry for an imported file (e.g. `.d.ts` intentionally not scanned) → for a relative specifier, `resolved` stays `null` and the call is bucketed `no-match`; a bare specifier is external. Confidence `high` on the negative result.
+- Missing `symbolTable` entry for an imported file (e.g. `.d.ts` intentionally not scanned) → for a relative specifier, `resolved` stays `null` and the call is bucketed `no-match`; a bare specifier is external. Confidence `high` on the negative result. Either way, a qualified target through a named import that keeps the exported name is still looked up at Steps 4–5 first (§4.4).
 - Cycle in imports → does not affect resolution (resolution is per-call, not transitive).
 
 ### 8.3 Non-goals
 
 Explicitly out of scope:
 
-- **Renaming a resolved id after the fact** (e.g. following re-exports transitively across five files). The first matching Symbol id wins; if that Symbol re-exports another, the edge points at the re-exporter, not the origin. Rationale: transitive re-export following is stateful and hurts determinism.
+- **Renaming a resolved id after the fact** (e.g. following re-exports transitively across five files). The first matching Symbol id wins; if that Symbol re-exports another (`export const Invoice = InvoiceImpl`), the edge points at the re-exporter, not the origin. A re-export clause (`export { Invoice } from './invoice'`) is no Symbol at all, so import scope finds nothing in that module and the call goes on as §4.4 says (§11.6). Rationale: transitive re-export following is stateful and hurts determinism.
 - **Adding a distinction beyond what the qname convention already carries.** [`ir-schema.md`](./ir-schema.md) §3.2 distinguishes instance vs. static members at the qname level (`ClassName.method` vs. `ClassName::method`). A call through the class name reads the static side, which is the one step §4.3 takes to compose `::`; nothing else is layered on top: whatever the language plugin's qname says is the identity of the callee, that is the identity used in `resolved`.
 - **Confidence numbers.** Categorical only, per [`overview.md`](./overview.md) §2.
 
@@ -351,7 +376,7 @@ Every implementation of the resolver must pass the following.
 | CR5a | default import of a named default export under another local name (`export default function makeApp() {}` in `./y`; `import createApp from './y'; createApp()`), including one declared apart from its export (`const f = …; export default f`) | `resolved` = the declaration's Symbol id (`<lang>:./y#makeApp`, `<lang>:./y#f`), confidence `high` |
 | CR5b | dotted call through a default import (`export default class Svc { static run() {} }` in `./y`; `import S from './y'; S.run()`) | `resolved` = `<lang>:./y#Svc::run`, confidence `high`: the tail composes past the default export's own name as §4.3 composes it |
 | CR5c | default import whose local name is also a named export of the module (`import connect from './y'` where `./y` has `export function connect`) | the named export is never taken: `resolved` = the module's default export when it has one (CR5, CR5a), and `null`, bucketed `no-match`, when it has none |
-| CR5d | default import of a module with two default exports (TS2528) | `resolved` = `null`, diagnostic bucket `ambiguous`, both candidates recorded |
+| CR5d | default import of a module with two default exports (TS2528) | `resolved` = `null`, diagnostic bucket `ambiguous`, both candidates recorded; for a dotted call through it (`U.save()`) whose member both declare, too, rather than a same-named `U.save` elsewhere (CR11a) |
 | CR6 | type-only import used as call — cannot happen at runtime but resolver sees the string | `resolved` = `null`, confidence `high` |
 | CR7 | bare specifier (`import { sortBy } from 'lodash'; sortBy()`) | `resolved` = `null`, confidence `high` |
 | CR8 | dynamic import (`await import('./y')`) — no direct call at the site | no `Call` entry, no edge |
@@ -359,6 +384,7 @@ Every implementation of the resolver must pass the following.
 | CR9a | call to a name a destructuring parameter binds (`{ x }`, `[x]`, `{ a: x }`, `{ x = y }`, `...[x]`) | `resolved` = `null`, confidence `high` (local shadow); a call to `y` in `{ x = y }` is not shadowed. A single-name rest parameter (`...x`) is CR9's case: its `name` is `x`. Not reached through a function a `const` hands its call (`const h = withAuth(({ x }) => x())`, LP7c), whose parameters are on no `signature`: that `x()` resolves as though nothing shadowed it, as CR9's `withAuth((x) => x())` does (§4.2) |
 | CR10 | call to a local nested function | `resolved` = `null`, confidence `high` |
 | CR11 | qualified cross-file same-component (`PricingService.calc()` no import) | `resolved` = that Symbol id when unique, confidence `medium` |
+| CR11a | qualified target whose head is bound to a declaration without the member, while other files declare a member of that name (`Logger.log`), in the caller's component or another. The declaration is a class, enum, namespace or object-literal `const`, kept or dropped, that the caller's file declares or that a named import keeping the exported name reaches in a module declaring it. Or the head is bound by an aliased, default or namespace import, whatever its module declares | `resolved` = `null`, diagnostic bucket `no-match` (`external` for a bare specifier, `ambiguous` with CR5d's candidates); Steps 4–5 are not searched. With the member declared, `resolved` = that member, confidence `high`. CR11 / CR12 are still reached for a head bound by nothing, by an `ambient-declaration`, a `destructured-binding`, a function or a `const` whose value the resolver cannot see, or by a named import keeping the exported name of a bare specifier, of a module the scan has no Symbol in, or of a module that does not declare the name (a barrel re-export) |
 | CR12 | qualified workspace-scope (no import, unique globally) | `resolved` = that Symbol id, confidence `low` |
 | CR13 | ambiguous qualified name (two matches) | `resolved` = `null`, confidence `medium` |
 | CR14 | `this.<method>` in untyped mode | `resolved` = `null`, confidence `medium` |
@@ -417,7 +443,9 @@ An edge from A to B is a distinct fact from A's own confidence. Downgrading A's 
 
 ### 11.6 Why re-export transitivity is not followed
 
-A barrel file `packages/domain/index.ts` re-exporting `export { Invoice } from './invoice'` would let a caller see either `packages/domain/index.ts#Invoice` or `packages/domain/invoice.ts#Invoice` as the resolution target. Transitively following the re-export requires reading every barrel in dependency order, which is stateful and race-prone. The first-match rule (§4.4 hits the barrel; the barrel is a Symbol; done) is deterministic. Downstream tooling that cares about the ultimate origin can walk `Dependency` edges to find it.
+A barrel file `packages/domain/index.ts` re-exporting `export { Invoice } from './invoice'` declares no `Invoice`: a re-export clause is not a declaration, so the barrel has no Symbol of that name, and import scope finds nothing there (§4.4). Following the clause to `./invoice` would mean reading every barrel's exports in dependency order, which is stateful and race-prone, so the resolver does not.
+
+Through `import { Invoice } from '@domain'` or `'./domain'`, `Invoice.create()` goes on to Steps 4–5 instead. They reach `invoice.ts#Invoice.create` when it is the only Symbol of that name in the component or the workspace, at `medium` or `low` rather than `high`. They can do so because the importer wrote the declaration's own name. Under a name the declaration does not have (`import { Invoice as Inv }`, or a default or namespace import), Steps 4–5 could only find a namesake, so the search ends at the import and the call stays `null` (§4.4).
 
 ### 11.7 Why an unresolvable call is high-confidence
 

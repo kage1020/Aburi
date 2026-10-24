@@ -29,9 +29,11 @@ describe("a directory is a workspace root when it holds a marker", () => {
     ["pyproject.toml", '[tool.uv.workspace]\nmembers = ["pkg-a"]\n'],
     ["pyproject.toml", '[tool.hatch.workspaces]\nmembers = ["pkg-a"]\n'],
     ["pyproject.toml", '[tool.poetry]\nname = "root"\n'],
-  ])("%s holding %j", async (file, content) => {
+  ])("%s holding %j, with or without a byte order mark opening it", async (file, content) => {
     await tree.writeSource(file, content)
+    expect(await rootFrom()).toBe(tree.root)
 
+    await tree.writeSource(file, `\uFEFF${content}`)
     expect(await rootFrom()).toBe(tree.root)
   })
 
@@ -56,6 +58,13 @@ describe("a directory is a workspace root when it holds a marker", () => {
 })
 
 describe("the walk upward", () => {
+  it("roots at an outer package.json#workspaces that opens with a byte order mark", async () => {
+    await tree.writeSource("package.json", '\uFEFF{ "workspaces": ["apps/*"] }')
+    await tree.writeSource("apps/billing/turbo.json", "{}")
+
+    expect(await rootFrom("apps", "billing")).toBe(tree.root)
+  })
+
   it("prefers the outermost marker over an inner package.json#workspaces", async () => {
     await tree.mkdir(".git")
     await tree.writePackage("apps/billing", { name: "billing", workspaces: ["lib/*"] })
@@ -106,8 +115,11 @@ describe("a manifest that cannot be read", () => {
     expect(await codeFrom("apps", "billing")).toBe("workspace-manifest-malformed")
   })
 
-  it("is raised at the workspace root itself", async () => {
-    await tree.writeSource("package.json", "{ not json")
+  it.each([
+    ["that is not JSON", "{ not json"],
+    ["with a byte order mark after its first character", '{\uFEFF "workspaces": [] }'],
+  ])("is raised at the workspace root itself, for a manifest %s", async (_case, content) => {
+    await tree.writeSource("package.json", content)
     await tree.writeSource("Cargo.toml", '[workspace]\nmembers = ["crate-a"]\n')
 
     expect(await codeFrom()).toBe("workspace-manifest-malformed")

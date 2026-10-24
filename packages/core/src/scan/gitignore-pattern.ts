@@ -30,11 +30,11 @@ interface Rule {
   head: string
 }
 
-const UTF8_BOM = "\xef\xbb\xbf"
+const UTF8_BOM_AS_LATIN1 = "\xef\xbb\xbf"
 
 export function parseGitignore(content: Buffer): GitignoreRules | RuleTooLong {
   let text = content.toString("latin1")
-  if (text.startsWith(UTF8_BOM)) text = text.slice(UTF8_BOM.length)
+  if (text.startsWith(UTF8_BOM_AS_LATIN1)) text = text.slice(UTF8_BOM_AS_LATIN1.length)
   const rules: Rule[] = []
   for (const [index, raw] of text.split("\n").entries()) {
     if (raw === "" || raw.startsWith("#")) continue

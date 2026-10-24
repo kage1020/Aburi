@@ -244,7 +244,7 @@ Detected frameworks are **only recorded in `Component.frameworks[]`**; the corre
 
 ### 4.6 `publicApi`
 
-Resolve `exports` / `main` / `module` / `types` from `package.json`:
+Read the paths `package.json` names:
 
 ```jsonc
 // package.json
@@ -260,12 +260,23 @@ Resolve `exports` / `main` / `module` / `types` from `package.json`:
 
 ```jsonc
 {
-  "publicApi": ["src/index.ts", "src/client.ts"]
+  "publicApi": ["src/client.ts", "src/index.ts"]
 }
 ```
 
-If there is no `exports`, take the file path from `main` / `module` / `types`.
-If none exist, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
+Every string target of `exports`, through conditions and arrays, and `main`, `module`, `types` and `typings` are read, whether or not `exports` is present; the entries are their union, deduplicated and sorted.
+
+Each value is a path relative to the package directory, and its entry is written in one spelling: NFC, with no leading `./` however often it repeats, and no `.` or empty segment inside it, so `././src/index.ts`, `./src/./index.ts` and `src//index.ts` are all `src/index.ts`. These values contribute no entry:
+
+- the package directory itself: `""`, `"."`, `"./"`, `"./."`. `"main": "./"` is a legal npm value (it resolves to `./index.js`), and `"./": "./"` is the folder-mapping form of `exports` that Node accepted before subpath patterns
+- any other directory, which is a value whose last segment is empty or `.`: `"./lib/"`, `"./lib/."`, or the target of a folder mapping such as `"./lib/": "./lib/"`
+- an absolute path (`"/"`, `"/dist/index.js"`), one whose first segment reads as a Windows drive (`"C:/dist/index.js"`, `"a:index.js"`, though `"ab:index.js"` is kept), or one holding a `..` segment, even `"./src/../index.js"`, which stays inside the package: an entry is the value's own spelling, never a path resolved from it
+- a value holding a backslash, which a Document cannot spell ([`ir-schema.md`](./ir-schema.md) §14 #10)
+- a value that is not a string, such as `"main": 42`
+
+An entry is the file the manifest names, not a file a resolver would find for it. `index.js` inside a directory is Node's lookup, and a folder mapping exports whatever the directory holds at the time; neither is a path the manifest wrote. An empty entry in particular would be no glob at all, and the schema refuses it.
+
+If no value gives an entry, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
 
 For Python / Go / Rust, each language plugin will provide "public API file" inference logic in a future release (see the [roadmap](../roadmap.md)). Today only JS/TS is covered.
 
@@ -338,6 +349,7 @@ When multiple detectors return the same path (e.g., both pnpm and turbo detect `
 - A single Component
 - Keep **every** manifest the detectors found for that directory, plus the `package.json` under its root whether or not one of them reported it, and read them in §4.1's order for `id` and `name`. A directory claimed by pnpm and nx at once has a `package.json` and a `project.json`, and they routinely name it differently: the first is the published npm name the rest of the Document is written against, the second an nx project name
 - A manifest that is present and cannot be read — bad JSON, or an IO failure that is not "no such file" — aborts detection with `workspace-manifest-malformed` naming the file. Absent is the ordinary case and says nothing; unreadable is an identity this run cannot see, and answering with the next manifest's name would hide it
+- One byte order mark (U+FEFF) opening a manifest is read past, in every manifest detection reads — a candidate's `package.json` or `project.json`, the root `package.json` and `pnpm-workspace.yaml`, and the markers §2.1's walk opens, `Cargo.toml` and `pyproject.toml` included. PowerShell 5's `Out-File` and `Set-Content` write one under `-Encoding utf8`, and in a JSON manifest Node's `require()`, npm and pnpm read past it, as RFC 8259 §8.1 allows. In a JSON manifest, a second one or one after the first character is bad JSON, and the message names the parser's detail, or says the file opens with more than one mark: an editor that hides them shows valid JSON
 - `frameworks` (§4.5) and `publicApi` (§4.6) are read from the `package.json` alone. They are defined over `dependencies` and `exports`, which are npm's fields; an nx `project.json` holds targets whose options are arbitrary JSON, so a key of either name in one is not the npm field it resembles
 
 When multiple detectors generate the same id with different paths (§4.1):
@@ -388,6 +400,7 @@ Implementation guidance:
 | CD18 | nx alone claims `apps/billing`, `project.json#name = "billing-web"` and a `dependencies` key in it | id and name `billing-web`, no frameworks, no publicApi |
 | CD19 | nx alone claims `apps/billing`, and a `package.json` sits beside the `project.json` | Identity, frameworks and publicApi come from the `package.json` |
 | CD20 | `apps/billing/package.json` is not valid JSON | Detection aborts with `workspace-manifest-malformed` naming the file |
+| CD20a | One byte order mark (U+FEFF) opening a candidate's `package.json` or `project.json`, the root `package.json` (with or without `workspaces`), `pnpm-workspace.yaml`, or the `package.json`, `Cargo.toml` or `pyproject.toml` §2.1's walk takes for a marker | Detected as without it: the same workspace root, Components and ids. Two of them, or one after the first character, in a `package.json` aborts as CD20 does, and two opening it are named as more than one byte order mark |
 | CD21 | `pnpm-workspace.yaml` with no `packages:` key, or with `packages: []` | Nothing is reported — pnpm includes only the root package either way |
 | CD22 | `turbo.json` alone, or `nx.json` with no `project.json` | Nothing is reported — neither declares package patterns |
 | CD23 | `packages:` whose entry carries a trailing colon, or a `workspaces` entry that is not a string | Detection aborts with `workspace-manifest-malformed` naming the manifest and the entry |
@@ -416,6 +429,9 @@ Implementation guidance:
 | CD44 | `nx.json` beside `libs/shared/project.json`, `.github/actions/deploy/project.json` and `.git/modules/vendored/project.json` | Two candidates, `.github/actions/deploy` and `libs/shared` |
 | CD45 | `packages: ["packages/*", ".github/actions/*"]` with a `package.json` in `packages/app`, `packages/.template` and `.github/actions/deploy` | Two candidates, `.github/actions/deploy` and `packages/app` |
 | CD46 | `.git/` and `libs/vendored/.git/` cannot be listed, beside what each of the three searches looks for in `src` | Detection runs: no search lists a `.git` directory |
+| CD47 | `package.json#main: "./"`, or `exports: {".": "./src/ok.js", "./": "./"}` | No entry for the package directory: no `publicApi` key, or `publicApi = ["src/ok.js"]`. The IR satisfies its schema |
+| CD48 | `main`, `module`, `types` or `typings` set to `"."`, `"./."`, `"././"`, `"./lib/"`, `"./lib/."`, `"/"`, `"/dist/index.mjs"`, `"C:/dist/index.d.ts"`, `"a:index.js"`, `"../shared/index.d.ts"` or `"./src/../index.js"`, or to a value that is not a string; or an `exports` folder mapping `"./lib/": "./lib/"` | No entry for any of them |
+| CD49 | `main: "././dist/index.js"`, `module: "./dist/./index.js"` or `types: "dist//index.js"` | publicApi = ["dist/index.js"] for each |
 
 ## 11. Design decisions
 
