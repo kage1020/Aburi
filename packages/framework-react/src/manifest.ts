@@ -42,7 +42,7 @@ const EXT_KIND_ENTRIES: ReactExtKindEntry[] = [
     id: "framework:react:provider",
     baseKind: "function",
     description:
-      "Function component whose returned JSX is a context provider (`<X.Provider>`) — a common ancestor pattern.",
+      "Function component that returns a context provider (`<X.Provider>`) on at least one of its returns — a common ancestor pattern.",
   },
   {
     id: "framework:react:hoc",

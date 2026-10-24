@@ -1,4 +1,4 @@
-import { findReturnedJsxElementName, hasJsxReturn, isProviderElementName } from "./jsx"
+import { findReturnedJsxElementNames, hasJsxReturn, isProviderElementName } from "./jsx"
 
 /** The gate React itself uses to tell `<Foo />` from an HTML element. */
 export function isPascalCase(leaf: string): boolean {
@@ -12,7 +12,7 @@ export function matchesHocNaming(leaf: string): boolean {
 }
 
 export function returnsContextProvider(body: unknown): boolean {
-  return isProviderElementName(findReturnedJsxElementName(body))
+  return findReturnedJsxElementNames(body).some(isProviderElementName)
 }
 
 export function returnsJsx(body: unknown): boolean {

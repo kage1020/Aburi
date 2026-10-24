@@ -20,7 +20,12 @@ export {
   type ReactExtKind,
 } from "./ext-kinds"
 export { bodyCallsAnotherHook, matchesHookNaming } from "./hooks"
-export { findReturnedJsxElementName, hasJsxReturn, isProviderElementName } from "./jsx"
+export {
+  findReturnedJsxElementName,
+  findReturnedJsxElementNames,
+  hasJsxReturn,
+  isProviderElementName,
+} from "./jsx"
 export { frameworkReactManifest } from "./manifest"
 export { ReactFrameworkPlugin, reactFrameworkPlugin } from "./plugin"
 export {
