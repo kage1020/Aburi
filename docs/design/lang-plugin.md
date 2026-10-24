@@ -434,9 +434,11 @@ When multiple framework plugins are enabled in the config, **first-match-wins in
 This avoids ambiguous states such as "the same class is recognized as both a NestJS Controller and a Custom Framework Controller". If a project has conflicts, priority is controlled via config order. The ad-hoc plugins `frameworkHints` stands for come after every plugin in `frameworks` ([`config.md`](./config.md) §8.3.2).
 
 A framework plugin receives the following inputs:
-- the `SymbolCandidate` (including decorators). A `const`'s `fullNode` is its whole declaration statement, shared by every name the statement declares, so a question about one name's initializer is answered from the declarator that binds that name
+- the `SymbolCandidate` (including decorators)
 - the file's `ImportEdge[]`, on `FrameworkClassifyContext` (§4.5)
 - the framework declaration of the owning component
+
+A `const`'s `fullNode` is its whole declaration statement, shared by every name it declares; a plugin reads one name's initializer from the declarator that binds it.
 
 Against these it may:
 - override `decorator.boundary`

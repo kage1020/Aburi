@@ -255,10 +255,12 @@ Contracts:
   declare several names (`export const PAGE_SIZE = 20, Row = memo(RowImpl)`), so
   read one name's initializer from its own declarator. Given the statement
   (`asSyntaxNode(symbol.fullNode)`) and the name's last segment
-  (`lastQnameSegment(symbol.name)`), `declaratorValue` from `@aburi/core` returns
-  that initializer read through `as`, `satisfies`, `!` and parentheses, and
-  `null` for a name a destructuring pattern binds. A search of the whole
-  statement for a call answers for whichever name holds the first one.
+  (`lastQnameSegment(symbol.name)`), `declaratorValue` returns that initializer
+  read through `as`, `satisfies`, `!` and parentheses. It returns `null` for a
+  name with no initializer of its own (`declare const Ctx: Context<string>`,
+  `let x`) and for one a destructuring pattern binds. All three come from
+  `@aburi/core`. Searching the whole statement for its first call finds one
+  that may belong to another name.
 - An optional `symbolDropHint(symbol, ctx)` drops a Symbol the way a language
   plugin's does. Every framework plugin is asked, not only the one that
   classified the Symbol, and the Symbol already carries the winning
