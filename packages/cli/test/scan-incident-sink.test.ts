@@ -89,6 +89,18 @@ describe("runScan — the incident report goes to the caller's sink", () => {
     expect(report.skipped).toHaveLength(2)
   })
 
+  it("rejects with the exception its sink throws", async () => {
+    await writeStubWorkspace(workspace.root, ["boom.stub", "ok.stub"])
+    const boom = new Error("sink failed")
+    await expect(
+      scanStubs({
+        warn: () => {
+          throw boom
+        },
+      }),
+    ).rejects.toBe(boom)
+  })
+
   it("summarizes a file that reported more than one error, and says where recovery began", async () => {
     expect(await incidentsOf(["noisy.stub", "ok.stub"])).toEqual([
       "⚠ 1 file(s) had recoverable parse errors.",

@@ -1,11 +1,11 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, dirname, join } from "node:path"
+import { dirname, join } from "node:path"
 import { gitTestEnv } from "@aburi/test-support"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CLI_BIN, requireBuiltBin } from "./bin"
+import { CLI_BIN, linkedWorktrees, removeWorktreeTempDirs, useBuiltBin } from "./bin"
 
 const STALLING_PLUGIN = `
 import { writeFileSync } from "node:fs"
@@ -16,26 +16,9 @@ await new Promise(() => setInterval(() => {}, 1000))
 let repo = ""
 let decoy = ""
 let child: ChildProcess | null = null
-let tempDirsBefore = new Set<string>()
 
 function git(args: string[], cwd = repo): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", env: gitTestEnv(repo) })
-}
-
-async function worktreeTempDirs(): Promise<string[]> {
-  const names = await readdir(tmpdir())
-  return names
-    .filter((name) => name.startsWith("aburi-worktree-"))
-    .map((name) => join(tmpdir(), name))
-}
-
-/** The linked worktrees git has registered for `repo`, the main one excluded. */
-function linkedWorktrees(): string[] {
-  return git(["worktree", "list", "--porcelain"])
-    .split("\n")
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.slice("worktree ".length))
-    .slice(1)
 }
 
 async function until(condition: () => boolean, what: string): Promise<void> {
@@ -47,7 +30,6 @@ async function until(condition: () => boolean, what: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  tempDirsBefore = new Set(await worktreeTempDirs())
   repo = await realpath(await mkdtemp(join(tmpdir(), "aburi-interrupt-")))
   await mkdir(join(repo, "src"))
   await mkdir(join(repo, "plugins"))
@@ -76,16 +58,13 @@ beforeEach(async () => {
 afterEach(async () => {
   child?.kill("SIGKILL")
   child = null
-  for (const dir of await worktreeTempDirs()) {
-    if (tempDirsBefore.has(dir) || !existsSync(join(dir, "base", basename(repo)))) continue
-    await rm(dir, { recursive: true, force: true })
-  }
+  await removeWorktreeTempDirs(repo)
   await rm(repo, { recursive: true, force: true })
   await rm(decoy, { recursive: true, force: true })
 })
 
 describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the base scan", () => {
-  requireBuiltBin()
+  useBuiltBin()
 
   it.each([
     { signal: "SIGINT", decoyEnv: false },
@@ -113,7 +92,7 @@ describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the ba
     )
 
     await until(() => existsSync(ready), "the base scan to reach the stalling plugin")
-    const [worktree] = linkedWorktrees()
+    const [worktree] = linkedWorktrees(repo)
     expect(worktree, "the run should be holding a base worktree").toBeDefined()
     const checkoutParent = dirname(dirname(worktree as string))
     expect(existsSync(checkoutParent)).toBe(true)
@@ -123,7 +102,7 @@ describe.skipIf(process.platform === "win32")("aburi diff, interrupted in the ba
 
     // Re-raised rather than swallowed: the shell sees 128+N, as without the listener.
     expect(outcome).toEqual({ code: null, signal })
-    expect(linkedWorktrees()).toEqual([])
+    expect(linkedWorktrees(repo)).toEqual([])
     expect(existsSync(checkoutParent)).toBe(false)
     expect(await readFile(decoyIndex)).toEqual(decoyIndexBefore)
   }, 30_000)

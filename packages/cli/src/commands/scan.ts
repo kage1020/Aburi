@@ -197,7 +197,12 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       await removeComponentMdsExcept(command, outputDir, report.componentMdPaths, logger)
     }
   } catch (error) {
-    reportIncidents(report, options.incidents)
+    try {
+      reportIncidents(report, options.incidents)
+    } catch (sinkError) {
+      // A throw from here would replace the error that ended the scan.
+      logger.warn(`Failed to report the scan's incidents: ${errorMessage(sinkError)}`)
+    }
     throw error
   }
   reportIncidents(report, options.incidents)

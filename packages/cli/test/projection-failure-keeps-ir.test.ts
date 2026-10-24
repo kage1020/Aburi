@@ -80,4 +80,25 @@ describe("a Markdown projection that throws", () => {
 
     expect(log.warnings).toContain("⚠ 1 file(s) had recoverable parse errors.")
   })
+
+  it("ends the command with its own error, and logs the sink's, when the incident sink throws too", async () => {
+    failing.page = "component"
+    await workspace.writeSource("src/broken.ts", "export const a = (\n")
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    try {
+      const sink = (): void => {
+        throw new Error("sink failed")
+      }
+
+      await expect(runScan({ cwd: workspace.root, incidents: { warn: sink } })).rejects.toThrow(
+        FAILURE,
+      )
+
+      expect(write.mock.calls.map(([chunk]) => String(chunk))).toContain(
+        "warn: Failed to report the scan's incidents: sink failed\n",
+      )
+    } finally {
+      write.mockRestore()
+    }
+  })
 })
