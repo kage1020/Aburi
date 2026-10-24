@@ -1,9 +1,14 @@
 import {
   CoreError,
+  type CoreErrorCode,
+  type DetectManagersResult,
   detectComponents,
+  detectManagers,
+  type GrammarViolation,
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
+  posixSpellingViolation,
   posixWorkspaceRelativeViolation,
 } from "@aburi/core"
 import type { Component, Config, LanguagePlugin } from "@aburi/types"
@@ -17,6 +22,23 @@ export function declaredComponents(config: Partial<Config>): Config["components"
   return declared !== undefined && declared.length > 0 ? declared : undefined
 }
 
+export async function resolveManagers(
+  config: Partial<Config>,
+  workspaceRoot: string,
+): Promise<DetectManagersResult> {
+  try {
+    return await detectManagers(workspaceRoot, { respectGitignore: config.respectGitignore })
+  } catch (error) {
+    throw isUnreadableTree(error) ? componentResolutionFailure(error) : error
+  }
+}
+
+// The manager scan meets the tree before the census does, so a tree neither can read is reported
+// alike whichever meets it. A manifest fault the manager scan meets keeps its exit 1.
+export function isUnreadableTree(error: unknown): error is CoreError {
+  return error instanceof CoreError && UNREADABLE_TREE_CODES.has(error.code)
+}
+
 export async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
@@ -28,9 +50,7 @@ export async function resolveComponents(
     return await detectComponents({
       workspaceRoot,
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
-      ...(config.respectGitignore === undefined
-        ? {}
-        : { respectGitignore: config.respectGitignore }),
+      respectGitignore: config.respectGitignore,
     })
   } catch (error) {
     throw componentResolutionFailure(error)
@@ -42,12 +62,16 @@ function componentFromConfig(entry: NonNullable<Config["components"]>[number]): 
   const component: Component = {
     id: makeComponentId(entry.id),
     name: entry.name ?? entry.id,
-    roots: entry.roots.map((root) => assertWorkspaceRelative(root, entry.id)),
+    roots: entry.roots.map((root) =>
+      assertSpelling(root, `components[id=${entry.id}] root`, posixWorkspaceRelativeViolation),
+    ),
     languages: languages.length > 0 ? languages : [makeLanguageId("ts")],
     description: entry.description ?? null,
   }
   if (entry.publicApi !== undefined && entry.publicApi.length > 0) {
-    component.publicApi = entry.publicApi.map((pattern) => pattern.normalize("NFC"))
+    component.publicApi = entry.publicApi.map((pattern) =>
+      assertSpelling(pattern, `components[id=${entry.id}] publicApi entry`, posixSpellingViolation),
+    )
   }
   if (entry.frameworks !== undefined && entry.frameworks.length > 0) {
     component.frameworks = [...entry.frameworks]
@@ -55,12 +79,13 @@ function componentFromConfig(entry: NonNullable<Config["components"]>[number]): 
   return component
 }
 
-function assertWorkspaceRelative(root: string, componentId: string): string {
-  const normalized = root.normalize("NFC")
-  const violation = posixWorkspaceRelativeViolation(
-    normalized,
-    `components[id=${componentId}] root`,
-  )
+function assertSpelling(
+  value: string,
+  subject: string,
+  violationOf: (value: string, subject: string) => GrammarViolation | null,
+): string {
+  const normalized = value.normalize("NFC")
+  const violation = violationOf(normalized, subject)
   if (violation !== null) throw new CoreError(violation.message, violation)
   return normalized
 }
@@ -74,7 +99,12 @@ function componentResolutionFailure(error: unknown): CliError {
   )
 }
 
-const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<string> = new Set([
+const UNREADABLE_TREE_CODES: ReadonlySet<CoreErrorCode> = new Set<CoreErrorCode>([
+  "scan-gitignore-unreadable",
+  "scan-directory-unreadable",
+])
+
+const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<CoreErrorCode> = new Set<CoreErrorCode>([
   "invalid-component-id",
   "invalid-language-id",
   "non-posix-path",

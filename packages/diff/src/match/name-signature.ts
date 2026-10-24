@@ -1,5 +1,6 @@
 import type { Symbol as IRSymbol } from "@aburi/types"
-import { signatureSimilarity } from "../signature"
+import { atLeast, quotient, type Ratio, WHOLE, weightedMean } from "../ratio"
+import { signatureSimilarityRatio } from "../signature"
 import { createNameScorer, lastSegment, type NameScorer, tokenizeName } from "../similarity"
 import {
   acceptInScoreOrder,
@@ -40,14 +41,13 @@ export function matchStageNameSignature(
     if (!saysEnoughToPair(headSymbol.name)) continue
     const bucket = buckets.get(bucketKey(headSymbol))
     if (bucket === undefined) continue
-    const threshold = thresholdFor(headSymbol.name)
-    const memberFloor = lowestUsefulMember(threshold)
+    const row = rowFor(headSymbol.name)
     const tokens = memberTokens(headSymbol.name)
     let reach = 0
     for (const token of tokens) reach += bucket.byToken.get(token)?.length ?? 0
     if (reach >= bucket.members.length) {
       for (const baseSymbol of bucket.members) {
-        collectCandidate(baseSymbol, headSymbol, scorer, memberFloor, threshold, candidates)
+        collectCandidate(baseSymbol, headSymbol, scorer, row, candidates)
       }
       continue
     }
@@ -60,7 +60,7 @@ export function matchStageNameSignature(
         visited[position] = visitCount
         const baseSymbol = bucket.members[position]
         if (baseSymbol !== undefined) {
-          collectCandidate(baseSymbol, headSymbol, scorer, memberFloor, threshold, candidates)
+          collectCandidate(baseSymbol, headSymbol, scorer, row, candidates)
         }
       }
     }
@@ -77,27 +77,26 @@ function collectCandidate(
   base: IRSymbol,
   head: IRSymbol,
   scorer: NameScorer,
-  memberFloor: number,
-  threshold: number,
+  row: Row,
   candidates: ScoredPair[],
 ): void {
   const member = scorer.member(base.name, head.name)
-  if (member < memberFloor) return
+  if (!atLeast(member, row.memberFloor)) return
   if (!scorer.ownersCompatible(base.name, head.name)) return
-  const score =
-    0.5 * member +
-    0.3 * signatureSimilarity(base.signature ?? null, head.signature ?? null) +
-    0.2 * OWNER_AXIS_SATISFIED
-  if (score >= threshold) candidates.push({ base, head, score })
+  const score = weightedMean([
+    { weight: MEMBER_WEIGHT, value: member },
+    {
+      weight: SIGNATURE_WEIGHT,
+      value: signatureSimilarityRatio(base.signature ?? null, head.signature ?? null),
+    },
+    { weight: OWNER_WEIGHT, value: OWNER_AXIS_SATISFIED },
+  ])
+  if (atLeast(score, row.threshold)) candidates.push({ base, head, score: quotient(score) })
 }
 
 function bucketKey(symbol: IRSymbol): string {
   const sig = symbol.signature === null || symbol.signature === undefined ? "no-sig" : "has-sig"
   return `${symbol.kind}::${sig}`
-}
-
-function lowestUsefulMember(threshold: number): number {
-  return 2 * (threshold - 0.5)
 }
 
 interface Bucket {
@@ -112,13 +111,34 @@ function memberTokens(qname: string): readonly string[] {
   return tokens.length === 0 ? [NO_MEMBER_TOKENS] : tokens
 }
 
-const EXACT_MATCH_ONLY = 1
-const TWO_TOKEN_THRESHOLD = 0.95
-const DEFAULT_THRESHOLD = 0.85
+const MEMBER_WEIGHT = 5
+const SIGNATURE_WEIGHT = 3
+const OWNER_WEIGHT = 2
+const OTHER_AXES_WEIGHT = SIGNATURE_WEIGHT + OWNER_WEIGHT
+const TOTAL_WEIGHT = MEMBER_WEIGHT + OTHER_AXES_WEIGHT
 
-const OWNER_AXIS_SATISFIED = 1
+const OWNER_AXIS_SATISFIED = WHOLE
 
-function thresholdFor(qname: string): number {
+interface Row {
+  readonly threshold: Ratio
+  readonly memberFloor: Ratio
+}
+
+function rowAt(threshold: Ratio): Row {
+  return {
+    threshold,
+    memberFloor: {
+      numerator: TOTAL_WEIGHT * threshold.numerator - OTHER_AXES_WEIGHT * threshold.denominator,
+      denominator: MEMBER_WEIGHT * threshold.denominator,
+    },
+  }
+}
+
+const EXACT_MATCH_ONLY = rowAt(WHOLE)
+const TWO_TOKEN_THRESHOLD = rowAt({ numerator: 19, denominator: 20 })
+const DEFAULT_THRESHOLD = rowAt({ numerator: 17, denominator: 20 })
+
+function rowFor(qname: string): Row {
   const tokens = tokenizeName(lastSegment(qname)).length
   if (tokens <= 1) return EXACT_MATCH_ONLY
   if (tokens === 2) return TWO_TOKEN_THRESHOLD

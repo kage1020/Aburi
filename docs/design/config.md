@@ -20,7 +20,11 @@ References:
   `components[].roots`, relative plugin refs) still resolves against the workspace root,
   and the scan still covers the whole workspace. `aburi scan` warns when the two differ.
 - Format: JSONC (comments allowed) or JSON
-- Encoding: UTF-8, LF
+- Encoding: UTF-8, LF. One byte order mark (U+FEFF) opening the file is read past, because PowerShell
+  5's `Out-File` and `Set-Content` write one under `-Encoding utf8` and Node's `require()` and npm read
+  past it; a second one, or one after the first character, is a parse error (`config-parse-failed`).
+  Line and column in a message count from after it, as an editor shows them, and so does the offset of
+  a parse error
 - Indentation: 2 spaces
 
 Why JSONC is allowed: this is a human-authored config, so comments on each section carry value. Generated JSON must be passable to a parser by consumers as-is, so pure JSON is supported too.
@@ -109,6 +113,8 @@ These are **appended** to the core standard patterns of drop-list §3.1 (existin
 
 - Default: `true`
 - Applies every directory's `.gitignore` with git's own rules — the root's and each nested one, deepest first (see drop-list.md §3.3) — alongside drop-list Category A. `$GIT_DIR/info/exclude` and `core.excludesFile` are per-machine and deliberately not read
+- Component detection reads it too: the language census counts no git-ignored file, and the nx detector takes no git-ignored `project.json` for a project. The resolution of declared package patterns never reads it, as pnpm and npm do not (component-detect.md §8)
+- While it holds, a directory it excludes may go unlisted: failing to list one is passed over rather than ending the run (drop-list.md §3)
 
 Setting it to `false` makes git-ignored files (build artifacts, etc.) extraction targets as well. Intended for special cases such as deliberately inspecting built code in CI.
 
@@ -215,6 +221,8 @@ When not specified explicitly, the core Component autodetect infers them from `p
 ```
 
 Each field has the same shape as [`ir-schema.md`](./ir-schema.md) §4. **However, `languages` may be omitted on the config side** (when omitted, autodetect fills it in). `name` may also be omitted on the config side, in which case the autodetect result (`package.json#name`, etc.) is used. In the schema, both are required on the IR Component; the config Component is lenient.
+
+A `publicApi` entry is carried into the IR as written, in NFC, so one the IR schema refuses is refused here, with exit 2 naming the component, before anything is scanned: an entry holding a backslash, which this schema admits and the IR's does not. A root the IR cannot record is refused the same way.
 
 `frameworks` holds framework ids (`nestjs`, what a plugin's `provides.frameworks[]` or the
 detector names), not plugin names. A value that is a plugin's own name (`framework-nestjs`),
@@ -493,6 +501,8 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C20 | `languages: ["ts"]`, or `frameworks: ["nestjs"]` | Exit 2 before any plugin is imported, naming `lang-typescript` or `framework-nestjs` |
 | C21 | `components: [{ …, "frameworks": ["framework-nestjs"] }]` | Exit 0; stderr names the component and suggests `nestjs`; the IR carries `framework-nestjs` |
 | C21a | `components: [{ …, "frameworks": ["lang-typescript"] }]`, a plugin that provides no framework | Exit 0; stderr says to remove it or write the component's framework id |
+| C22 | A config that opens with one byte order mark (U+FEFF) | Loads as without it; a key named twice is reported at the column an editor shows. Two of them, or one after the first character, is `config-parse-failed` naming `InvalidSymbol` and its offset |
+| C23 | `components: [{ …, "publicApi": ["src\\index.ts"] }]` | Exit 2 naming the component and the entry |
 
 ## 14.1 Config Schema Compatibility Policy
 

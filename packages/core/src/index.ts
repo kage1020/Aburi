@@ -7,7 +7,7 @@ export {
   resolveCallGraph,
 } from "./callgraph"
 export { type SerializeOptions, serializeCanonical } from "./canonical"
-export { describeCodePoints } from "./codepoints"
+export { describeCodePoints, stripUtf8Bom } from "./codepoints"
 export { countBy, groupBy } from "./collections"
 export {
   __testing as __testing_component,
@@ -35,8 +35,6 @@ export {
   ZERO_FINGERPRINT,
 } from "./fingerprint"
 export {
-  type BackslashSite,
-  backslashSite,
   DEFAULT_EXPORT_QNAME,
   type GrammarViolation,
   isComponentId,
@@ -51,6 +49,7 @@ export {
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  posixSpellingViolation,
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
   type SegmentOptions,
@@ -60,6 +59,8 @@ export {
   toDocumentPath,
   toPosixRelative,
   trySymbolId,
+  type UnnameableSite,
+  unnameableSite,
 } from "./id"
 export { DEFAULT_EXPORT_NAME, type ImportBinding, splitAliasedImportName } from "./import-edge"
 export { assertIRIntegrity, checkIRIntegrity, isCoreEffectId } from "./integrity"
@@ -108,6 +109,7 @@ export {
   DropCFilter,
   type DropCFilterInput,
 } from "./scan/drop-c"
+export { describeThrown, isPluginSetFault } from "./scan/faults"
 export {
   type ExtractedFile,
   type FilePipelineInput,
@@ -148,14 +150,18 @@ export {
   asSyntaxNode,
   calleeLeaf,
   calleeText,
+  declaratorValue,
   findFirstDescendantOfType,
   findNamedChildOfType,
   type SyntaxNode,
+  unwrapValue,
 } from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {
+  type DetectManagersOptions,
   type DetectManagersResult,
   detectManagers,
+  type UnnameableRoot,
   type UnresolvedDeclaration,
   type WorkspaceCandidate,
 } from "./workspace"

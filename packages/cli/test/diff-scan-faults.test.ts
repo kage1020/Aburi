@@ -3,6 +3,7 @@ import { git, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, formatFailOnMessage, IR_JSON_FILENAME, runDiff, runScan } from "../src"
 import { writeStubRepository, writeStubWorkspace } from "./stub-language"
+import { writeFileAt } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-scan-faults")
 
@@ -171,6 +172,29 @@ describe("aburi diff — why each faulted scan did not exit clean", () => {
     expect(said).toContain(line)
     if (absent !== "") expect(said).not.toContain(absent)
   })
+
+  it.skipIf(process.platform === "win32")(
+    "names a workspace package no Document path can spell, which reddens the diff on its own",
+    async () => {
+      await writeStubRepository(workspace.root, { base: ["ok.stub"], head: ["ok.stub"] })
+      await writeFileAt(workspace.root, "pnpm-workspace.yaml", 'packages:\n  - "*"\n')
+      await writeFileAt(workspace.root, "a:pkg/package.json", JSON.stringify({ name: "odd" }))
+      const log = recordingLogger()
+
+      const report = await runDiff({
+        cwd: workspace.root,
+        refSpec: "main..HEAD",
+        outputDir: resolve(workspace.root, "out"),
+        warn: log.warn,
+      })
+
+      expect(report.faultedScans).toEqual(["head"])
+      expect(report.exitCode).toBe(EXIT.GATE)
+      expect(log.warnings).toContain(
+        "⚠ head: 1 workspace package(s) sit in directories no Document path can spell. This run exits 3 even though the diff was written. Fix it, or the comparison is against a workspace one side could not read.",
+      )
+    },
+  )
 })
 
 describe("aburi diff --base/--head — faults the documents remember", () => {

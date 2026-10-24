@@ -3,6 +3,7 @@ import {
   CoreError,
   detectComponents,
   detectManagers,
+  type UnnameableRoot,
   type UnresolvedDeclaration,
 } from "@aburi/core"
 import type { Config } from "@aburi/types"
@@ -12,6 +13,7 @@ import { pathKind } from "../fs-probe"
 import { outputIsADirectory, writeOutputFile } from "../output-file"
 import { FRAMEWORK_TO_PLUGIN, LANGUAGE_TO_PLUGIN } from "../plugin-catalog"
 import { resolveWorkspaceRoot } from "../workspace-root"
+import { isUnreadableTree } from "./scan-components"
 
 const CONFIG_ARTEFACT = "the config"
 
@@ -35,6 +37,7 @@ export interface InitReport {
   suggestedPlugins: readonly string[]
   unmappedLanguages: readonly string[]
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
+  unnameableRoots: readonly UnnameableRoot[]
   fellBackToSingleComponent: boolean
   unmappedFrameworks: readonly string[]
   overwrote: boolean
@@ -57,23 +60,17 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     )
   }
 
-  const managers = await detectManagers(workspaceRoot)
+  const { respectGitignore } = options
+  const managers = await detectManagers(workspaceRoot, { respectGitignore }).catch(
+    (error: unknown) => {
+      throw isUnreadableTree(error) ? detectionFailure(error) : error
+    },
+  )
   let components: Awaited<ReturnType<typeof detectComponents>>
   try {
-    components = await detectComponents({
-      workspaceRoot,
-      ...(options.respectGitignore === undefined
-        ? {}
-        : { respectGitignore: options.respectGitignore }),
-    })
+    components = await detectComponents({ workspaceRoot, respectGitignore })
   } catch (error) {
-    throw new CliError(
-      `Failed to detect components: ${errorMessage(error)}${gitignoreEscapeHatch(error)}`,
-      error instanceof CoreError && error.code === "scan-gitignore-unreadable"
-        ? "runtime-error"
-        : "config-error",
-      { cause: error },
-    )
+    throw detectionFailure(error)
   }
 
   const languageSet = new Set<string>()
@@ -110,6 +107,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     unmappedLanguages: unmappedIds(languageSet, LANGUAGE_TO_PLUGIN),
     unmappedFrameworks: unmappedIds(frameworkSet, FRAMEWORK_TO_PLUGIN),
     unresolvedDeclarations: managers.unresolved,
+    unnameableRoots: managers.unnameableRoots,
     fellBackToSingleComponent: managers.workspaces.length === 0,
     overwrote: existing === "file",
     exitCode: EXIT.SUCCESS,
@@ -175,6 +173,14 @@ function renderConfig(input: RenderedConfigInput): string {
     .join("\n")
   const insertion = `\n  ${banner.split("\n").join("\n  ")}`
   return `${json.replace("{\n", `{${insertion}\n`)}\n`
+}
+
+function detectionFailure(error: unknown): CliError {
+  return new CliError(
+    `Failed to detect components: ${errorMessage(error)}${gitignoreEscapeHatch(error)}`,
+    isUnreadableTree(error) ? "runtime-error" : "config-error",
+    { cause: error },
+  )
 }
 
 function gitignoreEscapeHatch(error: unknown): string {

@@ -1,5 +1,6 @@
+import { unwrapValue } from "@aburi/core"
 import type { Node } from "web-tree-sitter"
-import { asFunctionValue, unwrapValue } from "./ast-helpers"
+import { asFunctionValue } from "./ast-helpers"
 import { writtenNameSegment } from "./class-members"
 
 export type ObjectEntry =

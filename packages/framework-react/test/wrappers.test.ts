@@ -1,9 +1,11 @@
+import { CoreError } from "@aburi/core"
 import { describe, expect, it } from "vitest"
 import { extractWrapperCall, isContextCall, isForwardRefCall, isMemoCall } from "../src/index"
 import { candidateNamed } from "./fixtures/symbol"
 
 async function wrapperOf(declaration: string) {
-  return extractWrapperCall((await candidateNamed(`export ${declaration}`, "X")).fullNode)
+  const candidate = await candidateNamed(`export ${declaration}`, "X")
+  return extractWrapperCall(candidate.fullNode, candidate.name)
 }
 
 describe("extractWrapperCall", () => {
@@ -24,11 +26,16 @@ describe("extractWrapperCall", () => {
     expect(await wrapperOf("const X = 42")).toBeNull()
   })
 
+  it("lets a qualified name with an empty last segment throw rather than read no wrapper", async () => {
+    const candidate = await candidateNamed("export const X = memo(Inner)", "X")
+    expect(() => extractWrapperCall(candidate.fullNode, "ui.")).toThrow(CoreError)
+  })
+
   it.each([
     null,
     { placeholder: true },
   ])("returns null for %o, which is not a syntax node", (node) => {
-    expect(extractWrapperCall(node)).toBeNull()
+    expect(extractWrapperCall(node, "X")).toBeNull()
   })
 })
 

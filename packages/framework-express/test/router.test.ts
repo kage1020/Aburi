@@ -26,6 +26,22 @@ describe("extractRouterCall", () => {
       `import { Router } from "express"\nconst r = (Router())\n`,
       ["r Router"],
     ],
+    [
+      "a parenthesized `Router()` with a comment inside the parentheses",
+      `import { Router } from "express"\nconst r = (/* api */ Router())\n`,
+      ["r Router"],
+    ],
+    [
+      "`Router()` cast with `as`",
+      `import express from "express"\nconst r = express.Router() as express.Router\n`,
+      ["r express.Router"],
+    ],
+    [
+      "`Router()` checked with `satisfies`",
+      `import { Router } from "express"\nconst r = Router() satisfies Router\n`,
+      ["r Router"],
+    ],
+    ["`Router()!`", `import { Router } from "express"\nconst r = Router()!\n`, ["r Router"]],
   ])("reads %s as a Router construction", async (_label, source, routers) => {
     expect(await routersOf(source)).toEqual(routers)
   })

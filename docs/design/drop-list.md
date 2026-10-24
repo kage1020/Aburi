@@ -34,6 +34,8 @@ Excludes an entire file from extraction. The file is not even AST-parsed.
 
 **Symlinks are not followed, to a file or to a directory.** Git stores a link as one entry and never looks behind it, and the walk goes no further: a link is never a candidate for extraction, and nothing under a linked directory is reached through it. Followed, a link gives a file one Symbol id per path reaching it (`shared -> src` lists every file twice) and brings in files from outside the workspace under a workspace path, and a cyclic link is expanded once. Component detection's language census and its nx project search make the same decision, so neither finds anything only a link reaches; its resolution of declared package patterns follows links, as pnpm does, so a package declared through a link is a Component that owns no scanned file ([`component-detect.md` §3.1.1](./component-detect.md)).
 
+**A directory the walk cannot list ends the run**, naming it, at exit `1` — the code a file the scan cannot open ends it with ([`cli-spec.md`](./cli-spec.md) §5.4), and by the same predicate. A directory gone by the time the walk reaches it (`ENOENT`, or `ENOTDIR` when a file replaced it) is passed over, as a vanished file is; any other failure ends the run, apart from the exemptions below. A permission (`EACCES`, or `EPERM` where Windows denies one), an exhausted descriptor table or failing storage is a property of the machine: passed over, it would leave every file under the directory out of `symbols`, `stats.totalFiles` and `stats.skippedFiles` alike, and the same commit would give a smaller Document on another day and still exit `0`. So is an entry that vanishes while its directory is listed, on a filesystem that reports no entry types: the listing fails with the entry's `ENOENT`, and passing it over would lose the entry's siblings with it. `ELOOP` from a listing ends the run too: the walk lists no link, so only the machine can cause it. When several directories fail, the first in path order, by code unit, is the one named. Three kinds of directory are exempt, for different reasons. One the Category A globs drop is never listed, so a failure there cannot happen, and neither is a dot directory (`.pgdata/`), which the walk never enters. One that `.gitignore` excludes is still walked (§3.3), but while `.gitignore` is respected none of its files can reach the Document, and git never lists it either, so failing to list it — a data volume a container left in the checkout, owned by another user — is passed over, and the error for any other directory suggests excluding it there. A rule has to exclude the directory itself or one above it: `data/pg/*` excludes what is in `data/pg` and not `data/pg`, so failing to list `data/pg` still ends the run, as it must, because a later `!` rule could re-include a file in it. With `respectGitignore` off its files are scanned, and failing to list it ends the run like any other. Component detection's language census and its nx project search decide the same way; its resolution of declared package patterns never reads `.gitignore`, and a link it cannot resolve ends the run as a directory it cannot list does ([`component-detect.md` §8](./component-detect.md)).
+
 ### 3.1 Core standard patterns
 
 | Pattern | Reason |
@@ -65,7 +67,7 @@ Each language plugin may add skip patterns specific to its own language. Example
 
 Files ignored by git are therefore skipped automatically without listing `dist/` etc. explicitly.
 
-It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So each file is compiled into its own matcher and every discovered candidate is asked about the chain of them above it, rather than the walk being pruned by any. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there. Each matcher is asked about the candidate alone: whether a directory above it is excluded is decided first, across every file at once, so a deeper file that re-includes a directory (`third_party/.gitignore` holding `!ourlib/` under a root `third_party/*`) brings back the files in it.
+It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So each file is compiled into its own matcher and every discovered candidate is asked about the chain of them above it, rather than the walk being pruned by any. The consequence worth knowing: a `.gitignore`d directory is still walked, and one that cannot be listed is passed over rather than ending the run (§3). What such a file usually names is in the Category A list above and is pruned there. Each matcher is asked about the candidate alone: whether a directory above it is excluded is decided first, across every file at once, so a deeper file that re-includes a directory (`third_party/.gitignore` holding `!ourlib/` under a root `third_party/*`) brings back the files in it.
 
 The matcher is a port of git's wildmatch, not a library's reading of the documentation: which lines are rules (a leading byte-order mark, one CR before each newline and unescaped trailing spaces are dropped, a NUL ends a rule, and a lone `!` is a rule that matches nothing), what each is matched against, and the glob itself (`**`, POSIX classes such as `[[:digit:]]`, `\?`, a `]` as a bracket's first member, reversed ranges) follow git's `dir.c` and `wildmatch.c`. No local git is consulted, so where git's answer has changed between releases, the current one is followed. Matching is on bytes, as git's is, so `?` takes one byte of a UTF-8 name rather than one character. A rule git reads but can never match, such as one with an unterminated bracket, matches nothing here too and is not an error. One search git makes is cut short: once what follows a `**/` has failed in a way no deeper directory can mend, no deeper directory is tried. That changes what a rule costs, never its answer; git's own time grows exponentially with the number of `**/` in a rule. Beyond that, the port is git's matcher apart from the differences the rest of this section lists: case, tracked files, the rule files outside the tree, rules over 4,096 bytes, and rule files of 100 MiB or more.
 
@@ -102,7 +104,7 @@ Excluded from the Markdown projection; shown only via `aburi explain <symbol>`.
 
 | Pattern | dropReason |
 |---|---|
-| class with only field declarations, no methods, no boundary decorator | `"pure DTO"` |
+| class with only field declarations, no methods or static blocks, no boundary decorator | `"pure DTO"` |
 | interface declaration | `"interface (data model)"` |
 | type alias declaration | `"type alias"` |
 | empty function/method (body is `{}`) | `"empty body"` |
@@ -113,13 +115,19 @@ Excluded from the Markdown projection; shown only via `aburi explain <symbol>`.
 
 A class is a `pure DTO` when all of the following hold:
 
-- The body has no methods (including constructors; a shorthand-property constructor such as `class { constructor(public x: number) {}` is allowed)
+- The body has no methods, constructors included (even one that only declares parameter properties, such as `constructor(public x: number) {}`), and no `static { … }` block
 - It has no boundary decorator (one that a framework plugin judged `boundary: true`)
-- The body consists solely of field declarations
+- The body declares at least one field, and every other member is an index signature or a comment
+
+A static block is behaviour, more plainly than a method: it runs, unconditionally, when the class is defined. Its calls are walked on the class (`lang-plugin.md` LP20a), the only Symbol that carries them, so dropping a class of fields and a static block as a DTO would take the block's calls and effects with it. Getters, setters and constructors are methods here, and so are a method signature and an abstract method, which declare behaviour without a body.
+
+An index signature (`[key: string]: unknown`) is part of the shape, so it leaves a class of fields a DTO. A `//` or `/* */` comment is not a member at all and changes neither hint: a class of `static readonly` literals with a doc comment on each is still `pure constants`. An index signature is not a constant, so beside one that class is a `pure DTO`.
 
 A field whose value is a function *the plugin recognises as one* is a method for this rule (`create = (d) => { … }`, `create = function (d) { … }`). It declares behaviour, not a shape, and a class written entirely that way is not a data model. The question is the field's value, not whether the member became a Symbol: a member the plugin could not name — a computed name, say — is still not data.
 
 The recognised set is the language plugin's, and it is narrower than "holds a function": a generator, or a function behind a wrapper (`handle = withAuth(() => …)`), reads as data here. A class of nothing else is dropped, and the calls the owner was carrying for it go with it, which is a loss rather than a filter. Widening the set is one decision for the plugin and not three, since the same predicate decides whether the member gets a Symbol at all.
+
+Being such a function is the only way a field's value keeps the class. Any other initializer, a call included (`seed = makeSeed()`, `static rows = db.load()`), leaves the member a field declaration, although it runs on construction or definition and is walked on the class: a class of such fields is a DTO, and those calls go with it, the same loss as the wrapper's.
 
 The core performs this determination, but each language plugin may add auxiliary rules for pure-DTO detection (e.g. `class-validator` decorators such as `@IsString` count as decoration; anything else is an ordinary determinant).
 
@@ -319,12 +327,20 @@ Properties the extraction pipeline must satisfy.
 | A4 | Adding `config.ignore: ["docs/**"]` | Everything under `docs/` is skipped |
 | A5 | `src/a.ts` beside the directory links `shared -> src`, `src/ext` linking out of the workspace and `src/loop -> ..`, and the file links `src/b.ts -> a.ts`, `src/o.ts` linking to a file outside the workspace and the dangling `src/dangling.ts -> nowhere.ts` | Only `src/a.ts` is scanned, once, and nothing is skipped: no link is a candidate and nothing is reached through one |
 | A5b | `src/a.ts` in a workspace whose root is itself reached through a link | `src/a.ts` is scanned, as it is from the root's real path: the rule is about links inside the workspace, not the path to it |
+| A6 | A directory `src/locked` that cannot be listed — `EACCES`, `EPERM`, `EIO`, `EMFILE` or `ELOOP` — or a workspace root that cannot be, whatever `.gitignore` says | The run ends with `scan-directory-unreadable` naming the directory, at exit `1`; of several, the first in path order |
+| A6b | `src/gone` failing with `ENOENT` or `ENOTDIR` when listed | Passed over: the rest of `src/` is scanned and nothing is skipped. An entry of `src/gen` whose type lookup fails with `ENOENT` while `src/gen` is listed ends the run as in A6, naming `src/gen` |
+| A6c | `data/pg` that cannot be listed, with `.gitignore` holding `pg/` or `data/`, or `data/.gitignore` holding `pg/` | Passed over while `.gitignore` is respected, and an unlistable `src/locked` beside it is still named; with `respectGitignore` off the run ends as in A6. With `.gitignore` holding `data/pg/*`, or `data/*` with `data/.gitignore` holding `!pg/`, the run ends as in A6 |
+| A6d | `build/`, `config.ignore: ["fixtures/**"]` and a language plugin's `**/legacy/**`, each a directory that cannot be listed | None of them is listed, and the run is unaffected |
 
 ### 8.2 Symbol-level (Category B)
 
 | ID | Input | Expected |
 |---|---|---|
 | B1 | pure DTO (`class Foo { x: number; y: string }`) | `dropped: true, dropReason: "pure DTO"` |
+| B1b | a class of a field and a static block (`class Registry { static items: string[] = []; static { prisma.user.deleteMany() } }`), and the same class without the field | `dropped: false` with `prisma.user.deleteMany` in the class's `calls`, either way; without the block, `dropped: true, dropReason: "pure DTO"` |
+| B1c | a class of a field and a getter, a setter or a constructor | `dropped: false` |
+| B1d | a class of a field and an index signature, a `declare` field, an `accessor` field, a field holding a call (`seed = compute()`) or a comment | `dropped: true, dropReason: "pure DTO"` |
+| B1e | a class of `static readonly` literals with a doc comment, a line comment or a stray `;` among them; the same class beside an index signature | `dropped: true, dropReason: "pure constants"`; beside the index signature, `"pure DTO"` |
 | B2 | `interface Foo { x: number }` | `dropped: true, dropReason: "interface (data model)"` |
 | B3 | `type Bar = string` | `dropped: true, dropReason: "type alias"` |
 | B4 | `export { x } from './y'` | `dropped: true, dropReason: "re-export"` |

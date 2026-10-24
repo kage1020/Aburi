@@ -46,4 +46,34 @@ describe("scan — React source shapes across .tsx and .jsx files", () => {
       formatDate: null,
     })
   })
+
+  it("gives a const a context, memo or forward-ref role only when its own initializer is that call", async () => {
+    await workspace.writeSource(
+      "src/ui.tsx",
+      [
+        `import { createContext, forwardRef, memo } from "react"`,
+        `export const ThemeContext = createContext("light"), DEFAULT_THEME = "light"`,
+        `export const PAGE_SIZE = 20, Row = memo((props: { id: string }) => <li>{props.id}</li>)`,
+        `export const routes = [{ path: "/", element: memo(() => <div />) }]`,
+        `export const handlers = { save: () => forwardRef(() => null) }`,
+        `export const label = String(42)`,
+      ].join("\n"),
+    )
+
+    const { ir } = await scanWith(workspace.root, {
+      languages: [langTypescriptPlugin],
+      frameworks: [reactFrameworkPlugin],
+    })
+    const consts = ir.symbols.filter((symbol) => symbol.kind === "const")
+
+    expect(Object.fromEntries(consts.map((symbol) => [symbol.name, symbol.extKind]))).toEqual({
+      ThemeContext: "framework:react:context",
+      DEFAULT_THEME: null,
+      PAGE_SIZE: null,
+      Row: "framework:react:memo",
+      routes: null,
+      handlers: null,
+      label: null,
+    })
+  })
 })

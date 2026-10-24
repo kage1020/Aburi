@@ -65,7 +65,8 @@ Key rules:
   `aburi.json` to your plugin.
 
 Two plugins declaring the same `extKind` id make the registry throw at register
-time. We chose a loud failure over a silent takeover.
+time. We chose a loud failure over a silent takeover. `aburi scan` then exits `3`
+and names the entry in `aburi.json` that loaded the refused plugin.
 
 ## Language plugin
 
@@ -158,9 +159,11 @@ backwards is caught rather than shipped as an empty IR.
 A throw is recorded as `reason: "extraction-failed"` along with what you threw.
 The exception is an error whose `code` names a fault in the plugin set rather
 than in the file, such as `scan-plugin-misconfigured`, `invalid-language-id`, or
-`vocab-undeclared`. Those are re-thrown and end the run immediately, because
-they would otherwise repeat for every file and report the workspace as broken
-instead of the plugin.
+`vocab-undeclared`. Those are re-thrown and end the run immediately with exit
+`3`, because they would otherwise repeat for every file and report the workspace
+as broken instead of the plugin. The code decides, not the class: a refusal from
+`ctx.registry.assertEffectDeclared` is the registry's error, and it ends the run
+the same way.
 :::
 
 ## Framework plugin
@@ -248,6 +251,16 @@ Contracts:
   the [language plugin spec](../design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
 - `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
   Read it, memoize on its identity if you like, and never mutate it.
+- A `const` Symbol's `fullNode` is its whole declaration statement, which can
+  declare several names (`export const PAGE_SIZE = 20, Row = memo(RowImpl)`), so
+  read one name's initializer from its own declarator. Given the statement
+  (`asSyntaxNode(symbol.fullNode)`) and the name's last segment
+  (`lastQnameSegment(symbol.name)`), `declaratorValue` returns that initializer
+  read through `as`, `satisfies`, `!` and parentheses. It returns `null` for a
+  name with no initializer of its own (`declare const Ctx: Context<string>`,
+  `let x`) and for one a destructuring pattern binds. All three come from
+  `@aburi/core`. Searching the whole statement for its first call finds one
+  that may belong to another name.
 - An optional `symbolDropHint(symbol, ctx)` drops a Symbol the way a language
   plugin's does. Every framework plugin is asked, not only the one that
   classified the Symbol, and the Symbol already carries the winning

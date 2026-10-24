@@ -1,4 +1,10 @@
-import { asSyntaxNode, calleeLeaf, calleeText, findFirstDescendantOfType } from "@aburi/core"
+import {
+  asSyntaxNode,
+  calleeLeaf,
+  calleeText,
+  declaratorValue,
+  lastQnameSegment,
+} from "@aburi/core"
 
 /** Bare identifiers only: `React.<name>` callees are matched by leaf. */
 export const REACT_CONTEXT_FACTORIES: ReadonlySet<string> = new Set(["createContext"])
@@ -10,11 +16,12 @@ export interface WrapperCall {
   readonly leaf: string
 }
 
-export function extractWrapperCall(fullNode: unknown): WrapperCall | null {
+export function extractWrapperCall(fullNode: unknown, name: string): WrapperCall | null {
   const node = asSyntaxNode(fullNode)
   if (node === null) return null
-  const call = findFirstDescendantOfType(node, "call_expression")
-  if (call === null) return null
+  // `lastQnameSegment` throws on a broken qname; that is a language-plugin bug not to swallow.
+  const call = declaratorValue(node, lastQnameSegment(name))
+  if (call === null || call.type !== "call_expression") return null
   const callee = calleeText(call)
   if (callee === null) return null
   return { callee, leaf: calleeLeaf(callee) }
