@@ -363,6 +363,8 @@ A string array indicating why this symbol was extracted in this form. Each entry
 
 An empty array means "picked up automatically by the core extraction path".
 
+A Symbol's `derivedBy` entry that names something the source wrote — the call a framework plugin classified, `framework:express:route:app.get` — is composed from the names the syntax tree holds, never copied from an expression's text: that text carries the formatting it was written with, so a chain wrapped over several lines would put line breaks and indentation into the entry, and a `;` in a comment inside it would split the entry. Reformatting the code an entry names, or adding a comment inside it, leaves the entry as it was ([`lang-plugin.md`](./lang-plugin.md) §5.2.3 gives the framework plugins' reading of a call).
+
 ### 5.6 `dropped`
 
 - `false` (default): included in the IR output

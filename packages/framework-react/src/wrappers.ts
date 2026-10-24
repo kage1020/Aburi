@@ -1,7 +1,7 @@
 import {
   asSyntaxNode,
-  calleeLeaf,
-  calleeText,
+  type CalleeName,
+  calleeName,
   declaratorValue,
   lastQnameSegment,
 } from "@aburi/core"
@@ -11,10 +11,7 @@ export const REACT_CONTEXT_FACTORIES: ReadonlySet<string> = new Set(["createCont
 export const REACT_FORWARD_REF_FACTORIES: ReadonlySet<string> = new Set(["forwardRef"])
 export const REACT_MEMO_FACTORIES: ReadonlySet<string> = new Set(["memo"])
 
-export interface WrapperCall {
-  readonly callee: string
-  readonly leaf: string
-}
+export type WrapperCall = CalleeName
 
 export function extractWrapperCall(fullNode: unknown, name: string): WrapperCall | null {
   const node = asSyntaxNode(fullNode)
@@ -22,9 +19,7 @@ export function extractWrapperCall(fullNode: unknown, name: string): WrapperCall
   // `lastQnameSegment` throws on a broken qname; that is a language-plugin bug not to swallow.
   const call = declaratorValue(node, lastQnameSegment(name))
   if (call === null || call.type !== "call_expression") return null
-  const callee = calleeText(call)
-  if (callee === null) return null
-  return { callee, leaf: calleeLeaf(callee) }
+  return calleeName(call)
 }
 
 export function isContextCall(call: WrapperCall | null): boolean {

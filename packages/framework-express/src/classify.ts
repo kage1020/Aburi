@@ -1,4 +1,4 @@
-import { asSyntaxNode, calleeLeaf, calleeText } from "@aburi/core"
+import { asSyntaxNode, calleeName } from "@aburi/core"
 import type {
   Confidence,
   FrameworkClassifyContext,
@@ -6,7 +6,6 @@ import type {
   SymbolCandidate,
   SymbolClassification,
 } from "@aburi/types"
-import { calleeRoot } from "./callee"
 import type { ExpressExtKind } from "./ext-kinds"
 import { EXPRESS_DERIVED_BY_PREFIX } from "./ext-kinds"
 import { hasExpressImport } from "./imports"
@@ -53,7 +52,7 @@ function classifyConstSymbol(
   const confidence: Confidence = hasExpressImport(ctx) ? "high" : "medium"
   return {
     extKind: "framework:express:router",
-    derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:router:${routerCall.callee}`,
+    derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:router:${routerCall.name}`,
     confidence,
   }
 }
@@ -64,30 +63,27 @@ function classifyCallSymbol(
 ): ExpressClassification | null {
   const call = asSyntaxNode(symbol.fullNode)
   if (call === null) return null
-  const callee = calleeText(call)
+  const callee = calleeName(call)
   if (callee === null) return null
-  const method = calleeLeaf(callee)
-  const receiver = calleeRoot(callee)
   const importAnchored = hasExpressImport(ctx)
 
-  if (isRouteMethod(method) && hasRouteArguments(call)) {
+  if (isRouteMethod(callee.leaf) && hasRouteArguments(call)) {
     return {
       extKind: "framework:express:route",
-      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:route:${receiver}.${method}`,
+      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:route:${callee.name}`,
       confidence: importAnchored ? "high" : "medium",
     }
   }
 
-  if (method === EXPRESS_MIDDLEWARE_METHOD) {
-    return classifyUseCall(callee, receiver, symbol, importAnchored)
+  if (callee.leaf === EXPRESS_MIDDLEWARE_METHOD) {
+    return classifyUseCall(callee.name, symbol, importAnchored)
   }
 
   return null
 }
 
 function classifyUseCall(
-  callee: string,
-  receiver: string,
+  name: string,
   symbol: SymbolCandidate<OpaqueAstNode>,
   importAnchored: boolean,
 ): ExpressClassification | null {
@@ -97,7 +93,7 @@ function classifyUseCall(
   if (shape.hasErrorHandler) {
     return {
       extKind: "framework:express:error-middleware",
-      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:error-middleware:${callee};arity-4`,
+      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:error-middleware:${name};arity-4`,
       confidence: importAnchored ? "high" : "medium",
     }
   }
@@ -105,7 +101,7 @@ function classifyUseCall(
   if (isMountShape(shape)) {
     return {
       extKind: "framework:express:mount",
-      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:mount:${callee};router-identifier`,
+      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:mount:${name};router-identifier`,
       confidence: importAnchored ? "high" : "medium",
     }
   }
@@ -116,7 +112,7 @@ function classifyUseCall(
     const confidence: Confidence = shape.hasRegularHandler && importAnchored ? "high" : "medium"
     return {
       extKind: "framework:express:middleware",
-      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:middleware:${receiver}.use;${arity}`,
+      derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:middleware:${name};${arity}`,
       confidence,
     }
   }

@@ -1,16 +1,14 @@
 import {
   asSyntaxNode,
-  calleeLeaf,
-  calleeText,
+  type CalleeName,
+  calleeName,
   declaratorValue,
   lastQnameSegment,
 } from "@aburi/core"
 
 export const EXPRESS_ROUTER_FACTORIES: ReadonlySet<string> = new Set(["Router"])
 
-export interface RouterCall {
-  readonly callee: string
-}
+export type RouterCall = CalleeName
 
 export function extractRouterCall(fullNode: unknown, name: string): RouterCall | null {
   const node = asSyntaxNode(fullNode)
@@ -18,8 +16,6 @@ export function extractRouterCall(fullNode: unknown, name: string): RouterCall |
   // `lastQnameSegment` throws on a broken qname; that is a language-plugin bug not to swallow.
   const initializer = declaratorValue(node, lastQnameSegment(name))
   if (initializer === null || initializer.type !== "call_expression") return null
-  const callee = calleeText(initializer)
-  if (callee === null) return null
-  if (!EXPRESS_ROUTER_FACTORIES.has(calleeLeaf(callee))) return null
-  return { callee }
+  const callee = calleeName(initializer)
+  return callee !== null && EXPRESS_ROUTER_FACTORIES.has(callee.leaf) ? callee : null
 }

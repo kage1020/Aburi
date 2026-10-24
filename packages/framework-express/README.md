@@ -44,6 +44,19 @@ registration, and so is a Router's initializer:
 `app.route("/users")!.get(h)` is a route as `app.route("/users").get(h)` is,
 and `const r = express.Router() as express.Router` is a Router.
 
+`derivedBy` names the call `<receiver>.<method>`, read off the syntax tree as
+`@aburi/lang-typescript`'s `call-statement:` entry is: the method called and
+the name the receiver chain starts from, through those wrappers and every call
+on the way. `app.get("/users", h)`, `(app as Express).get("/users", h)`, the
+same call wrapped over two lines or with a comment before `.get`, and
+`app.route("/users").get(h)` all give `framework:express:route:app.get`, and
+`app.use(cors()).use("/api", apiRouter)` gives
+`framework:express:mount:app.use`. A Router is named by its factory the same
+way: `Router`, `express.Router`, and `require.Router` for
+`require("express").Router()`. No entry carries the source's line breaks,
+indentation or comments, so reformatting a call leaves its entries as they
+were.
+
 Confidence is `high` when the file imports the `express` package or one of its
 subpaths (or reaches Express via CommonJS `require('express')`) and `medium`
 otherwise — the classification survives so the workspace projection still
