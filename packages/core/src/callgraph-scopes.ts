@@ -67,8 +67,8 @@ export function resolveTarget(
     return null
   }
 
-  // Scoping has already chosen the declaration a bound head names, so a missing member is final:
-  // a same-named Symbol in another file is not a candidate.
+  // Component and workspace scope match the whole target by spelling, so past the declaration a
+  // head is bound to they could only find a namesake.
   const bound =
     resolveInFileScope(ctx, head, tail, trace) ?? resolveInImportScope(ctx, head, tail, trace)
   if (bound !== null) return bound.hit
@@ -80,6 +80,8 @@ interface BoundHead {
   hit: ResolutionHit | null
 }
 
+const NO_MEMBER: BoundHead = { hit: null }
+
 function resolveInFileScope(
   ctx: ResolveTargetContext,
   head: string,
@@ -87,10 +89,22 @@ function resolveInFileScope(
   trace: ResolutionTrace,
 ): BoundHead | null {
   const file = ctx.caller.source.file
-  const anchor = soleCandidate(ctx.run.table.topLevelByFile.get(file)?.get(head), trace)
-  if (anchor === null) return null
-  const id = tail.length === 0 ? anchor.id : memberId(ctx, file, head, tail)
-  return { hit: id === null ? null : { id, confidence: "high" } }
+  const owned = ownsMembers(ctx, file, head)
+  const declared = ctx.run.table.topLevelByFile.get(file)?.get(head)
+  if (declared !== undefined) {
+    const anchor = soleCandidate(declared, trace)
+    if (anchor === null) return null
+    if (tail.length === 0) return { hit: { id: anchor.id, confidence: "high" } }
+  } else if (!owned) {
+    return null
+  }
+  const id = memberId(ctx, file, head, tail)
+  if (id !== null) return { hit: { id, confidence: "high" } }
+  return owned ? NO_MEMBER : null
+}
+
+function ownsMembers(ctx: ResolveTargetContext, file: string, name: string): boolean {
+  return ctx.run.table.memberOwnersByFile.get(file)?.has(name) === true
 }
 
 function memberId(
@@ -117,38 +131,66 @@ function resolveInImportScope(
   tail: readonly string[],
   trace: ResolutionTrace,
 ): BoundHead | null {
+  const { names, renamed } = importedNamesOf(ctx, head, tail)
   const candidates = new Set<SymbolId>()
-  let declared = false
-  const consider = (file: string, first: string, rest: readonly string[]) => {
-    if (ctx.run.table.topLevelByFile.get(file)?.has(first) === true) declared = true
-    const id = memberId(ctx, file, first, rest)
+  for (const { file, name, rest } of names) {
+    const id = memberId(ctx, file, name, rest)
     if (id !== null) candidates.add(id)
   }
+  const [only, ...others] = candidates
+  if (only !== undefined && others.length === 0) return { hit: { id: only, confidence: "high" } }
+  for (const id of candidates) trace.ambiguousCandidates.add(id)
+  // Under an alias, or a default or namespace import, the target never spells the declaration's
+  // name, so the import binds the head even where the module does not declare it.
+  const bound = renamed || names.some(({ file, name }) => ownsMembers(ctx, file, name))
+  return bound ? NO_MEMBER : null
+}
+
+interface ImportedName {
+  file: string
+  name: string
+  rest: readonly string[]
+}
+
+interface ImportedNames {
+  names: ImportedName[]
+  renamed: boolean
+}
+
+function importedNamesOf(
+  ctx: ResolveTargetContext,
+  head: string,
+  tail: readonly string[],
+): ImportedNames {
+  const names: ImportedName[] = []
+  let renamed = false
   for (const edge of ctx.imports) {
-    if (edge.dynamic || !isRelativeSpecifier(edge.source)) continue
-    const targetFile = resolveRelativeSpecifierOnce(ctx, edge.source)
-    if (targetFile === null) continue
+    if (edge.dynamic) continue
 
     if (edge.symbols === "*") {
+      if (edge.namespaceBinding !== head) continue
+      renamed = true
       const [first, ...rest] = tail
-      if (first !== undefined && edge.namespaceBinding === head) consider(targetFile, first, rest)
+      const file = relativeTargetOf(ctx, edge)
+      if (first !== undefined && file !== null) names.push({ file, name: first, rest })
       continue
     }
 
     for (const raw of edge.symbols) {
       const { imported, local } = splitAliasedImportName(raw)
       if (local !== head) continue
-      if (imported !== DEFAULT_EXPORT_NAME) consider(targetFile, imported, tail)
-      else for (const name of defaultExportsOf(ctx, targetFile)) consider(targetFile, name, tail)
+      if (imported !== local) renamed = true
+      const file = relativeTargetOf(ctx, edge)
+      if (file === null) continue
+      if (imported !== DEFAULT_EXPORT_NAME) names.push({ file, name: imported, rest: tail })
+      else for (const name of defaultExportsOf(ctx, file)) names.push({ file, name, rest: tail })
     }
   }
-  const [only, ...others] = candidates
-  if (others.length > 0) {
-    for (const id of candidates) trace.ambiguousCandidates.add(id)
-  } else if (only !== undefined) {
-    return { hit: { id: only, confidence: "high" } }
-  }
-  return declared ? { hit: null } : null
+  return { names, renamed }
+}
+
+function relativeTargetOf(ctx: ResolveTargetContext, edge: ImportEdge): string | null {
+  return isRelativeSpecifier(edge.source) ? resolveRelativeSpecifierOnce(ctx, edge.source) : null
 }
 
 function defaultExportsOf(ctx: ResolveTargetContext, file: string): string[] {

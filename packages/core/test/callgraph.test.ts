@@ -121,52 +121,68 @@ describe("resolveCallGraph", () => {
     expect(resolveFromBilling(scopeCase).edges.map((edge) => edge.to)).toEqual([scopeCase.to])
   })
 
-  describe("a head bound to a declaration it can see is where the resolver stops", () => {
-    interface BindingCase {
-      binding: string
-      target: string
+  describe("a head bound to a declaration whose members are Symbols is where the resolver stops", () => {
+    interface BindingCase extends Omit<ScopeCase, "callees"> {
       declaration: IRSymbol
-      member: string
-      imports?: ReadonlyMap<string, readonly ImportEdge[]>
     }
 
+    const FIELDS_ONLY = { kind: "class", dropped: true, dropReason: "pure DTO" } as const
     const baseLogger = makeSymbol("ts:src/base.ts#Logger", { kind: "class" })
     const BINDINGS: BindingCase[] = [
       {
-        binding: "a class declared in the caller's file",
+        scope: "a class declared in the caller's file",
         target: "Logger.log",
         declaration: makeSymbol("ts:src/a.ts#Logger", { kind: "class" }),
-        member: "ts:src/a.ts#Logger.log",
       },
       {
-        binding: "a named import of a class its module declares",
+        scope: "a dropped class of fields declared in the caller's file",
+        target: "Logger.log",
+        declaration: makeSymbol("ts:src/a.ts#Logger", FIELDS_ONLY),
+      },
+      {
+        scope: "a namespace declared in the caller's file",
+        target: "Logger.log",
+        declaration: makeSymbol("ts:src/a.ts#Logger", { kind: "namespace" }),
+      },
+      {
+        scope: "an object literal the caller's file binds",
+        target: "Logger.log",
+        declaration: makeSymbol("ts:src/a.ts#Logger", {
+          kind: "const",
+          derivedBy: ["object-literal-initializer"],
+        }),
+      },
+      {
+        scope: "a named import of a class its module declares",
         target: "Logger.log",
         declaration: baseLogger,
-        member: "ts:src/base.ts#Logger.log",
         imports: importsOf("src/a.ts", { source: "./base", symbols: ["Logger"] }),
       },
       {
-        binding: "a renamed import of a class its module declares",
+        scope: "a named import of a dropped class of fields its module declares",
+        target: "Logger.log",
+        declaration: makeSymbol("ts:src/base.ts#Logger", FIELDS_ONLY),
+        imports: importsOf("src/a.ts", { source: "./base", symbols: ["Logger"] }),
+      },
+      {
+        scope: "a renamed import of a class its module declares",
         target: "Base.log",
         declaration: baseLogger,
-        member: "ts:src/base.ts#Logger.log",
         imports: importsOf("src/a.ts", { source: "./base", symbols: ["Logger as Base"] }),
       },
       {
-        binding: "a default import of the class its module exports as default",
+        scope: "a default import of the class its module exports as default",
         target: "Base.log",
         declaration: makeSymbol("ts:src/base.ts#Logger", {
           kind: "class",
           derivedBy: ["export-default"],
         }),
-        member: "ts:src/base.ts#Logger.log",
         imports: importsOf("src/a.ts", { source: "./base", symbols: ["default as Base"] }),
       },
       {
-        binding: "a namespace import of a module that declares the class",
+        scope: "a namespace import of a module that declares the class",
         target: "base.Logger.log",
         declaration: baseLogger,
-        member: "ts:src/base.ts#Logger.log",
         imports: importsOf("src/a.ts", {
           source: "./base",
           symbols: "*",
@@ -175,67 +191,69 @@ describe("resolveCallGraph", () => {
       },
     ]
 
-    const sameNamedMember = (target: string, component: string) =>
-      makeSymbol(`ts:src/audit-log.ts#${target}`, { kind: "method", component })
+    // Two, so a search that went on past the binding would end `ambiguous` rather than `no-match`.
+    const namesakes = (target: string, component: string) =>
+      ["audit-log", "trace-log"].map((file) =>
+        makeSymbol(`ts:src/${file}.ts#${target}`, { kind: "method", component }),
+      )
 
-    it.each(
-      BINDINGS.flatMap((c) => [
-        { ...c, elsewhere: "the caller's component", component: "billing" },
-        { ...c, elsewhere: "another component", component: "reporting" },
-      ]),
-    )("leaves a call through $binding unresolved, bucketed `no-match`, when the class lacks the member, over a same-named member in $elsewhere", (c) => {
-      const result = resolveFromBilling({
-        ...c,
-        scope: c.binding,
-        callees: [c.declaration, sameNamedMember(c.target, c.component)],
+    describe.each([
+      ["the caller's component", "billing"],
+      ["another component", "reporting"],
+    ])("over same-named members in %s", (_elsewhere, component) => {
+      it.each(
+        BINDINGS,
+      )("leaves a call through $scope unresolved, bucketed `no-match`, when it lacks the member", (c) => {
+        const result = resolveFromBilling({
+          ...c,
+          callees: [c.declaration, ...namesakes(c.target, component)],
+        })
+        expect(result.edges).toEqual([])
+        expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+        expect(result.diagnostics.map((d) => [d.bucket, d.candidates])).toEqual([["no-match", []]])
       })
-      expect(result.edges).toEqual([])
-      expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
-      expect(result.diagnostics.map((d) => [d.bucket, d.candidates])).toEqual([["no-match", []]])
     })
 
-    it.each(BINDINGS)("reaches the member through $binding when the class declares it", (c) => {
+    it.each(BINDINGS)("reaches the member through $scope when it declares it", (c) => {
+      const member = makeSymbol(`${c.declaration.id}.log`, { kind: "method" })
       const result = resolveFromBilling({
         ...c,
-        scope: c.binding,
-        callees: [
-          c.declaration,
-          makeSymbol(c.member, { kind: "method" }),
-          sameNamedMember(c.target, "billing"),
-        ],
+        callees: [c.declaration, member, ...namesakes(c.target, "billing")],
       })
-      expect(result.edges.map((edge) => [edge.to, edge.confidence])).toEqual([[c.member, "high"]])
+      expect(result.edges.map((edge) => [edge.to, edge.confidence])).toEqual([[member.id, "high"]])
     })
 
-    it.each<ScopeCase>([
-      { scope: "a head nothing binds", target: "Logger.log", callees: [] },
+    it.each<ScopeCase & { bucket: string }>([
       {
-        scope: "a head imported from a bare specifier",
-        target: "Logger.log",
-        callees: [],
-        imports: importsOf("src/a.ts", { source: "@acme/logging", symbols: ["Logger"] }),
-      },
-      {
-        scope:
-          "a head imported from a module that declares no such name, as a barrel re-exports it",
-        target: "Logger.log",
+        scope: "an alias of a name its module only re-exports",
+        target: "Base.log",
         callees: [makeSymbol("ts:src/barrel.ts#other")],
-        imports: importsOf("src/a.ts", { source: "./barrel", symbols: ["Logger"] }),
+        imports: importsOf("src/a.ts", { source: "./barrel", symbols: ["Logger as Base"] }),
+        bucket: "no-match",
       },
       {
-        scope: "a head imported from a module the scan has no Symbol in",
-        target: "Logger.log",
+        scope: "an alias imported from a module the scan has no Symbol in",
+        target: "Base.log",
         callees: [],
-        imports: importsOf("src/a.ts", { source: "./barrel", symbols: ["Logger"] }),
+        imports: importsOf("src/a.ts", { source: "./barrel", symbols: ["Logger as Base"] }),
+        bucket: "no-match",
       },
       {
         scope: "a default import of a module whose only `Logger` is a named export",
         target: "Logger.log",
         callees: [makeSymbol("ts:src/barrel.ts#Logger", { kind: "class" })],
         imports: importsOf("src/a.ts", { source: "./barrel", symbols: ["default as Logger"] }),
+        bucket: "no-match",
       },
       {
-        scope: "a namespace import of a module that declares no such name",
+        scope: "a default import of an anonymous class",
+        target: "Base.run",
+        callees: [makeSymbol("ts:src/base.ts#<default>", { kind: "class" })],
+        imports: importsOf("src/a.ts", { source: "./base", symbols: ["default as Base"] }),
+        bucket: "no-match",
+      },
+      {
+        scope: "a namespace import of a module that only re-exports the name",
         target: "barrel.Logger.log",
         callees: [makeSymbol("ts:src/barrel.ts#other")],
         imports: importsOf("src/a.ts", {
@@ -243,14 +261,102 @@ describe("resolveCallGraph", () => {
           symbols: "*",
           namespaceBinding: "barrel",
         }),
+        bucket: "no-match",
       },
-    ])("still searches the caller's component for $scope", (scopeCase) => {
-      const decoy = sameNamedMember(scopeCase.target, "billing")
+      {
+        scope: "a namespace import of a bare specifier",
+        target: "logging.Logger.log",
+        callees: [],
+        imports: importsOf("src/a.ts", {
+          source: "@acme/logging",
+          symbols: "*",
+          namespaceBinding: "logging",
+        }),
+        bucket: "external",
+      },
+    ])("ends the search at $scope, since the target does not spell the declaration's name", (c) => {
+      const result = resolveFromBilling({
+        ...c,
+        callees: [...c.callees, ...namesakes(c.target, "billing")],
+      })
+      expect(result.edges).toEqual([])
+      expect(result.diagnostics.map((d) => [d.bucket, d.candidates])).toEqual([[c.bucket, []]])
+    })
+
+    it.each<ScopeCase>([
+      {
+        scope: "a const the caller's file declares with a value it cannot see",
+        target: "Logger.log",
+        callees: [makeSymbol("ts:src/a.ts#Logger", { kind: "const" })],
+      },
+      {
+        scope: "a destructured binding",
+        target: "Logger.log",
+        callees: [
+          makeSymbol("ts:src/a.ts#Logger", { kind: "const", derivedBy: ["destructured-binding"] }),
+        ],
+      },
+      {
+        scope: "an ambient class",
+        target: "Logger.log",
+        callees: [
+          makeSymbol("ts:src/a.ts#Logger", { kind: "class", derivedBy: ["ambient-declaration"] }),
+        ],
+      },
+      {
+        scope: "a function the caller's file declares",
+        target: "Logger.log",
+        callees: [makeSymbol("ts:src/a.ts#Logger")],
+      },
+      {
+        scope: "an interface the caller's file declares",
+        target: "Logger.log",
+        callees: [makeSymbol("ts:src/a.ts#Logger", { kind: "interface", dropped: true })],
+      },
+      {
+        scope: "two top-level Symbols of that name in the caller's file",
+        target: "Logger.log",
+        callees: [
+          makeSymbol("ts:src/a.ts#Logger", { kind: "class" }),
+          makeSymbol("ts:src/a.ts#Logger.second", { name: "Logger", kind: "class" }),
+        ],
+      },
+      {
+        scope: "a named import from a bare specifier",
+        target: "Logger.log",
+        callees: [],
+        imports: importsOf("src/a.ts", { source: "@acme/logging", symbols: ["Logger"] }),
+      },
+      {
+        scope: "a named import of a name its module only re-exports",
+        target: "Logger.log",
+        callees: [makeSymbol("ts:src/barrel.ts#other")],
+        imports: importsOf("src/a.ts", { source: "./barrel", symbols: ["Logger"] }),
+      },
+      {
+        scope: "a named import from a module the scan has no Symbol in",
+        target: "Logger.log",
+        callees: [],
+        imports: importsOf("src/a.ts", { source: "./barrel", symbols: ["Logger"] }),
+      },
+      {
+        scope: "a named import of a const with a value its module cannot see",
+        target: "Logger.log",
+        callees: [makeSymbol("ts:src/base.ts#Logger", { kind: "const" })],
+        imports: importsOf("src/a.ts", { source: "./base", symbols: ["Logger"] }),
+      },
+    ])("still searches the caller's component past $scope", (scopeCase) => {
+      const inComponent = makeSymbol(`ts:src/audit-log.ts#${scopeCase.target}`, {
+        kind: "method",
+        component: "billing",
+      })
       const result = resolveFromBilling({
         ...scopeCase,
-        callees: [...scopeCase.callees, decoy],
+        callees: [...scopeCase.callees, inComponent],
       })
-      expect(result.edges.map((edge) => [edge.to, edge.confidence])).toEqual([[decoy.id, "medium"]])
+      expect(result.edges.map((edge) => [edge.to, edge.confidence])).toEqual([
+        [inComponent.id, "medium"],
+      ])
     })
   })
 
