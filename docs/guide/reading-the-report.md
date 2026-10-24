@@ -70,9 +70,8 @@ beside the new one:
   - db.write: `prisma.user.create` (L5) [effects-prisma] ⚠ medium (was high)
 ```
 
-When the old symbol had several elements of that kind the edit could have
-touched, such as a second guard beside the edited one, and they disagree on the
-old value, the row shows only the new one.
+When several elements of one kind were edited at once, such as two guards, and
+their old values differ, that field shows only the new value.
 
 For an added or removed symbol, Aburi renders the whole thing:
 
@@ -85,7 +84,7 @@ For an added or removed symbol, Aburi renders the whole thing:
 - throw: `new RefundNotAllowed()` (L68)
 
 **Effects**:
-- db.write: `prisma.order.update` (L72)
+- db.write: `prisma.order.update` (L72) [effects-prisma]
 ```
 
 Three field groups carry most of the meaning.
@@ -160,7 +159,7 @@ grouped by file, with its boundaries, signature, rules, effects, and calls.
 - throw: `new EmptyCart()` (L22)
 
 **Effects**:
-- db.write: `prisma.order.create` (L34)
+- db.write: `prisma.order.create` (L34) [effects-prisma]
 ```
 
 To look at one symbol, skip the file and ask for it:

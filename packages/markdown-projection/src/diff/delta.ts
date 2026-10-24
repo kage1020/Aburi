@@ -21,11 +21,14 @@ export function renderDeltaBody(change: ChangedEntry): string[] {
   // only when that segment changed.
   const shortNameChanged = lastSegment(before.name) !== lastSegment(after.name)
   const nameRows = rows.length
-  appendSignatureDelta(rows, delta.signature ?? null, before.signature?.inputs ?? [])
-  appendDecoratorDelta(rows, delta.decorators, before.decorators)
-  appendArrayGroup(rows, "rules", delta.rules, RULES, before.rules)
-  appendArrayGroup(rows, "effects", delta.effects, EFFECTS, before.effects)
-  appendArrayGroup(rows, "calls", delta.calls, CALLS, before.calls)
+  appendSignatureDelta(rows, delta.signature ?? null, [
+    before.signature?.inputs ?? [],
+    after.signature?.inputs ?? [],
+  ])
+  appendDecoratorDelta(rows, delta.decorators, [before.decorators, after.decorators])
+  appendArrayGroup(rows, "rules", delta.rules, RULES, [before.rules, after.rules])
+  appendArrayGroup(rows, "effects", delta.effects, EFFECTS, [before.effects, after.effects])
+  appendArrayGroup(rows, "calls", delta.calls, CALLS, [before.calls, after.calls])
   const explained = rows.length > nameRows || shortNameChanged || delta.visibilityChanged
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
@@ -56,11 +59,7 @@ function lastSegment(name: string): string {
   return tail.slice(tail.lastIndexOf(".") + 1)
 }
 
-function appendSignatureDelta(
-  rows: string[],
-  sig: SignatureDelta | null,
-  beforeInputs: readonly unknown[],
-): void {
+function appendSignatureDelta(rows: string[], sig: SignatureDelta | null, inputSides: Sides): void {
   if (sig === null) return
   if (sig.outputs.added.length > 0 || sig.outputs.removed.length > 0) {
     const before = renderStringList(sig.outputs.removed)
@@ -71,7 +70,7 @@ function appendSignatureDelta(
   appendInlineRow(rows, "signature.throws added", sig.throws.added)
   appendInlineRow(rows, "signature.throws removed", sig.throws.removed)
   appendInlineRow(rows, "signature.throws modified", sig.throws.modified)
-  const inputs = bucketRows(sig.inputs, INPUTS, beforeInputs)
+  const inputs = bucketRows(sig.inputs, INPUTS, inputSides)
   for (const bucket of BUCKETS) {
     const count = sig.inputs[bucket].length
     if (count === 0) continue
@@ -83,13 +82,9 @@ function appendSignatureDelta(
   if (sig.typeParametersChanged) rows.push(`- signature.typeParameters: changed`)
 }
 
-function appendDecoratorDelta(
-  rows: string[],
-  delta: ArrayDelta | undefined,
-  before: readonly unknown[],
-): void {
+function appendDecoratorDelta(rows: string[], delta: ArrayDelta | undefined, sides: Sides): void {
   if (delta === undefined) return
-  const lines = bucketRows(delta, DECORATORS, before)
+  const lines = bucketRows(delta, DECORATORS, sides)
   for (const bucket of BUCKETS) {
     for (const line of lines[bucket]) rows.push(`- decorator ${bucket}: ${line}`)
   }
@@ -104,10 +99,10 @@ function appendArrayGroup<T>(
   label: string,
   delta: ArrayDelta | undefined,
   elements: DeltaElements<T>,
-  before: readonly unknown[],
+  sides: Sides,
 ): void {
   if (delta === undefined) return
-  const lines = bucketRows(delta, elements, before)
+  const lines = bucketRows(delta, elements, sides)
   for (const bucket of BUCKETS) {
     if (lines[bucket].length === 0) continue
     rows.push(`- ${label} ${bucket}:`)
@@ -117,10 +112,16 @@ function appendArrayGroup<T>(
 
 const BUCKETS = ["added", "removed", "modified"] as const
 
-/** One field a delta row shows, among those the diff compares. */
+/** One array as the base and the head Symbol hold it. */
+type Sides = readonly [before: readonly unknown[], after: readonly unknown[]]
+
+/** One field a delta row shows. */
 interface Part<T> {
   text(item: T): string
-  /** Whether two elements agree on the fields this part shows; by default, whether they read alike. */
+  /**
+   * Whether two elements agree on the fields the diff compares behind this part, which need not be
+   * what it prints; by default, whether they read alike.
+   */
   same?(a: T, b: T): boolean
   /** This part of a modified row whose base element was `was`; by default `was → now`. */
   changed?(was: T, now: T): string
@@ -129,32 +130,54 @@ interface Part<T> {
 /** How one delta array's elements read, and what the diff pairs and compares them on. */
 interface DeltaElements<T> {
   read(value: unknown): T | null
+  /** The diff's key, or a coarser one, which only adds candidates for the base element. */
   key(item: T): string
-  /** Every field the diff compares beside the key. */
+  /** Under one key, two elements agree on every part exactly when the diff calls them equal. */
   parts: readonly Part<T>[]
-  row(item: T, show: (part: Part<T>) => string, modified: boolean): string
+  row(item: T, show: (part: Part<T>) => string): string
+  /** A modified element's row, where it is not `row`. */
+  modifiedRow?(item: T, show: (part: Part<T>) => string): string
 }
 
 function bucketRows<T>(
   delta: ArrayDelta,
   elements: DeltaElements<T>,
-  before: readonly unknown[],
+  sides: Sides,
 ): Record<(typeof BUCKETS)[number], string[]> {
-  const base = readAll(before, elements)
-  const plain = (item: T) => elements.row(item, (part) => part.text(item), false)
+  const plain = (item: T) => elements.row(item, (part) => part.text(item))
+  const modifiedRow = elements.modifiedRow ?? elements.row
+  const bases = delta.modified.length === 0 ? [] : modifiedBases(delta, elements, sides)
   const modified = (item: T) => {
-    const counterparts = base.filter(
-      (b) =>
-        elements.key(b) === elements.key(item) &&
-        !elements.parts.every((part) => agree(part, b, item)),
+    const candidates = bases.filter(
+      (b) => elements.key(b) === elements.key(item) && !alike(elements, b, item),
     )
-    return elements.row(item, (part) => modifiedPart(part, item, counterparts), true)
+    return modifiedRow(item, (part) => modifiedPart(part, item, candidates))
   }
   return {
     added: readAll(delta.added, elements).map(plain),
     removed: readAll(delta.removed, elements).map(plain),
     modified: readAll(delta.modified, elements).map(modified),
   }
+}
+
+/**
+ * The base elements the diff may have paired with a modified element. It leaves every base element
+ * removed, paired with a head element it equals, or paired with a modified one, so each unchanged
+ * head element accounts for one base element equal to it. An element stays whenever one equal to it
+ * is left, as the delta does not say which of two equal elements on different lines was taken.
+ */
+function modifiedBases<T>(delta: ArrayDelta, elements: DeltaElements<T>, sides: Sides): T[] {
+  const [before, after] = sides
+  const kept = readEvery(withoutEach(before, delta.removed), elements)
+  // An element that cannot be read could be any modified element's base.
+  if (kept === null) return []
+  const unchanged = readAll(withoutEach(after, [...delta.added, ...delta.modified]), elements)
+  const left = [...kept]
+  for (const item of unchanged) {
+    const at = left.findIndex((b) => alike(elements, b, item))
+    if (at >= 0) left.splice(at, 1)
+  }
+  return kept.filter((b) => left.some((l) => alike(elements, l, b)))
 }
 
 function readAll<T>(values: readonly unknown[], elements: DeltaElements<T>): T[] {
@@ -164,24 +187,75 @@ function readAll<T>(values: readonly unknown[], elements: DeltaElements<T>): T[]
   })
 }
 
+function readEvery<T>(values: readonly unknown[], elements: DeltaElements<T>): T[] | null {
+  const items = readAll(values, elements)
+  return items.length === values.length ? items : null
+}
+
+/** `values` less one element equal to each of `taken`; a delta bucket holds elements as they are. */
+function withoutEach(values: readonly unknown[], taken: readonly unknown[]): unknown[] {
+  const left = [...values]
+  for (const value of taken) {
+    const at = left.findIndex((v) => sameValue(v, value))
+    if (at >= 0) left.splice(at, 1)
+  }
+  return left
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((value, index) => sameValue(value, b[index]))
+    )
+  }
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keys = definedKeys(a)
+  return keys.length === definedKeys(b).length && keys.every((key) => sameValue(a[key], b[key]))
+}
+
+// A key holding `undefined` is one JSON drops.
+function definedKeys(record: Record<string, unknown>): string[] {
+  return Object.keys(record).filter((key) => record[key] !== undefined)
+}
+
+function alike<T>(elements: DeltaElements<T>, a: T, b: T): boolean {
+  return elements.key(a) === elements.key(b) && elements.parts.every((part) => agree(part, a, b))
+}
+
 function agree<T>(part: Part<T>, a: T, b: T): boolean {
   return part.same?.(a, b) ?? part.text(a) === part.text(b)
 }
 
 /**
- * The diff paired `now` with one of `counterparts`, so where every one of them differs from `now`
+ * The diff paired `now` with one of `candidates`, so where every one of them differs from `now`
  * on this part and all of them read alike, that reading is the base value.
  */
-function modifiedPart<T>(part: Part<T>, now: T, counterparts: readonly T[]): string {
-  const [was, ...others] = counterparts
+function modifiedPart<T>(part: Part<T>, now: T, candidates: readonly T[]): string {
+  const [was, ...others] = candidates
   if (
     was === undefined ||
-    counterparts.some((c) => agree(part, c, now)) ||
-    others.some((c) => part.text(c) !== part.text(was))
+    candidates.some((c) => agree(part, c, now)) ||
+    others.some((c) => part.text(c) !== part.text(was)) ||
+    part.text(was) === part.text(now)
   ) {
     return part.text(now)
   }
   return part.changed?.(was, now) ?? `${part.text(was)} → ${part.text(now)}`
+}
+
+/** A part the element lacks, shown only where the row sets a base value beside it. */
+function optionalPart<T>(
+  absent: boolean,
+  part: Part<T>,
+  item: T,
+  show: (part: Part<T>) => string,
+): string | null {
+  const shown = show(part)
+  return absent && shown === part.text(item) ? null : shown
 }
 
 interface DecoratorLike {
@@ -226,8 +300,8 @@ const RULES: DeltaElements<RuleLike> = {
   row: (r, show) =>
     ruleRowText({
       type: r.type,
-      payload: payloadOf(r) === undefined ? null : show(rulePayload),
-      loopKind: r.loopKind === undefined ? null : show(ruleLoopKind),
+      payload: optionalPart(payloadOf(r) === undefined, rulePayload, r, show),
+      loopKind: optionalPart(r.loopKind === undefined, ruleLoopKind, r, show),
       line: r.line,
     }),
 }
@@ -257,12 +331,19 @@ const effectFrom: Part<EffectLike> = {
     sameStrings(sortedSources(a), sortedSources(b)),
 }
 
-const effectPlugin: Part<EffectLike> = { text: (e) => e.plugin ?? "none" }
+const effectPlugin: Part<EffectLike> = {
+  text: (e) => e.plugin ?? "none",
+  same: (a, b) => a.plugin === b.plugin,
+}
 
 const effectConfidence: Part<EffectLike> = {
   text: badgeOf,
+  same: (a, b) => a.confidence === b.confidence,
   // `high` has no badge to show, so the base side spells it.
-  changed: (was, now) => `${badgeOf(now)} (was ${badgeOf(was).trim() || "high"})`,
+  changed: (was, now) =>
+    was.confidence === undefined
+      ? badgeOf(now)
+      : `${badgeOf(now)} (was ${badgeOf(was).trim() || "high"})`,
 }
 
 const EFFECTS: DeltaElements<EffectLike> = {
@@ -274,7 +355,7 @@ const EFFECTS: DeltaElements<EffectLike> = {
       id: e.id,
       target: inlineCode(e.target),
       origin: show(effectFrom),
-      plugin: e.plugin === undefined ? null : show(effectPlugin),
+      plugin: optionalPart(e.plugin === undefined, effectPlugin, e, show),
       badge: show(effectConfidence),
     }),
 }
@@ -301,9 +382,9 @@ const CALLS: DeltaElements<CallLike> = {
   read: asCallLike,
   key: (c) => c.target,
   parts: [callResolved],
+  row: (c) => callRowText(c),
   // What a call resolves to is all a modified one can differ in, so only its row names it.
-  row: (c, show, modified) =>
-    modified ? `${callRowText(c)} resolved: ${show(callResolved)}` : callRowText(c),
+  modifiedRow: (c, show) => `${callRowText(c)} resolved: ${show(callResolved)}`,
 }
 
 interface InputLike {
@@ -377,6 +458,7 @@ function asEffectLike(value: unknown): EffectLike | null {
   if (propagated !== undefined && typeof propagated !== "boolean") return null
   if (derivedFrom !== undefined && stringsOf(derivedFrom) === undefined) return null
   if (propagated !== true && line === undefined) return null
+  if (propagated === true && (stringsOf(derivedFrom) ?? []).length === 0) return null
   return {
     id,
     target,
