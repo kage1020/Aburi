@@ -1,5 +1,45 @@
 # @aburi/framework-react
 
+## 0.4.0
+
+### Minor Changes
+
+- 90fa1cb: A `const` is now a `framework:react:context`, `framework:react:forward-ref` or `framework:react:memo` only when its own initializer is the `createContext(...)`, `forwardRef(...)` or `memo(...)` call. A `const` Symbol's node is its whole declaration statement, and the first call anywhere in it decided the role whichever name was asked about: in `export const ThemeContext = createContext("light"), DEFAULT_THEME = "light"` both names were contexts, in `export const A = memo(X), B = forwardRef(Y)` `B` was a memo, and in `export const theme = getTheme(), Ctx = createContext(null)` `Ctx` had no role. A const that only contained a wrapper call took its role too: a route table (`[{ path: "/", element: memo(Page) }]`), a handler map (`{ save: () => forwardRef(…) }`), `new Holder(memo(Row))`, `flag ? memo(A) : B`, and a name destructured from one (`const { displayName } = memo(Row)`). The initializer is read through `as`, `satisfies`, `!` and parentheses only, as `@aburi/lang-typescript` reads it to name the Symbol, so `memo(Row) as typeof Row` is still a memo, while a wrapper behind an old-style type assertion (`<Context<T>>createContext(…)`, `<any>memo(Inner)`, written in a `.ts` file) is no longer classified. Its outermost call names the role, so `memo(forwardRef(…))` is still a memo and `withTheme(memo(Row))` is none. `extractWrapperCall` now takes the Symbol's name as a second argument.
+
+  The `api` fingerprint reads `extKind`, so it moves for every const this reclassifies: a name declared beside a wrapper, or holding one inside its initializer, loses the role, and so does a wrapper behind `<T>x`; a wrapper declared after a name whose initializer holds any call takes its own role, where it had that call's or none (`Row` in `export const f = () => g(), Row = memo(Inner)` gains memo, and `Ctx` in `export const routes = [memo(A)], Ctx = createContext(null)` goes from memo to context). An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains or loses those of them that have effects. A wrapper whose statement's first call is a wrapper of the same kind keeps its kind; at most its `derivedBy` changes (`React.memo` for `memo`), which no fingerprint reads. A const that its statement declares alone, initialised by the wrapper call itself or through `as`, `satisfies`, `!` or parentheses, is read as before. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
+
+### Patch Changes
+
+- b7a7148: The declaration files carry less JSDoc: comments that restated the code, and citations of design documents in the IR, diff, config and plugin schemas' descriptions, are gone. No behaviour changes.
+- Updated dependencies [19ead65]
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [90fa1cb]
+- Updated dependencies [b7a7148]
+- Updated dependencies [9c21737]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [ad04fff]
+- Updated dependencies [1a56ce7]
+- Updated dependencies [f32e45b]
+- Updated dependencies [b7a7148]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [6be7d2e]
+- Updated dependencies [ad21560]
+- Updated dependencies [36fd72f]
+- Updated dependencies [6afef8b]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [d4fca12]
+- Updated dependencies [463d616]
+- Updated dependencies [47f8ef9]
+- Updated dependencies [65c758f]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.3.2
 
 ### Patch Changes

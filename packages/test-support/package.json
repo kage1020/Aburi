@@ -1,6 +1,6 @@
 {
   "name": "@aburi/test-support",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Helpers shared across the workspace's Vitest suites: builders for IR and diff records, classify contexts, import edges and symbol candidates, a no-op vocab registry, loggers, scratch workspaces, git repositories and directory links, and IR schema validation. Depends on nothing above @aburi/types, so every package can use it. Not published; consumed from source.",
   "type": "module",
