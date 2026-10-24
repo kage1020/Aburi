@@ -31,9 +31,9 @@ describe("projectWorkspace — component dependency graph", () => {
       "",
       "```mermaid",
       "graph LR",
-      '  billing["Billing"]',
-      '  payments["Payments"]',
-      "  billing --> payments",
+      '  c_billing["Billing"]',
+      '  c_payments["Payments"]',
+      "  c_billing --> c_payments",
       "```",
       "",
       "Fallback list:",
@@ -46,10 +46,22 @@ describe("projectWorkspace — component dependency graph", () => {
   it.each<[string, Dependency[]]>([
     ["no edge at all", []],
     ["only a Symbol edge", [symbolEdge]],
-  ])("draws a lone component as a node, with no list, given %s", (_, dependencies) => {
+  ])("draws a lone component as a node, then a list saying there is no component edge, given %s", (_, dependencies) => {
     expect(
       sectionOf(projectWorkspace(makeIR({ components: [billing], dependencies })), HEADING),
-    ).toEqual([HEADING, "", "```mermaid", "graph LR", '  billing["Billing"]', "```", ""])
+    ).toEqual([
+      HEADING,
+      "",
+      "```mermaid",
+      "graph LR",
+      '  c_billing["Billing"]',
+      "```",
+      "",
+      "Fallback list:",
+      "",
+      "_No Component edges recorded._",
+      "",
+    ])
   })
 
   it("draws one arrow for two edges between the same pair, and lists both", () => {
@@ -63,7 +75,7 @@ describe("projectWorkspace — component dependency graph", () => {
       }),
     )
     const section = sectionOf(md, HEADING)
-    expect(section.filter((line) => line.includes("-->"))).toEqual(["  billing --> payments"])
+    expect(section.filter((line) => line.includes("-->"))).toEqual(["  c_billing --> c_payments"])
     expect(section).toContain("- billing → payments (via `event`)")
     expect(section).toContain("- billing → payments (via `import`)")
   })
@@ -75,36 +87,82 @@ describe("projectWorkspace — component dependency graph", () => {
         dependencies: [dependency({ from: "billing", to: "stray" })],
       }),
     )
-    expect(md).toContain("  billing --> stray")
+    expect(md).toContain("  c_billing --> c_stray")
     expect(md).toContain("- billing → stray (via `import`)")
     expect(md).not.toContain('stray["')
   })
 
-  it("says there is nothing to draw for a workspace with no component and no edge", () => {
+  it("says there is nothing to draw for a workspace with no component and no component edge", () => {
     expect(sectionOf(projectWorkspace(makeIR()), HEADING)).toEqual([
       HEADING,
       "",
-      "_No inter-component dependencies._",
+      "_No Component edges recorded._",
       "",
     ])
   })
 
-  it("maps distinct component ids to distinct node ids", () => {
+  it("writes each component id behind the prefix with - as _, so distinct ids stay distinct", () => {
     const ids = ["billing", "billing-api", "billing-api-v2", "a", "ab-c", "abc"]
     const md = projectWorkspace(
       makeIR({ components: ids.map((id) => component({ id, name: id })) }),
     )
-    const nodeIds = new Set(
-      md.split("\n").flatMap((line) => line.match(/^\s+([a-z0-9_]+)\["/)?.slice(1) ?? []),
-    )
-    expect(nodeIds.size).toBe(ids.length)
+    expect(md.split("\n").filter((line) => line.includes('["'))).toEqual([
+      '  c_a["a"]',
+      '  c_ab_c["ab-c"]',
+      '  c_abc["abc"]',
+      '  c_billing["billing"]',
+      '  c_billing_api["billing-api"]',
+      '  c_billing_api_v2["billing-api-v2"]',
+    ])
   })
 
   it("escapes the characters that would break a node label", () => {
     const md = projectWorkspace(
       makeIR({ components: [component({ id: "foo", name: 'A "b" & <c> [d]\nnext' })] }),
     )
-    expect(md).toContain('  foo["A &quot;b&quot; &amp; &lt;c&gt; [d&rbrack;<br/>next"]\n')
+    expect(md).toContain('  c_foo["A &quot;b&quot; &amp; &lt;c&gt; [d&rbrack;<br/>next"]\n')
+  })
+})
+
+describe("projectWorkspace — component ids that are mermaid keywords", () => {
+  const api = component({ id: "api", name: "API" })
+  const keywords = [
+    "graph",
+    "flowchart",
+    "subgraph",
+    "end",
+    "style",
+    "class",
+    "interpolate",
+    "click",
+    "call",
+    "href",
+  ]
+
+  it.each<[string, string, Dependency[], string[]]>(
+    keywords.flatMap((id) => [
+      [id, "with no edge", [], []],
+      [
+        id,
+        "at the start of an edge",
+        [dependency({ from: id, to: "api" })],
+        [`  c_${id} --> c_api`],
+      ],
+      [id, "at the end of an edge", [dependency({ from: "api", to: id })], [`  c_api --> c_${id}`]],
+    ]),
+  )("writes the component %s under a prefixed node id, %s", (id, _, dependencies, arrows) => {
+    const section = sectionOf(
+      projectWorkspace(makeIR({ components: [api, component({ id, name: id })], dependencies })),
+      HEADING,
+    )
+    expect(section.slice(section.indexOf("```mermaid"), section.indexOf("```") + 1)).toEqual([
+      "```mermaid",
+      "graph LR",
+      '  c_api["API"]',
+      `  c_${id}["${id}"]`,
+      ...arrows,
+      "```",
+    ])
   })
 })
 
@@ -127,5 +185,19 @@ describe("projectWorkspace — component dependency graph size limit", () => {
       `_Component graph omitted: ${MERMAID_NODE_LIMIT + 1} nodes exceeds the render limit (${MERMAID_NODE_LIMIT}). See list below._`,
     )
     expect(md).toContain("Fallback list:\n\n- c-000 → outside (via `import`)\n")
+  })
+
+  it("follows the note past the limit with a list saying there is no component edge", () => {
+    const md = projectWorkspace(makeIR({ components: numbered(MERMAID_NODE_LIMIT + 1) }))
+    expect(sectionOf(md, HEADING)).toEqual([
+      HEADING,
+      "",
+      `_Component graph omitted: ${MERMAID_NODE_LIMIT + 1} nodes exceeds the render limit (${MERMAID_NODE_LIMIT}). See list below._`,
+      "",
+      "Fallback list:",
+      "",
+      "_No Component edges recorded._",
+      "",
+    ])
   })
 })

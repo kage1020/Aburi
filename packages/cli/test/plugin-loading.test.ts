@@ -2,7 +2,7 @@ import { resolve } from "node:path"
 import { frameworkHintPlugins } from "@aburi/config"
 import { RegistryError } from "@aburi/plugin-registry"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
-import type { Config, FrameworkPlugin } from "@aburi/types"
+import type { Config, FrameworkPlugin, Provides } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CliError, EXIT, type LoadPluginsOptions, loadPlugins } from "../src"
 import { pathExists } from "../src/fs-probe"
@@ -10,7 +10,8 @@ import {
   EFFECTS_MANIFEST,
   FAKE_EFFECTS_PLUGIN,
   FAKE_LANGUAGE_PLUGIN,
-  LANG_MANIFEST,
+  FRAMEWORK_MANIFEST,
+  pluginModuleSource,
 } from "./plugin-fakes"
 import { runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
@@ -20,10 +21,9 @@ const workspace = useScratchWorkspace("plugin-loading")
 
 const FRAMEWORK_CORE: FrameworkPlugin = {
   manifest: {
-    ...LANG_MANIFEST,
+    ...FRAMEWORK_MANIFEST,
     name: "framework-core",
-    type: "framework",
-    provides: { ...LANG_MANIFEST.provides, frameworks: ["core"] },
+    provides: { ...FRAMEWORK_MANIFEST.provides, frameworks: ["core"] },
   },
   init: async () => {},
   classifySymbol: () => null,
@@ -116,10 +116,7 @@ describe("loadPlugins — finding the plugin in a module", () => {
 
 describe("loadPlugins — frameworkHints", () => {
   it("registers each entry under framework:hint and runs it after the configured frameworks", async () => {
-    const fakeFramework: FrameworkPlugin = {
-      ...FRAMEWORK_CORE,
-      manifest: { ...LANG_MANIFEST, name: "framework-fake", type: "framework" },
-    }
+    const fakeFramework: FrameworkPlugin = { ...FRAMEWORK_CORE, manifest: FRAMEWORK_MANIFEST }
 
     const loaded = await load(
       { frameworks: ["framework-fake"] },
@@ -165,11 +162,12 @@ describe("loadPlugins — frameworkHints", () => {
 })
 
 describe("loadPlugins — a manifest the registry refuses", () => {
-  it.each<[string, Config, Record<string, unknown>, string]>([
+  it.each<[string, Config, Record<string, unknown>, string, string]>([
     [
       "a reserved namespace",
       { frameworks: ["framework-core"] },
       { "@aburi/framework-core": { plugin: FRAMEWORK_CORE } },
+      "framework-core",
       "reserved-namespace",
     ],
     [
@@ -184,15 +182,17 @@ describe("loadPlugins — a manifest the registry refuses", () => {
           },
         },
       },
+      "effects-b",
       "duplicate-prefix",
     ],
-  ])("reports %s as a plugin fault, keeping the registry's error as the cause", async (_, config, modules, code) => {
+  ])("reports %s as a fault of the plugin's config entry, keeping the registry's error as the cause", async (_, config, modules, ref, code) => {
     const error = await errorFrom(CliError, () => loadModules(config, modules))
 
     expect(error.code).toBe("plugin-error")
     expect(error.cause).toBeInstanceOf(RegistryError)
-    expect((error.cause as RegistryError).code).toBe(code)
-    expect(error.message).toBe((error.cause as RegistryError).message)
+    const cause = error.cause as RegistryError
+    expect(cause.code).toBe(code)
+    expect(error.message).toBe(`Plugin "${ref}" cannot be registered: ${cause.message}`)
   })
 
   it("lets a failure the registry did not code through unchanged", async () => {
@@ -215,22 +215,82 @@ describe("loadPlugins — a manifest the registry refuses", () => {
   })
 })
 
-describe("aburi scan — a plugin whose manifest the registry refuses", () => {
-  it("exits 3 with the registry's message, before writing anything", async () => {
-    await writeStubWorkspace(workspace.root, [], { frameworks: ["./framework-core.mjs"] })
-    await writeFileAt(
-      workspace.root,
-      "framework-core.mjs",
-      `export const plugin = ${JSON.stringify({ manifest: FRAMEWORK_CORE.manifest })}
-plugin.init = async () => {}
-plugin.classifySymbol = () => null
-`,
-    )
+function frameworkModule(name: string, provides: Partial<Provides>): string {
+  return pluginModuleSource(
+    { ...FRAMEWORK_MANIFEST, name, provides: { ...FRAMEWORK_MANIFEST.provides, ...provides } },
+    `  init: async () => {},
+  classifySymbol: () => null,`,
+  )
+}
+
+describe("aburi scan — a configured plugin that cannot be loaded", () => {
+  it.each<[string, string[], Record<string, string>, string]>([
+    [
+      "fails to import",
+      ["./framework-missing.mjs"],
+      {},
+      'Failed to import plugin "./framework-missing.mjs"',
+    ],
+    [
+      "declares a prefix another configured plugin declared",
+      ["./framework-one.mjs", "./framework-two.mjs"],
+      {
+        "framework-one.mjs": frameworkModule("framework-one", {
+          extKindPrefixes: ["framework:acme"],
+        }),
+        "framework-two.mjs": frameworkModule("framework-two", {
+          extKindPrefixes: ["framework:acme"],
+        }),
+      },
+      'Plugin "./framework-two.mjs" cannot be registered: extKind prefix "framework:acme" is already declared by plugin "framework-one".',
+    ],
+    [
+      "has the name of another configured plugin and a different manifest",
+      ["./framework-one.mjs", "./framework-copy.mjs"],
+      {
+        "framework-one.mjs": frameworkModule("framework-one", {
+          extKindPrefixes: ["framework:acme"],
+        }),
+        "framework-copy.mjs": frameworkModule("framework-one", {
+          extKindPrefixes: ["framework:copy"],
+        }),
+      },
+      'Plugin "./framework-copy.mjs" cannot be registered: Plugin "framework-one" is already registered with a different manifest.',
+    ],
+    [
+      "declares a name in a reserved namespace",
+      ["./framework-core.mjs"],
+      { "framework-core.mjs": frameworkModule("framework-core", { frameworks: ["core"] }) },
+      'Plugin "./framework-core.mjs" cannot be registered: Plugin "framework-core" declares framework name "core" inside a reserved namespace',
+    ],
+    [
+      "declares a prefix outside the namespaces its type may own",
+      ["./framework-shape.mjs"],
+      {
+        "framework-shape.mjs": frameworkModule("framework-shape", {
+          extKindPrefixes: ["effects:acme"],
+        }),
+      },
+      'Plugin "./framework-shape.mjs" cannot be registered: Plugin "framework-shape" (type framework) declares extKind prefix "effects:acme" outside its allowed roots',
+    ],
+    [
+      "holds a manifest value JSON cannot carry",
+      ["./framework-odd.mjs"],
+      {
+        "framework-odd.mjs": `${frameworkModule("framework-odd", {})}plugin.manifest.homepage = undefined\n`,
+      },
+      'Plugin "./framework-odd.mjs" cannot be registered: Plugin manifest contains a non-JSON value (undefined) at $.homepage',
+    ],
+  ])("exits 3 for a plugin that %s, naming its config entry, before writing anything", async (_, frameworks, files, says) => {
+    await writeStubWorkspace(workspace.root, [], { frameworks })
+    for (const [path, content] of Object.entries(files)) {
+      await writeFileAt(workspace.root, path, content)
+    }
 
     const { code, stdout, stderr } = await runCliIn(workspace.root, ["scan", "--format", "json"])
 
     expect(code, stderr).toBe(EXIT.GATE)
-    expect(stderr).toContain('declares framework name "core" inside a reserved namespace')
+    expect(stderr).toContain(says)
     expect(stdout).toBe("")
     expect(await pathExists(resolve(workspace.root, "out"))).toBe(false)
   })

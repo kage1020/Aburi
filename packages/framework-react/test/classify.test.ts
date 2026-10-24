@@ -137,9 +137,9 @@ describe("classifyReactSymbol", () => {
 
 describe("classifyReactSymbol — a const read from its own initializer", () => {
   /** `"<name> <extKind> <derivedBy>"` per const Symbol, `"<name> -"` for one with no role, sorted. */
-  async function constRoles(source: string): Promise<string[]> {
-    const ctx = makeCtx("src/f.tsx", source)
-    return (await candidatesOf(source))
+  async function constRoles(source: string, path = "src/f.tsx"): Promise<string[]> {
+    const ctx = makeCtx(path, source)
+    return (await candidatesOf(source, path))
       .filter((candidate) => candidate.kind === "const")
       .map((candidate) => {
         const role = classifyReactSymbol(candidate, ctx)
@@ -178,7 +178,7 @@ describe("classifyReactSymbol — a const read from its own initializer", () => 
       ],
     ],
     [
-      "memo(forwardRef(...)) declared second",
+      "`memo(forwardRef(...))` declared second",
       "export const size = 1, Fancy = memo(forwardRef((p, r) => <b ref={r} />))",
       ["Fancy framework:react:memo framework:react:memo:memo", "size -"],
     ],
@@ -225,5 +225,27 @@ describe("classifyReactSymbol — a const read from its own initializer", () => 
     ["parentheses", "export const Row = (memo(Impl))"],
   ])("reads a wrapper through %s", async (_label, source) => {
     expect(await constRoles(source)).toEqual(["Row framework:react:memo framework:react:memo:memo"])
+  })
+
+  it.each([
+    [
+      "type arguments on the call",
+      "export const Ctx = React.createContext<Theme | null>(null)",
+      "Ctx framework:react:context framework:react:context:React.createContext",
+    ],
+    [
+      "a type annotation on the name",
+      'export const Ctx: React.Context<string> = createContext("light")',
+      "Ctx framework:react:context framework:react:context:createContext",
+    ],
+  ])("reads a wrapper call declared with %s", async (_label, source, role) => {
+    expect(await constRoles(source)).toEqual([role])
+  })
+
+  it.each([
+    ['export const Ctx = <Context<string>>createContext("light")', "Ctx"],
+    ["export const Row = <any>memo(Inner)", "Row"],
+  ])("gives no role to a wrapper behind an old-style type assertion: %s", async (source, name) => {
+    expect(await constRoles(source, "src/f.ts")).toEqual([`${name} -`])
   })
 })

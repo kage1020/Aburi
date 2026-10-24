@@ -26,9 +26,13 @@ component classifies as `provider` rather than `component`.
 A const is read from its own declarator, so in
 `export const PAGE_SIZE = 20, Row = memo(RowImpl)` only `Row` is a memo. The
 initializer must be the wrapper call itself, read through `as`, `satisfies`,
-`!` and parentheses as `@aburi/lang-typescript` reads it
+`!` and parentheses as `@aburi/lang-typescript` reads it to name the Symbol
 (`memo(Row) as typeof Row` is a memo), and its outermost call names the role,
-so `memo(forwardRef(…))` is a memo.
+so `memo(forwardRef(…))` is a memo. A const whose initializer only contains a
+wrapper call (in an array or object literal, handed to another call or to
+`new`, in one branch of a conditional), or that a destructuring pattern pulls
+out of one, has no wrapper role: it holds that expression's value, not
+necessarily the wrapped component.
 
 That call is named in `derivedBy` by the name read off the syntax tree: the
 name the callee's receiver chain starts from, read through the same wrappers,
@@ -41,15 +45,6 @@ no entry carries the source's line breaks, indentation or comments.
 
 Not classified today (documented for completeness):
 
-- A wrapper call a const's initializer only contains: one in an array or an
-  object literal (`[{ element: memo(Page) }]`), handed to another call
-  (`withTheme(memo(Row))`) or to `new`, or in one branch of a conditional
-  (`flag ? memo(A) : B`). The const holds whatever that expression evaluates
-  to, not the wrapper's result.
-- A name a destructuring pattern pulls out of a wrapper call
-  (`const { displayName } = memo(Row)`) — the binding is not the wrapped
-  component, only something read off it.
-
 - Class components (`class X extends React.Component`) — the plugin only
   targets function components; adding class support is a separate signal path.
 - `"use client"` / `"use server"` directives — those are the `framework-next`
@@ -58,6 +53,10 @@ Not classified today (documented for completeness):
   type resolves to `ReactNode`, whether an HOC parameter is typed as a
   component). The JSX-body heuristic used here is the most reliable pre-LSP
   signal.
+- A wrapper behind an old-style type assertion (`<Context<T>>createContext(…)`,
+  `<any>memo(Inner)`, written in a `.ts` file) — the initializer is read
+  through `as`, `satisfies`, `!` and parentheses only, as
+  `@aburi/lang-typescript` reads it to name the Symbol.
 
 ## Install
 

@@ -20,8 +20,8 @@ describe("detectModuleDirective", () => {
       "'use strict'\n'use server'\nexport function X() {}",
       "server",
     ],
-    ["a UTF-8 BOM", "﻿'use client'\nexport function X() {}", "client"],
-    ["a BOM and a comment", "﻿// copyright\n'use client'\nexport function X() {}", "client"],
+    ["a UTF-8 BOM", "\uFEFF'use client'\nexport function X() {}", "client"],
+    ["a BOM and a comment", "\uFEFF// copyright\n'use client'\nexport function X() {}", "client"],
     ["a newline, even with a `+` on the next line", "'use client'\n+ 'x'", "client"],
   ])("reads the directive behind %s", (_label, source, directive) => {
     expect(detectModuleDirective(source)).toBe(directive)

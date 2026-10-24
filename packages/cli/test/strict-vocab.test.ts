@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import { EXIT, runScan, VOCAB_DISCOVERED_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
+import { listTree } from "./workspace"
 
 const workspace = useScratchWorkspace("strict-vocab")
 
@@ -16,6 +17,10 @@ async function readRecord(): Promise<unknown> {
   return JSON.parse(
     await readFile(resolve(workspace.root, "out", VOCAB_DISCOVERED_FILENAME), "utf8"),
   )
+}
+
+function listOutputs(): Promise<string[]> {
+  return listTree(resolve(workspace.root, "out"))
 }
 
 const ODD_TWICE = {
@@ -43,6 +48,23 @@ describe("aburi scan, strict by default", () => {
     expect(code).toBe(EXIT.GATE)
     expect(stderr).toContain('Plugin "lang-stub" emitted extKind "stub:odd:thing" at odd.stub')
     expect(stderr).toContain("aburi scan --discover")
+  })
+
+  it("leaves what an earlier scan wrote as it was when it stops at such a value", async () => {
+    await writeStubWorkspace(workspace.root, ["ok.stub"])
+    expect((await runCliIn(workspace.root, ["scan"])).code).toBe(EXIT.SUCCESS)
+    const earlier = await listOutputs()
+    expect(earlier).toEqual([
+      "aburi.ir.json",
+      "components",
+      "components/stub-fixture.md",
+      "workspace.md",
+    ])
+    await writeStubWorkspace(workspace.root, ["odd.stub", "ok.stub"])
+
+    expect((await scanWith()).code).toBe(EXIT.GATE)
+
+    expect(await listOutputs()).toEqual(earlier)
   })
 
   it("exits 3 under --strict even when the config turns strict off", async () => {
@@ -102,7 +124,7 @@ describe("aburi scan with strict off", () => {
     expect(await readRecord()).toMatchObject({ discoveredAt: expect.any(String) })
   })
 
-  it("reports the values but writes no record for a diff's scan, which shares its directory", async () => {
+  it("reports the values but writes no record for the scan aburi diff runs", async () => {
     await writeStubWorkspace(workspace.root, ["odd.stub"], { strict: false })
 
     const report = await runScan({

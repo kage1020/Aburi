@@ -37,12 +37,12 @@ to skip, and a handler alone makes them a route: a chain that has called
 any depth (`app.route("/users").get(listUsers).post(createUser)`), and a call
 whose first argument is a spread (`app.get(...routeArgs)`).
 
-Arguments are read through `as`, `satisfies`, `!` and parentheses, and so are a
-route's receiver chain and a Router's initializer, as `@aburi/lang-typescript`
-reads them to name the registration: `app.use(logger as RequestHandler)` is
-middleware as `app.use(logger)` is, `app.route("/users")!.get(h)` is a route as
-`app.route("/users").get(h)` is, and
-`const r = express.Router() as express.Router` is a Router.
+Arguments and a route's receiver chain are read through `as`, `satisfies`, `!`
+and parentheses, as `@aburi/lang-typescript` reads them to name the
+registration, and so is a Router's initializer:
+`app.use(logger as RequestHandler)` is middleware as `app.use(logger)` is,
+`app.route("/users")!.get(h)` is a route as `app.route("/users").get(h)` is,
+and `const r = express.Router() as express.Router` is a Router.
 
 `derivedBy` names the call `<receiver>.<method>`, read off the syntax tree as
 `@aburi/lang-typescript`'s `call-statement:` entry is: the method called and

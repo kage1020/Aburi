@@ -35,8 +35,12 @@ describe("parsePluginManifest", () => {
     expect(m.type).toBe("effects")
   })
 
-  it("refuses text that is not JSONC, saying where", async () => {
-    const caught = await refusalOf("{not json")
+  it.each([
+    ["text that is not JSONC", "{not json"],
+    ["two byte order marks", `\uFEFF\uFEFF${VALID_MANIFEST}`],
+    ["a byte order mark after the first character", `{\uFEFF "name": "effects-foo" }`],
+  ])("refuses %s, saying where", async (_, text) => {
+    const caught = await refusalOf(text)
     expect(caught).toMatchObject({ code: "manifest-parse-failed", plugins: [] })
     expect(caught.message).toMatch(
       /^Plugin manifest at inline is not valid JSONC: .* at offset \d+/,
@@ -117,8 +121,11 @@ describe("parsePluginManifest given a key named twice in one object", () => {
 describe("loadPluginManifest", () => {
   const scratch = useScratchWorkspace("registry-manifest")
 
-  it("reads a manifest from disk", async () => {
-    await scratch.writeSource("aburi-plugin.json", VALID_MANIFEST)
+  it.each([
+    ["", VALID_MANIFEST],
+    [" that opens with a byte order mark", `\uFEFF${VALID_MANIFEST}`],
+  ])("reads a manifest%s from disk", async (_, text) => {
+    await scratch.writeSource("aburi-plugin.json", text)
     expect((await loadPluginManifest(join(scratch.root, "aburi-plugin.json"))).name).toBe(
       "effects-foo",
     )

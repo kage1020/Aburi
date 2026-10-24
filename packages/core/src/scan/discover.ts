@@ -1,13 +1,13 @@
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
-import { glob } from "tinyglobby"
 import { toNfc } from "../codepoints"
-import { backslashSite, symbolIdSeparatorSite, toDocumentPath } from "../id"
+import { symbolIdSeparatorSite, toDocumentPath, type UnnameableSite, unnameableSite } from "../id"
 import { compareBy } from "../order"
 import { describeThrown, isVanishedFile } from "./faults"
 import { openGitignoreTree } from "./gitignore"
 import { fileExtension } from "./route"
+import { walk } from "./walk"
 
 export const CORE_IGNORE_PATTERNS: readonly string[] = [
   "**/node_modules/**",
@@ -68,7 +68,7 @@ interface UnrepresentableBase {
 }
 
 export interface UnnameableFile extends UnrepresentableBase {
-  reason: "unspellable-name"
+  reason: UnnameableSite["reason"]
   unnameablePrefix: string
 }
 
@@ -96,7 +96,7 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
 
   const gitignore = respectGitignore ? openGitignoreTree(workspaceRoot) : null
 
-  const matches = await glob(["**/*"], {
+  const matches = await walk(["**/*"], {
     cwd: workspaceRoot,
     ignore: dropGlobs,
     onlyFiles: true,
@@ -105,6 +105,7 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     // Followed, a link gives a file one Symbol id per path reaching it and brings in files from
     // outside the workspace. Git keeps the link itself as an entry, but never looks behind it.
     followSymbolicLinks: false,
+    gitignore,
   })
 
   const extensions = new Set((options.languageExtensions ?? []).map(toNfc))
@@ -118,11 +119,11 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
 
     if (gitignore !== null && (await gitignore.ignores(rawPath))) continue
 
-    const unnameable = backslashSite(rawPath)
+    const unnameable = unnameableSite(rawPath)
     if (unnameable !== null) {
       unrepresentableFiles.push({
         fsPath: rawPath,
-        reason: "unspellable-name",
+        reason: unnameable.reason,
         unnameablePrefix: unnameable.prefix,
       })
       continue

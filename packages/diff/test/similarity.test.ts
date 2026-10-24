@@ -9,6 +9,7 @@ import {
   ownersAreCompatible,
   tokenizeName,
 } from "../src"
+import { quotient } from "../src/ratio"
 import { createNameScorer } from "../src/similarity"
 
 describe("tokenizeName", () => {
@@ -200,7 +201,7 @@ describe("createNameScorer", () => {
         if (scorer.name(base, head) !== nameSimilarity(base, head)) {
           disagreements.push(`name(${base}, ${head})`)
         }
-        if (scorer.member(base, head) !== memberSimilarity(base, head)) {
+        if (quotient(scorer.member(base, head)) !== memberSimilarity(base, head)) {
           disagreements.push(`member(${base}, ${head})`)
         }
         if (scorer.ownersCompatible(base, head) !== ownersAreCompatible(base, head)) {
