@@ -48,7 +48,8 @@ rewrites it in place instead of piling up a new one.
 
 [The action's README](https://github.com/kage1020/Aburi/blob/main/packages/github-action/README.md#inputs)
 lists the rest — `refspec`, `config`, `output-dir`, `format`, `working-directory`, `comment`,
-`token` — and the outputs.
+`token` — and the outputs. There is no input for the log level: set `ABURI_LOG_LEVEL` in the
+step's `env:` instead.
 
 ::: tip A large pull request still gets a comment
 GitHub refuses a comment body over 65536 bytes, which is about 310 added symbols' worth of

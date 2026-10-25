@@ -18,7 +18,7 @@ References:
 
 Effect classification, as specified in [`effect-plugin.md`](./effect-plugin.md), attaches an `Effect` record to the exact call site where a side-effect is performed. A NestJS controller that delegates to a service that delegates to a repository that ultimately calls `prisma.invoice.create` therefore ends up with the `db.write` effect on the **repository method**, not on the controller. From the reviewer's perspective this is inverted: the controller is the observable surface, and the interesting semantic fact — "this handler writes to the database" — is not visible without walking the call chain by hand.
 
-[`roadmap.md`](../roadmap.md) states the next-phase goal verbatim: **"Effect propagation: build the symbol call graph and propagate `db.write` to methods that call methods that call `prisma.invoice.create`"**. This document specifies the propagation rules.
+The goal is to build the symbol call graph and propagate `db.write` to methods that call methods that call `prisma.invoice.create`. This document specifies the propagation rules, which `@aburi/core` implements.
 
 The pass runs in `@aburi/core`. It consumes the `CallEdge[]` produced by call resolution ([`call-resolution.md`](./call-resolution.md) §7) and augments each Symbol's `effects[]` with the union of effects reachable through outgoing edges. Locally-detected effects are preserved unchanged; propagated entries are discriminated by an optional `propagated: true` field so downstream consumers can distinguish them without dual code paths.
 

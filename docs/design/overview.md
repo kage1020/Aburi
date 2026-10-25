@@ -121,6 +121,8 @@ Automatic PR comment posting is bundled as a thin `@aburi/github-action` ([`gith
 | `moved` | git rename detection + differing path but matching remainder of the symbol ID, or fingerprint match |
 | `changed` | Same ID with a change in the `api`, `logic` or `syntax` fingerprint, or in `confidence` ([`diff-algorithm.md`](./diff-algorithm.md) §4) |
 | `moved+changed` | Renamed and changed as well, as `changed` |
+| `dropped-toggled` | Same Symbol, kept on one side and dropped as boilerplate on the other |
+| `unknown` | Present on one side only, in a file the other side's scan skipped, so its absence proves nothing |
 
 Move detection runs in order, each stage handling what the previous one left:
 

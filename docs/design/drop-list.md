@@ -300,7 +300,7 @@ Precedence when multiple drop rules / keep rules conflict. **Higher entries win*
 ```
 1. config.keep                          (forced keep)
 2. config.suppress                       (forced drop, but loses to keep)
-3. plugin drop rules (including manifest.dropCallees)  (added to Category C/B)
+3. plugin drop rules (including an effect plugin's dropCallees)  (added to Category C/B)
 4. core drop rules                       (Category A/B/C standard set)
 5. default                               (no drop)
 ```

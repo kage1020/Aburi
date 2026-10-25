@@ -621,7 +621,7 @@ Each plugin must follow these conventions:
    - A `releaseTree` that throws is recorded on `ScanResult.treeReleaseFailures` and does not fail the file, whose Symbols are already in the IR. A `releaseTree` that is declared as something other than a function is recorded there too, saying so — it is a contract violation rather than a parser fault, and the two are not described in the same words.
 2. **WASM heap budget under parallel execution**
    - `capabilities.wasmHeapPerWorkerMB` in the plugin manifest (range: 16–4096 MiB, implicit default 256 MiB when undeclared) is the source-of-truth
-   - The core caps `--concurrency` at `min(specified value, floor(availableMemoryMB / wasmHeapPerWorkerMB))`
+   - The core will cap `--concurrency` at `min(specified value, floor(availableMemoryMB / wasmHeapPerWorkerMB))` once the worker pool exists ([`performance.md`](./performance.md), planned); a scan parses one file at a time today
    - When multiple lang plugins coexist in the same run, the **maximum** of each plugin's declared value is used (sized for the hungriest lang)
 3. **Reservation for a native-binding fallback**
    - In a future release, switching to native bindings (e.g. the `tree-sitter` Node bindings) may be added via flags such as `capabilities.preferNative` (see the [roadmap](../roadmap.md))

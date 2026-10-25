@@ -86,6 +86,8 @@ Nothing here is committed.
 - Expose Aburi as an MCP server, callable from AI coding agents.
 - `aburi review`, feeding the diff to a model for automated review comments.
 - Name Slice View clusters automatically. They carry ids today.
+- Warn when the two analyses `aburi diff --base --head` compares were made with
+  different plugins, from the plugin list each one records.
 - `aburi vocab`, listing the effect ids and extension kinds the loaded plugins
   declare, and which plugin owns each.
 - `--quiet` for `scan` and `diff`, and `aburi diff --filter`, narrowing the

@@ -35,7 +35,7 @@ Each plugin has exactly **one manifest**, in which it declares its name, its typ
 
 ### 3.1 Format
 
-The manifest lives in the `aburi` property of `package.json`, or in a standalone `aburi-plugin.json`. If both exist, the former takes precedence.
+The manifest is the `manifest` property of the plugin object the module exports: its default export, a `plugin` export, or the first top-level export carrying a `manifest`, in that order. Neither `package.json` nor a standalone file is read for it.
 
 ```jsonc
 // type=effects plugin (effects only, e.g. lifecycle hooks)
@@ -241,7 +241,7 @@ interface VocabRegistry {
 
 ## 8. CLI (future use)
 
-The `aburi vocab` subcommand (specified in [`cli-spec.md`](./cli-spec.md)):
+The planned `aburi vocab` subcommand ([`cli-spec.md`](./cli-spec.md) §8; not implemented):
 
 ```bash
 aburi vocab list                                       # show all vocab

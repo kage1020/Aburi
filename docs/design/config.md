@@ -87,7 +87,7 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
 }
 ```
 
-Every field is optional. Even an empty `{ "$schema": "..." }` works (autodetect does everything).
+Every field is optional to the schema. An empty `{ "$schema": "..." }` is a valid config, but `aburi scan` refuses it at exit 2: Components are autodetected (§12), plugins are not, and with no language plugin no file can be parsed.
 
 ## 3. `ignore`
 
@@ -202,7 +202,7 @@ Opaque per-plugin configuration.
 ## 6. `components`
 
 Overrides the logical component boundaries of a monorepo.
-When not specified explicitly, the core Component autodetect infers them from `pnpm-workspace.yaml` / `turbo.json` / `go.work` / `Cargo.toml` / `pyproject.toml`, etc.
+When not specified explicitly, the core Component autodetect infers them from `pnpm-workspace.yaml`, `package.json` `workspaces` and nx's `project.json` files, with `turbo.json` as a hint ([`component-detect.md`](./component-detect.md) §3; the Go, Rust and Python detectors are planned).
 
 ```jsonc
 {
@@ -427,18 +427,19 @@ Config values can be overridden by CLI flags:
 | `--respect-gitignore` / `--no-respect-gitignore` | `respectGitignore` |
 | `--strict` / `--no-strict` | `strict` |
 | `--discover` | Equivalent to `strict: false` |
+| `--lsp` / `--no-lsp` | `lsp.enabled` ([`lsp-enrichment.md`](./lsp-enrichment.md) §12) |
 | `--output-dir <path>` | `output.dir` |
 
 See [`cli-spec.md`](./cli-spec.md) for details.
 
-## 12. autodetect (Behavior Without a Config)
+## 12. autodetect
 
-When no config exists at all (`aburi.json` is absent), `aburi scan` attempts the following autodetect:
+What Aburi infers when the config leaves it out:
 
 ```
 Determining the workspace root:
   - Location of the .git directory (or the nearest one when inside a subdirectory)
-  - pnpm-workspace.yaml / package.json workspaces / turbo.json / go.work / Cargo.toml workspace
+  - pnpm-workspace.yaml / package.json workspaces / turbo.json / nx.json, and the other markers of component-detect §2.1
 
 Monorepo detection:
   - Infer components[].roots from the manifests above
@@ -447,11 +448,14 @@ Language detection:
   - Determine languages per component from extension frequency
 
 Framework detection:
-  - Look for nestjs / next / react / express etc. in package.json dependencies
-  - Suggest auto-enabling the `framework-<name>` plugin matching each detected framework (without actually enabling it)
+  - Look for nestjs / next / react / express etc. in package.json dependencies, into components[].frameworks
 ```
 
-Autodetect alone is enough to run, but for stability it is recommended to write the results to `aburi.json` via `aburi init`.
+Plugins are not inferred. `aburi scan` loads exactly the plugins `languages` / `frameworks` /
+`effects` name, so with no config, or one naming no language plugin, it exits 2 and names
+`aburi init` ([`cli-spec.md`](./cli-spec.md) CL6). `aburi init` runs the detection above and
+writes it down, mapping each detected language and framework to the first-party plugin for it
+(§13).
 
 ## 13. Output of `aburi init`
 
@@ -462,21 +466,20 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
   "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
   "frameworks": [],
-  "effects": [],
   "components": [
-    { "id": "billing", "name": "Billing", "roots": ["apps/billing"], "languages": ["ts"] },
-    { "id": "shared",  "name": "Shared",  "roots": ["packages/shared"], "languages": ["ts"] }
+    { "id": "billing", "name": "Billing", "roots": ["apps/billing"], "languages": ["ts"], "frameworks": [] },
+    { "id": "shared",  "name": "Shared",  "roots": ["packages/shared"], "languages": ["ts"], "frameworks": [] }
   ]
 }
 ```
 
-`init` fills in the language and framework plugin refs it has a mapping for; effects plugins are outside its scope and are added by hand.
+`init` fills in the language and framework plugin refs it has a mapping for, and writes no `effects` key: effects plugins are outside its scope and are added by hand.
 
 ## 14. Verifiable Properties
 
 | ID | Input | Expectation |
 |---|---|---|
-| C1 | A config that is only `{}` | Runs via autodetect |
+| C1 | A config that is only `{}` | Valid; `aburi scan` exits 2, saying no language plugin is configured |
 | C2 | `effects` is an empty array | No effect classification; everything remains in calls |
 | C3 | `effects: ["effects-prisma", "effects-stripe"]` | Classification is evaluated in order |
 | C4 | Two entries with the same component id | Config validation error |

@@ -48,7 +48,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 
 | Field | Type admits `null` | Class | Writer rule |
 |---|---|---|---|
-| `generatedAt` | no | B | reserved for the producer's clock; **no writer emits it today**, so the key is always absent. `--no-timestamp` currently suppresses only the Markdown projection's "Generated" line |
+| `generatedAt` | no | B | reserved for the producer's clock; **no writer emits it today**, so the key is always absent. `--no-timestamp` (implied by `CI`) drops the clock from `aburi-vocab-discovered.json` (`discoveredAt`) and from the Markdown projection's "Generated" line, which has none to drop while this key is absent |
 | `stats.effectClassifyTimeouts` | no | B | omitted when no classification overran its budget |
 | `stats.lspEnrichment` | no | B | omitted when the LSP pass did not run |
 | `stats.lspEnrichment.hintsProduced` | no | B | emitted by the current pipeline whenever the enclosing record is; absence means the document predates the counter |
@@ -171,7 +171,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 ```
 
 - `$schema`: canonical URL. Used for IDE JSON Schema resolution and integrated validation
-- `generatedAt`: operational metadata of the producer. **Excluded from fingerprint computation**. Class B per §1.1 — the key is omitted rather than nulled when there is no timestamp to record. No writer emits it today: the scan pipeline never sets it, and `--no-timestamp` currently reaches only the Markdown projection, where it suppresses the "Generated" line. A producer that does record a clock must drop the key when committing the IR, so that re-scanning an unchanged workspace produces an unchanged file
+- `generatedAt`: operational metadata of the producer. **Excluded from fingerprint computation**. Class B per §1.1 — the key is omitted rather than nulled when there is no timestamp to record. No writer emits it today: the scan pipeline never sets it. `--no-timestamp` reaches the Markdown projection, where it would suppress the time on the "Generated" line, and `aburi-vocab-discovered.json`, whose `discoveredAt` is the only clock a scan writes. A producer that does record a clock must drop the key when committing the IR, so that re-scanning an unchanged workspace produces an unchanged file
 - `workspace.root`: always `"."`. Never write absolute paths (IR portability)
 - `workspace.managers[].tool`: runtime-independent string. Representative values: `pnpm`/`npm`/`yarn`/`bun`/`uv`/`poetry`/`pip`/`cargo`/`go`/`mvn`/`gradle`/`hatch`/`pixi`. Unknown values are not rejected (so that adding a new tool never requires a schema revision)
 - `stats`: for human/CI logs. Excluded from fingerprint
@@ -542,7 +542,7 @@ never a name spelled oddly.
 
 ## 11. Dependency
 
-An edge between symbols or between components. Both endpoint kinds live in the same `dependencies[]` array — the schema for `from`/`to` is a plain `string`, and the endpoint kind is recovered from the id shape (`<language>:<file>#<qname>` for a Symbol id, ASCII kebab-case for a Component id).
+An edge between symbols or between components. `aburi scan` writes Symbol edges only, `via: "call"` from the resolved call graph; Component edges are valid v1 for any producer, and the projections and the diff handle them, but the scan emits none yet. Both endpoint kinds live in the same `dependencies[]` array — the schema for `from`/`to` is a plain `string`, and the endpoint kind is recovered from the id shape (`<language>:<file>#<qname>` for a Symbol id, ASCII kebab-case for a Component id).
 
 ```jsonc
 {

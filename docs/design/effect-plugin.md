@@ -229,7 +229,7 @@ A call_expression belongs to a single owning Symbol (nested anonymous functions 
 
 ## 7. Drop Additions by Logger-Oriented Plugins
 
-Providing `dropCallees: string[]` in the manifest adds the given callee prefixes to the core's drop-list category C ([`drop-list.md`](./drop-list.md) §5.2).
+Providing `dropCallees: string[]` on the plugin object (§4.1; the manifest has no such field) adds the given callee prefixes to the core's drop-list category C ([`drop-list.md`](./drop-list.md) §5.2).
 
 Example: if the `effects-pino` plugin declares `["pino", "child"]`, then `pino.info(...)` / `child.info(...)` are excluded from effects/calls.
 
@@ -239,10 +239,10 @@ Writing a drop-only plugin is also possible (`provides.effects: []` but declarin
 
 | plugin | example recognized callees | main effect ids |
 |---|---|---|
-| `@aburi/effects-nest` | NestJS lifecycle hooks | `x-nest:lifecycle.on-module-init` etc. |
+| `@aburi/effects-nest` | `EventEmitter2` / `eventBus` `.emit(...)` | `event.publish` |
 | `@aburi/effects-prisma` | `prisma.*.{find*,create,update,upsert,delete}` | `db.read` / `db.write` |
 | `@aburi/effects-drizzle` | `db.select().from(...)` / `db.insert(...)` | `db.read` / `db.write` |
-| `@aburi/effects-trpc` | `trpc.*.{query,mutation}` | `network.rpc` |
+| `@aburi/effects-trpc` | `trpc.*.{query,mutation}` and the React Query hooks | `network.rpc` |
 | `@aburi/effects-axios` | `axios.{get,post,put,patch,delete}` | `network.http` |
 | `@aburi/effects-fetch` | `fetch(...)` (global) | `network.http` |
 | `@aburi/effects-bullmq` | `queue.add(...)` / worker | `queue.publish` / `queue.consume` |
@@ -251,7 +251,7 @@ Writing a drop-only plugin is also possible (`provides.effects: []` but declarin
 | `@aburi/effects-winston` | `winston.*` | same as above |
 | `@aburi/effects-otel` | `tracer.*` / `metrics.*` / `span.*` | same as above |
 
-Implementation details of each plugin live in their respective READMEs. Today NestJS + Prisma are implemented as the minimum; the rest are planned — see the [roadmap](../roadmap.md).
+Implementation details of each plugin live in their respective READMEs. Today `effects-nest`, `effects-prisma`, `effects-drizzle` and `effects-trpc` are implemented; the rest are planned — see the [roadmap](../roadmap.md).
 
 ## 9. Pattern-Matching Implementation Examples
 
