@@ -33,9 +33,9 @@ describe("signatureLine", () => {
     ["several outputs as a union", { outputs: ["A", "B"] }, "`() → A | B`"],
     ["type parameters ahead of the inputs", { typeParameters: ["T", "U"] }, "`<T,U>() → void`"],
     [
-      "what it throws after the code span",
+      "what it throws after the code span, each type in a span of its own",
       { throws: ["NotFound", "Denied"] },
-      "`() → void` throws NotFound, Denied",
+      "`() → void` throws `NotFound`, `Denied`",
     ],
     [
       "async and generator as badges",
