@@ -42,8 +42,8 @@ directories such as `node_modules`, `dist` and `.next`.
 
 Aburi never reads `.git`, and it does not scan another checkout kept inside the
 repository as part of it: a linked worktree under `.worktrees` or
-`.claude/worktrees`, a nested repository and a submodule are left out, as git
-leaves them out of `git status`.
+`.claude/worktrees`, a nested repository and a submodule are left out, since git
+counts none of their files as the repository's.
 
 Aburi honours `.gitignore` by default, every one in the tree, the way git reads
 them. Turn that off when you want to analyse build output on purpose:
