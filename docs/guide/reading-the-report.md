@@ -33,6 +33,7 @@ ones and folds Moved, Dropped changes and Syntax-only changes behind a `<details
 |---|---|---|
 | ⚠ API changes | A public surface moved: signature, throws, or decorators. | Check every caller. |
 | 🔧 Logic changes | Control flow or effects changed inside a body. | This is the review. |
+| 🧵 Slice View | The changed symbols that call one another, grouped into one slice per call chain. | Read a feature end to end. |
 | ➕ Added | New symbols, rendered in full. | Read the effects and rules. |
 | ➖ Removed | Symbols that disappeared. | Confirm you meant to delete them. |
 | ❔ Unknown | One revision never analysed the file. | Fix the scan, not the code. |
@@ -40,7 +41,7 @@ ones and folds Moved, Dropped changes and Syntax-only changes behind a `<details
 | 🔀 Moved + Changed | Relocated and modified. | Read it like a Logic change. |
 | 🔀 Moved | Relocated, behaviour identical. | Skim and move on. |
 | 🧱 Component changes | A component appeared, vanished, or changed — roots, public API, frameworks, name, languages, or description. | Architectural. Worth a look. |
-| 🔗 Dependency changes | A new or dropped edge between components or symbols. | Watch for layering violations. |
+| 🔗 Dependency changes | A call between two symbols that appeared or went. | Watch for layering violations. |
 | 💧 Dropped changes | Boilerplate that came or went. | Usually nothing. |
 | 🎚 Confidence changes | Aburi is more or less sure of a symbol, and nothing it fingerprints changed. | Check the new badge (see [Confidence](#confidence)). |
 | 🎨 Syntax-only changes | Bodies reformatted, behaviour identical. | Nothing. |
@@ -78,10 +79,9 @@ For an added or removed symbol, Aburi renders the whole thing:
 ```md
 ### `refundOrder` *(function)*
 **File**: `src/app/orders/actions.ts:64`
-**Boundary**: `"use server"`
 **Rules**:
 - guard: `!order.canRefund` (L67)
-- throw: `new RefundNotAllowed()` (L68)
+- throw: `RefundNotAllowed` (L68)
 
 **Effects**:
 - db.write: `prisma.order.update` (L72) [effects-prisma]
@@ -89,8 +89,12 @@ For an added or removed symbol, Aburi renders the whole thing:
 
 Three field groups carry most of the meaning.
 
-**Boundary** names what makes the symbol reachable from outside: an HTTP route,
-a message handler, a server action, an exported entry point.
+**Boundary** lists the decorators that make the symbol reachable from outside:
+NestJS's `@Post()` or `@MessagePattern()`, or one a
+[`frameworkHints`](./configuration.md#teach-it-your-in-house-framework) rule marks
+with `boundary: true`. A framework without decorators, such as Next.js, records
+its route handlers under Derived by instead, which `aburi explain` shows, and the
+entry has no Boundary line.
 
 **Rules** are the control flow Aburi kept. Guards, throws, returns, loops,
 branches. A removed `guard` line means somebody removed a condition.
@@ -144,19 +148,20 @@ plugin installed, and it will keep showing up until you change the cause.
 `aburi scan` writes two more documents, useful outside pull request review.
 
 **`out/workspace.md`** covers the repository at a glance: components and their
-roots, the dependency graph between them, the most common effects, and any files
-the scan could not read. Hand this one to a new joiner.
+roots, the most common effects, and any files the scan could not read. Hand this
+one to a new joiner. Its Component dependencies graph shows the components alone
+for now: the scan records calls between symbols, which each component page lists,
+and no edges between components yet.
 
 **`out/components/<id>.md`** covers one component in full. Every kept symbol,
 grouped by file, with its boundaries, signature, rules, effects, and calls.
 
 ```md
 #### `submitOrder` *(function)*
-**Boundary**: `"use server"`
-**Signature**: `(cart: Cart) → Promise<Order>` throws `PaymentDeclined` ⚡async
+**Signature**: `(cart: Cart) → Promise<Order>` throws `EmptyCart` ⚡async
 **Rules**:
 - guard: `cart.items.length === 0` (L21)
-- throw: `new EmptyCart()` (L22)
+- throw: `EmptyCart` (L22)
 
 **Effects**:
 - db.write: `prisma.order.create` (L34) [effects-prisma]

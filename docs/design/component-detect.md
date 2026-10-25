@@ -1,6 +1,6 @@
 # Component Autodetect
 
-The algorithm by which `aburi init` and `aburi scan` (when no config is present) infer logical Components from the physical structure of a monorepo.
+The algorithm by which `aburi init` and `aburi scan` (when the config declares no `components[]`) infer logical Components from the physical structure of a monorepo.
 If the config explicitly declares `components[]`, it takes precedence over the autodetect result ([`config.md`](./config.md) §6.1).
 
 References:
@@ -15,7 +15,7 @@ Aburi infers "which set of files forms one logical unit (Component)" with zero u
 
 This enables:
 - `aburi init` to generate `aburi.json` with pre-populated `components[]`
-- `aburi scan` to work even without `aburi.json`
+- `aburi scan` to find Components a config does not declare
 - Newcomers to get an overview of the workspace structure before writing any config
 
 ## 2. Two-stage algorithm

@@ -35,7 +35,7 @@ working directory.
 |---|---|
 | `0` | Success, no gate tripped. |
 | `1` | Runtime failure: an I/O error (a write the disk refused to an output file says which command and which output; one refused on stdout or stderr ends the process there, with Node's own report and no cleanup; a file or directory the scan may not read is named), an unexpected exception, or `explain` found no match. |
-| `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on. |
+| `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on, a config that loads no language plugin. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
 CI gates on `3`. A reader that stops early does not change the code:
@@ -47,15 +47,17 @@ CI gates on `3`. A reader that stops early does not change the code:
 |---|---|
 | `ABURI_CONFIG` | Config file path. The `--config` flag wins over it. |
 | `ABURI_LOG_LEVEL` | The same as `--log-level`, which wins over it. A value other than the four levels is ignored. |
-| `NO_COLOR` | Suppress colour output. |
-| `CI` | Makes `aburi scan` omit the timestamp, so identical commits produce identical bytes. |
+| `CI` | The same as `aburi scan --no-timestamp`. |
+
+The CLI writes no colour, so `NO_COLOR` and `FORCE_COLOR` change nothing.
 
 ## Config discovery
 
 1. `--config <path>`
 2. `ABURI_CONFIG`
 3. `aburi.jsonc` / `aburi.json`, walking up from the working directory
-4. Built-in defaults
+4. Built-in defaults. They load no plugin, so a command that scans exits `2` and asks for a
+   language plugin or `aburi init`.
 
 Paths you give to `--config` resolve against the working directory. Paths
 *inside* the config resolve against the workspace root, which need not be the
@@ -96,7 +98,7 @@ aburi init --with-suggestions --output config/aburi.jsonc
 ```
 aburi scan [--output-dir <dir>] [--format json|md|both] [--no-md|--no-json]
            [--ignore <glob>]... [--respect-gitignore | --no-respect-gitignore]
-           [--strict | --no-strict | --discover]
+           [--strict | --no-strict | --discover] [--lsp | --no-lsp]
            [--compact] [--no-timestamp] [--config <path>]
 ```
 
@@ -118,8 +120,9 @@ file removed.
 | `--respect-gitignore` / `--no-respect-gitignore` | Override the config for this run. |
 | `--strict` / `--no-strict` | Override `strict` for this run. Strict stops at a value a plugin emits without its manifest declaring it; off, the scan keeps it and records it in `aburi-vocab-discovered.json`, which a strict scan that completes removes again. |
 | `--discover` | The same as `--no-strict`. With `--strict`, exits `2`. |
+| `--lsp` / `--no-lsp` | Override `lsp.enabled` for this run. `--lsp` still needs a server under `lsp.servers` to talk to. |
 | `--compact` | JSON without indentation. |
-| `--no-timestamp` | Omit `generatedAt`. Implicit when `CI` is set. |
+| `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implicit when `CI` is set. `aburi.ir.json` carries no timestamp either way. |
 | `--config <path>` | Use a different config file. |
 
 ```bash
@@ -188,7 +191,7 @@ its ref as a label in the report.
 Both scans read the **head**'s config — the one discovery finds from your
 working directory, or the one `--config` names there. The base revision's own
 `aburi.json` is ignored, even when the base ref carries a different one, and a
-head with no config at all scans the base by autodetect too. Otherwise editing
+head with no config at all exits `2` without scanning either. Otherwise editing
 `ignore` would count as a change to every Symbol the setting covers, and
 `aburi diff HEAD~1..HEAD --fail-on added` would fail a pull request that
 touched no source.
@@ -277,7 +280,7 @@ Repeating `--fail-on` adds its clauses after the earlier ones, so
 
 | Clause | Matches |
 |---|---|
-| `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` | Symbols with that status. |
+| `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` `unknown` | Symbols with that status. |
 | `dropped-toggled:to-dropped` `dropped-toggled:to-kept` | One direction of a boilerplate toggle. |
 | `api-changed` `logic-changed` `syntax-changed` `confidence-changed` | Symbols whose change touched that axis. |
 
@@ -299,7 +302,8 @@ turn a regression into a green pipeline.
 ## `aburi explain`
 
 ```
-aburi explain <target> [--ir <path>] [--output <path>] [--no-rescan] [--config <path>]
+aburi explain <target> [--ir <path>] [--output <path>] [--no-rescan] [--debug-resolution]
+              [--config <path>]
 ```
 
 Prints the full detail for one symbol. The target can be:
@@ -315,6 +319,7 @@ Prints the full detail for one symbol. The target can be:
 | `--ir <path>` | Read an existing analysis instead of scanning. |
 | `--output <path>` | Write to a file instead of stdout. Directories in the path are created if they are missing; a path that cannot hold a file — an existing directory, or a file sitting on its parent path — exits 2 and names it. |
 | `--no-rescan` | Fail rather than scanning when no analysis file is found. |
+| `--debug-resolution` | Append a `## Call resolution` table: each call site, what it resolved to, and for an unresolved one the reason and the candidates. The analysis file does not keep the reasons, so it always scans, and with `--ir` or `--no-rescan` it exits `2`. |
 | `--config <path>` | Use a different config file. |
 
 Without `--ir`, Aburi looks for `aburi.ir.json` in the output directory, walking

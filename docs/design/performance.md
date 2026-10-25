@@ -1,6 +1,6 @@
 # Parallel Parsing Architecture
 
-This document specifies how `aburi scan` uses a worker pool to reach the roadmap performance target — parse a >1000-file TypeScript project in under 30 seconds on a 4-core CI runner — while producing byte-identical IR to a single-threaded reference run. It refines, but does not replace, the concurrency defaults already stated in [cli-spec.md](./cli-spec.md) §14 and the WASM lifecycle rules in [lang-plugin.md](./lang-plugin.md) §8.1. No IR schema change, no new CLI flag, no new config field.
+**Status: planned.** `aburi scan` parses one file at a time today and has no `--concurrency` flag; the [roadmap](../roadmap.md) explains why the pool waits. This document specifies how `aburi scan` would use a worker pool to reach the roadmap performance target — parse a >1000-file TypeScript project in under 30 seconds on a 4-core CI runner — while producing byte-identical IR to a single-threaded reference run. It refines, but does not replace, the concurrency defaults already stated in [cli-spec.md](./cli-spec.md) §14 and the WASM lifecycle rules in [lang-plugin.md](./lang-plugin.md) §8.1. No IR schema change, no new CLI flag, no new config field.
 
 ## References:
 

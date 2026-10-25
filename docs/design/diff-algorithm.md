@@ -1039,7 +1039,7 @@ If base/head share the same Component id but with different roots:
 If base has the effects-prisma plugin enabled and head does not:
 - What was db.write in base remains as calls in head
 - The Symbol's logic fingerprint changes, so it appears as "changed"
-- There is no mechanism to tell directly from the Diff that the cause is a plugin configuration difference (a planned proposal records `generator.plugins[]` in the IR — see the [roadmap](../roadmap.md))
+- There is no mechanism to tell directly from the Diff that the cause is a plugin configuration difference. Both IRs record `generator.plugins[]`, but the diff does not compare the two lists yet (planned — see the [roadmap](../roadmap.md)). In ref mode the case does not arise: both scans load the head's plugins ([`cli-spec.md`](./cli-spec.md) §6.4 step 3)
 
 ### 9.5 Massive moved counts
 
@@ -1153,4 +1153,4 @@ Component / Dependency changes are architecture-level changes. Mixing them with 
 ### 11.8 Why plugin-configuration-difference detection is not yet supported
 
 If base and head have different plugin sets, the same source yields different IRs. This is a difference in "observation", not "meaning".
-The diff currently works under the premise of "trusting the IR"; plugin differences will be handled by a separate mechanism (recording `generator.plugins[]` in the IR). Introducing this today would require a schema change, so it is deferred — see the [roadmap](../roadmap.md).
+The diff currently works under the premise of "trusting the IR"; plugin differences will be handled by a separate mechanism, comparing the `generator.plugins[]` each IR already records. Reporting the result would need a field the diff schema does not have, so it is deferred — see the [roadmap](../roadmap.md).

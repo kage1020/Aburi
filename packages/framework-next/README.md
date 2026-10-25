@@ -61,8 +61,10 @@ Not classified today (documented for completeness): `default`, `global-error`,
 `middleware`, `instrumentation`, and the metadata files (`sitemap`, `icon`,
 `opengraph-image`, …). Adding them is a table extension inside `app-router.ts`.
 
-Client / server component discrimination folds into `derivedBy` (`framework:next:client-component`
-when a `"use client"` directive is present).
+Client / server discrimination folds into `derivedBy`: a `"use client"` or `"use server"` directive
+at the top of an App Router file adds `framework:next:client-component` or
+`framework:next:server-action` to the Symbols classified above. A server action in a file no
+App Router convention names (`app/orders/actions.ts`) is not classified.
 
 ## Install
 

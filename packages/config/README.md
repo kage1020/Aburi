@@ -6,8 +6,8 @@ synthetic plugin manifests for hint-declared vocab that does not need a
 physical plugin package.
 
 The loader is workspace-aware: `loadConfig({ cwd })` walks up from `cwd`
-looking for `aburi.jsonc` first, then `aburi.json`, and falls back to the
-autodetect variant when neither is found.
+looking for `aburi.jsonc` first, then `aburi.json`, and returns the `found: false`
+variant when neither is found.
 
 ## Install
 
@@ -27,16 +27,17 @@ if (loaded.found) {
   loaded.syntheticPlugins // one framework plugin per frameworkHints entry
 } else {
   // No aburi.json / aburi.jsonc on disk. `loaded.config` is `{}` and
-  // `loaded.syntheticPlugins` is `[]`; the caller runs autodetect.
+  // `loaded.syntheticPlugins` is `[]`; the caller decides what that means
+  // (`aburi scan` exits 2: an empty config loads no language plugin).
 }
 ```
 
 `LoadedConfig` is a discriminated union keyed by `found` so callers narrow with
 `if (loaded.found) { … }` before touching `loaded.source` / `loaded.config`.
 Skipping the narrow is a type error, which was the point — a "did you forget
-the autodetect branch?" bug is easier to catch at compile time than in prod.
+the no-config branch?" bug is easier to catch at compile time than in prod.
 
-Direct file read (skip discovery, no autodetect fallback):
+Direct file read (skip discovery, no `found: false` fallback):
 
 ```ts
 const config = await readConfigFile("./aburi.json")

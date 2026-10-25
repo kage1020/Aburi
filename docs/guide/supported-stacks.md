@@ -24,7 +24,7 @@ Install as many as apply. They do not conflict.
 | Package | Recognises |
 |---|---|
 | `@aburi/framework-nestjs` | `@Module`, `@Controller`, `@Injectable`, HTTP and WebSocket method decorators, guards, interceptors, pipes, filters |
-| `@aburi/framework-next` | App Router files (`page`, `layout`, `route`, `template`, `loading`, `error`, `not-found`) and the `"use client"` / `"use server"` directives |
+| `@aburi/framework-next` | App Router files (`page`, `layout`, `route`, `template`, `loading`, `error`, `not-found`), noting a `"use client"` / `"use server"` directive at the top of one |
 | `@aburi/framework-express` | Router instances, route handlers, middleware, error handlers, mount points |
 | `@aburi/framework-react` | Function components, custom hooks, contexts and providers, `forwardRef`, `memo`, higher-order components |
 
@@ -46,9 +46,9 @@ to it.
 | `@aburi/effects-trpc` | tRPC client calls and the React Query hook surface | `network.rpc` |
 | `@aburi/effects-nest` | `EventEmitter2` / `eventBus` `.emit(...)` | `event.publish` |
 
-Aburi detects an effect at the call site. A method that calls a repository
-method that writes to the database does not yet inherit `db.write`. Propagation
-along the call graph is on the [roadmap](../roadmap.md).
+Aburi detects an effect at the call site, then carries it up the calls it
+resolved: a method that calls a repository method that writes to the database
+gets `db.write` too, marked `[propagated from …]` with the symbol it came from.
 
 ## Example setups
 

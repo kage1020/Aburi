@@ -82,9 +82,18 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .description("Generate aburi.json from autodetect")
     .option("--output <path>", "output path (default: ./aburi.json)", parsePath)
     .option("--force", "overwrite existing config")
-    .option("--with-suggestions", "include plugin install suggestions as comments")
-    .option("--respect-gitignore", "honour .gitignore while counting a component's languages")
-    .option("--no-respect-gitignore", "ignore .gitignore while counting a component's languages")
+    .option(
+      "--with-suggestions",
+      "name the detected plugins the workspace has not installed, as comments",
+    )
+    .option(
+      "--respect-gitignore",
+      "honour .gitignore in the language census and the nx project search",
+    )
+    .option(
+      "--no-respect-gitignore",
+      "ignore .gitignore in the language census and the nx project search",
+    )
     .action(
       (cmdOptions: {
         output?: string
@@ -103,6 +112,9 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             }),
           })
           stdout.write(`✓ Wrote ${report.outputPath}\n`)
+          if (report.overwrote) {
+            stderr.write(`⚠ Overwrote ${report.outputPath}; the config that was there is gone.\n`)
+          }
           stdout.write(
             `  managers: ${report.detectedManagers.join(", ") || "—"}\n` +
               `  languages: ${report.detectedLanguages.join(", ") || "—"}\n` +
@@ -144,7 +156,10 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--respect-gitignore", "honour .gitignore patterns (overrides config)")
     .option("--no-respect-gitignore", "ignore .gitignore patterns (overrides config)")
     .option("--compact", "compact JSON output")
-    .option("--no-timestamp", "omit generatedAt from IR (default when running under CI env)")
+    .option(
+      "--no-timestamp",
+      "omit discoveredAt from aburi-vocab-discovered.json (default under CI)",
+    )
     .option("--config <path>", "config file path", parsePath)
     .option("--lsp", "enable optional LSP enrichment (overrides config lsp.enabled=true)")
     .option("--no-lsp", "disable LSP enrichment (overrides config lsp.enabled=false)")

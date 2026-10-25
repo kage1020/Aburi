@@ -117,7 +117,7 @@ Three things land in `out/`:
 | File | What it is |
 |---|---|
 | `aburi.ir.json` | The analysis itself, as JSON. Everything else derives from it. |
-| `workspace.md` | One page covering the whole repository: components, dependencies, effect surface. |
+| `workspace.md` | One page covering the whole repository: components, their languages and frameworks, the effect surface. |
 | `components/*.md` | Per-component detail. Every kept symbol with its boundaries, rules, and effects. |
 
 Open `workspace.md` first. On a codebase you have never seen, it is the fastest
@@ -167,6 +167,7 @@ The symbol's Markdown goes to stdout, so you can pipe it into a pager or a file:
 ```md
 # `submitOrder` *(function)*
 
+**Component**: storefront
 **File**: `apps/storefront/src/app/orders/actions.ts:5-12`
 **Visibility**: public
 **Language**: ts
@@ -197,8 +198,8 @@ The symbol's Markdown goes to stdout, so you can pipe it into a pager or a file:
 - syntax: `d64c00d2efc8`
 ```
 
-Sections for the component, decorators, effects, and callers appear whenever the
-analysis has them. Pass a symbol name, a file path, or a full symbol id — Aburi
+Sections for decorators, effects, and callers appear whenever the analysis has
+them, and the component line whenever a component's roots hold the file. Pass a symbol name, a file path, or a full symbol id — Aburi
 works out which one you meant. `--output <path>` writes the Markdown to a file
 instead.
 

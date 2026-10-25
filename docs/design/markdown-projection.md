@@ -202,13 +202,16 @@ The monorepo overview.
 
 ### 4.1 Structure
 
+The example draws Component edges, which the IR can carry and `aburi scan` does not write yet
+(§4.2): against a scanned workspace the graph holds the nodes alone.
+
 ````md
-# Workspace: <project name>
+# Workspace
 
 **Languages**: ts, py
 **Managers**: pnpm (`apps/*`, `packages/*`), uv (`services/*`)
 **Symbols**: 542 kept · 87 dropped (across 1234 files)
-**Generated**: `@aburi/core` `1.0.0` at `2026-06-21T15:30:00Z`
+**Generated**: `aburi` `1.0.0`
 
 ## Components
 
@@ -302,7 +305,7 @@ diagram, and the section is that sentence alone.
 
 ### 4.3 generation metadata
 
-Displayed only when `generatedAt` is present in the IR. Omitted under `--no-timestamp`.
+The `**Generated**` line names the generator. Its ` at <time>` tail is displayed only when `generatedAt` is present in the IR, which no writer emits today ([`ir-schema.md`](./ir-schema.md) §2), and omitted under `--no-timestamp`.
 
 ## 5. L1 + L2 — `components/<id>.md`
 

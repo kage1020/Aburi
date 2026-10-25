@@ -10,17 +10,19 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 ## Subcommands
 
 - **`aburi init`** — autodetect the workspace, write `aburi.json` with the
-  detected languages / frameworks / components. `--force` overwrites,
-  `--with-suggestions` appends `pnpm add -D @aburi/framework-<x>` JSONC
-  comments for detected first-party plugins,
-  `--respect-gitignore` / `--no-respect-gitignore` decides whether the
-  language census reads `.gitignore` (honoured by default).
+  detected languages / frameworks / components. `--force` overwrites, and says so on
+  stderr; `--with-suggestions` adds a `// Suggested install: pnpm add -D @aburi/<plugin>`
+  JSONC comment for each detected first-party plugin the workspace has not installed;
+  `--respect-gitignore` / `--no-respect-gitignore` decides whether the language census
+  and the nx project search read `.gitignore` (honoured by default).
 - **`aburi scan`** — load config, resolve plugins, run `@aburi/core` scan,
   emit IR JSON + workspace / component Markdown. `--format json|md|both`,
   `--ignore <glob>` (repeatable),
   `--respect-gitignore` / `--no-respect-gitignore`, `--compact`,
   `--no-timestamp`, `--strict` / `--no-strict` / `--discover` (undeclared plugin
-  vocabulary: exit 3, or keep it and write `aburi-vocab-discovered.json`).
+  vocabulary: exit 3, or keep it and write `aburi-vocab-discovered.json`),
+  `--lsp` / `--no-lsp` (override `lsp.enabled`). A config that loads no language
+  plugin exits 2.
 - **`aburi diff`** — two dispatch paths:
   - `<base>..<head>` — `git rev-parse --verify` on both refs, shallow-repo
     guard, `git worktree add --detach` to materialise base, scan both sides,
@@ -32,7 +34,7 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 - **`aburi explain`** — three-arm dispatch: full Symbol id (`ts:src/foo.ts#Foo.bar`),
   file path (all Symbols in the file, workspace-root-relative), or case-sensitive
   substring on `Symbol.name`. Ambiguous substring hits exit 2 with the candidate
-  list.
+  list. `--debug-resolution` rescans and appends the per-call resolution table.
 
 ## `--max-bytes`
 

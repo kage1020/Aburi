@@ -1,4 +1,4 @@
-import { resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import {
   CoreError,
   detectComponents,
@@ -80,7 +80,9 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     for (const framework of component.frameworks ?? []) frameworkSet.add(framework)
   }
 
-  const suggestions = options.withSuggestions ? suggestPluginsFor(languageSet, frameworkSet) : []
+  const suggestions = options.withSuggestions
+    ? await uninstalledPackages(workspaceRoot, suggestPluginsFor(languageSet, frameworkSet))
+    : []
   const contents = renderConfig({
     languages: pluginRefsFor(languageSet, LANGUAGE_TO_PLUGIN),
     frameworks: pluginRefsFor(frameworkSet, FRAMEWORK_TO_PLUGIN),
@@ -134,6 +136,25 @@ function suggestPluginsFor(
     ...pluginRefsFor(languages, LANGUAGE_TO_PLUGIN),
     ...pluginRefsFor(frameworks, FRAMEWORK_TO_PLUGIN),
   ].map((name) => `@aburi/${name}`)
+}
+
+async function uninstalledPackages(
+  workspaceRoot: string,
+  packages: readonly string[],
+): Promise<string[]> {
+  const missing: string[] = []
+  for (const name of packages) {
+    if (!(await installedFrom(workspaceRoot, name))) missing.push(name)
+  }
+  return missing
+}
+
+/** The `node_modules` walk an ESM import makes, which never reads `NODE_PATH`, so a hoisted install counts and a global one does not. */
+async function installedFrom(directory: string, name: string): Promise<boolean> {
+  for (let dir = directory; ; dir = dirname(dir)) {
+    if ((await pathKind(join(dir, "node_modules", name))) === "directory") return true
+    if (dirname(dir) === dir) return false
+  }
 }
 
 function unmappedIds(detected: ReadonlySet<string>, table: ReadonlyMap<string, string>): string[] {

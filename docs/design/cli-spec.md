@@ -6,7 +6,7 @@ References:
 - [`config.md`](./config.md) — config file resolution and CLI-flag overrides
 - [`diff-algorithm.md`](./diff-algorithm.md) — how inputs are supplied to `aburi diff`
 - [`markdown-projection.md`](./markdown-projection.md) — output Markdown conventions
-- [`extension-vocab.md`](./extension-vocab.md) — what `aburi vocab` queries
+- [`extension-vocab.md`](./extension-vocab.md) — what `aburi vocab` (planned, §8) would query
 
 ---
 
@@ -16,7 +16,7 @@ The single entry point to Aburi. Every capability is exposed through a subcomman
 
 Design principles:
 - **Easy to automate in CI**: stable exit codes, JSON output available, non-interactive by default
-- **Friendly to humans**: proper help, colored output, progress indication
+- **Friendly to humans**: proper help; colored output and progress indication are planned (§10–§12)
 - **Follow Unix conventions**: stdout/stderr separation, long/short options, env vars
 
 ## 2. Command Overview
@@ -26,7 +26,7 @@ aburi init                                  # generate config file
 aburi scan                                  # generate IR
 aburi diff <base>..<head>                   # compute diff
 aburi explain <id-or-pattern>               # show a single symbol/file
-aburi vocab list|effects|extkinds|plugins|who-owns   # query extension vocabulary
+aburi vocab list|effects|extkinds|plugins|who-owns   # (planned, §8) query extension vocabulary
 aburi --version / aburi -v                  # version
 aburi --help / aburi -h                     # global help
 ```
@@ -125,27 +125,29 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 ### 4.6 stdout Example
 
 ```
-✓ Detected 3 components (pnpm workspaces)
-✓ Detected 2 languages: ts, tsx
-✓ Detected 1 framework: nestjs (in apps/billing)
-✓ Wrote ./aburi.json
-
-Next steps:
-  1. Install lang plugin: pnpm add -D @aburi/lang-typescript
-  2. Install framework plugin (optional): pnpm add -D @aburi/framework-nestjs
-  3. Install effect plugins (optional): pnpm add -D @aburi/effects-prisma
-  4. Enable them in aburi.json (uncomment the suggested entries)
-  5. Run: aburi scan
+✓ Wrote /repo/aburi.json
+  managers: pnpm
+  languages: ts
+  frameworks: nestjs
+  components: 3
+  suggested: @aburi/framework-nestjs
 ```
 
-With `--with-suggestions`, install/enable lines for official plugins matching the detected frameworks are included in `aburi.json` **as commented-out entries**. Uncommenting them enables the plugins immediately:
+The `suggested:` line appears under `--with-suggestions` when it names anything. Warnings go to
+stderr: a `--force` that replaced a file (`⚠ Overwrote /repo/aburi.json; the config that was there
+is gone.`), and a detected language or framework no first-party plugin covers.
+
+`languages` and `frameworks` always name the first-party plugins for what was detected, installed or
+not, because a scan loads nothing it is not told to. `--with-suggestions` adds one JSONC comment per
+plugin among them that the workspace has not installed — no `node_modules/@aburi/<name>` directory
+in the workspace root or any directory above it, the walk an ESM import from there makes:
 
 ```jsonc
 {
+  // Suggested install: pnpm add -D @aburi/framework-nestjs
   "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
-  // Detected: nestjs. Install with: pnpm add -D @aburi/framework-nestjs
-  // "frameworks": ["framework-nestjs"],
+  "frameworks": ["framework-nestjs"],
   "components": [/* ... */]
 }
 ```
@@ -159,10 +161,10 @@ Scans the workspace and generates the IR.
 ```
 aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
            [--strict|--no-strict] [--discover]
-           [--quiet] [--compact]
-           [--concurrency <n>]
+           [--compact] [--no-timestamp]
+           [--lsp|--no-lsp]
            [--respect-gitignore|--no-respect-gitignore]
-           [--ignore <glob>]
+           [--ignore <glob>] [--config <path>]
 ```
 
 ### 5.2 Options
@@ -175,24 +177,27 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | `--no-json` | Drops the IR JSON output. Alone, equivalent to `--format md`. With `--no-md`, or with any `--format` that would have written JSON (`json`, `both`), exit 2 |
 | `--strict` / `--no-strict` | Override `config.strict` ([`config.md`](./config.md) §10). Strict stops at the first undeclared value with exit 3; off, the scan keeps every such value and writes `aburi-vocab-discovered.json` into the output directory ([`extension-vocab.md`](./extension-vocab.md) §11.5.1), an empty list included. A strict scan that completes removes a record an earlier run left, so no completed `scan` leaves one naming values that are declared now. `aburi diff` has neither flag: its scans take strictness from `config.strict` alone (CL8b) |
 | `--discover` | The same as `--no-strict`, named for the workflow it serves. With `--strict`, exit 2 |
-| `--quiet` | Suppress progress output; stdout carries the final summary only |
+| `--quiet` | (planned) Limit stdout to the census lines |
 | `--compact` | Compact the JSON to a single line |
-| `--concurrency <n>` | Parser concurrency (default: CPU - 1) |
+| `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implied by `CI` (§11). The IR carries no timestamp to omit ([`ir-schema.md`](./ir-schema.md) §1.1) |
+| `--lsp` / `--no-lsp` | Override `config.lsp.enabled` ([`lsp-enrichment.md`](./lsp-enrichment.md)). `--lsp` with no `lsp.servers` entry for a loaded language starts no server, and says so on stderr |
+| `--concurrency <n>` | (planned, §14) Parser concurrency |
 | `--respect-gitignore` / `--no-respect-gitignore` | Override `config.respectGitignore`. A pair rather than the negative alone, so that a run which typed neither is distinguishable from one that asked for the default — an override the caller did not spell must leave the config alone |
 | `--ignore <glob>` | Append to `config.ignore[]` (repeatable) |
+| `--config <path>` | The config file to read (§13) |
 
 ### 5.3 Behavior
 
 1. Resolve the config
 2. Load plugins and build the registry
-3. Walk the workspace, parsing each file in parallel
-4. Extraction pipeline: drop list → tag propagation → effect classification → fingerprint → Symbol finalization
+3. Walk the workspace, parsing one file at a time (the worker pool of §14 is planned)
+4. Extraction pipeline: per file, extraction → framework classification → Symbol drop (category B) → body walk → effect classification and call drop (category C) → fingerprint; then, over the whole workspace, LSP enrichment when `lsp.enabled` → call resolution → effect propagation → the `logic` fingerprint again, now reading propagated effects → the IR's integrity check
 5. Write `<output-dir>/aburi.ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md` — the IR first, because every page is derived from it: a page that fails to render leaves the IR on disk rather than taking it down too, and an IR the serializer refuses leaves no pages beside it. A page that fails to render is a bug in Aburi (exit `1`, §9) and names the page; the scan's incidents are reported before the command ends, as they are after a clean run
    - **What this run does not write is removed**, once everything it writes is written, so the directory describes this run alone and not a mix of runs: the `aburi.ir.json` a `--format md` run leaves out, which `aburi explain --no-rescan` would otherwise answer from (§7.3); the `workspace.md` and every component page a `--format json` run leaves out; and, under any format, the page of a Component this IR does not hold — one renamed or removed since. A path that cannot be removed is refused like one that cannot be written, and so is a `components/` that cannot be listed or a page whose first line cannot be read. The message names the step that failed — `could not remove <artefact> at <path>`, `could not list the components directory at <path>`, `could not read the Markdown for component "<id>" at <path>` — and is exit `2` for a directory standing where a removed file would be, exit `1` for any other refusal. Each file `aburi scan` removes, the discovered-vocabulary record (§5.2) included, is logged as one `info:` line, `Removed <artefact> at <path>`, so the default level, `warn`, shows none of them (§5.6)
    - **Only Aburi's own files are removed.** The output directory, and `components/` in particular, may hold files of the caller's — a README, notes, Markdown a person wrote, a subdirectory — and those stay, as `components/` itself does. `aburi.ir.json` and `workspace.md` are recognised by name alone, as `aburi diff` recognises its report (§6.4), so a file of the caller's under either name is removed with them. A component page is recognised by name and content both, since its name is any Component id: a regular file directly in `components/`, named `<id>.md` for a valid Component id ([`ir-schema.md`](./ir-schema.md) §4), that opens with the heading the page opens with, `# Component: <id>` ([`markdown-projection.md`](./markdown-projection.md) §5.1), and a line ending, LF or CRLF alike. A file whose name is no Component id, or whose first line is anything else — another heading, or that heading with more on its line — is not one. Reading that line is part of removing the page: the scan reads only as many bytes as the heading and a CRLF take, reading again until it has them or the file ends, and a failure to read is refused the same way
    - **A run that stops before this step removes nothing, and a run writes before it removes.** A plugin that fails to load, a strict scan's undeclared value (exit `3`) or a file the scan could not read (exit `1`) leaves the earlier run's files as they were: together they still describe the last scan that completed, as the discovered-vocabulary record is removed only by a strict scan that completes (§5.2). So does a write that fails or a page that fails to render, since every removal follows the last write: a `--format md` run that cannot write `workspace.md` leaves the earlier `aburi.ir.json` where it was. The removals go one file at a time, so a run that fails at one of them has already removed those before it; nothing the run should have produced is lost, and the next run that completes removes the rest. `aburi diff` removes its earlier report before it starts instead (§6.4): its exit `3` is both the gate's and a plugin failure's, and a caller that reads the report after either would take an earlier one for its own
    - These removals are `aburi scan`'s, whatever the format: a scan run for another command (`runScan` called with that `command`) removes nothing. The scan `aburi explain` runs (§7.4) writes the IR alone, and the scans `aburi diff` runs write into directories of their own
-6. Print a one-line final summary to stdout
+6. Print the census lines and the path of each artefact written to stdout (§5.5)
 
 ### 5.4 Exit Codes
 
@@ -223,23 +228,17 @@ refusal.
 ### 5.5 stdout Example
 
 ```
-✓ Loaded 3 plugins (1 lang, 1 framework, 1 effects)
-✓ Parsed 1234 files in 12.4s
-✓ Extracted 542 kept · 87 dropped symbols
-✓ Wrote out/aburi.ir.json + out/workspace.md + 3 component files
-```
-
-The kept/dropped line is followed by the call-resolution census in the same
-format `aburi diff` uses (§6.6):
-```
 542 kept · 87 dropped · 1234 files
 calls 1310 · resolved 1203 · unresolved 107 (external 30 · dynamic 60 · ambiguous 3 · no-match 14)
+→ /repo/out/aburi.ir.json
+→ /repo/out/workspace.md
 ```
 
-With `--quiet`, only the final line:
-```
-542 kept · 87 dropped · 3 components
-```
+The kept/dropped line is followed by the call-resolution census in the same format `aburi diff`
+uses (§6.6), then one `→` line per artefact written: the IR, and `workspace.md` when the format
+writes Markdown. The component pages beside it are not listed one by one.
+
+A planned `--quiet` would print the census lines alone.
 
 ### 5.6 stderr (Warnings)
 
@@ -617,10 +616,12 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | `--head <path>` | Head IR file path (instead of a ref) |
 | `--output-dir <path>` | Destination for diff.json / diff.md / diff.full.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
-| `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
+| `--filter <kinds>` | (planned) Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
 | `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates). Repeatable: each occurrence adds its clauses after the earlier ones' (§6.7) |
 | `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, keeping sections most important first at their smallest (names only for a section of whole Symbols) and then growing the name lists back to full entries from the top ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped, and when the cap changed the report the uncapped one is written as `diff.full.md` beside it. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
-| `--quiet` | Limit stdout to a single final summary line |
+| `--compact` | Compact `diff.json` to a single line |
+| `--config <path>` | The config file both scans read (§13, §6.4 step 3) |
+| `--quiet` | (planned) Limit stdout to the glyph line |
 
 ### 6.3 Arguments
 
@@ -655,7 +656,7 @@ With refs (every git command these steps run gets the caller's environment as §
    - Both scans root at the repository: the workspace-root walk stops at the first `.git` ([`component-detect.md`](./component-detect.md) §2.1, CD32), the head checkout's own `.git` (a directory or a file) on one side and the temporary worktree's `.git` file on the other. Rooted anywhere else, the two sides scan different trees (`component-detect.md` §11.1 has the layouts that did), so a base scan that roots anywhere but its worktree ends the run as a bug in Aburi (exit `1`, §9)
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
 6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.json`, `diff.md` or `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since each would describe another diff: a `--format md` run leaves no `diff.json` of an earlier run's, and a `--format json` run no `diff.md`, so none naming a `diff.full.md` that is gone. So a run that stops before this step (a plugin that fails to load, a strict scan's undeclared value) leaves no report at all rather than an earlier one a caller would take for its own. A path there that cannot be removed is refused like one that cannot be written
-7. Print a one-line summary to stdout
+7. Print the glyph line, the head's call-resolution census and the path of `diff.md` to stdout (§6.6)
 8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: from just after the temporary directory is created until this cleanup has finished, a listener for each removes the worktree and the temporary directory synchronously, then raises the same signal again, so on POSIX the exit status stays 128+N. On Windows a signal cannot be raised against the process again; the run exits with that same 128+N instead. A failed removal on this path is reported on stderr. The listener narrows the window rather than closing it: a signal sent to this process alone (not to its process group, as a terminal's Ctrl-C is) does not reach a `git worktree add` still running, and that child can finish registering the worktree after the cleanup has run, leaving it behind. `SIGKILL` cannot be caught, and leaves both behind, as does a write to stdout or stderr that fails for any reason but a reader that left (§9); `SIGQUIT` and `SIGBREAK` are not handled either
 
 With file inputs: skip steps 1-3 and start at step 5.
@@ -750,10 +751,12 @@ read the warnings to tell the two apart.
 
 Normal:
 ```
-+5 -3 ~12 ↔2 ⤴1   (added · removed · changed · moved · moved+changed)
++5 -3 ~12 ↔2 ⤴1
 calls 1310 · resolved 1203 · unresolved 107 (external 30 · dynamic 60 · ambiguous 3 · no-match 14)
-→ out/diff.md
+→ /repo/out/diff.md
 ```
+
+The glyphs are added, removed, changed, moved and moved+changed, in that order.
 
 The second line is the head IR's `stats.callResolution` ([`call-resolution.md`](./call-resolution.md) §8.1). It answers "is the Slice View below missing edges?" without a second command. Buckets with a count of zero are omitted; when nothing is unresolved the line reads `calls N · resolved N · unresolved 0`.
 
@@ -792,7 +795,7 @@ someone else's incident, on documents the caller pinned deliberately. `DiffRepor
 is `null` in this mode rather than empty, because "ran no scan" is not the same answer as "ran
 two clean scans".
 
-`--quiet`:
+A planned `--quiet` would print the glyph line alone:
 ```
 +5 -3 ~12 ↔2 ⤴1
 ```
@@ -858,6 +861,7 @@ Shows details of a single Symbol / file / pattern match.
 
 ```
 aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--debug-resolution]
+              [--config <path>]
 ```
 
 ### 7.2 Arguments
@@ -897,6 +901,7 @@ than a name, and is looked up as any other path.
 | `--output <path>` | Write to a file (default: stdout). The directories the path names are created, as `--output-dir` creates its own; a path that cannot hold a file — it names a directory, or a file stands on its parent path — is exit 2 |
 | `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `<output-dir>/aburi.ir.json` — `config.output.dir` when the config names one, otherwise `out` — starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
 | `--no-rescan` | Exit `2` when the lookup above finds no IR, instead of scanning. Staleness is not examined: an IR that is found is read whatever its age. An `aburi scan --format md` removes the IR an earlier run left in its output directory (§5.3), so a scan that wrote only pages leaves none to be read in its place |
+| `--config <path>` | The config file the rescan reads, and where `config.output.dir` comes from for the lookup above (§13) |
 | `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
 
 ### 7.4 Behavior
@@ -918,9 +923,9 @@ incidents is a different matter, and step 2 reads it — see §7.6.
 
 ```
 Multiple matches for "createInvoice":
-  1. ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice
-  2. ts:apps/billing/src/legacy/OldService.ts#OldService.createInvoice
-  3. ts:packages/test/src/factories.ts#createInvoice
+  ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice
+  ts:apps/billing/src/legacy/OldService.ts#OldService.createInvoice
+  ts:packages/test/src/factories.ts#createInvoice
 
 Specify the full id to disambiguate.
 ```
@@ -996,7 +1001,8 @@ exist". Reading an existing IR reaches this code by the second route only; no sc
 
 ## 8. `aburi vocab`
 
-Queries the registered extension vocabulary.
+**Planned; not implemented.** `aburi vocab` exits 2 as an unknown command today. This section
+reserves the interface: it would query the registered extension vocabulary.
 
 ### 8.1 Subcommands
 
@@ -1089,15 +1095,15 @@ and left at the code the answer itself earned.
 | Stream | Use |
 |---|---|
 | stdout | Results (summary lines, JSON, Markdown body). Pipeable; the target of CI parsing |
-| stderr | Progress, warnings, error messages, colored UI |
+| stderr | Warnings, error messages, the per-file log; progress and colored UI once they exist (planned) |
 
-Example: `aburi diff main..HEAD --quiet > result.txt 2> log.txt`
+Example: `aburi diff main..HEAD > result.txt 2> log.txt`
 
 Either stream may lose its reader part way through (`| head -1`). That costs the reader the rest of
 that stream and nothing else: the other stream, the artefacts and the exit code are what they
 would have been (§9).
 
-The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON.
+The `--json` flag of the planned `aburi vocab` would dedicate stdout to machine-readable JSON.
 
 ## 11. Environment Variables
 
@@ -1105,9 +1111,9 @@ The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON
 |---|---|
 | `ABURI_CONFIG` | Config file path (equivalent to --config) |
 | `ABURI_LOG_LEVEL` | Equivalent to --log-level, which wins over it (§3), except that a value other than the four levels is ignored rather than refused |
-| `NO_COLOR` | If set, disable coloring (standard convention) |
-| `FORCE_COLOR` | If set, force coloring on (standard convention) |
-| `CI` | If set, CI mode (§12) |
+| `NO_COLOR` | (planned) If set, disable coloring (standard convention). Read today, with no effect: the CLI writes no colour |
+| `FORCE_COLOR` | (planned) If set, force coloring on (standard convention). Read today, with no effect |
+| `CI` | If set, `aburi scan` behaves as under `--no-timestamp`. The rest of CI mode (§12) is planned |
 
 Precedence: CLI flags > environment variables > config file.
 
@@ -1115,7 +1121,8 @@ git's own variables reach the git commands `aburi diff` runs, except `GIT_INDEX_
 
 ## 12. CI Mode
 
-Automatic switches when the `CI=true` env is detected:
+**Planned**, apart from the timestamp: today `CI` only implies `aburi scan --no-timestamp` (§5.2),
+and there is no `--ci` flag. The switches below would apply when the `CI=true` env is detected:
 
 - Suppress progress animations (final summary only)
 - Disable coloring (on if `FORCE_COLOR` is set)
@@ -1132,20 +1139,25 @@ Can also be enabled via an explicit `--ci` flag (for CI environments where the e
 4. <cwd>/aburi.json
 5. Repeat 3-4 recursively in parent directories, up to the **filesystem** root — not the
    workspace root, so a config shared across several repositories is still honoured
-6. autodetect (works with no config present)
+6. built-in defaults: an empty config, which loads no plugin, so a command that scans exits 2
+   (CL6) and names the fix, a language plugin in `languages` or `aburi init`
 ```
 
 Passing `--cwd` (planned, §3) will change the cwd and therefore the search origin.
 
 `aburi diff` in ref mode runs this list **once**, against the invoking cwd, before it
 materialises the base worktree — and hands the single answer (an absolute path, or "nothing
-found, autodetect") to both scans. Re-running it from inside the worktree would resolve steps
+found") to both scans. Re-running it from inside the worktree would resolve steps
 1-5 against the base revision instead of the head — a relative `ABURI_CONFIG` relocates
 exactly like a relative `--config`, since both arrive as the same value — and would turn a
 head-side step 6 into a step 3-5 hit whenever the base ref still carries a config the head
 deleted. Either is what §6.4 step 3 forbids.
 
 ## 14. Concurrency
+
+**Planned; not implemented.** `aburi scan` parses one file at a time and has no `--concurrency`
+flag, which exits 2 as an unknown option. The [roadmap](../roadmap.md) explains why the worker pool
+waits. This section reserves the interface:
 
 - Parser concurrency for `aburi scan`: default = `max(1, CPU_count - 1)`
 - Override with `--concurrency <n>`
@@ -1164,6 +1176,11 @@ A future release will switch to Node worker_threads instead of a worker pool (se
 | `aburi watch` | Watch file changes and regenerate the IR |
 | `aburi doctor` | Consistency check of config / plugins |
 | `aburi serve` | LSP-like local server (IDE integration) |
+| `aburi vocab` | Query the extension vocabulary (§8) |
+| `--quiet` on `scan` and `diff` | Census or glyph line alone (§5.2, §6.2) |
+| `aburi diff --filter` | Restrict the report to some statuses (§6.2) |
+| `--concurrency`, worker pool | §14 |
+| Colour, progress, CI mode | §10–§12 |
 | `aburi vocab list --json` extension | merged with discoverer output |
 
 None of these are implemented yet; see the [roadmap](../roadmap.md). The signatures are reserved to avoid future compatibility breaks.
@@ -1173,30 +1190,28 @@ None of these are implemented yet; see the [roadmap](../roadmap.md). The signatu
 `aburi --help`:
 
 ```
-aburi - Render meaningful code structure as IR for review
+Usage: aburi [options] [command]
 
-Usage:
-  aburi <command> [options]
+Render meaningful code structure as IR for review
+
+Options:
+  -v, --version                      output the version number
+  --log-level <level>                per-file log on stderr: debug | info | warn
+                                     | error (default: ABURI_LOG_LEVEL, or
+                                     warn); info adds the files scan removes,
+                                     and error shows none of it
+  -h, --help                         display help for command
 
 Commands:
-  init       Generate aburi.json from autodetect
-  scan       Generate IR from current workspace
-  diff       Compute diff between two IRs
-  explain    Show single symbol details
-  vocab      Show registered extension vocabulary
-
-Common options:
-  --cwd <path>           Set working directory (planned)
-  --config <path>        Override config file location
-  --log-level <level>    debug | info | warn | error
-  --no-color             Disable colored output (planned)
-  -h, --help             Show help for command
-  -v, --version          Show version
-
-Run "aburi <command> --help" for command-specific options.
+  init [options]                     Generate aburi.json from autodetect
+  scan [options]                     Generate IR from the current workspace
+  diff [options] [refspec]           Compute the semantic diff between two IRs
+  explain [options] <id-or-pattern>  Show a single Symbol's details
+  help [command]                     display help for command
 ```
 
-Each command's `--help` follows the same three-section structure: "Usage / Options / Examples".
+Each command's `--help` lists its usage, its options, and the global options (CL38). `--config` is
+a command's option, not a global one (§3).
 
 ## 17. Verifiable Properties
 
@@ -1207,7 +1222,7 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL3 | `aburi nope` | Unknown command, exit 2 |
 | CL4 | `aburi init` with existing aburi.json | exit 2, error message on stderr |
 | CL5 | `aburi init --force` | Overwrites existing file, exit 0, warning on stderr |
-| CL6 | `aburi scan` (no config) | Runs via autodetect, exit 0 |
+| CL6 | `aburi scan` (no config, or `{}`) | exit 2, saying no language plugin is configured and naming `aburi init` |
 | CL7 | `aburi scan --discover` | Records undeclared vocab, exit 0 |
 | CL8 | `aburi scan` strict + undeclared vocab | exit 3 |
 | CL8a | `aburi scan --strict --discover` | exit 2 |
@@ -1216,12 +1231,12 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL9 | `aburi diff main..HEAD --fail-on changed` with changes | exit 3 |
 | CL10 | `aburi diff` with missing arguments | exit 2 |
 | CL11 | `aburi explain <ambiguous>` | exit 2, candidate list on stdout |
-| CL12 | `aburi vocab who-owns <unknown>` | exit 1 |
-| CL13 | `aburi vocab list --json` | machine-readable JSON, exit 0 |
-| CL14 | Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
-| CL15 | `NO_COLOR=1 aburi scan` | No coloring |
-| CL16 | `CI=true aburi scan` | Progress animation suppressed |
-| CL18 | `aburi --config ./custom.json scan` | Uses the specified config |
+| CL12 | (planned) `aburi vocab who-owns <unknown>` | exit 1 |
+| CL13 | (planned) `aburi vocab list --json` | machine-readable JSON, exit 0 |
+| CL14 | (planned) Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
+| CL15 | (planned) `NO_COLOR=1 aburi scan` | No coloring |
+| CL16 | (planned) `CI=true aburi scan` | Progress animation suppressed |
+| CL18 | `aburi scan --config ./custom.json` | Uses the specified config. `aburi --config ./custom.json scan` exits 2: `--config` is the command's option (§3) |
 | CL19 | `aburi explain <name>` where a plugin threw during the rescan | exit 3, incident lines on stderr |
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
 | CL20a | `aburi scan` where a plugin emitted two Symbols under one id for one file (`lang-plugin.md` LP28b) | exit 3 and the IR still written, with that file on the `extraction-failed` lines a throw reaches — the wording there names both causes, since nothing threw. `aburi diff` gates the same way, and its fault clause says `extraction withdrew N file(s)` rather than naming an exception |
@@ -1292,7 +1307,7 @@ In the majority of cases without ID collisions there is 1 hit; ambiguity is an e
 
 ### 18.6 Why `aburi vocab` Is a Standalone Subcommand
 
-Vocab is a query target independent of the IR. A standalone `aburi vocab` command has higher discoverability than a flag like `aburi scan --show-vocab` (it also appears on its own in the help output).
+Planned (§8). Vocab is a query target independent of the IR. A standalone `aburi vocab` command has higher discoverability than a flag like `aburi scan --show-vocab` (it also appears on its own in the help output).
 
 ### 18.7 Why Environment Variables Substitute for CLI Flags
 
@@ -1300,4 +1315,4 @@ In CI / Docker / Makefiles, configuring via env is easier than threading flags t
 
 ### 18.8 Why Planned Features Are Reserved
 
-Reserving the names `aburi watch` / `aburi doctor` / `aburi serve` today prevents name collisions and compatibility breaks when they are added later. They are not implemented, but are documented.
+Reserving the names `aburi watch` / `aburi doctor` / `aburi serve` / `aburi vocab` and the flags of §15 today prevents name collisions and compatibility breaks when they are added later. They are not implemented, but are documented.
