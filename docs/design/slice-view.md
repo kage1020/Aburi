@@ -139,7 +139,7 @@ The translation `φ` in §5.1 exists because the two sides name Symbols differen
 
 If a call has `resolved: null` in one of the two IRs (call-resolution declined to identify the callee — see [`call-resolution.md`](./call-resolution.md) §4.5 / §4.6 / §4.7), it produces no `CallEdge` on that side and therefore no candidate edge in this pass. Slice View does NOT read `Symbol.calls[]` directly; it reads only the resolved `CallEdge[]`. This preserves the [`call-resolution.md`](./call-resolution.md) §2 promise that "enabling LSP MUST NOT change the shape or ordering" of what downstream consumers see — a slice does not silently split or merge based on whether LSP was available.
 
-The drop is silent in the **data** but not in the **output**. A reviewer who expects `Ctl.route → Svc.op` as one slice and gets two singletons cannot tell an architectural fact from a resolver miss, so the projection reports it: §12.6 marks the members that carry unresolved calls, and `aburi diff` prints the workspace-level census from [`call-resolution.md`](./call-resolution.md) §8.1 on stdout. This changes nothing about clustering — the pass still consumes resolved `CallEdge[]` only, and the `slices[]` output is byte-identical to what it was before the reporting existed.
+The drop is silent in the **data** but not in the **output**. A reviewer who expects `Ctl.route → Svc.op` as one slice and gets two singletons cannot tell an architectural fact from a resolver miss, so the projection reports it: §12.6 marks the members whose unresolved calls name a member of another Slice, and `aburi diff` prints the workspace-level census from [`call-resolution.md`](./call-resolution.md) §8.1 on stdout. This changes nothing about clustering — the pass still consumes resolved `CallEdge[]` only, and the `slices[]` output is byte-identical to what it was before the reporting existed.
 
 ### 5.5 Cross-language: no edges yet
 
@@ -358,19 +358,25 @@ Each Slice becomes a `###` subsection under `## 🧵 Slice View`:
 
 - `RefundController.refund` — *(changed)*
   **File**: `apps/billing/src/RefundController.ts:42`
-  ↳ delta.apiChanged, delta.logicChanged
+  ↳ API and logic changed
 - `RefundService.refund` — *(changed)*
   **File**: `apps/billing/src/RefundService.ts:88`
-  ↳ delta.logicChanged
+  ↳ logic changed
 - `RefundRepo.saveRefund` — *(added)*
   **File**: `apps/billing/src/RefundRepo.ts:15`
-  ↳ effects: db.write on `prisma.refund.create`
+  ↳ new method with db.write
 
 ---
 ```
 
 - The heading contains the full `sliceId` and the member count.
-- Each member is a bullet with: Symbol short-form (last-segment qname), the status in italics, file:line, and a `↳` follow-up line summarising which delta axes tripped or, for `added` / `removed`, the entry's boundary/effect surface. A `moved+changed` member opens that line with where it moved, as [`markdown-projection.md`](./markdown-projection.md) writes a move: `↳ moved: <route>; delta.logicChanged`.
+- Each member is a bullet with: Symbol short-form (last-segment qname), the status in italics, file:line, and a `↳` follow-up line saying, in words, what changed about it:
+  - a `changed` member names the delta axes that tripped, in the order API, logic, syntax, component, visibility, confidence: `API and logic changed`, `logic, syntax and visibility changed`. A member whose only axis is syntax reads `syntax only`, the reading [`markdown-projection.md`](./markdown-projection.md) §6.2 gives the section such a change lands in;
+  - an `added` or `removed` member names its kind and, when it has any, the effects that make it worth reading, each id once: `new method with db.write, event.publish`, `removed const`;
+  - a `moved+changed` member opens with where it moved, as [`markdown-projection.md`](./markdown-projection.md) writes a move, then its axes: `↳ moved: <route>; logic changed`. A `moved` member has the route alone;
+  - a `dropped-toggled` member reads `now dropped` or `no longer dropped`.
+
+  The line is for a reader, so it carries no field name of the diff document: `delta.logicChanged` says the same thing as `logic changed` to someone who has the schema open, and nothing to someone reading a pull request.
 - Members appear in ascending Symbol id order per §8.2. A projection variant that arranges members in call-order (anchor first, then callees) is left for a future iteration — the JSON side stays as specified.
 - Slices are separated by a `---` thematic break for visual boundary marking.
 - Column choices reuse existing [`markdown-projection.md`](./markdown-projection.md) §3 conventions: file paths POSIX and backtick-wrapped (§3.3), no emoji for the default status. A member row carries no confidence badge (§3.5 keeps it to headings and names-only rows); a member whose confidence moved says so on its `↳` line.
@@ -383,15 +389,17 @@ Singleton Slices (§6.3) are collected into a single `<details>` block appended 
 ### Standalone changes
 
 <details>
-<summary>4 singleton slices (no in-Node call-graph neighbours)</summary>
+<summary>4 symbols with no resolved call to or from another changed symbol</summary>
 
-- `slice:ts:packages/shared/src/logger.ts#log` — `log` *(changed, logic)*
-- `slice:ts:packages/shared/src/util.ts#formatMoney` — `formatMoney` *(changed, syntax-only)*
-- `slice:ts:apps/billing/src/dto/refund.dto.ts#RefundDto` — `RefundDto` *(dropped-toggled, to-dropped)*
-- `slice:ts:apps/billing/src/routes/health.ts#health` — `health` *(added)*
+- `log` — *(changed)* · `packages/shared/src/logger.ts:3` · logic changed
+- `formatMoney` — *(changed)* · `packages/shared/src/util.ts:12` · syntax only
+- `RefundDto` — *(dropped-toggled)* · `apps/billing/src/dto/refund.dto.ts:5` · now dropped
+- `health` — *(added)* · `apps/billing/src/routes/health.ts:8` · new function
 
 </details>
 ```
+
+Each row is a §12.2 member on one line: name, status, `file:line` and the follow-up. The singleton's Slice id is not written: it is `slice:` and the member's own id, so the name and the file already say it. The summary counts in the singular for one (`1 symbol`).
 
 The reviewer sees the count at a glance and can expand for the list. This matches the collapsed-section policy of [`markdown-projection.md`](./markdown-projection.md) §12.2 ("Keeping dropped entries, folded") — the fact is retained, the reader is not.
 
@@ -407,31 +415,33 @@ Per §9.4, if `slices[]` is empty the entire `## 🧵 Slice View` section is omi
 
 §5.4 explains why an unresolved call contributes no edge. The consequence a reviewer actually feels is a Slice that split — or a singleton that looks disconnected but is not. The projection surfaces that directly.
 
-Directly under the section heading, when any member carries at least one `resolved: null` call:
+It marks only the unresolved calls that could have joined two Slices: those whose target ends in the name of a member of **another** Slice. The last segment of the target is compared with the last segment of each member's qualified name (`this.repo.save` and `getRepo.save`, the target `getRepo().save()` is written as, name `Repo.save`), so a call to a member of the caller's own Slice, or to nothing the diff changed, is not marked. Directly under the section heading, when any member makes such a call:
 
 ```md
 ## 🧵 Slice View
 
-> ⚠ 2 of the changed symbols below make 5 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.
+> ⚠ 3 calls below name a changed symbol in another Slice but were not resolved to it, so those Slices may belong together.
 ```
 
-And on the individual members — appended to the `↳` follow-up line of a §12.2 bullet, and to the label of a §12.3 singleton:
+And on the individual members — appended to the `↳` follow-up line of a §12.2 bullet, and to the row of a §12.3 singleton — naming each such target once:
 
 ```md
 - `Ctl.route` — *(changed)*
   **File**: `apps/billing/src/RefundController.ts:42`
-  ↳ delta.logicChanged · ⚠ 3 unresolved calls
+  ↳ logic changed · ⚠ unresolved call to `getService.saveRecord`
 ```
 
 ```md
-- `slice:ts:apps/billing/src/RefundController.ts#RefundController.refund` — `RefundController.refund` *(added)* · ⚠ 1 unresolved call
+- `health` — *(added)* · `apps/billing/src/routes/health.ts:8` · new function · ⚠ unresolved calls to `this.repo.save`, `audit`
 ```
 
-Members that resolved cleanly carry no marker, and a diff where nothing is unresolved renders exactly as it did before this section existed — the marker has to stay rare to stay meaningful.
+Members whose unresolved calls name no member of another Slice carry no marker, and a diff where none does renders exactly as it would if every call had resolved. The marker has to stay rare to stay meaningful, and counting every `resolved: null` call did not keep it rare: a call into `node:path`, a library or an array method can never resolve to a Symbol, so on Aburi's own pull requests three members in four carried a marker, and of the 2,719 unresolved calls those members made, 76 named a changed symbol at all. A reader learned to skip the line, and the 76 went with it.
 
-**Where the counts come from.** `diff.symbols[]` already embeds the full IR `Symbol` on each entry, `calls[].resolved` included, so the projection counts them directly. No field is added to `SliceRecord` and no new pass runs; this keeps §14.12's "a Slice is a derived view, not a new fact" intact.
+The name match is the over-approximation that stays useful. It flags a call that only shares a name with a member — `map.get` beside a changed `Cache.get` — because the projection cannot see what the resolver could not; and it misses a call written under another name than the member's, an aliased import or a default one, which the resolver links whenever the import is relative and only misses across a bare package specifier. Both are rare beside what the old count flagged.
 
-**Why counting only the members is enough.** §5.1 draws an edge only when *both* endpoints are Nodes, and the edge originates at the caller. Any edge that would have merged two Slices therefore starts at one of the members rendered here — an unresolved call on some unrelated unchanged Symbol could never have bridged them anyway.
+**Where the targets come from.** `diff.symbols[]` already embeds the full IR `Symbol` on each entry, `calls[].resolved` included, so the projection reads them directly — the head Symbol for a member both revisions hold, the one revision's Symbol for an added or removed one. No field is added to `SliceRecord` and no new pass runs; this keeps §14.12's "a Slice is a derived view, not a new fact" intact.
+
+**Why reading only the members is enough.** §5.1 draws an edge only when *both* endpoints are Nodes, and the edge originates at the caller. Any edge that would have merged two Slices therefore starts at one of the members rendered here and ends at another — an unresolved call on some unrelated unchanged Symbol could never have bridged them, and neither could one whose target names no member.
 
 ## 13. Verifiable Properties (Test Criteria)
 
@@ -494,6 +504,8 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV20 | Some singleton and some multi-member Slices | Multi-member Slices rendered first, then the "Standalone changes" fold (§12.3) |
 | SV21 | Cross-language PR (TS + Python nodes) | Two disjoint singleton-or-multi Slices per language; no cross-language edges attempted (§5.5, §14.13) |
 | SV22 | Any output | `aburi.diff.v1.json` validates unchanged against the schema (§11.3) |
+| SV22a | Members that are `changed` on one axis, on several, on syntax alone, `added` with effects, `removed`, `dropped-toggled` | The `↳` line, or the singleton row, says it in words — `logic changed`, `API and logic changed`, `syntax only`, `new method with db.write`, `removed function`, `now dropped` — and names no field of the diff document (§12.2, §12.3) |
+| SV22b | A member with unresolved calls to `rows.push`, to a member of its own Slice and to `getRepo.save` where `Repo.save` is a member of another Slice | The note under the heading counts one call, and the member's line ends ``⚠ unresolved call to `getRepo.save` ``; with only the first two, no note and no marker (§12.6) |
 
 ### 13.7 Anchor derivation enforcement
 

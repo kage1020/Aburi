@@ -111,6 +111,36 @@ branches. A removed `guard` line means somebody removed a condition.
 `db.transaction`, `event.publish`, `network.rpc`. A method that gained
 `db.write` now writes to your database.
 
+## A slice
+
+The Slice View groups the changed symbols that call one another, so a feature
+reads end to end. Each member says in a line what happened to it:
+
+```md
+### `slice:ts:src/app/orders/actions.ts#submitOrder` (2 members)
+
+- `submitOrder` — *(changed)*
+  **File**: `src/app/orders/actions.ts:18`
+  ↳ API and logic changed
+- `chargeCard` — *(added)*
+  **File**: `src/lib/payments.ts:7`
+  ↳ new function with network.http
+```
+
+The symbols that call no other changed symbol are folded under **Standalone
+changes**, one line each.
+
+Two slices that should be one can come apart when Aburi could not tell what a
+call reaches. When an unresolved call is named like a changed symbol in another
+slice, the member says so, and a note under the heading counts them:
+
+```md
+  ↳ logic changed · ⚠ unresolved call to `getRepo.save`
+```
+
+Read the slice that holds `Repo.save` together with this one. Calls into
+libraries or built-ins are never marked: they could not have joined two slices.
+
 ## Confidence
 
 Aburi flags anything it is less sure about. A symbol carries the badge on its

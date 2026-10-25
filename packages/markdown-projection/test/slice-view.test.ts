@@ -1,4 +1,4 @@
-import { changed, errorFrom, makeDiff, makeSymbol, sliceId } from "@aburi/test-support"
+import { changed, effect, errorFrom, makeDiff, makeSymbol, sliceId } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { ProjectionInvariantError, projectDiff } from "../src"
@@ -6,16 +6,8 @@ import { sectionOf } from "./markdown"
 
 const HEADING = "## 🧵 Slice View"
 
-function at(name: string, file: string, startLine: number, unresolvedCalls = 0): IRSymbol {
-  const symbol = makeSymbol({
-    id: `ts:${file}#${name}`,
-    name,
-    calls: Array.from({ length: unresolvedCalls }, (_, i) => ({
-      target: `mystery${i}`,
-      line: 20 + i,
-      resolved: null,
-    })),
-  })
+function at(name: string, file: string, startLine: number): IRSymbol {
+  const symbol = makeSymbol({ id: `ts:${file}#${name}`, name })
   return { ...symbol, source: { ...symbol.source, startLine } }
 }
 
@@ -51,13 +43,13 @@ describe("projectDiff — the Slice View", () => {
       "",
       "- `Ctl.route` — *(changed)*",
       "  **File**: `src/ctl.ts:42`",
-      "  ↳ delta.logicChanged",
+      "  ↳ logic changed",
       "- `Repo.save` — *(added)*",
       "  **File**: `src/repo.ts:15`",
-      "  ↳ new symbol",
+      "  ↳ new function",
       "- `Svc.op` — *(changed)*",
       "  **File**: `src/svc.ts:88`",
-      "  ↳ delta.logicChanged",
+      "  ↳ logic changed",
       "",
       "---",
       "",
@@ -65,33 +57,66 @@ describe("projectDiff — the Slice View", () => {
   })
 
   it.each<[string, SymbolChange, string]>([
-    ["a removed Symbol", { status: "removed", symbol: repo }, "removed symbol"],
+    ["a removed Symbol by its kind", { status: "removed", symbol: repo }, "removed function"],
     [
-      "a Symbol whose dropped flag flipped",
+      "an added Symbol by its kind and the effects it has",
+      {
+        status: "added",
+        symbol: {
+          ...repo,
+          kind: "method",
+          effects: [
+            effect({
+              id: "db.write",
+              target: "prisma.user.create",
+              plugin: "effects-prisma",
+              line: 3,
+            }),
+            effect({ id: "event.publish", target: "bus.emit", plugin: "effects-events", line: 4 }),
+            effect({
+              id: "db.write",
+              target: "prisma.audit.create",
+              plugin: "effects-prisma",
+              line: 5,
+            }),
+          ],
+        },
+      },
+      "new method with db.write, event.publish",
+    ],
+    [
+      "a Symbol that became boilerplate",
       {
         status: "dropped-toggled",
         before: repo,
         after: { ...repo, dropped: true, dropReason: "DTO" },
         direction: "to-dropped",
       },
-      "dropped-toggled: to-dropped",
+      "now dropped",
     ],
     [
-      "every axis that moved",
+      "a Symbol that stopped being boilerplate",
+      { status: "dropped-toggled", before: repo, after: repo, direction: "to-kept" },
+      "no longer dropped",
+    ],
+    [
+      "every axis that moved, in words",
       changed(repo, {
         apiChanged: true,
         syntaxChanged: true,
         componentChanged: true,
         visibilityChanged: true,
       }),
-      "delta.apiChanged, delta.syntaxChanged, delta.componentChanged, delta.visibilityChanged",
+      "API, syntax, component and visibility changed",
     ],
+    ["two axes", changed(repo, { apiChanged: true, logicChanged: true }), "API and logic changed"],
+    ["a syntax change alone", changed(repo, { syntaxChanged: true }), "syntax only"],
     [
       "a confidence change",
       changed(repo, { confidenceChanged: true }, { confidence: "medium" }),
-      "delta.confidenceChanged",
+      "confidence changed",
     ],
-    ["a change with no axis set", changed(repo), "no delta axes"],
+    ["a change with no axis set", changed(repo), "nothing flagged"],
   ])("follows up %s", (_, change, followUp) => {
     expect(sliceView([change, logicChange(ctl)], [slice(ctl, repo)])).toContain(`  ↳ ${followUp}`)
   })
@@ -111,7 +136,7 @@ describe("projectDiff — the Slice View", () => {
     ])
   })
 
-  it("folds the singleton Slices into one block after the others, each labelled by its member", () => {
+  it("folds the singleton Slices into one block after the others, one row per member", () => {
     const solo = at("formatMoney", "src/util.ts", 3)
     const lines = sliceView(
       [logicChange(ctl), logicChange(svc), logicChange(solo), logicChange(repo)],
@@ -125,10 +150,10 @@ describe("projectDiff — the Slice View", () => {
       "### Standalone changes",
       "",
       "<details>",
-      "<summary>2 singleton slices (no in-Node call-graph neighbours)</summary>",
+      "<summary>2 symbols with no resolved call to or from another changed symbol</summary>",
       "",
-      "- `slice:ts:src/util.ts#formatMoney` — `formatMoney` *(changed)*",
-      "- `slice:ts:src/elsewhere.ts#other` — `Repo.save` *(changed)*",
+      "- `formatMoney` — *(changed)* · `src/util.ts:3` · logic changed",
+      "- `Repo.save` — *(changed)* · `src/repo.ts:15` · logic changed",
       "",
       "</details>",
       "",
@@ -162,47 +187,65 @@ describe("projectDiff — the Slice View", () => {
 })
 
 describe("projectDiff — unresolved calls in the Slice View", () => {
-  it.each<[string, number[], string]>([
-    [
-      "one member",
-      [3, 0],
-      "> ⚠ 1 of the changed symbols below makes 3 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.",
-    ],
-    [
-      "several members",
-      [1, 2],
-      "> ⚠ 2 of the changed symbols below make 3 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.",
-    ],
+  function calling(name: string, file: string, ...targets: string[]): IRSymbol {
+    return {
+      ...at(name, file, 1),
+      calls: targets.map((target, i) => ({ target, line: 2 + i, resolved: null })),
+    }
+  }
+
+  it.each<[string, string[], string]>([
     [
       "one call",
-      [1, 0],
-      "> ⚠ 1 of the changed symbols below makes 1 call the resolver could not identify, so a Slice here may be split rather than genuinely disconnected.",
+      ["getRepo.save"],
+      "> ⚠ 1 call below names a changed symbol in another Slice but was not resolved to it, so those Slices may belong together.",
     ],
-  ])("totals them under the heading for %s", (_, counts, note) => {
-    const [first = 0, second = 0] = counts
-    const a = at("a", "src/a.ts", 1, first)
-    const b = at("b", "src/b.ts", 1, second)
-    expect(sliceView([logicChange(a), logicChange(b)], [slice(a, b)])[2]).toBe(note)
-  })
-
-  it("marks the affected member of a Slice", () => {
+    [
+      "several calls",
+      ["this.repo.save", "save"],
+      "> ⚠ 2 calls below name a changed symbol in another Slice but were not resolved to it, so those Slices may belong together.",
+    ],
+  ])("totals the calls naming a member of another Slice under the heading, for %s", (_, targets, note) => {
+    const ctlCalling = calling("Ctl.route", "src/ctl.ts", ...targets)
     const lines = sliceView(
-      [logicChange(at("Ctl.route", "src/ctl.ts", 42, 3)), logicChange(svc)],
-      [slice(ctl, svc)],
+      [logicChange(ctlCalling), logicChange(svc), logicChange(repo)],
+      [slice(ctlCalling, svc), slice(repo)],
     )
-    expect(lines).toContain("  ↳ delta.logicChanged · ⚠ 3 unresolved calls")
-    expect(lines).toContain("  ↳ delta.logicChanged")
+    expect(lines[2]).toBe(note)
   })
 
-  it("marks an affected singleton, counting an added member's own calls", () => {
-    const added = at("addedFn", "src/add.ts", 15, 1)
-    expect(sliceView([{ status: "added", symbol: added }], [slice(added)])).toContain(
-      "- `slice:ts:src/add.ts#addedFn` — `addedFn` *(added)* · ⚠ 1 unresolved call",
+  it("marks the member making such a call, naming each target once", () => {
+    const ctlCalling = calling("Ctl.route", "src/ctl.ts", "getRepo.save", "join", "getRepo.save")
+    const lines = sliceView(
+      [logicChange(ctlCalling), logicChange(svc), logicChange(repo)],
+      [slice(ctlCalling, svc), slice(repo)],
+    )
+    expect(lines).toContain("  ↳ logic changed · ⚠ unresolved call to `getRepo.save`")
+    expect(lines).toContain("  ↳ logic changed")
+  })
+
+  it("marks a singleton that makes such a call, an added one included", () => {
+    const added = calling("addedFn", "src/add.ts", "Repo.save", "Svc.op")
+    expect(
+      sliceView(
+        [{ status: "added", symbol: added }, logicChange(repo), logicChange(svc)],
+        [slice(added), slice(repo, svc)],
+      ),
+    ).toContain(
+      "- `addedFn` — *(added)* · `src/add.ts:1` · new function · ⚠ unresolved calls to `Repo.save`, `Svc.op`",
     )
   })
 
-  it("says nothing when every member resolved cleanly", () => {
-    const lines = sliceView([logicChange(ctl), logicChange(svc)], [slice(ctl, svc)])
+  it.each<[string, string]>([
+    ["a target no changed symbol is named after", "rows.push"],
+    ["a member of its own Slice", "this.op"],
+    ["a target whose last segment is computed", "handlers.<computed>"],
+  ])("says nothing about an unresolved call to %s", (_, target) => {
+    const ctlCalling = calling("Ctl.route", "src/ctl.ts", target)
+    const lines = sliceView(
+      [logicChange(ctlCalling), logicChange(svc), logicChange(repo)],
+      [slice(ctlCalling, svc), slice(repo)],
+    )
     expect(lines.join("\n")).not.toContain("⚠")
   })
 })

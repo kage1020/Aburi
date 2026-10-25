@@ -70,7 +70,7 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     expect(section).toContain("writeRecord")
     expect(section).toContain("(3 members)")
 
-    expect(section).not.toContain("unresolved call")
+    expect(section).not.toContain("⚠")
     expect(headScan.ir.stats.callResolution?.unresolved).toEqual({
       localScope: 0,
       external: 0,
@@ -105,7 +105,11 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     expect(ctlSlice, "the unresolved call should split the controller off").toBeDefined()
 
     const section = sliceViewSection(projectDiff(diff))
-    expect(section).toContain("the resolver could not identify")
-    expect(section).toContain("⚠ 2 unresolved calls")
+    expect(section).toContain(
+      "> ⚠ 1 call below names a changed symbol in another Slice but was not resolved to it",
+    )
+    expect(section).toContain(
+      "- `handleRequest` — *(added)* · `src/ctl.ts:1` · new function · ⚠ unresolved call to `getService.saveRecordService`",
+    )
   })
 })
