@@ -667,7 +667,7 @@ A Symbol can move without leaving its file: the diff counts any change of id in 
   - db.write: `prisma.user.upsert` (L33) [effects-prisma] ⚠ medium (was high)
 ```
 
-The folded list below reads the same way, less the head name it otherwise opens with, since the route already gives it. A Slice member's follow-up line opens with the route, ``↳ moved: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged``, as a move between files that kept its name opens with its two paths. A names-only row ends ``(from `Repo.save` at L12)`` where a move between files that kept its name ends ``(from `<path>`)``.
+The folded list below reads the same way, less the head name it otherwise opens with, since the route already gives it. A Slice member's follow-up line opens with the route, ``↳ moved: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); logic changed``, as a move between files that kept its name opens with its two paths. A names-only row ends ``(from `Repo.save` at L12)`` where a move between files that kept its name ends ``(from `<path>`)``.
 
 A move between files that changed the Symbol's name as well gives each path with its name, ``**Moved**: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts` ``, and so do the folded row (without the head name it would open with), the follow-up line, and the names-only row, ``(from `parseAmount` in `src/parse.ts`)``. The sections that render the pair again (API changes, Logic changes, Confidence changes) title it by its head name with no route, so wherever a pair whose name changed renders a delta body, the body opens with ``- name: `<base name>` → `<head name>` ``; in Moved + Changed it repeats the route, since the body is the same in every section. Their names-only rows carry the same ``(from …)`` as the Moved + Changed one (§6.4): the size cap can omit Moved + Changed and keep the other section, and the old name would then be on no line. The old name of an exported function is the name its callers use, which is the fact a reviewer needs.
 
@@ -677,11 +677,18 @@ A move between files that changed the Symbol's name as well gives each path with
 <details>
 <summary>2 moved (no semantic change)</summary>
 
-- `formatMoney`: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
-- `parseAmount`: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
+- `formatMoney`, `parseAmount`: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
 
 </details>
 ```
+
+The Symbols that kept their names along one route share a row, in the section's order. A file that
+moved takes every Symbol in it along, and a row each repeated the same two paths down the fold, so
+the row a reviewer reads is the file's. A move within a file, or one that changed the name, names
+the Symbol in its route and keeps a row of its own.
+
+Each fold's summary says what it counts, and counts one in the singular: `1 moved (no semantic
+change)`, `1 entry`, `1 symbol (implementation refactor only, no semantic change)`.
 
 #### 🧱 Component changes
 
@@ -1017,6 +1024,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP11 | diff containing a moved+changed symbol | Moved + Changed section (not folded) |
 | MP11a | diff containing a moved or moved+changed Symbol whose base and head files are the same | Every place the move is written (the Moved + Changed entry and its names-only row, the folded Moved list, a Slice member's follow-up) names the file once with the base and head names and lines, never the path twice. A move between files still writes both paths |
 | MP11b | diff containing a moved or moved+changed Symbol whose name changed, within one file or between files | Every place the move is written carries the base name: a move between files writes each path with its name, every delta body of the pair opens with ``- name: `<base>` → `<head>` ``, and every names-only row of the pair carries the Moved + Changed row's ``(from …)``, in API changes, Logic changes and Confidence changes as in Moved + Changed, so a size cap that omits Moved + Changed still names the base. A change of the last segment explains the API flag, so no "no field-level detail" row follows; a new owner alone (`Repo.save` → `UserRepo.save`) does not explain it |
+| MP11c | diff with several Symbols moved between the same two files under their own names, beside a rename and a move to a third file | The folded Moved list writes the first group on one row, `` `A`, `B`: `<old>` → `<new>` ``, and the other two on a row each; its summary reads `4 moved (no semantic change)`, and one entry `1 moved (no semantic change)` |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, in either form, beside every more important section that stayed, and no omitted section would fit back into the result, not even with the lists below it made names-only where names-only would then be smaller; among the sections with a names-only form, the full ones come first and every one after the first short one is short, omitted, or full where names-only would be no smaller. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |

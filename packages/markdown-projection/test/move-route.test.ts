@@ -102,12 +102,12 @@ describe("a move's route on a Slice member's follow-up line", () => {
   it("leads a moved+changed member with its route, then its axes", () => {
     const md = projectSlice(reownedInFile, acrossFiles, renamedAcrossFiles)
     expect(md).toContain(
-      "↳ moved: within `src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged",
+      "↳ moved: within `src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); logic changed",
     )
-    expect(md).toContain("↳ moved: `src/old.ts` → `src/new.ts`; delta.logicChanged")
+    expect(md).toContain("↳ moved: `src/old.ts` → `src/new.ts`; logic changed")
     expect(md).toContain(
       "↳ moved: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts`; " +
-        "delta.apiChanged, delta.syntaxChanged",
+        "API and syntax changed",
     )
   })
 
