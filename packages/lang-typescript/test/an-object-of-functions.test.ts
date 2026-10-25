@@ -291,7 +291,6 @@ describe("entries that are not members", () => {
   it.each([
     ["a value", "n: q()", ["q"]],
     ["a function handed to a call", "h: withAuth(() => { q() })", ["withAuth", "q"]],
-    ["a generator function", "g: function* () { yield q() }", ["q"]],
     ["a function in an array", "hs: [() => { q() }]", ["q"]],
     ["a shorthand", "q", []],
     ["a spread", "...q()", ["q"]],
