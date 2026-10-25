@@ -200,6 +200,11 @@ describe("a formatting edit is no change", () => {
       price("/* nothing to charge */ ", "/* member discount */ "),
     ],
     [
+      "a union parameter joined onto one line",
+      "export function add(\n  provider:\n    | ClassProvider\n    | ValueProvider,\n): void {\n  use(provider)\n}\n",
+      "export function add(provider: ClassProvider | ValueProvider): void {\n  use(provider)\n}\n",
+    ],
+    [
       "a guard re-wrapped over several lines",
       check('user.age < 18 || user.banned || user.role === "guest"'),
       check("", "    user.age < 18 ||", "    user.banned ||", '    user.role === "guest"', "  "),

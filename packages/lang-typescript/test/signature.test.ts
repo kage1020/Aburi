@@ -37,6 +37,50 @@ describe("what a function's signature records", () => {
   })
 })
 
+describe("a type broken over lines with a leading operator", () => {
+  const broken = [
+    "export function f(",
+    "  provider:",
+    "    | ClassProvider",
+    "    | FactoryProvider,",
+    "  parts: Array<",
+    "    | A",
+    "    | B",
+    "  >,",
+    "): & Base & Extra {}",
+  ].join("\n")
+
+  it("is recorded as the operator-free spelling", async () => {
+    const signature = await signatureOf(broken)
+
+    expect(signature?.inputs.map((i) => i.type)).toEqual([
+      "ClassProvider\n    | FactoryProvider",
+      "Array<\n    A\n    | B\n  >",
+    ])
+    expect(signature?.outputs).toEqual(["Base & Extra"])
+  })
+
+  it.each([
+    ["a parameter", "(x: | A | B) {}", "(x: A | B) {}"],
+    ["a return type", "(): | A | B {}", "(): A | B {}"],
+    ["a generic argument", "(x: Map<string, | A | B>) {}", "(x: Map<string, A | B>) {}"],
+    ["an intersection", "(x: & A & B) {}", "(x: A & B) {}"],
+    ["a type predicate", "(x: unknown): x is | A | B {}", "(x: unknown): x is A | B {}"],
+    ["a function type's return", "(load: () => | A | B) {}", "(load: () => A | B) {}"],
+    ["a type parameter's constraint", "<T extends | A | B>() {}", "<T extends A | B>() {}"],
+  ])("gives %s the signature it has written on one line", async (_label, leading, joined) => {
+    expect(await signatureOf(`export function f${leading}`)).toEqual(
+      await signatureOf(`export function f${joined}`),
+    )
+  })
+
+  it("keeps the characters of a string type", async () => {
+    const signature = await signatureOf('export function f(x: "| a" | "& b") {}')
+
+    expect(signature?.inputs.map((i) => i.type)).toEqual(['"| a" | "& b"'])
+  })
+})
+
 describe("what a function throws", () => {
   it.each([
     ["the constructor of `throw new`", "throw new MyError()", ["MyError"]],

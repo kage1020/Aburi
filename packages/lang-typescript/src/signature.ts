@@ -34,7 +34,7 @@ function readTypeParameters(node: Node): string[] {
   const out: string[] = []
   for (const child of params.namedChildren) {
     if (child === null || child.type !== "type_parameter") continue
-    out.push(child.text.trim())
+    out.push(typeText(child))
   }
   return out
 }
@@ -101,15 +101,37 @@ function extractParamType(param: Node): string {
   const typeAnn = param.childForFieldName("type") ?? findChild(param, "type_annotation")
   if (typeAnn === null) return ""
   const inner = typeAnn.namedChild(0)
-  return inner !== null ? inner.text.trim() : typeAnn.text.replace(/^:\s*/, "").trim()
+  return inner !== null ? typeText(inner) : typeAnn.text.replace(/^:\s*/, "").trim()
 }
 
 function readReturnType(node: Node): string[] {
   const returnType = node.childForFieldName("return_type") ?? findChild(node, "type_annotation")
   if (returnType === null) return []
   const inner = returnType.namedChild(0)
-  const text = (inner !== null ? inner.text : returnType.text.replace(/^:\s*/, "")).trim()
+  const text = inner !== null ? typeText(inner) : returnType.text.replace(/^:\s*/, "").trim()
   return text.length > 0 ? [text] : []
+}
+
+const LEADING_OPERATORS: ReadonlyMap<string, string> = new Map([
+  ["union_type", "|"],
+  ["intersection_type", "&"],
+])
+
+// A formatter writes `| A | B` when it breaks a union over lines and `A | B` when it joins it, so the
+// operator with no left operand is layout, and only the tree can tell it from one in a string type.
+function typeText(type: Node): string {
+  const source = type.text
+  const base = type.startIndex
+  let out = ""
+  let at = base
+  for (const node of walkDescendants(type)) {
+    const operator = node.child(0)
+    if (operator === null || operator.type !== LEADING_OPERATORS.get(node.type)) continue
+    out += source.slice(at - base, operator.startIndex - base)
+    at = node.child(1)?.startIndex ?? operator.endIndex
+  }
+  out += source.slice(at - base)
+  return out.trim()
 }
 
 function readThrows(node: Node, jsDocText: string | null): string[] {
