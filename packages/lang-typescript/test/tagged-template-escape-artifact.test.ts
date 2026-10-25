@@ -30,6 +30,11 @@ describe("an escape a template cannot hold still reports", () => {
     ["an untagged template inside a call's arguments", "export const c = f(`\\unicode`)"],
     ["a broken substitution in a tagged template", `export const d = tag\`\${foo(}\``],
     [
+      "a broken substitution right after such an escape, which recovery folds into its ERROR",
+      `export const f = tag\`\\xZ\${a b}\``,
+    ],
+    ["the same with a keyword in the substitution", `export const g = tag\`\\xZ\${a if b}\``],
+    [
       "an escape under a tag with type arguments, which the grammar reads as two comparisons",
       "export const e = tag<string>`\\unicode`",
     ],
