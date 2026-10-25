@@ -1,4 +1,4 @@
-import type { Symbol as IRSymbol } from "@aburi/types"
+import type { Symbol as IRSymbol, Logger } from "@aburi/types"
 import { atLeast, quotient, type Ratio, WHOLE, weightedMean } from "../ratio"
 import { signatureSimilarityRatio } from "../signature"
 import { createNameScorer, lastSegment, type NameScorer, tokenizeName } from "../similarity"
@@ -14,11 +14,18 @@ import {
 export function matchStageNameSignature(
   remainingBase: readonly IRSymbol[],
   remainingHead: readonly IRSymbol[],
+  logger?: Logger,
 ): StageResult {
+  const refuse = (symbol: IRSymbol, why: string) =>
+    logger?.debug(`diff/stage4: ${symbol.id} is not compared by name: ${why}`)
   const buckets = new Map<string, Bucket>()
   for (const baseSymbol of remainingBase) {
     if (baseSymbol.dropped) continue
-    if (!saysEnoughToPair(baseSymbol.name)) continue
+    if (!saysEnoughToPair(baseSymbol.name)) {
+      refuse(baseSymbol, SAYS_TOO_LITTLE)
+      continue
+    }
+    if (!hasSignature(baseSymbol)) refuse(baseSymbol, NO_SIGNATURE)
     const key = bucketKey(baseSymbol)
     const bucket: Bucket = buckets.get(key) ?? { members: [], byToken: new Map() }
     const position = bucket.members.length
@@ -37,8 +44,14 @@ export function matchStageNameSignature(
   let visitCount = 0
   for (const headSymbol of remainingHead) {
     if (headSymbol.dropped) continue
-    if (headSymbol.signature === null || headSymbol.signature === undefined) continue
-    if (!saysEnoughToPair(headSymbol.name)) continue
+    if (!saysEnoughToPair(headSymbol.name)) {
+      refuse(headSymbol, SAYS_TOO_LITTLE)
+      continue
+    }
+    if (!hasSignature(headSymbol)) {
+      refuse(headSymbol, NO_SIGNATURE)
+      continue
+    }
     const bucket = buckets.get(bucketKey(headSymbol))
     if (bucket === undefined) continue
     const row = rowFor(headSymbol.name)
@@ -47,7 +60,7 @@ export function matchStageNameSignature(
     for (const token of tokens) reach += bucket.byToken.get(token)?.length ?? 0
     if (reach >= bucket.members.length) {
       for (const baseSymbol of bucket.members) {
-        collectCandidate(baseSymbol, headSymbol, scorer, row, candidates)
+        collectCandidate(baseSymbol, headSymbol, scorer, row, candidates, logger)
       }
       continue
     }
@@ -60,7 +73,7 @@ export function matchStageNameSignature(
         visited[position] = visitCount
         const baseSymbol = bucket.members[position]
         if (baseSymbol !== undefined) {
-          collectCandidate(baseSymbol, headSymbol, scorer, row, candidates)
+          collectCandidate(baseSymbol, headSymbol, scorer, row, candidates, logger)
         }
       }
     }
@@ -79,10 +92,10 @@ function collectCandidate(
   scorer: NameScorer,
   row: Row,
   candidates: ScoredPair[],
+  logger: Logger | undefined,
 ): void {
   const member = scorer.member(base.name, head.name)
   if (!atLeast(member, row.memberFloor)) return
-  if (!scorer.ownersCompatible(base.name, head.name)) return
   const score = weightedMean([
     { weight: MEMBER_WEIGHT, value: member },
     {
@@ -91,11 +104,26 @@ function collectCandidate(
     },
     { weight: OWNER_WEIGHT, value: OWNER_AXIS_SATISFIED },
   ])
-  if (atLeast(score, row.threshold)) candidates.push({ base, head, score: quotient(score) })
+  if (!atLeast(score, row.threshold)) return
+  // Scored first, so only a pairing the gate alone refused is traced, not every pair in a bucket.
+  if (!scorer.ownersCompatible(base.name, head.name)) {
+    logger?.debug(
+      `diff/stage4: ${base.id} and ${head.id} are not paired: their owners do not correspond`,
+    )
+    return
+  }
+  candidates.push({ base, head, score: quotient(score) })
+}
+
+const SAYS_TOO_LITTLE = "its name says too little to pair on"
+const NO_SIGNATURE = "it has no signature, and a name alone does not pair"
+
+function hasSignature(symbol: IRSymbol): boolean {
+  return symbol.signature !== null && symbol.signature !== undefined
 }
 
 function bucketKey(symbol: IRSymbol): string {
-  const sig = symbol.signature === null || symbol.signature === undefined ? "no-sig" : "has-sig"
+  const sig = hasSignature(symbol) ? "has-sig" : "no-sig"
   return `${symbol.kind}::${sig}`
 }
 

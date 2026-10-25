@@ -10,6 +10,7 @@ import type {
   IR,
   IRRef,
   IRSymbol,
+  Logger,
   NotComparedFile,
   Summary,
   SymbolChange,
@@ -54,6 +55,7 @@ export interface DiffInput {
   generator?: { name: string; version: string }
   gitRenames?: GitRenameMap | null
   delta?: DeltaOptions
+  logger?: Logger
 }
 
 const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
@@ -71,7 +73,7 @@ export function buildDiff(
     input.gitRenames ?? null,
   )
   const stage3 = matchStageLogicFingerprint(stage2.remainingBase, stage2.remainingHead)
-  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead)
+  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead, input.logger)
   const stageDroppedWeak = matchStageDroppedWeak(stage4.remainingBase, stage4.remainingHead)
 
   const pairs: SymbolPair[] = [

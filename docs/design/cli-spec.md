@@ -345,7 +345,8 @@ incident report.
 That is not the same as silence. The run's `Logger` is a separate channel — per file rather
 than per run, governed by `--log-level` (§3) and `ABURI_LOG_LEVEL` (§11), and still writing to
 `process.stderr` whatever streams the caller injected. The level is the command's rather than
-one scan's: `diff` hands it to both of its scans and `explain` to the one it rescans with, so no
+one scan's: `diff` hands it to both of its scans and to the matcher, which traces the pairings
+it refused on a rule ([`diff-algorithm.md`](./diff-algorithm.md) §3.4.7), and `explain` to the one it rescans with, so no
 scan logs at a level the reader did not choose. An embedder passes it as `logLevel` to
 `runScan`, `runDiff` or `runExplain`, and gets `warn` without one. An embedded scan with no sink
 is quiet, not mute, and routing that channel to the caller is a known gap rather than something

@@ -463,6 +463,18 @@ Both non-null →
 - set match ratio of throws (order-insensitive)
 averaged.
 
+#### 3.4.7 What stage 4 says about a refusal
+
+Three of stage 4's refusals are rules rather than scores: a Symbol whose name says too little (§3.4.3), a Symbol with no signature (§3.4.0's `no-sig` bucket, which no head is compared against), and a pair whose owners do not correspond (§3.4.6). Each reaches the report as an `added` and a `removed` entry, and the report says nothing about why — the gate refuses `UserRepo` → `UsersRepository` deliberately, but a reviewer looking at the churn has nothing pointing them here. So each is written to the run's `Logger` at `debug`, when `DiffInput.logger` is given, as one line naming the Symbol, or both Symbols of the refused pair, and the rule:
+
+```
+diff/stage4: ts:src/a.ts#render is not compared by name: its name says too little to pair on
+diff/stage4: ts:src/a.ts#buildConfig is not compared by name: it has no signature, and a name alone does not pair
+diff/stage4: ts:src/a.ts#UserRepo.findUser and ts:src/b.ts#UsersRepository.findUser are not paired: their owners do not correspond
+```
+
+The gate is traced only for a pair that cleared its row's threshold, so the line names a pairing the gate alone refused and not every pair a bucket holds. A pair that scored below its row is a judgement on the evidence, not a rule, and is not traced. The channel is a diagnostic one: nothing it writes reaches the diff result or `aburi.diff.v1.json`, and `buildDiff`'s answer is the same with and without a logger. `aburi diff` passes the run's logger, so `--log-level debug` or `ABURI_LOG_LEVEL=debug` shows the lines on stderr.
+
 ### 3.5 Stage 5: the remainder is added / removed / unknown
 
 Symbols not paired by this point are finalized:
@@ -1112,6 +1124,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19l | A rename map handed to `buildDiff` sends two base paths onto one head path, or onto a path the base also skipped — git writes neither | the same `symbols[]` and `notCompared[]`, byte for byte, whatever order the map and the skip lists are in; a `notCompared[]` entry for each base record that reaches a head one (§3.5.1, §6.3) |
 | DF20 | A pair whose stage-4 composite equals its row exactly: member 3/4 with signature 11/12, and member 7/10 with an identical signature, at 0.85; an identical member with signature 5/6 at 0.95; an identical member and signature at 1.0. End to end, `AccountService.createUserAccount(a: string, b: number, c: Date, d: boolean)` moved file and renamed `createUserAccountRecord` with `d: Options` | paired, rationale: "name-signature" — the composite is a fraction compared exactly (§3.4.3); one step below (two of four inputs retyped, a member of 7/11, its only input retyped at 0.95 or 1.0) added: 1, removed: 1 |
 | DF20a | Two bases score the same composite for one head, made of different axes — one renamed its member (3/4, signature 11/12), the other kept it (1, signature 1/2) | the lower base id pairs, whichever of the two it is (§3.8) |
+| DF20b | A Symbol whose name says too little, a Symbol with no signature, and a pair the owner gate refuses after clearing its row, each with a logger | the same added and removed entries as without one, and one `debug` line per Symbol or refused pair naming the rule (§3.4.7); none for a pair stage 4 made or one that scored below its row |
 
 ## 10.1 Diff schema compatibility policy
 
