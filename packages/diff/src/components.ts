@@ -138,9 +138,15 @@ export function diffDependencies(
   base: readonly Dependency[],
   head: readonly Dependency[],
   sides: { base: DependencySideView; head: DependencySideView; renames: RenameDirections },
+  headIdsByBaseId: ReadonlyMap<DependencyEndpoint, DependencyEndpoint> = new Map(),
 ): DependencyDiff & { unknown: DependencyUnknown[] } {
+  const asHeadEndpoint = (endpoint: DependencyEndpoint) => headIdsByBaseId.get(endpoint) ?? endpoint
   const baseKeys = new Map<string, Dependency>()
-  for (const dependency of base) baseKeys.set(dependencyKey(dependency), dependency)
+  for (const dependency of base) {
+    const from = asHeadEndpoint(dependency.from)
+    const to = asHeadEndpoint(dependency.to)
+    baseKeys.set(dependencyKey({ ...dependency, from, to }), dependency)
+  }
   const headKeys = new Map<string, Dependency>()
   for (const dependency of head) headKeys.set(dependencyKey(dependency), dependency)
   const added: Dependency[] = []

@@ -861,6 +861,8 @@ dependencyDiff = {
 
 Dependency identity is judged by (from, to, via). Changes to direction / effect are treated as an added+removed pair (no modified needed).
 
+A base edge is keyed under the ids the Symbol pairing gave its endpoints: an endpoint the base wrote as the `before` of a `moved`, `moved+changed`, `changed` or `dropped-toggled` entry is read as that entry's `after` id — the translation `φ` that [`slice-view.md`](./slice-view.md) §5.1 applies to base call edges. A Symbol's id carries its file, so without it a call between two Symbols that only moved files reads as the old edge removed and a new one added, though it is the same call between the same two Symbols, and in a refactor that splits a file those pairs are most of the section. The pairing is one-to-one, so no two base edges fold onto one key. A removed edge is still reported as the base wrote it, and a Component endpoint is never in the mapping.
+
 #### 6.2.1 `unknown`: the other document could not have held this edge
 
 `dependencies[]` is projected from the resolved call graph, so a Symbol that never reached a document takes every edge it participated in with it. Comparing the two arrays by identity alone therefore reports those edges as deletions — the same confident-but-wrong report §3.5.1 exists to prevent, one array over, and the half that is easiest to miss is an edge whose *other* end survived: both revisions hold that Symbol, so the edge reads as a call the author removed.
@@ -876,7 +878,7 @@ Four properties, two of them differing from the Symbol side:
 
 A direction or effect flip stays an added + removed pair, and no loss check runs on it. The reason is not that neither document lost an endpoint file — nothing forbids a path from being both a `symbols[].source.file` and a skipped one, so that inference has no invariant behind it. It is that both documents *hold* the edge, so neither is silent about it, and `unknown` exists only to explain a silence.
 
-An edge touching a Symbol that **moved** can be `unknown` while the Symbol itself is confidently `moved`. If `S` goes `src/a.ts` → `src/b.ts` and head skipped `src/a.ts`, stage 2/3/4 pairs the Symbol from real evidence on both sides, while the base-only edge naming `ts:src/a.ts#S` has an endpoint in a file head never read. Erring toward `unknown` there is correct — the head has no edge to compare against — and it is the one case where the Symbol and dependency sides report different confidence about the same entity. "Cannot disagree about which file went missing" is a claim about file identity, not about the two classifications matching.
+An edge touching a Symbol that **moved** can be `unknown` while the Symbol itself is confidently `moved`. If `S` goes `src/a.ts` → `src/b.ts` and head skipped `src/a.ts`, stage 2/3/4 pairs the Symbol from real evidence on both sides. A base edge naming `ts:src/a.ts#S` is first looked up under `ts:src/b.ts#S` (§6.2), and when the head holds no such edge, it has an endpoint in a file head never read. Erring toward `unknown` there is correct — the head has no edge to compare against — and it is the one case where the Symbol and dependency sides report different confidence about the same entity. "Cannot disagree about which file went missing" is a claim about file identity, not about the two classifications matching.
 
 `dependencies.unknown[]` and `summary.depsUnknown` are optional in the schema only so a diff written before they existed stays valid. A current writer always emits both, empty array and zero included — unlike the IR's `stats.skippedFiles`, there is no arithmetic elsewhere in the document that would let a reader tell "nothing was unknown" from "this writer could not say".
 
@@ -1084,6 +1086,8 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF10 | Multiple Symbols in base/head share the same logic fp | Disambiguated by name similarity, paired correctly |
 | DF11 | Component added | 1 entry in components.added |
 | DF12 | Dependency added | 1 entry in dependencies.added |
+| DF12a | A call edge whose caller, callee or both are `moved` or `moved+changed`, the head holding the same call under the new ids | no dependency change (§6.2) |
+| DF12b | DF12a without the call on the head side | the base edge, under the ids the base wrote, in dependencies.removed |
 | DF13 | Dropped Symbol paired (same ID) | Treated as unchanged |
 | DF14 | Dropped Symbol disappeared (basename also changed) | Counted in droppedRemoved |
 | DF14b | Dropped Symbol moved to another directory (same basename) | moved: 1, rationale: "dropped-weak-match" |
