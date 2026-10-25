@@ -24,6 +24,21 @@ describe("normalizeAst — what a formatter or a reviewer's eye would not call a
     ["optional semicolons", fn("save(a); save(b);"), fn("save(a)\n save(b)")],
     ["a comment where an array hole is", fn("save([/* skip */, x])"), fn("save([, x])")],
     [
+      "a trailing comma after the last parameter",
+      fn("return 1"),
+      fn("return 1").replace("v: any)", "v: any,)"),
+    ],
+    [
+      "parentheses around a lone arrow parameter",
+      "export const inc = x => x + 1",
+      "export const inc = (x) => x + 1",
+    ],
+    [
+      "a comment in an empty parameter list",
+      "export function f() { go() }",
+      "export function f(/* none */) { go() }",
+    ],
+    [
       "interface member separators",
       "export interface I { a: string; b: number }",
       "export interface I { a: string, b: number }",
@@ -96,6 +111,26 @@ describe("normalizeAst — what changes the string", () => {
       fn("const [, token] = a.split(' '); use(token)"),
       fn("const [token] = a.split(' '); use(token)"),
     ],
+    [
+      "the key a destructured parameter reads",
+      "export function pick({ a: b }: any) { return b }",
+      "export function pick({ c: b }: any) { return b }",
+    ],
+    [
+      "a leading hole in an array parameter",
+      "export function second([, b]: any[]) { return b }",
+      "export function second([b]: any[]) { return b }",
+    ],
+    [
+      "a parameter's default value",
+      "export function f(limit = 20) { use(limit) }",
+      "export function f(limit = 10) { use(limit) }",
+    ],
+    [
+      "a lone arrow parameter's name",
+      "export const pick = (x: any) => use",
+      "export const pick = (y: any) => use",
+    ],
     ["a hole between elements", fn("save([1, , 3])"), fn("save([1, 3])")],
     ["a hole before a trailing comma", fn("save([x, ,])"), fn("save([x,])")],
   ])("tells %s", async (_label, before, after) => {
@@ -124,6 +159,9 @@ describe("normalizeAst — the shape of the string", () => {
         ' (arrow_function (formal_parameters (required_parameter (identifier "x")',
         ' (type_annotation ":" (predefined_type "number"))))',
         ' "=>" (binary_expression (identifier "x") "<" (number "1")))))))',
+        " (formal_parameters",
+        ' (required_parameter (identifier "a") (type_annotation ":" (predefined_type "any")))',
+        ' (required_parameter (identifier "b") (type_annotation ":" (predefined_type "any"))))',
       ].join(""),
     )
   })

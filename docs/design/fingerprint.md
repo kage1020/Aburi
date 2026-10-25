@@ -292,6 +292,7 @@ Line terminators are held by the core, not by `normalizeAst`, which is why S2d i
 - Renaming an identifier → changes (`syntax` is structure-based, not meaning-based, so identifiers are treated as part of the structure)
 - Changing a literal → changes
 - Changing an operator, a declaration keyword (`let` / `const`), a modifier or a primitive type → changes
+- Changing a function's parameter list where the api axis does not read it — a parameter's name, a destructuring pattern, a default's value → changes. `Signature` records a parameter's type and form only (§3.1), so the language plugin's normalized string covers the list as well as the body ([lang-plugin.md](./lang-plugin.md) LP8p1)
 
 ### 5.5 Uses of the syntax fingerprint
 
@@ -363,7 +364,7 @@ The reference implementation and every language plugin must pass the following t
 | A12 | Change only the class-scope portion of `Symbol.name` (`Old.method` → `New.method`) | api unchanged |
 | A13 | Change `language` (never happens in practice; defensive) | api unchanged (`language` is not part of the input) |
 | A22 | Change `signature.inputs[].name` from `ids` to `...ids` | api unchanged (A1's case: rest-ness is `rest`, and a marker spelled into `name` reaches no axis) |
-| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value) |
+| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value); syntax changes (S5b) |
 
 ### 7.3 api change conditions
 
@@ -425,6 +426,7 @@ The reference implementation and every language plugin must pass the following t
 | S4 | Rename an identifier | syntax changes |
 | S5 | Change a literal | syntax changes |
 | S5a | Change an operator, a declaration keyword, a modifier or a primitive type (`a + b` → `a - b`, `let` → `const`, `private` → `public`, `number` → `string`) | syntax changes |
+| S5b | Change a destructuring parameter's pattern (`{ a: b }` → `{ c: b }`, `[, b]` → `[b]`) or a parameter's default value (`limit = 20` → `limit = 10`) | syntax changes; api unchanged (A1, A23) |
 
 ### 7.7.1 syntax test criteria every language plugin must satisfy
 

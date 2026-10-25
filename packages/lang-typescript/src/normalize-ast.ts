@@ -10,9 +10,27 @@ export function normalizeAst(symbol: SymbolCandidate<Node>): string {
     described.push({ node, fullNode: declaration.fullNode })
   }
   return described
-    .flatMap(({ node, fullNode }) => [serialize(node), classHead(fullNode)])
+    .flatMap(({ node, fullNode }) => [
+      serialize(node),
+      classHead(fullNode),
+      node.id === fullNode.id ? "" : parameterList(fullNode),
+    ])
     .filter((part) => part.length > 0)
     .join(" ")
+}
+
+// The api axis hashes a parameter's type and form, not its name, its pattern or its default's value,
+// so a function described by its body alone saw none of those edits.
+function parameterList(fullNode: Node): string {
+  const list = fullNode.childForFieldName("parameters")
+  if (list !== null) return list.namedChildren.some(isWritten) ? serialize(list) : ""
+  const lone = fullNode.childForFieldName("parameter")
+  // A formatter adds the parentheses a lone arrow parameter may go without (`x => …` → `(x) => …`).
+  return lone === null ? "" : `(formal_parameters (required_parameter ${serialize(lone)}))`
+}
+
+function isWritten(node: Node | null): boolean {
+  return node !== null && node.type !== "comment"
 }
 
 function classHead(fullNode: Node): string {

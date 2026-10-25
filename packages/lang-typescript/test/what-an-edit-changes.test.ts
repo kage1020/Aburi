@@ -1,6 +1,6 @@
-import { delta, symbolNamed, useScratchWorkspace } from "@aburi/test-support"
+import { delta, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { changedSymbols, diffOfEdit, editOf } from "./fixtures/scan"
+import { changedSymbols, diffOfEdit } from "./fixtures/scan"
 
 const workspace = useScratchWorkspace("edit-axis")
 
@@ -129,18 +129,45 @@ describe("an edit to what a caller passes is an api change", () => {
   })
 })
 
-describe("an edit to a parameter's default value is no api change", () => {
-  it("keeps the api fingerprint, and the diff reports no change", async () => {
-    const { base, head, diff } = await editOf(
-      workspace,
-      FILE,
-      withParams("limit = 20"),
-      withParams("limit = 10"),
-    )
+describe("an edit to a parameter that no caller sees is a syntax-only change", () => {
+  it.each([
+    ["a default's value", withParams("limit = 20"), withParams("limit = 10"), ["f"]],
+    [
+      "a parameter renamed and unused",
+      withParams("limit: number"),
+      withParams("max: number"),
+      ["f"],
+    ],
+    [
+      "the key a destructured parameter reads",
+      "export function pick({ a: b }: any) {\n  return b\n}\n",
+      "export function pick({ c: b }: any) {\n  return b\n}\n",
+      ["pick"],
+    ],
+    [
+      "the hole an array parameter skips",
+      "export function second([, b]: any[]) {\n  return b\n}\n",
+      "export function second([b]: any[]) {\n  return b\n}\n",
+      ["second"],
+    ],
+    [
+      "an arrow's destructured parameter",
+      "export const pick = ({ a: b }: any) => b\n",
+      "export const pick = ({ c: b }: any) => b\n",
+      ["pick"],
+    ],
+    [
+      "a method's destructured parameter, on the method as well as its class",
+      "export class C {\n  m({ a: b }: any) {\n    return b\n  }\n}\n",
+      "export class C {\n  m({ c: b }: any) {\n    return b\n  }\n}\n",
+      ["C", "C.m"],
+    ],
+  ])("reports %s", async (_label, before, after, names) => {
+    const diff = await diffOfEdit(workspace, FILE, before, after)
+    const changed = changedSymbols(diff)
 
-    expect(symbolNamed(head, "f").fingerprint.api).toBe(symbolNamed(base, "f").fingerprint.api)
-    expect(diff.symbols).toEqual([])
-    expect(diff.summary).toMatchObject({ changed: 0, unchanged: 1 })
+    expect(changed.map((c) => c.name).sort()).toEqual(names)
+    for (const c of changed) expect(c).toMatchObject(SYNTAX_ONLY)
   })
 })
 
@@ -194,6 +221,16 @@ describe("an edit outside every rule and signature is a syntax-only change", () 
 
 describe("a formatting edit is no change", () => {
   it.each([
+    [
+      "a lone arrow parameter put in parentheses",
+      "export const inc = x => x + 1\n",
+      "export const inc = (x) => x + 1\n",
+    ],
+    [
+      "a trailing comma after the last parameter",
+      withParams("a: string, b: number"),
+      withParams("a: string, b: number,"),
+    ],
     [
       "comments written into a guard and a return",
       price("", ""),
