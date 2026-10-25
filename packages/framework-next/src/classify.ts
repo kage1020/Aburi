@@ -1,4 +1,5 @@
 import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
   EXPORT_CLAUSE_DERIVED_BY_PREFIX,
   EXPORT_DEFAULT_DERIVED_BY,
   EXPORT_KEYWORD_DERIVED_BY,
@@ -74,7 +75,7 @@ function classifyComponentSymbol(
   file: AppRouterFile,
   ctx: ExtractionContext,
 ): SymbolClassification | null {
-  if (symbol.kind !== "function") return null
+  if (!isComponentValue(symbol)) return null
   if (!symbol.derivedBy.includes(EXPORT_DEFAULT_DERIVED_BY)) return null
   return withDirective(
     {
@@ -83,6 +84,12 @@ function classifyComponentSymbol(
     },
     ctx,
   )
+}
+
+/** `withAuth(function Page() {…})` is a `const` the language plugin cannot see to be a function; the function it is handed is the evidence. */
+function isComponentValue(symbol: SymbolCandidate<OpaqueAstNode>): boolean {
+  if (symbol.kind === "function") return true
+  return symbol.kind === "const" && symbol.derivedBy.includes(CALL_ARGUMENT_FUNCTION_DERIVED_BY)
 }
 
 function withDirective(base: SymbolClassification, ctx: ExtractionContext): SymbolClassification {

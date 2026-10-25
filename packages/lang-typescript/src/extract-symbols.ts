@@ -1,4 +1,8 @@
-import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
+import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
+  type ExtractionContext,
+  type SymbolCandidate,
+} from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import {
   AMBIENT_DECLARATION_TYPE,
@@ -12,6 +16,7 @@ import {
   type CallExtractionState,
   makeCallExtractionState,
   visitCallStatement,
+  wrappedFunctions,
 } from "./call-symbols"
 import { addClassAndMembers } from "./class-candidates"
 import { type CandidateSink, makeCandidateSink } from "./declaration-merge"
@@ -24,7 +29,7 @@ import {
   topLevelVisibility,
 } from "./export-evidence"
 import { readLeadingJsDoc } from "./leading-jsdoc"
-import { makeTsSymbolId, nestedQname } from "./qname"
+import { defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
 import {
   ENUM_SHAPE,
@@ -122,6 +127,10 @@ function visitStatement(
       return
     }
     default:
+      if (isDefaultExport(node)) {
+        const candidate = makeDefaultCallCandidate(node, ctx)
+        if (candidate !== null) out.add(candidate)
+      }
       return
   }
 }
@@ -184,6 +193,31 @@ function makeFunctionCandidate(
     derivedBy: exportEvidence(node),
     bodyNode: node.childForFieldName("body"),
     fullNode: node,
+  }
+}
+
+function makeDefaultCallCandidate(
+  value: Node,
+  ctx: ExtractionContext,
+): SymbolCandidate<Node> | null {
+  const statement = value.parent
+  if (statement === null) return null
+  const [lead, ...rest] = wrappedFunctions(value, statement)
+  if (lead === undefined) return null
+  const qname = defaultExportQname()
+  return {
+    id: makeTsSymbolId(ctx.file.path, qname),
+    kind: "const",
+    extKind: null,
+    name: qname,
+    visibility: topLevelVisibility(value),
+    decorators: [],
+    signature: null,
+    source: makeSourceRange(statement, ctx),
+    derivedBy: [CALL_ARGUMENT_FUNCTION_DERIVED_BY, ...exportEvidence(value)],
+    bodyNode: lead.bodyNode,
+    fullNode: statement,
+    ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
   }
 }
 

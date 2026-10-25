@@ -1,8 +1,11 @@
-import { unwrapValue } from "@aburi/core"
-import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
+import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
+  type ExtractionContext,
+  type SymbolCandidate,
+} from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { asFunctionValue, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
-import { inlineHandlers } from "./call-symbols"
+import { wrappedFunctions } from "./call-symbols"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
 import { exportEvidence, topLevelVisibility } from "./export-evidence"
@@ -98,17 +101,12 @@ function makeVariableCandidate(
       derivedBy:
         lead === undefined
           ? exportEvidence(statement)
-          : ["call-argument-function", ...exportEvidence(statement)],
+          : [CALL_ARGUMENT_FUNCTION_DERIVED_BY, ...exportEvidence(statement)],
       bodyNode: lead?.bodyNode ?? null,
       fullNode: statement,
       ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
     },
   ]
-}
-
-function wrappedFunctions(initializer: Node, statement: Node): MergedDeclaration<Node>[] {
-  const call = unwrapValue(initializer)
-  return call.type === "call_expression" ? inlineHandlers(call, statement) : []
 }
 
 function objectMemberCandidates(

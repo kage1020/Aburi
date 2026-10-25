@@ -22,6 +22,19 @@ describe("classifyNextSymbol — App Router special files", () => {
     })
   })
 
+  it("gives a default export the role when it is a const handed the function it wraps", () => {
+    const file = "app/dashboard/page.tsx"
+    const wrapped: SymbolShape = {
+      kind: "const",
+      derivedBy: ["call-argument-function", "export-default"],
+    }
+
+    expect(classifyNextSymbol(symbolIn(file, "<default>", wrapped), makeCtx(file))).toEqual({
+      extKind: "framework:next:page",
+      derivedBy: "framework:next:page",
+    })
+  })
+
   it.each([
     "GET",
     "POST",
