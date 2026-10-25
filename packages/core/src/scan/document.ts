@@ -79,13 +79,13 @@ export function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
       effect: null,
     })
   }
-  out.sort(
-    (a, b) =>
-      compareCodeUnit(a.from, b.from) ||
-      compareCodeUnit(a.to, b.to) ||
-      compareCodeUnit(a.via, b.via),
+  return out.sort(compareDependencies)
+}
+
+export function compareDependencies(a: Dependency, b: Dependency): number {
+  return (
+    compareCodeUnit(a.from, b.from) || compareCodeUnit(a.to, b.to) || compareCodeUnit(a.via, b.via)
   )
-  return out
 }
 
 export function uniqueSorted<T extends string>(values: readonly T[]): T[] {

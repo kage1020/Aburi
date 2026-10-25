@@ -50,6 +50,7 @@ import {
   pluginNamedFrameworks,
   resolveComponents,
   resolveManagers,
+  resolveWorkspacePackages,
 } from "./scan-components"
 import { findCoverageFault } from "./scan-coverage"
 import { reportScanIncidents } from "./scan-incidents"
@@ -99,6 +100,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const managers = await resolveManagers(config, workspaceRoot)
   const components = await resolveComponents(config, workspaceRoot, plugins.languages)
+  const workspacePackages = await resolveWorkspacePackages(workspaceRoot, managers, components)
   const fellBackToSingleComponent =
     declaredComponents(config) === undefined && managers.workspaces.length === 0
 
@@ -120,6 +122,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
         roots: [...manager.roots],
       })),
       components,
+      workspacePackages,
       generator: await readGeneratorInfo(),
       logger,
     })

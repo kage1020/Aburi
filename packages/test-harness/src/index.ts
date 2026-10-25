@@ -23,7 +23,10 @@ export interface PluginLineup {
 }
 
 /** The parts of `ScanInput` a suite occasionally sets beyond plugins and config. */
-export type ScanExtras = Pick<ScanInput, "components" | "logger" | "lspServerFactory">
+export type ScanExtras = Pick<
+  ScanInput,
+  "components" | "logger" | "lspServerFactory" | "workspacePackages"
+>
 
 /**
  * `scan` over `workspaceRoot` with `lineup`, every plugin's manifest registered first. Classification

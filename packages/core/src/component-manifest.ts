@@ -62,6 +62,29 @@ export async function readCandidateManifests(entry: {
   )
 }
 
+/** A `package.json#name` and the workspace-relative root whose manifest declares it. */
+export interface WorkspacePackage {
+  name: string
+  root: string
+}
+
+export async function readWorkspacePackages(
+  workspaceRoot: string,
+  roots: readonly string[],
+): Promise<WorkspacePackage[]> {
+  const unique = [...new Set(roots)].sort(compareCodeUnit)
+  const read = await Promise.all(
+    unique.map(async (root) => ({
+      root,
+      manifest: await readJsonManifest(join(workspaceRoot, root, NPM_MANIFEST)),
+    })),
+  )
+  return read.flatMap(({ root, manifest }) => {
+    const name: unknown = manifest?.name
+    return typeof name === "string" && name.length > 0 ? [{ name, root }] : []
+  })
+}
+
 export interface ManifestIdentity {
   name?: string
 }

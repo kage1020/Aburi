@@ -202,9 +202,6 @@ The monorepo overview.
 
 ### 4.1 Structure
 
-The example draws Component edges, which the IR can carry and `aburi scan` does not write yet
-(§4.2): against a scanned workspace the graph holds the nodes alone.
-
 ````md
 # Workspace
 
@@ -299,8 +296,10 @@ edge, ``- `<from>` → `<to>` (via `<via>`)`` in edge order, or
 with no edge too, because a reader looking at a block that failed to render
 cannot otherwise tell whether it held any edge; every node is a Components
 table row or an endpoint named in the list. The sentence says what the IR
-records, not that the components are independent: `aburi scan` writes Symbol
-edges only. A workspace with no component and no Component edge has no
+records, not that the components are independent: `aburi scan` draws a
+Component edge from an import alone ([`ir-schema.md`](./ir-schema.md) §11.3),
+so two components that reach each other only through a call matched by name
+have no edge. A workspace with no component and no Component edge has no
 diagram, and the section is that sentence alone.
 
 ### 4.3 generation metadata

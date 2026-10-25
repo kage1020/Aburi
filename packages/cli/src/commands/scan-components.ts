@@ -10,6 +10,8 @@ import {
   makeLanguageId,
   posixSpellingViolation,
   posixWorkspaceRelativeViolation,
+  readWorkspacePackages,
+  type WorkspacePackage,
 } from "@aburi/core"
 import type { Component, Config, LanguagePlugin } from "@aburi/types"
 import { CliError, errorMessage } from "../errors"
@@ -52,6 +54,22 @@ export async function resolveComponents(
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
       respectGitignore: config.respectGitignore,
     })
+  } catch (error) {
+    throw componentResolutionFailure(error)
+  }
+}
+
+export async function resolveWorkspacePackages(
+  workspaceRoot: string,
+  managers: DetectManagersResult,
+  components: readonly Component[],
+): Promise<WorkspacePackage[]> {
+  const roots = [
+    ...managers.workspaces.map((candidate) => candidate.relativeRoot),
+    ...components.flatMap((component) => component.roots),
+  ]
+  try {
+    return await readWorkspacePackages(workspaceRoot, roots)
   } catch (error) {
     throw componentResolutionFailure(error)
   }

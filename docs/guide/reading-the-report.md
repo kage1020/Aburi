@@ -191,9 +191,9 @@ plugin installed, and it will keep showing up until you change the cause.
 
 **`out/workspace.md`** covers the repository at a glance: components and their
 roots, the most common effects, and any files the scan could not read. Hand this
-one to a new joiner. Its Component dependencies graph shows the components alone
-for now: the scan records calls between symbols, which each component page lists,
-and no edges between components yet.
+one to a new joiner. Its Component dependencies graph draws an arrow from one
+component to another wherever a file in the first imports the second, by a
+relative path or by its package name.
 
 **`out/components/<id>.md`** covers one component in full. Every kept symbol,
 grouped by file, with its boundaries, signature, rules, effects, and calls.

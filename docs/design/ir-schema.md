@@ -542,7 +542,7 @@ never a name spelled oddly.
 
 ## 11. Dependency
 
-An edge between symbols or between components. `aburi scan` writes Symbol edges only, `via: "call"` from the resolved call graph; Component edges are valid v1 for any producer, and the projections and the diff handle them, but the scan emits none yet. Both endpoint kinds live in the same `dependencies[]` array — the schema for `from`/`to` is a plain `string`, and the endpoint kind is recovered from the id shape (`<language>:<file>#<qname>` for a Symbol id, ASCII kebab-case for a Component id).
+An edge between symbols or between components. `aburi scan` writes two kinds: Symbol edges, `via: "call"`, from the resolved call graph, and Component edges, `via: "import"`, from the imports that cross a Component boundary (§11.3). Both endpoint kinds live in the same `dependencies[]` array — the schema for `from`/`to` is a plain `string`, and the endpoint kind is recovered from the id shape (`<language>:<file>#<qname>` for a Symbol id, ASCII kebab-case for a Component id).
 
 ```jsonc
 {
@@ -565,6 +565,17 @@ An edge between symbols or between components. `aburi scan` writes Symbol edges 
 `"outbound" | "inbound" | "bidirectional"`
 
 The direction as seen from `from`. `bidirectional` is limited to cases such as bidirectional RPC.
+
+### 11.3 Component edges
+
+`aburi scan` writes one `{ from: A, to: B, via: "import", direction: "outbound", effect: null }` for each ordered pair of distinct Components where a file attributed to A — as a Symbol in it is ([`component-detect.md`](./component-detect.md) §12) — imports a module of B. Every import edge the language plugin reports counts — static, dynamic, a re-export, and a type-only import, which [`lang-plugin.md`](./lang-plugin.md) reports in the same shape — and the specifier decides which Component the module belongs to:
+
+- **A relative specifier** joins the importing file's directory. The joined path belongs to the Component a file at that path would belong to, so it need not be a file the scan read: a JSON module, a stylesheet or a directory's index lies in the Component whose root holds its path. A specifier that climbs above the workspace root names none.
+- **A bare specifier** names a workspace package by its package name: `@scope/name` for a scoped specifier, otherwise its first segment, so `@acme/billing/invoice` imports `@acme/billing`. The workspace packages are the `package.json#name` at each `workspace.managers[].roots` entry and each Component root, and a package belongs to the Component that holds its `package.json`. A name two Components' manifests both declare names neither. Every other bare specifier — a registry dependency, a Node built-in, a path alias — is outside the graph.
+
+A file the Document leaves out (`stats.skippedFiles`) contributes no edge, and neither does a file outside every Component. A `package.json` at one of those roots that cannot be read or parsed ends the scan as Component detection's does ([`component-detect.md`](./component-detect.md) §7), since edges built without it would be missing silently.
+
+A resolved call between two Components adds no Component edge. A call into another Component goes through an import of it, which is already an edge. The resolved calls that do not are the ones workspace scope matched by a globally unique name alone ([`call-resolution.md`](./call-resolution.md) §4.6). Drawing a dependency from that evidence would put an arrow in the graph that no import supports. So every Component edge the scan writes is `via: "import"`.
 
 ## 12. SourceRange
 

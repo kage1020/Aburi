@@ -111,7 +111,7 @@ Sub-cases:
 | `import * as ns from './y'` | `name = ns` and `target = ns.foo` → resolve to `<lang>:<resolved-file>#foo` |
 | `import Default from './y'`, `import { default as Default } from './y'` | `name = Default` → resolve to the module's default export: `<lang>:<resolved-file>#<default>` when it is anonymous, `<lang>:<resolved-file>#makeApp` when it is `export default function makeApp`; a named export called `Default` is not taken |
 | `import type { X } from './y'` | ignored (type-only imports produce no runtime edge) |
-| `import('./y')` (dynamic) | ignored at the target site. Meant to become a `via: import` Component edge; the scan records no Component edge yet ([`ir-schema.md`](./ir-schema.md) §11) |
+| `import('./y')` (dynamic) | ignored at the target site. Like every import, it is a `via: import` Component edge when it crosses a Component boundary ([`ir-schema.md`](./ir-schema.md) §11.3) |
 | bare specifier `'lodash'` | out-of-workspace — `resolved` stays `null`, confidence `high` (this is a definite external, not a failure); a qualified target through a named import that keeps the exported name goes on to Step 4 |
 
 A default export is reached only as one of those two Symbols, and three spellings of one are not. A default export that is a value rather than a declaration (`export default withAuth(Page)`, `export default { Page }`) has no Symbol. An anonymous `export default class` has no member Symbols for a dotted tail to reach, since `<default>::run` is not a qualified name ([`ir-schema.md`](./ir-schema.md) §3.2). And a default re-exported from another module (`export { default } from './impl'`) leads to the re-exporting file, which §8.3 does not see past. Each leaves the call `null`, bucketed `no-match`.
