@@ -82,9 +82,9 @@ function appendSignatureDelta(
   if (sig === null) return
   const inputSides: Sides = [before?.inputs ?? [], after?.inputs ?? []]
   if (sig.outputs.added.length > 0 || sig.outputs.removed.length > 0) {
-    const before = renderStringList(sig.outputs.removed)
-    const after = renderStringList(sig.outputs.added)
-    rows.push(`- signature.outputs: ${inlineCode(before)} → ${inlineCode(after)}`)
+    const removed = renderStringList(sig.outputs.removed)
+    const added = renderStringList(sig.outputs.added)
+    rows.push(`- signature.outputs: ${inlineCode(removed)} → ${inlineCode(added)}`)
   }
   appendInlineRow(rows, "signature.outputs modified", sig.outputs.modified)
   appendInlineRow(rows, "signature.throws added", sig.throws.added)
@@ -98,16 +98,23 @@ function appendSignatureDelta(
     rows.push(`- signature.inputs ${bucket}: ${rendered}`)
   }
   if (sig.asyncChanged) {
-    rows.push(`- signature.async: ${before?.async ?? false} → ${after?.async ?? false}`)
+    rows.push(`- signature.async: ${flagOrNone(before, "async")} → ${flagOrNone(after, "async")}`)
   }
   if (sig.generatorChanged) {
-    rows.push(`- signature.generator: ${before?.generator ?? false} → ${after?.generator ?? false}`)
+    rows.push(
+      `- signature.generator: ${flagOrNone(before, "generator")} → ${flagOrNone(after, "generator")}`,
+    )
   }
   if (sig.typeParametersChanged) {
     rows.push(
       `- signature.typeParameters: ${typeParametersOrNone(before)} → ${typeParametersOrNone(after)}`,
     )
   }
+}
+
+/** A side with no signature never said whether it was async; `false` would claim it did. */
+function flagOrNone(signature: Signature | null | undefined, flag: "async" | "generator"): string {
+  return signature === null || signature === undefined ? "none" : String(signature[flag])
 }
 
 function typeParametersOrNone(signature: Signature | null | undefined): string {

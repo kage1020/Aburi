@@ -372,7 +372,8 @@ A target called from more than one line is one **Calls** row that lists each lin
 ``- `logger.warn` (L12, L30, L44)``, and the rows follow the line each target is first called on.
 A body that logs ten times listed `logger.warn` ten times: in the Added and Removed entries of 45
 of Aburi's own pull requests, 763 of 4,304 call rows repeated a target already listed. The
-`aburi explain` page keeps a row per call, since it sets each one beside its resolution.
+`aburi explain` page groups its **Calls** the same way (§7); its Call resolution table, when it has
+one, still gives each unresolved call a row of its own, as each has its own reason.
 
 A blank line follows each list section that something comes after. Without it, the next label
 or the `<sub>` line is a lazy continuation of the last bullet's paragraph and renders inside that
@@ -476,8 +477,10 @@ Symbol id in a span of its own (§3.4.2). The Boundary effect surface and the de
 ### 5.8 Call display
 
 ```
-- `<target>` (L<line>)
+- `<target>` (L<line>, L<line>, …)
 ```
+
+One row per target, with every line it is called on, in the order of the first (§5.2).
 
 When `resolved` is non-null this may be elided (a future release will consider internal links to the symbol id — see the [roadmap](../roadmap.md)):
 ```
@@ -491,7 +494,7 @@ The 3 axes on one line via `<sub>`:
 <sub>api=`9ee77913af43` logic=`7ecf8c1cebe7` syntax=`a3f2e1d0c9b8`</sub>
 ```
 
-Symbols whose fingerprint is all zeros (dropped) do not emit a fingerprint line.
+Symbols whose fingerprint is all zeros (dropped) do not emit a fingerprint line, and neither does a `diff.md` entry for an added, removed or unknown Symbol: with one revision, the hashes have nothing to be compared with (MP19).
 
 ## 6. Diff Markdown — `out/diff.md`
 
@@ -557,7 +560,7 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 - visibility: `internal` → `public`
 ```
 
-The rows for a single value — `signature.async`, `signature.generator`, `signature.typeParameters`, `component` and `visibility` — set the base value before the head one, read off the entry's `before` and `after` as the confidence row's are, because the flag alone says only that something moved and the reader's next question is from what to what. `async` and `generator` read `false` / `true`; no type parameters, and a Symbol outside every Component, read `none`; type parameters are spelled as the signature line leads with them (§5.5).
+The rows for a single value — `signature.async`, `signature.generator`, `signature.typeParameters`, `component` and `visibility` — set the base value before the head one, read off the entry's `before` and `after` as the confidence row's are, because the flag alone says only that something moved and the reader's next question is from what to what. `async` and `generator` read `false` / `true`, or `none` on a side that has no signature, which never said either; no type parameters, and a Symbol outside every Component, read `none`; type parameters are spelled as the signature line leads with them (§5.5).
 
 Every decorator row prints the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4), and falls back to `qualifier.name` when `raw` is absent. A modified decorator differs from its base in its arguments or its receiver, the two things the diff compares beside the name ([`diff-algorithm.md`](./diff-algorithm.md) §5.2.2), and `raw` spells both, so its row sets the base's `raw` before the head's wherever the base element can be told (Delta rows, below).
 
@@ -749,7 +752,7 @@ component whose only difference is in a field this version of the projection has
 A Symbol end is written by its name and file, the way a moved Symbol's route is, rather than by its
 id: the id repeats the language on every end, and an edge between two Symbols of one file, the
 common case for a call, wrote the same path twice. Such an edge names the file once, after both
-names. A Component end is its id, which is already its name.
+names. A Component end is written by its id.
 
 The Unknown group is not split by level the way the added and removed groups are. Only a Symbol endpoint has a file to lose ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1), so every entry in it is a symbol-level edge by construction. Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
 

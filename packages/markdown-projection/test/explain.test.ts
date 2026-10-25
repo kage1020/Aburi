@@ -82,6 +82,27 @@ describe("projectSymbolExplain — a kept Symbol", () => {
   })
 })
 
+describe("projectSymbolExplain — calls", () => {
+  it("writes a target called from several lines once, with every line, in first-call order", () => {
+    const symbol = makeSymbol({
+      id: "ts:src/a.ts#run",
+      name: "run",
+      calls: [
+        call({ target: "log", line: 9 }),
+        call({ target: "load", line: 2 }),
+        call({ target: "log", line: 3 }),
+      ],
+    })
+    expect(sectionOf(projectSymbolExplain(symbol), "## Calls")).toEqual([
+      "## Calls",
+      "",
+      "- `load` (L2)",
+      "- `log` (L3, L9)",
+      "",
+    ])
+  })
+})
+
 describe("projectSymbolExplain — a dropped Symbol", () => {
   it("shows the drop reason in place of the axis sections", () => {
     expect(projectSymbolExplain(droppedSymbol("ts:src/a.ts#Dto", "pure DTO"))).toBe(

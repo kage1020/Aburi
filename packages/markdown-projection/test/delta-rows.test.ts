@@ -96,7 +96,7 @@ describe("a changed Symbol's signature rows", () => {
     expect(renderDelta({ signature: signature(overrides) })).toContain(rows)
   })
 
-  it.each<[string, Partial<SignatureDelta>, Signature | null, Signature, string]>([
+  it.each<[string, Partial<SignatureDelta>, Signature | null, Signature | null, string]>([
     [
       "an async toggle",
       { asyncChanged: true },
@@ -116,7 +116,14 @@ describe("a changed Symbol's signature rows", () => {
       { asyncChanged: true },
       null,
       sig({ async: true }),
-      "- signature.async: false → true\n",
+      "- signature.async: none → true\n",
+    ],
+    [
+      "a generator toggle on a Symbol that has no signature left",
+      { generatorChanged: true },
+      sig({ generator: true }),
+      null,
+      "- signature.generator: true → none\n",
     ],
     [
       "type parameters gained",
