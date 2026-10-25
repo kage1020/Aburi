@@ -368,6 +368,12 @@ Grouped by file; within a file, ascending by source.startLine:
 A Symbol whose `confidence` is not `high` carries the badge (§3.5) at the end of its heading, as
 `#### \`XController\` *(class)* ⚠ medium`.
 
+A target called from more than one line is one **Calls** row that lists each line,
+``- `logger.warn` (L12, L30, L44)``, and the rows follow the line each target is first called on.
+A body that logs ten times listed `logger.warn` ten times: in the Added and Removed entries of 45
+of Aburi's own pull requests, 763 of 4,304 call rows repeated a target already listed. The
+`aburi explain` page keeps a row per call, since it sets each one beside its resolution.
+
 A blank line follows each list section that something comes after. Without it, the next label
 or the `<sub>` line is a lazy continuation of the last bullet's paragraph and renders inside that
 bullet, except after a fenced rule row, which a paragraph cannot continue (MP14).
@@ -1050,6 +1056,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP17c | diff entry whose delta flags `asyncChanged`, `generatorChanged`, `typeParametersChanged`, `componentChanged` or `visibilityChanged` | One row per flag with the base value before the head one: `- signature.async: false → true`, ``- signature.typeParameters: none → `<T>` ``, ``- component: `billing` → none``, ``- visibility: `internal` → `public` `` |
 | MP18 | diff whose `dependencies.added` holds a call edge between two Symbols of one file, one between two files, and one from a Component to a Symbol | The first reads `` `a` → `b` in `<file>` (via `call`) ``, the second `` `a` in `<file>` → `b` in `<file>` (via `call`) ``, the third `` `billing` → `b` in `<file>` (via `import`) ``; no Symbol id appears |
 | MP19 | diff with an added, a removed and an unknown Symbol, each with a non-zero fingerprint | No entry carries a `<sub>` fingerprint line; the same Symbol on its component page does |
+| MP20 | Symbol block whose calls are `log` (L3), `svc.save` (L5), `log` (L9) and `log` (L9) | **Calls** reads ``- `log` (L3, L9)`` then ``- `svc.save` (L5)`` |
 
 ## 12. Design decisions
 

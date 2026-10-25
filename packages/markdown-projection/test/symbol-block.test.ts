@@ -87,6 +87,25 @@ describe("renderSymbolBlock — what a Symbol block holds", () => {
     ])
   })
 
+  it("writes a target called more than once on one row, with each line it is called on", () => {
+    const block = renderSymbolBlock(
+      handle({
+        calls: [
+          call({ target: "log", line: 3 }),
+          call({ target: "svc.save", line: 5 }),
+          call({ target: "log", line: 9 }),
+          call({ target: "log", line: 9 }),
+        ],
+        fingerprint: zeroFp(),
+      }),
+    )
+    expect(block.slice(block.indexOf("**Calls**:"))).toEqual([
+      "**Calls**:",
+      "- `log` (L3, L9)",
+      "- `svc.save` (L5)",
+    ])
+  })
+
   it("writes only the heading and fingerprint for a Symbol with nothing else", () => {
     expect(renderSymbolBlock(handle({ fingerprint: fp("v1") }))).toEqual([
       "#### `handle` *(function)*",

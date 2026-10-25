@@ -296,6 +296,20 @@ export function callRowText(call: { readonly target: string; readonly line: numb
   return `${inlineCode(call.target)} (L${call.line})`
 }
 
+/** A body that logs ten times would otherwise list `log` ten times, a line apart. */
+export function groupedCallRows(calls: readonly Call[]): string[] {
+  const linesByTarget = new Map<string, Set<number>>()
+  for (const call of [...calls].sort((a, b) => a.line - b.line)) {
+    const lines = linesByTarget.get(call.target) ?? new Set<number>()
+    lines.add(call.line)
+    linesByTarget.set(call.target, lines)
+  }
+  return [...linesByTarget].map(
+    ([target, lines]) =>
+      `- ${inlineCode(target)} (${[...lines].map((line) => `L${line}`).join(", ")})`,
+  )
+}
+
 export function fingerprintLine(fp: Fingerprint): string | null {
   if (isZeroFingerprint(fp)) return null
   return `<sub>api=${inlineCode(fp.api)} logic=${inlineCode(fp.logic)} syntax=${inlineCode(fp.syntax)}</sub>`

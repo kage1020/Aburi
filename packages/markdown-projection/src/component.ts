@@ -1,13 +1,13 @@
 import type { Component, ComponentId, Dependency, Symbol as IRSymbol } from "@aburi/types"
 import {
   appendAll,
-  callRow,
   compareEffectIdentity,
   compareStrings,
   decoratorRows,
   droppedFoldout,
   effectRow,
   fingerprintLine,
+  groupedCallRows,
   inlineCode,
   isSymbolIdEndpoint,
   joinCode,
@@ -186,10 +186,7 @@ export function renderSymbolBlock(
     )
   }
   if (symbol.calls.length > 0) {
-    pushList(
-      "**Calls**:",
-      [...symbol.calls].sort((a, b) => a.line - b.line).map((c) => callRow(c)),
-    )
+    pushList("**Calls**:", groupedCallRows(symbol.calls))
   }
   const fp = options.fingerprint === false ? null : fingerprintLine(symbol.fingerprint)
   if (fp !== null) push(fp)
