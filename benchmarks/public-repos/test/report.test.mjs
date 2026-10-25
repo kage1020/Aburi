@@ -3,6 +3,7 @@ import {
   containsPath,
   countRecoverableParseErrors,
   parseArgs,
+  renderReport,
   resolveRepos,
   scanRunFault,
   scrubPaths,
@@ -149,5 +150,52 @@ describe("resolveRepos", () => {
   it("keeps the manifest's order rather than the order asked for", () => {
     expect(resolveRepos(manifest, ["nest", "zod"]).map((repo) => repo.id)).toEqual(["zod", "nest"])
     expect(resolveRepos(manifest, null)).toHaveLength(2)
+  })
+})
+
+describe("renderReport — the Diff table", () => {
+  function sweep(...diffs) {
+    return {
+      startedAt: "2026-10-25T00:00:00.000Z",
+      generator: "0.5.0",
+      options: { runs: 1, warmup: 0, diff: true },
+      environment: { node: "v24.0.0", cpus: 4, cpuModel: "CPU", totalMemGiB: 16 },
+      results: diffs.map(([id, reportBytes]) => ({
+        id,
+        scan: { wallMsMedian: 1000, peakRssKb: 120_000, exitCode: 0, warnings: "" },
+        metrics: { totalCalls: 0, skippedByReason: {} },
+        diff: {
+          wallMs: 2000,
+          peakRssKb: 150_000,
+          exitCode: 0,
+          summary: { added: 1, removed: 0, changed: 2, moved: 0 },
+          ...(reportBytes === undefined ? {} : { reportBytes }),
+        },
+      })),
+    }
+  }
+
+  function diffTable(report) {
+    const lines = renderReport(report).split("\n")
+    return lines.slice(lines.indexOf("## Diff (`base..head`, 50 commits apart)") + 2)
+  }
+
+  it("gives each report's size, marking one over the comment budget", () => {
+    const table = diffTable(sweep(["hono", 31_270], ["zod", 106_371], ["nest", null]))
+    expect(table[0]).toBe(
+      "| Repo | Wall | Peak RSS | Exit | Added | Removed | Changed | Moved | diff.md |",
+    )
+    expect(table.slice(2, 5)).toEqual([
+      "| `hono` | 2.00 s | 146 MiB | 0 | 1 | 0 | 2 | 0 | 30.5 KiB |",
+      "| `zod` | 2.00 s | 146 MiB | 0 | 1 | 0 | 2 | 0 | 103.9 KiB ⚠ |",
+      "| `nest` | 2.00 s | 146 MiB | 0 | 1 | 0 | 2 | 0 | — |",
+    ])
+    expect(table[6]).toMatch(/^`diff\.md` is the report without a size cap\./)
+  })
+
+  it("leaves the column out of a sweep recorded before the report was measured", () => {
+    const table = diffTable(sweep(["hono"]))
+    expect(table[0]).toBe("| Repo | Wall | Peak RSS | Exit | Added | Removed | Changed | Moved |")
+    expect(table.join("\n")).not.toContain("size cap")
   })
 })

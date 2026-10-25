@@ -214,11 +214,13 @@ async function measureRepo(repo, options) {
       const document = JSON.parse(await readFile(diffPath, "utf8"))
       counts = document.summary ?? null
     }
+    const reportPath = resolve(dir, "out-diff/diff.md")
     result.diff = {
       wallMs: measurement.wallMs,
       peakRssKb: measurement.maxRssKb,
       exitCode: measurement.exitCode,
       summary: counts,
+      reportBytes: existsSync(reportPath) ? (await stat(reportPath)).size : null,
       warnings: capture(measurement.stderr),
     }
   }

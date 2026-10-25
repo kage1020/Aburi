@@ -115,6 +115,14 @@ function formatMiB(kb) {
   return kb == null ? "—" : (kb / 1024).toFixed(0)
 }
 
+/** The `--max-bytes` the GitHub Action passes, so a comment fits GitHub's 65,536-character body. */
+const COMMENT_BUDGET = 65_507
+
+function formatReportBytes(bytes) {
+  if (bytes == null) return "—"
+  return `${(bytes / 1024).toFixed(1)} KiB${bytes > COMMENT_BUDGET ? " ⚠" : ""}`
+}
+
 function formatSeconds(ms) {
   return ms == null ? "—" : (ms / 1000).toFixed(2)
 }
@@ -237,11 +245,25 @@ export function renderReport(report) {
     )
   }
   if (results.some((result) => result.diff)) {
+    // A sample recorded before the report was measured renders as it always did.
+    const reported = results.some((result) => result.diff?.reportBytes != null)
     lines.push("")
     lines.push("## Diff (`base..head`, 50 commits apart)")
     lines.push("")
-    lines.push(row(["Repo", "Wall", "Peak RSS", "Exit", "Added", "Removed", "Changed", "Moved"]))
-    lines.push("|---|---:|---:|---:|---:|---:|---:|---:|")
+    lines.push(
+      row([
+        "Repo",
+        "Wall",
+        "Peak RSS",
+        "Exit",
+        "Added",
+        "Removed",
+        "Changed",
+        "Moved",
+        ...(reported ? ["diff.md"] : []),
+      ]),
+    )
+    lines.push(`|---|---:|---:|---:|---:|---:|---:|---:|${reported ? "---:|" : ""}`)
     for (const result of results) {
       if (!result.diff) continue
       const summary = result.diff.summary ?? {}
@@ -255,7 +277,16 @@ export function renderReport(report) {
           formatCount(summary.removed),
           formatCount(summary.changed),
           formatCount(summary.moved),
+          ...(reported ? [formatReportBytes(result.diff.reportBytes)] : []),
         ]),
+      )
+    }
+    if (reported) {
+      lines.push("")
+      lines.push(
+        `\`diff.md\` is the report without a size cap. The GitHub Action posts at most ` +
+          `${COMMENT_BUDGET.toLocaleString("en-US")} bytes of it, so a report marked ⚠ reaches the ` +
+          "pull request with sections listing names only or left out.",
       )
     }
   }
