@@ -197,6 +197,7 @@ Opaque per-plugin configuration.
 - Keys are plugin manifest names
 - Values are arbitrary objects interpreted by the plugin (the Aburi core does not inspect their contents)
 - Each plugin is responsible for documenting the schema of its options
+- A key that is not the manifest name of a plugin the scan loaded — a misspelling, or a plugin none of `languages` / `frameworks` / `effects` enables — is a warning, one per key in config order, naming the key and the plugins that did load. Its options are ignored, and the exit code is the one the run would have had without the key. The loaded plugins are the manifest names the registry holds once the plugins are loaded, so the `hint-<name>` plugin of each `frameworkHints` entry (§8.3) counts as loaded, and a plugin loaded by package id or path matches only under its manifest name. `aburi diff` says each such line once, without a side label, because both of its scans load the head's config and plugin set ([`cli-spec.md`](./cli-spec.md) §5.6)
 
 ## 6. `components`
 
@@ -221,6 +222,8 @@ When not specified explicitly, the core Component autodetect infers them from `p
 ```
 
 Each field has the same shape as [`ir-schema.md`](./ir-schema.md) §4. **However, `languages` may be omitted on the config side** (when omitted, autodetect fills it in). `name` may also be omitted on the config side, in which case the autodetect result (`package.json#name`, etc.) is used. In the schema, both are required on the IR Component; the config Component is lenient.
+
+A `publicApi` entry is carried into the IR as written, in NFC, so one the IR schema refuses is refused here, with exit 2 naming the component, before anything is scanned: an entry holding a backslash, which this schema admits and the IR's does not. A root the IR cannot record is refused the same way.
 
 `frameworks` holds framework ids (`nestjs`, what a plugin's `provides.frameworks[]` or the
 detector names), not plugin names. A value that is a plugin's own name (`framework-nestjs`),
@@ -486,7 +489,7 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C7d | Two entries writing `framework:acme:a` and `framework:acme:b` | Exit 2 naming the second entry |
 | C8 | Extracting undeclared vocab with `strict: false` | Warning only; recorded in `out/aburi-vocab-discovered.json` |
 | C9 | Passing CLI `--strict` | Overrides config `strict: false` |
-| C10 | Specifying an unregistered plugin in `pluginOptions` | Warning (ignored because the plugin is disabled) |
+| C10 | A `pluginOptions` key that names no loaded plugin, misspelled (`effects-prsima` beside `effects: ["effects-prisma"]`) or not enabled; and, alongside, a loaded plugin's name and the `hint-acme` of a `frameworkHints` entry named `acme` | Exit code unchanged; one warning per unmatched key, in config order: `pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, effects-prisma, hint-acme); its options are ignored.` Nothing for the loaded names |
 | C11 | `minParsedFileRatio` omitted, and a scan that parsed some files and lost others | Exit 0 |
 | C12 | `minParsedFileRatio: 0.9`, and a scan that parsed half the files it found | Exit 3, naming both counts and the floor |
 | C13 | `minParsedFileRatio` equal to the ratio the scan achieved | Exit 0 |
@@ -500,6 +503,7 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C21 | `components: [{ …, "frameworks": ["framework-nestjs"] }]` | Exit 0; stderr names the component and suggests `nestjs`; the IR carries `framework-nestjs` |
 | C21a | `components: [{ …, "frameworks": ["lang-typescript"] }]`, a plugin that provides no framework | Exit 0; stderr says to remove it or write the component's framework id |
 | C22 | A config that opens with one byte order mark (U+FEFF) | Loads as without it; a key named twice is reported at the column an editor shows. Two of them, or one after the first character, is `config-parse-failed` naming `InvalidSymbol` and its offset |
+| C23 | `components: [{ …, "publicApi": ["src\\index.ts"] }]` | Exit 2 naming the component and the entry |
 
 ## 14.1 Config Schema Compatibility Policy
 

@@ -134,6 +134,42 @@ backslash outright. `RelativePath` admits `|`, and `Call.target` (`minLength: 1`
 admits both. The escaping is applied to every cell regardless — a table whose correctness
 depends on which column the value landed in is one schema change away from being wrong.
 
+#### 3.4.2 Values in a row
+
+A value the IR, the diff or the config supplies goes in a code span wherever a row names it,
+free-form text included: a thrown type (§5.5), a propagated effect's direct sources (§5.7), a
+Component's `name` (§5.1), a component-level Dependency endpoint (§4.1, §5.1), the generator's
+`name` and `version` and the `generatedAt` of the `workspace.md` header (§4.1), a `dropReason`
+(§3.6, §6.2, §7) and each ref of the `diff.md` title (§6.1). Written bare, the value is read as
+Markdown, and what a reviewer sees is no longer what the IR holds:
+
+- `_` and `*` open emphasis: `ts:src/__generated__/client.ts#save` renders `generated` in bold
+  and drops the underscores, naming a different path, and a `frameworkHints` drop reason ending
+  `class *Payload*` loses its glob to italics.
+- A `<…>` that parses as a tag is raw HTML, which GitHub's sanitizer then removes:
+  `ApiError<NotFound>` reads `ApiError`, while `Map<string, number>` stays as written.
+- A newline starts a block: a name holding `\n## Beta` writes a heading of its own, and one
+  holding `<details>` an unclosed fold that swallows the rest of the page.
+- GFM's strikethrough takes a single `~`, so a title of `HEAD~2..HEAD~1` would strike out
+  `2..HEAD`.
+- On GitHub, `@name` becomes a mention and `#123` an issue link. A decorator `frameworkHints`
+  drop reason reads `frameworkHints "x": @AcmeDto` and reaches Dropped changes in the PR
+  comment, and a Component's `name` defaults to its manifest name, often `@scope/pkg`.
+
+A span is the one construct none of these reach, with its fence sized and its newlines
+collapsed as above. Backslash escapes would keep `main..HEAD` byte for byte, and are not used:
+the characters to escape are a list that grows with every extension the renderer turns on (`~`
+is GFM's), and a newline still cannot sit inside a heading or a list item's row.
+
+What a row writes bare is what admits no Markdown by its grammar: `ComponentId`, `LanguageId`,
+`EffectId`, plugin, framework and package-manager names, the schema's enums (`kind`,
+`visibility`, `confidence`, a skip reason, a change status), counts, line numbers, and a ref of
+the `diff.md` title that is a commit SHA, 7 to 40 lowercase hex digits (§6.1). A component-level
+Dependency endpoint names a Component id, but the schema holds it to nothing but `minLength: 1`
+and the integrity check reads only the endpoints shaped like a Symbol id, so it is spanned like
+any other value. The headings, labels and notes around the values are the projection's own
+fixed text (§10).
+
 ### 3.5 Confidence badges
 
 | Value | Display |
@@ -154,8 +190,8 @@ Dropped symbols are shown in a `## Dropped` section inside a `<details>` fold:
 <details>
 <summary>14 dropped symbols</summary>
 
-- `ts:apps/billing/src/dto/create-invoice.dto.ts#CreateInvoiceDto` — pure DTO
-- `ts:apps/billing/src/types.ts#Invoice` — interface (data model)
+- `ts:apps/billing/src/dto/create-invoice.dto.ts#CreateInvoiceDto` — `pure DTO`
+- `ts:apps/billing/src/types.ts#Invoice` — `interface (data model)`
 
 </details>
 ```
@@ -172,7 +208,7 @@ The monorepo overview.
 **Languages**: ts, py
 **Managers**: pnpm (`apps/*`, `packages/*`), uv (`services/*`)
 **Symbols**: 542 kept · 87 dropped (across 1234 files)
-**Generated**: aburi 1.0.0 at 2026-06-21T15:30:00Z
+**Generated**: `@aburi/core` `1.0.0` at `2026-06-21T15:30:00Z`
 
 ## Components
 
@@ -198,9 +234,9 @@ graph LR
 
 Fallback list:
 
-- billing → pricing (via `import`)
-- billing → shared (via `import`)
-- pricing → shared (via `import`)
+- `billing` → `pricing` (via `import`)
+- `billing` → `shared` (via `import`)
+- `pricing` → `shared` (via `import`)
 
 ## Files not analysed
 
@@ -243,8 +279,10 @@ an edge — and one such node id fails the whole block, or, for `click` at the
 start of an edge, turns the line into a click statement that drops the
 edge. No prefixed id is one of them, and a prefix keeps holding when a
 mermaid release adds a keyword, which a list of the keywords to avoid would
-not. Labels use `Component.name` with mermaid-hostile characters (`"`,
-`<`, `>`, `]`, newline) escaped so the `id["label"]` syntax stays intact.
+not. Labels use `Component.name` with mermaid-hostile characters (`&`,
+`"`, `<`, `>`, `]`) escaped and each line ending, a lone `\r` included,
+written as `<br/>`, so the `id["label"]` syntax stays intact and no line of
+a label can close the mermaid fence.
 
 If the union of declared components and edge endpoints exceeds 100 nodes,
 the mermaid block is replaced by an explicit `_Component graph omitted…_`
@@ -253,7 +291,7 @@ the text list is emitted (avoids unreadability).
 
 The mermaid block, or the note that replaces it, is always followed by
 `Fallback list:` and the text form of the edges: one bullet per Component
-edge, ``- <from> → <to> (via `<via>`)`` in edge order, or
+edge, ``- `<from>` → `<to>` (via `<via>`)`` in edge order, or
 `_No Component edges recorded._` when there is none. The list is emitted
 with no edge too, because a reader looking at a block that failed to render
 cannot otherwise tell whether it held any edge; every node is a Components
@@ -275,7 +313,7 @@ The component's logical boundary + full details of every symbol belonging to tha
 ```md
 # Component: billing
 
-**Name**: Billing
+**Name**: `Billing`
 **Roots**: `apps/billing`, `packages/billing-domain`
 **Languages**: ts
 **Frameworks**: nestjs
@@ -288,7 +326,7 @@ The component's logical boundary + full details of every symbol belonging to tha
 
 ## Dependencies
 
-- billing → pricing (via import)
+- `billing` → `pricing` (via `import`)
 
 ## Symbols
 
@@ -353,14 +391,14 @@ A symbol with everything empty (class without boundary, no methods) is normally 
 
 ### 5.5 Signature display
 
-`(name: type, name: type) → output` form. Multiple outputs are separated by `|`. `throws: A, B` is appended.
-`async` / `generator*` / `<T,U>` (type parameters) are shown alongside as badges.
+`(name: type, name: type) → output` form, in one code span. Multiple outputs are separated by `|`. ``throws `A`, `B` `` is appended, each thrown type in a span of its own: `Signature.throws` items are unconstrained strings ([ir-schema.md](./ir-schema.md) §7, §3.4.2).
+Type parameters lead the span (`<T,U>(…)`); `⚡async` and `*generator*` follow it.
 
 Each input is written as TypeScript writes it, whatever language the IR came from: an input's `optional` and `rest` fields ([ir-schema.md](./ir-schema.md) §7) print as `a?: string` and `...ids: string[]`, and a defaulted input as the optional one it is to a caller, `limit?`. An input with an empty `type` prints its name alone, `x`. The `signature.inputs` rows of a diff entry spell inputs the same way.
 
 Example:
-```
-(id: string) → Promise<User | null> throws NotFoundError ⚡async
+```md
+`(id: string) → Promise<User | null>` throws `NotFoundError` ⚡async
 ```
 
 ### 5.6 Rule display
@@ -419,6 +457,13 @@ Extension effects with the `x-` prefix use the same form:
 - x-stripe:charge: `stripe.charges.create` (L42) [effects-stripe]
 ```
 
+A propagated effect has no line of its own; its direct sources take the line tag's place, each
+Symbol id in a span of its own (§3.4.2). The Boundary effect surface and the delta rows of
+`diff.md` write the same suffix:
+```
+- db.write: `prisma.invoice.create` [propagated from `ts:src/repo.ts#Repo.save`] [effects-prisma]
+```
+
 ### 5.8 Call display
 
 ```
@@ -446,7 +491,7 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ### 6.1 Overall structure
 
 ```md
-# Aburi diff: <base.ref>..<head.ref>
+# Aburi diff: `<base.ref>`..`<head.ref>`
 
 **Summary**: +5 added · -3 removed · ~12 changed · 2 moved · 1 moved+changed · ?2 unknown
 
@@ -465,6 +510,10 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ## 🎚 Confidence changes
 ## 🎨 Syntax-only changes
 ```
+
+Each ref of the title is in a span (§3.4.2), unless it is a commit SHA, which is written bare: hex
+admits no Markdown, and GitHub links a bare SHA, which it does not inside a span. The GitHub
+Action passes the two SHAs it resolved, so on its default path the title keeps both commit links.
 
 The section order is fixed, **highest importance → lowest**, and this list is the order: §6.4 drops
 sections from the bottom of it, and MP13 is stated against it, so a list that has drifted from the
@@ -652,13 +701,13 @@ The Unknown group is not split by level the way the added and removed groups are
 
 ```md
 <details>
-<summary>4 added / 1 removed</summary>
+<summary>2 entries</summary>
 
-### Added
-- `ts:apps/billing/src/dto/refund.dto.ts#RefundDto` — pure DTO
+**1 to-dropped**
+- `ts:apps/billing/src/dto/refund.dto.ts#RefundDto` — `pure DTO`
 
-### Removed
-- `ts:apps/billing/src/dto/legacy.dto.ts#LegacyDto` — pure DTO
+**1 to-kept**
+- `ts:apps/billing/src/dto/legacy.dto.ts#LegacyDto`
 
 </details>
 ```
@@ -831,11 +880,7 @@ Renders L2 standalone. Written to `out/symbols/<sanitized-id>.md` or to `stdout`
 `@Post('/invoices')` `@UseGuards(AuthGuard)`
 
 ## Signature
-```
-(customerId: CustomerId, items: LineItem[]) → Promise<Invoice>
-throws: CreditLimitExceeded
-async
-```
+`(customerId: CustomerId, items: LineItem[]) → Promise<Invoice>` throws `CreditLimitExceeded` ⚡async
 
 ## Rules
 - guard: `customer.creditLimit < invoice.total` (L58)
@@ -872,7 +917,7 @@ When a dropped symbol is explained:
 
 **Component**: billing
 **File**: `apps/billing/src/dto/create-invoice.dto.ts:1-8`
-**Drop reason**: pure DTO
+**Drop reason**: `pure DTO`
 
 (dropped symbols carry no rules/effects/calls/fingerprint, so there are no detail sections)
 ```
@@ -945,6 +990,9 @@ All Markdown projection output is **English, with fixed wording**.
 | MP13c | diff with twelve API changes and one thin removed Symbol, projected with a budget that holds API changes only as names | `➖ Removed` is kept whole below the names-only API changes wherever that fits: not named only in a larger document, and not omitted |
 | MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
 | MP15 | A signature with an optional input and a rest input; a diff entry whose `signature.inputs.added` holds a rest input | `(a?: string, ...ids: string[])` in the signature line, and `` `...ids: string[]` `` in the diff row (§5.5). An input with an empty `type` prints as its name alone |
+| MP16 | A value holding `_x_`, `*x*`, `<T>`, a backtick, `~~s~~` and a newline followed by `## `, as a thrown type, as a propagated effect's direct source (Symbol block, Boundary effect surface, delta row), as a Component `name`, as a component-level Dependency endpoint (component page, `workspace.md` list), as the generator's `name` or `version` or the `generatedAt` of the `workspace.md` header, as either ref of the `diff.md` title, and as a `dropReason` (component page, Dropped changes, `explain`) | Rendered as CommonMark, each shows the value as written, its newline as a space: no emphasis, no HTML and no block of its own (§3.4.2) |
+| MP16a | A `diff.md` title whose ref is a commit SHA of 40 or of 7 lowercase hex digits, and one whose ref is six hex digits, uppercase hex or a branch name | The SHA bare, which GitHub links; every other ref in a span (§6.1) |
+| MP16b | A Component `name` holding `\n`, `\r\n` or a lone `\r`, then a fence line, then `# Injected` | One mermaid node line, each line ending written as `<br/>`: the fence stays open and no heading is written (§4.2) |
 
 ## 12. Design decisions
 

@@ -33,7 +33,7 @@ export function fitsInline(value: string): boolean {
   return !value.includes("\n") && value.length <= INLINE_CODE_MAX_LENGTH
 }
 
-const LINE_ENDING = /\r\n|\r|\n/
+export const LINE_ENDING = /\r\n|\r|\n/
 
 export function fencedBlock(source: string, indent = ""): string {
   const fence = "`".repeat(Math.max(MIN_BLOCK_FENCE, longestBacktickRun(source) + 1))
@@ -86,6 +86,10 @@ export function inlineCode(value: string): string {
   const edge = `${collapsed.at(0)}${collapsed.at(-1)}`
   const pad = edge.includes("`") || edge.includes(" ") ? " " : ""
   return `${fence}${pad}${collapsed}${pad}${fence}`
+}
+
+export function joinCode(items: readonly string[]): string {
+  return items.map((item) => inlineCode(item)).join(", ")
 }
 
 export function requireDropReason(symbol: {
@@ -146,7 +150,7 @@ export function signatureLine(signature: Signature | null | undefined): string |
   if (signature === null || signature === undefined) return null
   const inputs = signature.inputs.map(formatInput).join(", ")
   const outputs = signature.outputs.length > 0 ? signature.outputs.join(" | ") : "void"
-  const throwsPart = signature.throws.length > 0 ? ` throws ${signature.throws.join(", ")}` : ""
+  const throwsPart = signature.throws.length > 0 ? ` throws ${joinCode(signature.throws)}` : ""
   const asyncBadge = signature.async ? " ⚡async" : ""
   const genBadge = signature.generator ? " *generator*" : ""
   const typeParams =
@@ -214,7 +218,7 @@ export function propagatedFromSuffix(derivedFrom: readonly string[]): string {
   if (derivedFrom.length === 0) {
     throw new ProjectionInvariantError("derivedFrom", "propagated Effect")
   }
-  return `[propagated from ${derivedFrom.join(", ")}]`
+  return `[propagated from ${joinCode(derivedFrom)}]`
 }
 
 export function orderEffects(effects: readonly Effect[]): Effect[] {
@@ -275,16 +279,8 @@ export function sortDependencies(deps: readonly Dependency[]): Dependency[] {
   )
 }
 
-export interface RenderDocumentOptions {
-  readonly collapseBlankRuns?: boolean
-}
-
-export function renderDocument(
-  lines: readonly string[],
-  options: RenderDocumentOptions = {},
-): string {
-  const joined = lines.join("\n")
-  const body = options.collapseBlankRuns === false ? joined : joined.replace(/\n{3,}/g, "\n\n")
+export function renderDocument(lines: readonly string[]): string {
+  const body = lines.join("\n").replace(/\n{3,}/g, "\n\n")
   return `${body.trimEnd()}\n`
 }
 

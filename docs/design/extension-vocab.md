@@ -117,6 +117,8 @@ A prefix means "one or more namespace segments owned by this plugin". A plugin d
 
 These are machine-validated by [`aburi.plugin.v1.json`](https://github.com/kage1020/Aburi/blob/main/schema/aburi.plugin.v1.json).
 
+`provides.extKinds[].baseKind` says what kind of Symbol the extKind describes; it does not constrain `Symbol.kind`. A plugin may give the extKind to a Symbol the language plugin read as another kind, as `framework:next:route` (`baseKind: "function"`) goes to a route handler that is a `const` because its value cannot be seen to be a function.
+
 ## 4. Registration lifecycle
 
 ```

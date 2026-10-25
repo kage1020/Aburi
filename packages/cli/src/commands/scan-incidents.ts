@@ -31,13 +31,19 @@ const SKIP_REASON_ADVICE: Record<SkippedFile["reason"], string> = {
 
 type SayIncident = (line: string) => void
 
-export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: string | null): void {
+export function reportScanIncidents(
+  report: ScanReport,
+  warn: WarnFn,
+  label: string | null,
+  said: Set<string> = new Set(),
+): void {
   const sayIncident: SayIncident = (line) => {
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
   for (const line of describeWorkspaceDetection(report)) sayIncident(line)
   reportCoverageFault(report.coverageFault, sayIncident)
   reportPluginNamedFrameworks(report.pluginNamedFrameworks, sayIncident)
+  reportUnmatchedPluginOptions(report, warn, said)
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
   reportUndeclaredVocab(report.undeclaredVocab, report.vocabDiscoveredPath, sayIncident, warn)
@@ -182,6 +188,17 @@ function reportPluginNamedFrameworks(
     sayIncident(
       `Component "${component}" lists "${value}" in frameworks, which names a plugin, not a framework; the IR carries it as written. ${fix}`,
     )
+  }
+}
+
+/** Not labelled: a pluginOptions key reaches no artifact, and every scan of one command reads the same config. */
+function reportUnmatchedPluginOptions(report: ScanReport, warn: WarnFn, said: Set<string>): void {
+  const loaded = report.loadedPlugins.join(", ")
+  for (const key of report.unmatchedPluginOptions) {
+    const line = `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}); its options are ignored.`
+    if (said.has(line)) continue
+    said.add(line)
+    warn(line)
   }
 }
 

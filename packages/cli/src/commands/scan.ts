@@ -73,6 +73,11 @@ export interface ScanOptions {
   incidents?: {
     warn: WarnFn
     label?: string
+    /**
+     * The pluginOptions lines an earlier scan of the same command already said. Share one set only
+     * across scans that read one config and load one plugin set.
+     */
+    said?: Set<string>
   }
 }
 
@@ -141,6 +146,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     config.minParsedFileRatio,
   )
 
+  const loadedPlugins = plugins.registry.listPlugins().map((plugin) => plugin.name)
   const report: ScanReport = {
     irPath,
     workspaceMdPath: null,
@@ -173,6 +179,10 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     unnameableRoots: managers.unnameableRoots,
     fellBackToSingleComponent,
     pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
+    loadedPlugins,
+    unmatchedPluginOptions: Object.keys(config.pluginOptions ?? {}).filter(
+      (key) => !loadedPlugins.includes(key),
+    ),
     exitCode:
       scanResult.extractionFailures.length > 0 ||
       coverageFault !== null ||
@@ -197,7 +207,12 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       await removeComponentMdsExcept(command, outputDir, report.componentMdPaths, logger)
     }
   } catch (error) {
-    reportIncidents(report, options.incidents)
+    try {
+      reportIncidents(report, options.incidents)
+    } catch (sinkError) {
+      // A throw from here would replace the error that ended the scan.
+      logger.warn(`Failed to report the scan's incidents: ${errorMessage(sinkError)}`)
+    }
     throw error
   }
   reportIncidents(report, options.incidents)
@@ -206,11 +221,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
 function reportIncidents(report: ScanReport, incidents: ScanOptions["incidents"]): void {
   if (incidents === undefined) return
-  try {
-    reportScanIncidents(report, incidents.warn, incidents.label ?? null)
-  } catch {
-    // The exit code must not depend on stderr surviving: `aburi scan 2>&1 | head -1` closes it.
-  }
+  reportScanIncidents(report, incidents.warn, incidents.label ?? null, incidents.said)
 }
 
 function describeParseErrors(errors: readonly ParseError[]): string {

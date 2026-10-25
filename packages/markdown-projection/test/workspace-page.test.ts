@@ -36,7 +36,7 @@ describe("projectWorkspace — header", () => {
       "**Languages**: py, ts",
       "**Managers**: pnpm (`.`, `tools`), uv (`services/api`)",
       "**Symbols**: 1 kept · 1 dropped (across 2 files)",
-      "**Generated**: aburi 1.2.3 at 2026-01-02T03:04:05Z",
+      "**Generated**: `aburi` `1.2.3` at `2026-01-02T03:04:05Z`",
       "",
     ])
   })
@@ -48,7 +48,7 @@ describe("projectWorkspace — header", () => {
       projectWorkspace(stamped, { suppressTimestamp: true }),
       projectWorkspace(unstamped),
     ]) {
-      expect(md).toContain("**Generated**: aburi 1.2.3\n")
+      expect(md).toContain("**Generated**: `aburi` `1.2.3`\n")
     }
   })
 

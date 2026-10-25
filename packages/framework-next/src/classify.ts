@@ -1,9 +1,12 @@
-import { lastQnameSegment } from "@aburi/core"
-import type {
-  ExtractionContext,
-  OpaqueAstNode,
-  SymbolCandidate,
-  SymbolClassification,
+import {
+  EXPORT_CLAUSE_DERIVED_BY_PREFIX,
+  EXPORT_DEFAULT_DERIVED_BY,
+  EXPORT_KEYWORD_DERIVED_BY,
+  type ExtractionContext,
+  type OpaqueAstNode,
+  type SymbolCandidate,
+  type SymbolClassification,
+  type SymbolKind,
 } from "@aburi/types"
 import { type AppRouterFile, recognizeAppRouterFile } from "./app-router"
 import { detectModuleDirective, type ModuleDirective } from "./directives"
@@ -35,18 +38,35 @@ export function classifyNextSymbol(
   return classifyComponentSymbol(symbol, file, ctx)
 }
 
+/** A handler the language plugin cannot see to be a function (a destructuring, a call's result) is a `const`; Next calls it all the same. */
+const ROUTE_HANDLER_KINDS: ReadonlySet<SymbolKind> = new Set<SymbolKind>(["function", "const"])
+
 function classifyRouteSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: ExtractionContext,
 ): SymbolClassification | null {
-  if (symbol.kind !== "function") return null
-  // `lastQnameSegment` throws on a broken qname; that is a language-plugin bug not to swallow.
-  const leaf = lastQnameSegment(symbol.name)
-  if (!isNextHttpVerb(leaf)) return null
+  if (!ROUTE_HANDLER_KINDS.has(symbol.kind)) return null
+  const verbs = exportedNames(symbol).filter(isNextHttpVerb)
+  if (verbs.length === 0) return null
   return withDirective(
-    { extKind: "framework:next:route", derivedBy: `${NEXT_DERIVED_BY_PREFIX}:route:${leaf}` },
+    {
+      extKind: "framework:next:route",
+      derivedBy: verbs.map((verb) => `${NEXT_DERIVED_BY_PREFIX}:route:${verb}`).join(";"),
+    },
     ctx,
   )
+}
+
+/** `export-keyword` on a namespace member exports it from the namespace, not the module; matching the whole qname keeps `N.GET` from reading as a verb. */
+function exportedNames(symbol: SymbolCandidate<OpaqueAstNode>): string[] {
+  const names = new Set<string>()
+  if (symbol.derivedBy.includes(EXPORT_KEYWORD_DERIVED_BY)) names.add(symbol.name)
+  for (const token of symbol.derivedBy) {
+    if (token.startsWith(EXPORT_CLAUSE_DERIVED_BY_PREFIX)) {
+      names.add(token.slice(EXPORT_CLAUSE_DERIVED_BY_PREFIX.length))
+    }
+  }
+  return [...names]
 }
 
 function classifyComponentSymbol(
@@ -55,7 +75,7 @@ function classifyComponentSymbol(
   ctx: ExtractionContext,
 ): SymbolClassification | null {
   if (symbol.kind !== "function") return null
-  if (!symbol.derivedBy.includes("export-default")) return null
+  if (!symbol.derivedBy.includes(EXPORT_DEFAULT_DERIVED_BY)) return null
   return withDirective(
     {
       extKind: `framework:next:${file.role}`,
