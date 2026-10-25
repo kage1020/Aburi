@@ -60,6 +60,40 @@ describe("scan — event emitters in a NestJS service file", () => {
     expect(publish.calls.map((c) => c.target)).toEqual(["socket.emit"])
   })
 
+  it("publishes through a field declared as EventEmitter2 under any name, and leaves a gateway's socket a call", async () => {
+    await workspace.writeSource(
+      "src/orders.service.ts",
+      [
+        'import { Injectable } from "@nestjs/common"',
+        'import { EventEmitter2 } from "@nestjs/event-emitter"',
+        'import type { Server } from "socket.io"',
+        "",
+        "@Injectable()",
+        "export class OrdersService {",
+        "  private server!: Server",
+        "  constructor(private readonly eventEmitter: EventEmitter2) {}",
+        "  create(id: string) {",
+        '    this.eventEmitter.emit("order.created", { id })',
+        '    this.server.emit("order", id)',
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const create = symbolNamed(await scanWorkspace(), "OrdersService.create")
+
+    expect(create.effects).toMatchObject([
+      {
+        id: "event.publish",
+        target: "this.eventEmitter.emit",
+        confidence: "high",
+        derivedBy: "effects-plugin:nest:EventEmitter2.emit",
+      },
+    ])
+    expect(create.calls.map((c) => c.target)).toEqual(["this.server.emit"])
+  })
+
   it("publishes in a file that imports eventemitter2 itself", async () => {
     await workspace.writeSource(
       "src/publish.ts",

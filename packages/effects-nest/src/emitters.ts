@@ -1,4 +1,8 @@
-import { hasMatchingImport } from "@aburi/plugin-registry/plugin-input"
+import {
+  assertImportEdgeSource,
+  assertNamespaceBinding,
+  hasMatchingImport,
+} from "@aburi/plugin-registry/plugin-input"
 import type { ImportEdge } from "@aburi/types"
 import { EFFECTS_NEST_PLUGIN_NAME } from "./constants"
 
@@ -20,6 +24,31 @@ export function hasNestEmitterImport(imports: readonly ImportEdge[], filePath: s
     { plugin: EFFECTS_NEST_PLUGIN_NAME, filePath },
     isNestEmitterModule,
   )
+}
+
+export const NEST_EMITTER_CLASS = "EventEmitter2" as const
+
+export function namesNestEmitterClass(
+  imports: readonly ImportEdge[],
+  typeName: string,
+  filePath: string,
+): boolean {
+  const origin = { plugin: EFFECTS_NEST_PLUGIN_NAME, filePath }
+  return imports.some((edge) => {
+    assertImportEdgeSource(edge, origin)
+    if (!isNestEmitterModule(edge.source)) return false
+    if (edge.symbols === "*") {
+      const binding = edge.namespaceBinding
+      if (binding === undefined) return false
+      assertNamespaceBinding(binding, edge, origin)
+      return typeName === `${binding}.${NEST_EMITTER_CLASS}`
+    }
+    return edge.symbols.some(
+      (raw) =>
+        (raw === NEST_EMITTER_CLASS && typeName === NEST_EMITTER_CLASS) ||
+        raw === `${NEST_EMITTER_CLASS} as ${typeName}`,
+    )
+  })
 }
 
 const NEST_EVENT_EMITTER_IDENTIFIERS_LIST = ["eventBus", "EventEmitter2"] as const

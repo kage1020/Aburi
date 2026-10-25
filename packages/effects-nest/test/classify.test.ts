@@ -31,6 +31,40 @@ describe("classifyNestCall — publishing calls", () => {
   })
 })
 
+describe("classifyNestCall — a receiver declared as the emitter class", () => {
+  it.each([
+    ["this.eventEmitter.emit", "EventEmitter2"],
+    ["this.events.emit", "EventEmitter2"],
+  ])("classifies %s, whatever the field is called, tagged with the class", (target, receiverType) => {
+    expect(classifyNestCall(makeCall({ target, receiverType }), ctx)).toEqual({
+      effectId: "event.publish",
+      confidence: "high",
+      derivedBy: "effects-plugin:nest:EventEmitter2.emit",
+    })
+  })
+
+  it("keeps the name's tag where the receiver is also a recognised name", () => {
+    const call = makeCall({ target: "this.eventBus.emit", receiverType: "EventEmitter2" })
+
+    expect(classifyNestCall(call, ctx)?.derivedBy).toBe("effects-plugin:nest:eventBus.emit")
+  })
+
+  it.each([
+    ["a type the file's emitter import does not bind", "this.socket.emit", "Server", ctx],
+    ["a method other than emit", "this.events.on", "EventEmitter2", ctx],
+    [
+      "a file that imports no emitter module",
+      "this.events.emit",
+      "EventEmitter2",
+      makeCtx({
+        imports: [{ source: "./emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
+      }),
+    ],
+  ])("returns null for %s", (_label, target, receiverType, context) => {
+    expect(classifyNestCall(makeCall({ target, receiverType }), context)).toBeNull()
+  })
+})
+
 describe("classifyNestCall — calls that are not a publish", () => {
   it.each([
     ["no import at all", []],

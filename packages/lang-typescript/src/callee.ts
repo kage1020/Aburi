@@ -2,6 +2,7 @@ import { isQnameSegment } from "@aburi/core"
 import { type CallCandidate, COMPUTED_TARGET_SEGMENT } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { findChild, firstNonCommentChild, hasErrorChild } from "./ast-helpers"
+import { receiverTypeOf } from "./receiver-type"
 import { decodeStringLiteral, readStaticString } from "./string-escape"
 
 export function readCall(node: Node): CallCandidate | null {
@@ -14,6 +15,7 @@ export function readCall(node: Node): CallCandidate | null {
   const args = (argsNode?.namedChildren ?? []).filter(
     (arg): arg is Node => arg !== null && arg.type !== "comment",
   )
+  const receiverType = receiverTypeOf(callee)
   return {
     target: shape.target,
     line: node.startPosition.row + 1,
@@ -22,6 +24,7 @@ export function readCall(node: Node): CallCandidate | null {
     inNew: isNew,
     literalArgs: args.map(literalOf),
     ...(shape.dynamic ? { dynamicReceiver: true } : {}),
+    ...(receiverType === null ? {} : { receiverType }),
   }
 }
 
