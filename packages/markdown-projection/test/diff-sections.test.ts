@@ -10,7 +10,7 @@ import {
   sliceId,
   symbolId,
 } from "@aburi/test-support"
-import type { SymbolChange, SymbolDelta, SymbolDroppedToggled } from "@aburi/types"
+import type { SymbolChange, SymbolDelta, SymbolDroppedToggled, SymbolId } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectDiffSummaryLine } from "../src"
 import { namedSymbol, projectChanges, relocated } from "./fixtures"
@@ -249,6 +249,19 @@ describe("projectDiff — Summary lines", () => {
     )
   })
 
+  it("says how many of the removals were folded, in the document's Summary line alone", () => {
+    const diff = makeDiff({ summary: { ...summary, removedFolded: 2 } })
+    expect(projectDiff(diff)).toContain("· -3 removed (2 folded) ·")
+    expect(projectDiffSummaryLine(diff)).toBe("+5 -3 ~12 ↔2 ⤴1")
+  })
+
+  it.each([0, undefined])("names no folds when the count is %s", (removedFolded) => {
+    const diff = makeDiff({
+      summary: { ...summary, ...(removedFolded === undefined ? {} : { removedFolded }) },
+    })
+    expect(projectDiff(diff)).toContain("· -3 removed · ")
+  })
+
   it("qualifies both with the unknown count, so the counts beside it are not read as complete", () => {
     const diff = makeDiff({ summary: { ...summary, unknown: 4 } })
     expect(projectDiffSummaryLine(diff)).toBe("+5 -3 ~12 ↔2 ⤴1 · ?4 unknown")
@@ -260,5 +273,29 @@ describe("projectDiff — Summary lines", () => {
       expect(projectDiffSummaryLine(diff)).not.toContain("unknown")
       expect(projectDiff(diff)).not.toContain("unknown")
     }
+  })
+})
+
+describe("projectDiff — a removal folded into a head Symbol", () => {
+  const removedSection = (foldedInto: SymbolId | null) =>
+    sectionOf(
+      projectDiff(
+        makeDiff({
+          symbols: [{ status: "removed", symbol: namedSymbol("makeEmptyIR"), foldedInto }],
+        }),
+      ),
+      "## ➖ Removed",
+    )
+
+  it("names the Symbol it was folded into, under its file", () => {
+    const lines = removedSection(symbolId("ts:src/fixtures.ts#emptyIR"))
+    const file = lines.indexOf("**File**: `src/makeEmptyIR.ts:1`")
+    expect(lines[file + 1]).toBe(
+      "**Folded into**: `ts:src/fixtures.ts#emptyIR`, which holds the same body",
+    )
+  })
+
+  it("says nothing of a fold for a removal no head Symbol carries", () => {
+    expect(removedSection(null).join("\n")).not.toContain("Folded into")
   })
 })

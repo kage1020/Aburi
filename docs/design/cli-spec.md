@@ -817,12 +817,16 @@ aburi diff main..HEAD --fail-on changed,removed
 |---|---|
 | Status granularity | `added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` / `unknown` |
 | Delta granularity | `api-changed` / `logic-changed` / `syntax-changed` / `confidence-changed` |
-| Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` |
+| Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` / `removed:folded` |
 | Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |
 
 Multiple values may be given, comma-separated. Every segment must be a clause: an empty one (`added,`, `added,,removed`) exits 2, as a value with no clause at all does.
 
 `--fail-on` may also be repeated, so a script can write one clause per `--fail-on`: each occurrence adds its clauses after those of the occurrences before it, and `--fail-on changed --fail-on removed` gates exactly as `--fail-on changed,removed` does — the order included, which decides the clause a tripped gate names. Keeping only the last occurrence would leave the earlier clauses unchecked, and the run would pass on the change they were written to block. Each occurrence is read as a value of its own: an error quotes the one at fault and counts clauses within it (`--fail-on removed, --fail-on changed` exits 2 with `--fail-on value "removed," is invalid: clause 2 of 2 is empty; …`), and an empty occurrence exits 2 beside a valid one as it does alone. `runDiff`, which also takes the values as a list, refuses an empty one as it refuses an empty value, since either leaves the gate checking nothing.
+
+#### Removals folded into a survivor
+
+`removed` counts the removals whose body no head Symbol holds, and `removed:folded` the ones folded into a head Symbol that does ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2). Deduplicating N identical helpers into one leaves N−1 `removed` entries whatever the author does, so a gate that counted them would fail every such refactor until it was taken out of the workflow. `--fail-on removed,removed:folded` gates on every removal, as `removed` did before folds were read; a diff written before then carries no `foldedInto`, and `removed` counts all of its removals.
 
 #### Uses of Direction-Specific fail-on
 
@@ -835,7 +839,8 @@ In cases where a drop-rule change legitimately fires `dropped-toggled` in bulk (
 
 #### Evaluation Rules
 
-- Status granularity (`changed`, etc.): fires if even one Symbol has the given status
+- Status granularity (`changed`, etc.): fires if even one Symbol has the given status; `removed` leaves out a removal folded into a head Symbol, which `removed:folded` counts
+- Every clause counts `symbols[]` entries, never the `summary` counters, so the count and the Symbols it names are one list
 - Delta granularity (`api-changed`, etc.): fires if even one Symbol has status `changed` or `moved+changed` with the corresponding `delta.<axis>Changed: true`. A diff written before `delta.confidenceChanged` existed carries no key, and `confidence-changed` counts nothing in it
 
 Examples:
@@ -850,6 +855,16 @@ aburi diff main..HEAD --fail-on api-changed,removed,dropped-toggled
 ```
 
 This allows fine-grained CI gates, making operational policies such as "only API changes require approval, logic changes are warnings" possible today.
+
+A tripped clause names the Symbols it counted on stderr, under its line and indented, by the id the head gives each (the base's for a removal), ten at most and then how many more:
+
+```
+--fail-on removed tripped (observed: 2 removed)
+  ts:src/billing/legacy.ts#refundInvoice
+  ts:src/billing/legacy.ts#voidInvoice
+```
+
+A red check that said only `removed tripped` sent its reader to the report to find which removal, and on a pull request whose removals were expected left nothing to say why the gate fired but a comment. The first line keeps its form, so a script reading it reads it as before.
 
 A Symbol whose extraction confidence moved is `changed` even when no fingerprint did ([`diff-algorithm.md`](./diff-algorithm.md) §4), so `--fail-on changed` fires on it. A plugin can decide confidence from a file-level signal (the Express plugin reads whether the file imports `express`), so one edit can move every Symbol in a file at once. A gate that should not fire on that writes the axes it cares about (`--fail-on api-changed,logic-changed`, which a confidence-only change does not trip) and, where a mass shift should still be noticed, a threshold on the confidence axis (`confidence-changed:>20`).
 
@@ -1279,6 +1294,7 @@ a command's option, not a global one (§3).
 | CL53 | `aburi scan` where `package.json` and `aburi.json` both open with one byte order mark | exit 0, the Component named after the `package.json` |
 | CL54 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3` or `2`), never `1`; the other stream byte for byte, the same artefacts, and no base worktree or temporary directory left behind. stdout on a descriptor that refuses writes (one opened read-only) still exits 1, with the errno on stderr |
 | CL55 | `aburi diff main..HEAD` with a `pluginOptions` key that names no loaded plugin (`config.md` C10) | The warning once, with no side label, while the base scan's own lines keep theirs; the exit code is the one the run has without the key |
+| CL56 | `aburi diff … --fail-on removed` over a removal folded into a head Symbol, over one no head Symbol carries, and over twelve of the second kind | exit 0 for the folded one, which `--fail-on removed:folded` trips; exit 3 for the other, stderr naming it on an indented line under `--fail-on removed tripped (observed: 1 removed)`; for twelve, ten ids and `… and 2 more` (§6.7) |
 
 ## 18. Design Decisions
 

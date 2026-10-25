@@ -5,9 +5,10 @@ import {
   makeDiff,
   makeSymbol,
   movedChanged,
+  symbolId,
   useScratchWorkspace,
 } from "@aburi/test-support"
-import type { DiffResult, IR, SymbolChange, SymbolUnknown } from "@aburi/types"
+import type { DiffResult, IR, SymbolChange, SymbolRemoved, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   EXIT,
@@ -26,12 +27,22 @@ const workspace = useScratchWorkspace("fail-on")
 
 const SYMBOL = makeSymbol({ id: "ts:src/a.ts#A", name: "A" })
 
-function diffWith(
-  symbols: SymbolChange[],
-  summary: Partial<DiffResult["summary"]> = {},
-): DiffResult {
-  return makeDiff({ symbols, summary: { ...emptySummary(), ...summary } })
+function diffWith(symbols: SymbolChange[]): DiffResult {
+  return makeDiff({ symbols, summary: emptySummary() })
 }
+
+function changedEntries(count: number): SymbolChange[] {
+  return Array.from({ length: count }, (_, i) =>
+    changed(makeSymbol({ id: `ts:src/a.ts#f${i}`, name: `f${i}` })),
+  )
+}
+
+function removedEntry(name: string, fold: Pick<SymbolRemoved, "foldedInto"> = {}): SymbolRemoved {
+  return { status: "removed", symbol: makeSymbol({ id: `ts:src/a.ts#${name}`, name }), ...fold }
+}
+
+const FOLDED = { foldedInto: symbolId("ts:src/fixtures.ts#emptyIR") }
+const BARE = { foldedInto: null }
 
 function evaluation(spec: string, diff: DiffResult) {
   const [clause] = parseFailOn(spec)
@@ -129,19 +140,50 @@ describe("parseFailOn — the grammar", () => {
 
 describe("evaluateClause — what a clause counts", () => {
   it.each([
-    ["changed", diffWith([], { changed: 1 }), { triggered: true, observed: 1 }],
-    ["changed", diffWith([]), { triggered: false, observed: 0 }],
-    ["changed:>10", diffWith([], { changed: 10 }), { triggered: false, observed: 10 }],
-    ["changed:>10", diffWith([], { changed: 11 }), { triggered: true, observed: 11 }],
-  ])("%s over a diff with %j changed", (spec, diff, expected) => {
-    expect(evaluation(spec, diff)).toEqual(expected)
+    ["changed", 1, true],
+    ["changed", 0, false],
+    ["changed:>10", 10, false],
+    ["changed:>10", 11, true],
+  ])("%s over %i changed entries", (spec, count, triggered) => {
+    expect(evaluation(spec, diffWith(changedEntries(count)))).toMatchObject({
+      triggered,
+      observed: count,
+    })
+  })
+
+  it("names each entry it counted by the id the head gives it, in the diff's order", () => {
+    const moved = movedChanged(
+      makeSymbol({ id: "ts:src/old.ts#f", name: "f" }),
+      makeSymbol({ id: "ts:src/new.ts#f", name: "f" }),
+      { apiChanged: true },
+    )
+    const diff = diffWith([removedEntry("gone"), moved, changed(SYMBOL, { apiChanged: true })])
+    expect(evaluation("api-changed", diff).symbols).toEqual(["ts:src/new.ts#f", "ts:src/a.ts#A"])
+    expect(evaluation("removed", diff).symbols).toEqual(["ts:src/a.ts#gone"])
+  })
+
+  it("leaves a removal folded into a head Symbol to removed:folded", () => {
+    const diff = diffWith([
+      removedEntry("bare", BARE),
+      removedEntry("folded", FOLDED),
+      removedEntry("written-before-folds"),
+    ])
+    expect(evaluation("removed", diff).symbols).toEqual([
+      "ts:src/a.ts#bare",
+      "ts:src/a.ts#written-before-folds",
+    ])
+    expect(evaluation("removed:folded", diff).symbols).toEqual(["ts:src/a.ts#folded"])
+    expect(
+      evaluateFailOn(parseFailOn("removed"), diffWith([removedEntry("folded", FOLDED)]))
+        .firstTriggered,
+    ).toBeNull()
   })
 
   it("counts the changes whose delta moved the axis, and only those", () => {
-    const diff = diffWith(
-      [changed(SYMBOL, { apiChanged: true }), changed(SYMBOL, { logicChanged: true })],
-      { changed: 2 },
-    )
+    const diff = diffWith([
+      changed(SYMBOL, { apiChanged: true }),
+      changed(SYMBOL, { logicChanged: true }),
+    ])
     expect(observed("api-changed", diff)).toBe(1)
     expect(observed("logic-changed", diff)).toBe(1)
     expect(observed("syntax-changed", diff)).toBe(0)
@@ -159,14 +201,11 @@ describe("evaluateClause — what a clause counts", () => {
   })
 
   it("counts each dropped-toggled direction apart", () => {
-    const diff = diffWith(
-      [
-        { status: "dropped-toggled", direction: "to-dropped", before: SYMBOL, after: SYMBOL },
-        { status: "dropped-toggled", direction: "to-kept", before: SYMBOL, after: SYMBOL },
-        { status: "dropped-toggled", direction: "to-kept", before: SYMBOL, after: SYMBOL },
-      ],
-      { droppedToggled: 3 },
-    )
+    const diff = diffWith([
+      { status: "dropped-toggled", direction: "to-dropped", before: SYMBOL, after: SYMBOL },
+      { status: "dropped-toggled", direction: "to-kept", before: SYMBOL, after: SYMBOL },
+      { status: "dropped-toggled", direction: "to-kept", before: SYMBOL, after: SYMBOL },
+    ])
     expect(observed("dropped-toggled", diff)).toBe(3)
     expect(observed("dropped-toggled:to-dropped", diff)).toBe(1)
     expect(observed("dropped-toggled:to-kept", diff)).toBe(2)
@@ -185,16 +224,20 @@ describe("evaluateClause — what a clause counts", () => {
 
 describe("evaluateFailOn — which clause trips", () => {
   it("returns the first clause that trips, and every clause's count", () => {
-    const diff = diffWith([], { changed: 5, removed: 3 })
+    const diff = diffWith([...changedEntries(2), removedEntry("gone", BARE)])
     const { firstTriggered, evaluations } = evaluateFailOn(
       parseFailOn("added,changed,removed"),
       diff,
     )
-    expect(firstTriggered).toEqual({ clause: { token: "changed", threshold: null }, observed: 5 })
+    expect(firstTriggered).toEqual({
+      clause: { token: "changed", threshold: null },
+      observed: 2,
+      symbols: ["ts:src/a.ts#f0", "ts:src/a.ts#f1"],
+    })
     expect(evaluations.map((e) => [e.clause.token, e.observed, e.triggered])).toEqual([
       ["added", 0, false],
-      ["changed", 5, true],
-      ["removed", 3, true],
+      ["changed", 2, true],
+      ["removed", 1, true],
     ])
   })
 
@@ -211,6 +254,23 @@ describe("evaluateFailOn — which clause trips", () => {
     ],
   ] as const)("phrases %j tripping on %i", (clause, count, line) => {
     expect(formatTriggered(clause, count)).toBe(line)
+  })
+
+  it.each([
+    [1, ["--fail-on removed tripped (observed: 1 removed)", "  ts:src/a.ts#f0"]],
+    [
+      12,
+      [
+        "--fail-on removed tripped (observed: 12 removed)",
+        ...Array.from({ length: 10 }, (_, i) => `  ts:src/a.ts#f${i}`),
+        "  … and 2 more",
+      ],
+    ],
+  ])("names the Symbols under the line, ten at most, for %i of them", (count, lines) => {
+    const ids = Array.from({ length: count }, (_, i) => symbolId(`ts:src/a.ts#f${i}`))
+    expect(formatTriggered({ token: "removed", threshold: null }, count, ids).split("\n")).toEqual(
+      lines,
+    )
   })
 })
 
@@ -230,7 +290,11 @@ describe("aburi diff --fail-on", () => {
       paths.head,
       ...gate,
     ])
-    return { code, tripped: stderr.split("\n").filter((line) => line.startsWith("--fail-on")) }
+    return {
+      code,
+      tripped: stderr.split("\n").filter((line) => line.startsWith("--fail-on")),
+      stderr,
+    }
   }
 
   const CHANGED_TRIPPED = "--fail-on changed tripped (observed: 1 changed)"
@@ -243,7 +307,7 @@ describe("aburi diff --fail-on", () => {
     [[], EXIT.SUCCESS, []],
   ])("gates on every clause it is given: %j over one changed Symbol exits %i and prints %j", async (gate, code, tripped) => {
     const run = await diffTo(documentWith({ symbols: [ALPHA_EDITED, BETA] }), gate)
-    expect(run).toEqual({ code, tripped })
+    expect({ code: run.code, tripped: run.tripped }).toEqual({ code, tripped })
   })
 
   it.each([
@@ -258,6 +322,14 @@ describe("aburi diff --fail-on", () => {
     ])
     expect(run.code).toBe(EXIT.GATE)
     expect(run.tripped).toEqual([`--fail-on ${first} tripped (observed: 1 ${first})`])
+  })
+
+  it("names the Symbols that tripped it under the line, on stderr", async () => {
+    const run = await diffTo(documentWith({ symbols: [ALPHA] }), ["--fail-on", "removed"])
+    expect(run.code).toBe(EXIT.GATE)
+    expect(run.stderr).toContain(
+      "--fail-on removed tripped (observed: 1 removed)\n  ts:src/b.ts#beta\n",
+    )
   })
 
   const EMPTY_VALUE =

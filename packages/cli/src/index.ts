@@ -41,6 +41,7 @@ export { type AburiEnv, type LogLevel, readEnv } from "./env"
 export { CliError, type CliErrorCode } from "./errors"
 export { EXIT, type ExitCode } from "./exit-codes"
 export {
+  type ClauseOutcome,
   evaluateClause,
   evaluateFailOn,
   type FailOnClause,
@@ -50,6 +51,7 @@ export {
   type FailOnToken,
   formatTriggered,
   parseFailOn,
+  type TrippedClause,
 } from "./fail-on"
 export type { GitRunner } from "./git/runner"
 export { readIR } from "./ir-io"

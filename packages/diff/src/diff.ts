@@ -28,6 +28,7 @@ import {
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
 import { assertDiffable, ensureSchemasAgree } from "./input-gate"
 import {
+  foldTargets,
   type GitRenameMap,
   matchStageDroppedWeak,
   matchStageGitRename,
@@ -41,9 +42,10 @@ import { classifyStatus, dropDirection, representativeSymbol } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
-interface UnknownCounters {
+interface AlwaysEmittedCounters {
   unknown: number
   depsUnknown: number
+  removedFolded: number
 }
 
 export interface DiffInput {
@@ -60,7 +62,7 @@ const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
 
 export function buildDiff(
   input: DiffInput,
-): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & UnknownCounters } {
+): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & AlwaysEmittedCounters } {
   assertDiffable(input.baseIR, "baseIR")
   assertDiffable(input.headIR, "headIR")
   ensureSchemasAgree(input.baseIR, input.headIR)
@@ -82,9 +84,10 @@ export function buildDiff(
     ...stageDroppedWeak.matched,
   ]
 
-  const summary: Summary & UnknownCounters = {
+  const summary: Summary & AlwaysEmittedCounters = {
     unknown: 0,
     depsUnknown: 0,
+    removedFolded: 0,
     added: 0,
     removed: 0,
     moved: 0,
@@ -169,6 +172,7 @@ export function buildDiff(
     summary.added++
     symbols.push({ status: "added", symbol: headSymbol })
   }
+  const removed: IRSymbol[] = []
   for (const baseSymbol of stageDroppedWeak.remainingBase) {
     if (baseSymbol.dropped) {
       summary.droppedRemoved++
@@ -180,8 +184,14 @@ export function buildDiff(
       symbols.push(unknownSymbol(baseSymbol, "head", lost))
       continue
     }
+    removed.push(baseSymbol)
+  }
+  const folds = foldTargets(removed, input.headIR.symbols)
+  for (const baseSymbol of removed) {
+    const foldedInto = folds.get(baseSymbol.id) ?? null
     summary.removed++
-    symbols.push({ status: "removed", symbol: baseSymbol })
+    if (foldedInto !== null) summary.removedFolded++
+    symbols.push({ status: "removed", symbol: baseSymbol, foldedInto })
   }
 
   const components = diffComponents(input.baseIR.components, input.headIR.components)

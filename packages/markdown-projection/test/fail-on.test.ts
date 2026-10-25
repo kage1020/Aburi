@@ -86,7 +86,8 @@ describe("evaluateFailOn — the count each status watches", () => {
   const summary = {
     ...emptySummary(),
     added: 1,
-    removed: 2,
+    removed: 8,
+    removedFolded: 6,
     changed: 3,
     moved: 4,
     movedChanged: 5,
@@ -98,6 +99,7 @@ describe("evaluateFailOn — the count each status watches", () => {
   const expected: Record<FailOnStatus, number> = {
     added: 1,
     removed: 2,
+    "removed:folded": 6,
     changed: 3,
     moved: 4,
     "moved+changed": 5,
@@ -111,6 +113,14 @@ describe("evaluateFailOn — the count each status watches", () => {
     expect(evaluateFailOn({ kind: "bare", status }, summary, breakdown).observed).toBe(
       expected[status],
     )
+  })
+
+  it("counts every removal under removed for a diff written before folds were counted", () => {
+    const { removedFolded: _dropped, ...older } = summary
+    expect(evaluateFailOn({ kind: "bare", status: "removed" }, older, breakdown).observed).toBe(8)
+    expect(
+      evaluateFailOn({ kind: "bare", status: "removed:folded" }, older, breakdown).observed,
+    ).toBe(0)
   })
 
   it("reports zero unknowns for a diff written before the counter existed", () => {

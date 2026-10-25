@@ -52,7 +52,11 @@ async function diffIn(cwd: string, refSpec: string, failOn = "added") {
   return { report, diff, warnings: log.warnings }
 }
 
-const ADDED_ONE = { clause: { token: "added", threshold: null }, observed: 1 }
+const addedOne = (id: string) => ({
+  clause: { token: "added", threshold: null },
+  observed: 1,
+  symbols: [id],
+})
 
 describe("aburi diff — where the base revision is checked out", () => {
   it("diffs a linked worktree kept inside the main checkout, not the main checkout", async () => {
@@ -65,7 +69,7 @@ describe("aburi diff — where the base revision is checked out", () => {
     const { report, warnings } = await diffIn(feat, "main..feat")
 
     expect(report.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
-    expect(report.triggered).toEqual(ADDED_ONE)
+    expect(report.triggered).toEqual(addedOne("ts:src/feat.ts#featOnly"))
     expect(report.faultedScans).toEqual([])
     expect(warnings).toEqual([])
   })
@@ -110,7 +114,7 @@ describe("aburi diff — where the base revision is checked out", () => {
     const { report, warnings } = await diffIn(workspace.root, "HEAD~1..HEAD")
 
     expect(report.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
-    expect(report.triggered).toEqual(ADDED_ONE)
+    expect(report.triggered).toEqual(addedOne("ts:src/one.ts#two"))
     expect(report.faultedScans).toEqual([])
     expect(warnings).toEqual([])
   })

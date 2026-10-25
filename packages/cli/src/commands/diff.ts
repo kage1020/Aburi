@@ -16,7 +16,13 @@ import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-loa
 import type { LogLevel } from "../env"
 import { CliError, errorMessage, internalFault, unplacedErrorCode } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
-import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
+import {
+  evaluateFailOn,
+  type FailOnClause,
+  formatTriggered,
+  parseFailOn,
+  type TrippedClause,
+} from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
 import type { GitRunner } from "../git/runner"
 import { readIR } from "../ir-io"
@@ -67,7 +73,7 @@ export interface DiffReport {
   diffFullMdPath: string | null
   summaryLine: string
   callResolutionLine: string | null
-  triggered: { clause: FailOnClause; observed: number } | null
+  triggered: TrippedClause | null
   faultedScans: readonly DiffSide[] | null
   exitCode: ExitCode
 }
@@ -151,7 +157,7 @@ function parseFailOnValues(failOn: string | readonly string[]): FailOnClause[] {
 }
 
 export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {
-  return formatTriggered(triggered.clause, triggered.observed)
+  return formatTriggered(triggered.clause, triggered.observed, triggered.symbols)
 }
 
 async function removeEarlierReport(outputDir: string): Promise<void> {

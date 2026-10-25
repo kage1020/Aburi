@@ -3,12 +3,13 @@ import { inlineCode } from "../format"
 import { renderComponentChanges } from "./component-changes"
 import { renderDependencyChanges } from "./dependency-changes"
 import {
-  renderAddedRemoved,
+  renderAdded,
   renderChangedList,
   renderDroppedToggled,
   renderMoved,
   renderMovedChanged,
   renderNotCompared,
+  renderRemoved,
   renderSyntaxOnly,
   renderUnknown,
 } from "./entries"
@@ -16,6 +17,7 @@ import {
   indexChanged,
   indexConfidence,
   indexMovedChanged,
+  indexRemoved,
   indexSymbols,
   indexUnknown,
 } from "./names-only"
@@ -60,12 +62,8 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
       indexChanged(buckets.logicOnly),
     ),
     plainSection("## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols)),
-    plainSection("## ➕ Added", renderAddedRemoved(buckets.added), indexSymbols(buckets.added)),
-    plainSection(
-      "## ➖ Removed",
-      renderAddedRemoved(buckets.removed),
-      indexSymbols(buckets.removed),
-    ),
+    plainSection("## ➕ Added", renderAdded(buckets.added), indexSymbols(buckets.added)),
+    plainSection("## ➖ Removed", renderRemoved(buckets.removed), indexRemoved(buckets.removed)),
     plainSection("## ❔ Unknown", renderUnknown(buckets.unknown), indexUnknown(buckets.unknown)),
     plainSection("## 🚫 Not compared", renderNotCompared(diff.notCompared ?? [])),
     plainSection(
@@ -121,8 +119,10 @@ function titleRef(ref: string): string {
 
 function summaryLine(diff: DiffResult): string {
   const summary = diff.summary
+  const folded = summary.removedFolded ?? 0
+  const removed = folded === 0 ? "removed" : `removed (${folded} folded)`
   return withUnknown(
-    `+${summary.added} added · -${summary.removed} removed · ~${summary.changed} changed · ${summary.moved} moved · ${summary.movedChanged} moved+changed`,
+    `+${summary.added} added · -${summary.removed} ${removed} · ~${summary.changed} changed · ${summary.moved} moved · ${summary.movedChanged} moved+changed`,
     diff,
   )
 }

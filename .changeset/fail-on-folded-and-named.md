@@ -1,0 +1,5 @@
+---
+"@aburi/cli": minor
+---
+
+`--fail-on removed` no longer trips on a removal folded into a surviving Symbol, and a tripped gate names the Symbols that tripped it. Deduplicating two identical helpers into one always left one of them `removed`, so the gate the docs recommend starting with failed every such refactor. `removed` now counts the removals whose `foldedInto` is `null` or absent, and the new `removed:folded` counts the others: `--fail-on removed,removed:folded` gates on every removal as `removed` did before. The stderr line a tripped clause prints is followed by the id of each Symbol it counted, indented, ten at most and then `… and N more`, so a red check says which removal it was. `runDiff`'s `triggered`, `evaluateFailOn`'s `firstTriggered` and `evaluateClause` carry those ids as `symbols`, and `formatTriggered` takes them as an optional third argument. Every clause now counts `symbols[]` entries rather than the `summary` counters, which agree on any diff `aburi diff` writes.

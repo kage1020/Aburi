@@ -3,6 +3,7 @@ import type { Summary } from "@aburi/types"
 export type FailOnStatus =
   | "added"
   | "removed"
+  | "removed:folded"
   | "changed"
   | "moved"
   | "moved+changed"
@@ -14,6 +15,7 @@ export type FailOnStatus =
 export const FAIL_ON_STATUSES = [
   "added",
   "removed",
+  "removed:folded",
   "changed",
   "moved",
   "moved+changed",
@@ -83,7 +85,9 @@ function observedCount(
     case "added":
       return summary.added
     case "removed":
-      return summary.removed
+      return summary.removed - (summary.removedFolded ?? 0)
+    case "removed:folded":
+      return summary.removedFolded ?? 0
     case "changed":
       return summary.changed
     case "moved":

@@ -280,11 +280,14 @@ Repeating `--fail-on` adds its clauses after the earlier ones, so
 
 | Clause | Matches |
 |---|---|
-| `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` `unknown` | Symbols with that status. |
+| `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` `unknown` | Symbols with that status. `removed` leaves out a removal folded into a surviving Symbol. |
+| `removed:folded` | Removals whose body a head Symbol still holds, as deduplicating two identical helpers into one leaves the other removed. `removed,removed:folded` gates on every removal. |
 | `dropped-toggled:to-dropped` `dropped-toggled:to-kept` | One direction of a boilerplate toggle. |
 | `api-changed` `logic-changed` `syntax-changed` `confidence-changed` | Symbols whose change touched that axis. |
 
-Evaluation stops at the first clause that fires, which keeps CI logs short.
+Evaluation stops at the first clause that fires, which keeps CI logs short. The
+line it prints names the Symbols that tripped it, ten at most, one per indented
+line below it.
 
 ::: warning Quote the value
 `>` is a shell redirect. Write `--fail-on 'changed:>5'`, not

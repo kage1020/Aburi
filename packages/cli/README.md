@@ -55,11 +55,16 @@ its clauses after the earlier ones. Every clause supports an optional `:>N` coun
 threshold. Empty `--fail-on ""` is rejected (silent gate = green pipeline = bug), and so is
 an empty clause (`added,`, `added,,removed`).
 
-- Status tokens: `added`, `removed`, `changed`, `moved`, `moved+changed`, `dropped-toggled`.
-- Directional subtypes: `dropped-toggled:to-dropped`, `dropped-toggled:to-kept`.
+- Status tokens: `added`, `removed`, `changed`, `moved`, `moved+changed`, `dropped-toggled`, `unknown`.
+  `removed` leaves out a removal folded into a head Symbol that holds its body.
+- Subtypes: `dropped-toggled:to-dropped`, `dropped-toggled:to-kept`, and `removed:folded` for the
+  folded removals `removed` leaves out.
 - Delta axes: `api-changed`, `logic-changed`, `syntax-changed`, `confidence-changed`.
 
 Examples: `--fail-on removed`, `--fail-on changed:>5`, `--fail-on dropped-toggled:to-dropped:>10`.
+
+A tripped clause prints `--fail-on <clause> tripped (observed: N <token>)` on stderr and names the
+Symbols it counted below it, one indented id per line, ten at most.
 
 ## Exit codes
 

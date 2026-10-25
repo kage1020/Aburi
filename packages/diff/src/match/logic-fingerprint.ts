@@ -1,5 +1,5 @@
 import { logicNamesNothing, ZERO_FINGERPRINT } from "@aburi/core"
-import type { Symbol as IRSymbol } from "@aburi/types"
+import type { Symbol as IRSymbol, SymbolId } from "@aburi/types"
 import { createNameScorer, type NameScorer } from "../similarity"
 import {
   acceptInScoreOrder,
@@ -34,12 +34,45 @@ interface LogicGroup {
   symbols: IRSymbol[]
 }
 
+/**
+ * Deduplicating N identical helpers into one pairs one of them, so the other N−1 are removed while a
+ * head Symbol still holds their body. Unrelated bodies share a logic fingerprint often enough (one
+ * `if (x === null) throw new Error(…)` guard is one), so the syntax must agree as well.
+ */
+export function foldTargets(
+  removed: readonly IRSymbol[],
+  head: readonly IRSymbol[],
+): Map<SymbolId, SymbolId> {
+  const heads = groupByLogic(head)
+  const scorer = createNameScorer()
+  const targets = new Map<SymbolId, SymbolId>()
+  for (const symbol of removed) {
+    if (!carriesLogic(symbol) || logicNamesNothing(symbol)) continue
+    const group = heads.get(logicKey(symbol, false))
+    if (group === undefined) continue
+    const sameBody = group.symbols.filter(
+      (head) => head.fingerprint.syntax === symbol.fingerprint.syntax,
+    )
+    const survivor = closestNameTo(symbol, sameBody, scorer)
+    if (survivor !== undefined) targets.set(symbol.id, survivor.id)
+  }
+  return targets
+}
+
+function carriesLogic(symbol: IRSymbol): boolean {
+  return !symbol.dropped && symbol.fingerprint.logic !== ZERO_FINGERPRINT
+}
+
+function logicKey(symbol: IRSymbol, evidenceless: boolean): string {
+  return JSON.stringify([symbol.kind, symbol.fingerprint.logic, evidenceless])
+}
+
 function groupByLogic(symbols: readonly IRSymbol[]): Map<string, LogicGroup> {
   const groups = new Map<string, LogicGroup>()
   for (const symbol of symbols) {
-    if (symbol.dropped || symbol.fingerprint.logic === ZERO_FINGERPRINT) continue
+    if (!carriesLogic(symbol)) continue
     const evidenceless = logicNamesNothing(symbol)
-    const key = JSON.stringify([symbol.kind, symbol.fingerprint.logic, evidenceless])
+    const key = logicKey(symbol, evidenceless)
     const group = groups.get(key)
     if (group === undefined) groups.set(key, { evidenceless, symbols: [symbol] })
     else group.symbols.push(symbol)

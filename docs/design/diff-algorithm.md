@@ -471,6 +471,8 @@ Symbols not paired by this point are finalized:
 - `remainingBase` → status: `removed`
 - …unless the *other* document never analysed the file the Symbol lives in, in which case the status is `unknown` (§3.5.1)
 
+A `removed` entry also says whether its logic survived on the head side (§3.5.2).
+
 #### 3.5.1 `unknown`: the other document could not look
 
 A leftover Symbol whose `source.file` appears in the other document's `stats.skippedFiles[]` is not evidence of an addition or a deletion. That document did not read the file, so it cannot say whether the Symbol is there. The entry carries `absentFrom` (`base` or `head` — the document that lost the file, so `head` reads as "this may still exist" and `base` as "this may not be new") and the skip `reason`, which is what decides the reader's next move: `parse-timeout` depends on how loaded the machine was and usually clears on a re-run, while `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the file and clear only when something is fixed.
@@ -485,6 +487,24 @@ Four properties this rests on:
 When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.6).
 
 `dependencies[]` gets the same treatment on its own terms — see §6.2.1. What stays outside both is a file **both** revisions skipped: neither document holds a Symbol or an edge from it, so there is no leftover to classify and the diff is silent about a file it never compared. That is a statement about the run rather than about any entry, and `aburi diff` makes it on stderr (cli-spec.md §6.6) and in the artifact, in `notCompared[]` (§6.3).
+
+#### 3.5.2 `foldedInto`: a removal whose body a head Symbol holds
+
+Matching is one-to-one, so folding N identical helpers into one — two byte-identical `emptyIR` builders in two test files becoming one in a shared fixture — pairs one of them with the survivor (§3.3) and leaves N−1 `removed`. No care on the author's side changes that, and a bare removal reads like deleted behaviour, so `--fail-on removed` blocked a deduplication every reviewer would approve. The evidence that it is not a deletion is already in the documents: the survivor holds the removed Symbol's body.
+
+```
+for each removed Symbol r whose logic names something (fingerprint.md §4.8):
+  candidates = head Symbols, paired or not, not dropped, with r's kind, r's logic fingerprint
+               and r's syntax fingerprint
+  r.foldedInto = the candidate of highest nameSimilarity to r, ties to the lower id   # as §3.3's lone branch
+               | null when there is none
+```
+
+The kind and the refusal of logic that names nothing are stage 3's, read from the removed side, so a function never folds into a class. The syntax fingerprint is what stage 3 does not ask for. A shared logic fingerprint is enough for stage 3 to pair a lone base, because a wrong pairing there is still reported, as a change. Here it would take a deletion out of the gate, and unrelated bodies share a logic fingerprint often: one `if (tree === null) throw new Error(…)` guard is the whole logic of many helpers. On a change of this repository that moved its test helpers into a shared package, logic alone named a survivor for 22 removals, seven of them a function that only shares its guard with the removed one; with the syntax as well it names nine, each a helper that moved unchanged. The other six were folded into a survivor generalized on the way, whose body differs, and those removals stay bare: a gate that passes on less evidence than an unchanged body would pass on a coincidence. The candidates are every head Symbol, not only the unpaired ones. The survivor is usually paired, with the duplicate it kept (`moved`) or with itself when a twin beside it was deleted (unchanged), and it can be `added` when it took a name none of the duplicates had and stage 3 could not choose among them.
+
+`foldedInto` is a property of the `removed` entry, not a status of its own, because adding a status is breaking (§10.1). `summary.removed` still counts every `removed` entry, and `summary.removedFolded` counts the folded ones within it. A current writer emits both on the terms §10.1 gives an optional field whose absence an older writer could have meant differently: `foldedInto: null` on every unfolded entry, and `removedFolded: 0`. `--fail-on removed` counts the unfolded removals and `removed:folded` the folded ones ([cli-spec.md](./cli-spec.md) §6.7).
+
+**What this does not prove.** The same body says the survivor computes what the removed Symbol computed. It does not say every caller moved to the survivor: a removed exported helper still breaks an importer the change did not update, as a `moved` one does. The entry stays in `removed` and in the report's Removed section, naming the survivor, so a reviewer sees both.
 
 ### 3.6 Handling dropped symbols
 
@@ -953,11 +973,12 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
     "depsAdded":     3,
     "depsRemoved":   1,
     "unknown":       2,
-    "depsUnknown":   1
+    "depsUnknown":   1,
+    "removedFolded": 1
   },
   "symbols": [
     { "status": "added",   "symbol": { /* Symbol */ } },
-    { "status": "removed", "symbol": { /* Symbol */ } },
+    { "status": "removed", "symbol": { /* Symbol */ }, "foldedInto": "ts:src/fixtures.ts#emptyIR" | null /* §3.5.2 */ },
     { "status": "moved",   "before": {...}, "after": {...}, "rationale": "git-rename" },
     { "status": "changed", "before": {...}, "after": {...}, "delta": { /* see §5 */ } },
     { "status": "moved+changed", "before": {...}, "after": {...}, "rationale": "...", "delta": {...} },
@@ -1110,6 +1131,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19j | git renames `src/big.ts` → `src/billing.ts`; the head skips `src/billing.ts` (or the base skips `src/big.ts`, or both do) | the base Symbols are `unknown` with `absentFrom: "head"` and `lostPath: "src/billing.ts"` (or the head Symbols `unknown` with `absentFrom: "base"` and `lostPath: "src/big.ts"`), never `removed` / `added`; skipped on both sides, one `notCompared[]` entry with `path: "src/billing.ts"` and `basePath: "src/big.ts"` (§3.5.1, §6.3) |
 | DF19k | DF19j with the head skipping `src/billing.ts`, and the base holding an edge `ts:src/big.ts#Billing` → `ts:src/kept.ts#kept` | the edge is in `dependencies.unknown` with `absentFrom: "head"` and `lostFiles: [{ path: "src/billing.ts", … }]` — the head's name for the file, not the holder's `src/big.ts` — never in `removed` (§6.2.1) |
 | DF19l | A rename map handed to `buildDiff` sends two base paths onto one head path, or onto a path the base also skipped — git writes neither | the same `symbols[]` and `notCompared[]`, byte for byte, whatever order the map and the skip lists are in; a `notCompared[]` entry for each base record that reaches a head one (§3.5.1, §6.3) |
+| DF19m | Two Symbols of one kind, one logic fingerprint that names something and one syntax fingerprint, in two files, become one in a third file | the one the survivor pairs with is `moved` (§3.3); the other is `removed` with `foldedInto` naming the survivor, and `summary.removedFolded` is 1. With the logic naming nothing, the survivor of another kind, or its body written otherwise (same logic, other syntax), the removal carries `foldedInto: null`. A deleted twin of an unchanged Symbol names that Symbol (§3.5.2) |
 | DF20 | A pair whose stage-4 composite equals its row exactly: member 3/4 with signature 11/12, and member 7/10 with an identical signature, at 0.85; an identical member with signature 5/6 at 0.95; an identical member and signature at 1.0. End to end, `AccountService.createUserAccount(a: string, b: number, c: Date, d: boolean)` moved file and renamed `createUserAccountRecord` with `d: Options` | paired, rationale: "name-signature" — the composite is a fraction compared exactly (§3.4.3); one step below (two of four inputs retyped, a member of 7/11, its only input retyped at 0.95 or 1.0) added: 1, removed: 1 |
 | DF20a | Two bases score the same composite for one head, made of different axes — one renamed its member (3/4, signature 11/12), the other kept it (1, signature 1/2) | the lower base id pairs, whichever of the two it is (§3.8) |
 
@@ -1123,7 +1145,7 @@ In particular, because the CI gate (`aburi diff --fail-on`) depends on it:
 - Adding a `summary` field is non-breaking
 - Adding an optional `SymbolDelta` boolean is non-breaking, and the producer emits it unconditionally, `false` included, for the reason the next row gives
 - Adding an optional array is non-breaking on the same terms — to `componentDiff` / `dependencyDiff` or to the document itself — and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed. This is where the diff parts company with the IR, whose Class B fields (ir-schema.md §1.1) are omitted when empty: an IR reader can fall back on `totalFiles - parsedFiles`, and a diff reader has nothing to fall back on.
-- Adding an optional scalar to an entry is non-breaking, and unlike an array it may be left out when it has nothing to say, provided its absence is unambiguous by construction. `NotComparedFile.basePath` and `SymbolUnknown.lostPath` are the cases: each is written only when git renamed the file between the revisions, and a writer that predates them did not look across a rename at all, so it never produced an entry that needed one. In a document of either age, absence means "the other name is the same", and nothing has to be emitted to say so. A scalar whose absence an older writer could have meant differently is emitted unconditionally, as the `SymbolDelta` booleans are.
+- Adding an optional scalar to an entry is non-breaking, and unlike an array it may be left out when it has nothing to say, provided its absence is unambiguous by construction. `NotComparedFile.basePath` and `SymbolUnknown.lostPath` are the cases: each is written only when git renamed the file between the revisions, and a writer that predates them did not look across a rename at all, so it never produced an entry that needed one. In a document of either age, absence means "the other name is the same", and nothing has to be emitted to say so. A scalar whose absence an older writer could have meant differently is emitted unconditionally, as the `SymbolDelta` booleans are, and as `SymbolRemoved.foldedInto` is, `null` included: a writer that predates it reported every removal bare, folded or not (§3.5.2).
 
 ## 11. Design decisions
 

@@ -95,6 +95,16 @@ describe("projectDiff — maxBytes writes a names-only row per entry", () => {
       "- `Unsure0000` *(function)* ⚠ medium — `src/Unsure0000.ts:1` (`high` → `medium`)",
     ],
     [
+      "a removed Symbol folded into a head one, with the one it was folded into",
+      "## ➖ Removed",
+      Array.from({ length: 40 }, (_, i) => ({
+        status: "removed",
+        symbol: symbolWithBody(`Removed${pad(i)}`),
+        foldedInto: symbolId("ts:src/fixtures.ts#emptyIR"),
+      })),
+      "- `Removed0000` *(function)* — `src/Removed0000.ts:1` (folded into `ts:src/fixtures.ts#emptyIR`)",
+    ],
+    [
       "an unknown Symbol, with why it is listed",
       "## ❔ Unknown",
       Array.from({ length: 40 }, (_, i) => ({
