@@ -16,6 +16,7 @@ export const langTypescriptManifest: LangManifest = {
       "export-default",
       "export-clause",
       "variable-assigned-function",
+      "variable-assigned-class",
       "class-method",
       "field-assigned-function",
       "call-statement",

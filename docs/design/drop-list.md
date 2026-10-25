@@ -125,6 +125,8 @@ A class is a `pure DTO` when all of the following hold:
 - It has no boundary decorator (one that a framework plugin judged `boundary: true`)
 - The body declares at least one field, and every other member is an index signature or a comment
 
+A class a binding holds (`export const Point = class { x = 0; y = 0 }`) is a class here, as the same class declared is ([`lang-plugin.md`](./lang-plugin.md) LP7h).
+
 A static block is behaviour, more plainly than a method: it runs, unconditionally, when the class is defined. Its calls are walked on the class (`lang-plugin.md` LP20a), the only Symbol that carries them, so dropping a class of fields and a static block as a DTO would take the block's calls and effects with it. Getters, setters and constructors are methods here, and so are a method signature and an abstract method, which declare behaviour without a body.
 
 An index signature (`[key: string]: unknown`) is part of the shape, so it leaves a class of fields a DTO. A `//` or `/* */` comment is not a member at all and changes neither hint: a class of `static readonly` literals with a doc comment on each is still `pure constants`. An index signature is not a constant, so beside one that class is a `pure DTO`.
@@ -354,6 +356,7 @@ Properties the extraction pipeline must satisfy.
 | B1c | a class of a field and a getter, a setter or a constructor | `dropped: false` |
 | B1d | a class of a field and an index signature, a `declare` field, an `accessor` field, a field holding a call (`seed = compute()`) or a comment | `dropped: true, dropReason: "pure DTO"` |
 | B1e | a class of `static readonly` literals with a doc comment, a line comment or a stray `;` among them; the same class beside an index signature | `dropped: true, dropReason: "pure constants"`; beside the index signature, `"pure DTO"` |
+| B1f | B1 and B1e's classes held by a binding (`export const Foo = class { x: number; y: string }`) | the hint the declared class gets: `"pure DTO"`, `"pure constants"` |
 | B2 | `interface Foo { x: number }` | `dropped: true, dropReason: "interface (data model)"` |
 | B3 | `type Bar = string` | `dropped: true, dropReason: "type alias"` |
 | B4 | `export { x } from './y'` | `dropped: true, dropReason: "re-export"` |
