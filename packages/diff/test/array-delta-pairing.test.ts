@@ -112,7 +112,7 @@ describe("an edited rule is paired with a free candidate within the window", () 
       { ...NOTHING, modified: ["!owner"] },
     ],
     [
-      "the body around it moved too",
+      "lines were inserted above it inside the body",
       [guard(1, "!user"), guard(2, "!owner"), guard(3, "!invoice")],
       [guard(21, "!user"), guard(22, "!admin"), guard(23, "!invoice")],
       2,
@@ -189,6 +189,51 @@ describe("an edited rule is paired with a free candidate within the window", () 
       added: ["!far"],
       modified: ["!near"],
     })
+  })
+})
+
+describe("an element's line is counted from its Symbol's first line", () => {
+  const startingAt = (startLine: number): Partial<IRSymbol> => ({
+    source: {
+      file: "src/a.ts",
+      startLine,
+      endLine: startLine + 20,
+      startColumn: null,
+      endColumn: null,
+    },
+  })
+
+  it("pairs an edit in a Symbol that moved 30 lines down its file", () => {
+    const rules = deltaOf(
+      { ...startingAt(10), rules: [guard(12, "!user")] },
+      { ...startingAt(40), rules: [guard(42, "!admin")] },
+    ).rules
+    expect(rules).toEqual({ ...NOTHING, modified: [guard(42, "!admin")] })
+  })
+
+  it("pairs a call whose resolution changed, and an edited decorator, in a body that moved", () => {
+    const save = (line: number, resolved: string | null) =>
+      call({ target: "repo.save", line, resolved })
+    const get = (line: number, path: string) => decorator({ name: "Get", line, arguments: [path] })
+    const delta = deltaOf(
+      { ...startingAt(5), calls: [save(8, null)], decorators: [get(5, "/a")] },
+      {
+        ...startingAt(60),
+        calls: [save(63, "ts:src/repo.ts#Repo.save")],
+        decorators: [get(60, "/b")],
+      },
+    )
+    expect(delta.calls).toEqual({ ...NOTHING, modified: [save(63, "ts:src/repo.ts#Repo.save")] })
+    expect(delta.decorators).toEqual({ ...NOTHING, modified: [get(60, "/b")] })
+  })
+
+  it("keeps an edit apart from a predecessor on the same file line but elsewhere in its body", () => {
+    expect(
+      deltaOf(
+        { ...startingAt(1), rules: [guard(20, "!a")] },
+        { ...startingAt(15), rules: [guard(20, "!b")] },
+      ).rules,
+    ).toEqual({ added: [guard(20, "!b")], removed: [guard(20, "!a")], modified: [] })
   })
 })
 

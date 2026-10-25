@@ -17,6 +17,11 @@ export const MAX_LINE_FUZZ = 10
 export const MIN_LINE_FUZZ = 0
 
 export interface DeltaOptions {
+  /**
+   * How many lines apart, each counted from its own Symbol's first line, an edited rule, call or
+   * decorator may sit from its predecessor and still pair with it: an integer from
+   * `MIN_LINE_FUZZ` to `MAX_LINE_FUZZ`, `DEFAULT_LINE_FUZZ` when left out.
+   */
   lineFuzz?: number
 }
 
@@ -26,6 +31,7 @@ export function computeSymbolDelta(
   options: DeltaOptions = {},
 ): SymbolDelta {
   const fuzz = validateLineFuzz(options.lineFuzz ?? DEFAULT_LINE_FUZZ)
+  const origins: Origins = [base.source.startLine, head.source.startLine]
   return {
     apiChanged: base.fingerprint.api !== head.fingerprint.api,
     logicChanged: base.fingerprint.logic !== head.fingerprint.logic,
@@ -33,10 +39,10 @@ export function computeSymbolDelta(
     componentChanged: (base.component ?? null) !== (head.component ?? null),
     visibilityChanged: base.visibility !== head.visibility,
     confidenceChanged: base.confidence !== head.confidence,
-    rules: diffRules(base.rules, head.rules, fuzz),
-    effects: diffEffects(base.effects, head.effects),
-    calls: diffCalls(base.calls, head.calls, fuzz),
-    decorators: diffDecorators(base.decorators, head.decorators, fuzz),
+    rules: diffRules(base.rules, head.rules, origins, fuzz),
+    effects: diffEffects(base.effects, head.effects, origins),
+    calls: diffCalls(base.calls, head.calls, origins, fuzz),
+    decorators: diffDecorators(base.decorators, head.decorators, origins, fuzz),
     signature: diffSignature(base.signature ?? null, head.signature ?? null),
   }
 }
@@ -61,6 +67,24 @@ interface Identified<T> {
   item: T
   key: string
   line: number
+}
+
+/**
+ * The first line of the base and of the head Symbol. An element's line is counted from its own
+ * Symbol's, so an edit in a body that lines were inserted above still sits beside its predecessor.
+ */
+type Origins = readonly [base: number, head: number]
+
+function identifyEach<T>(
+  base: readonly T[],
+  head: readonly T[],
+  origins: Origins,
+  identify: (element: T, origin: number) => Identified<T>,
+): [Identified<T>[], Identified<T>[]] {
+  return [
+    base.map((element) => identify(element, origins[0])),
+    head.map((element) => identify(element, origins[1])),
+  ]
 }
 
 function classifyArrayDelta<T>(
@@ -194,9 +218,18 @@ function assignInOrder<T>(
   return chosen
 }
 
-function diffRules(base: readonly Rule[], head: readonly Rule[], lineFuzz: number): ArrayDelta {
-  const mapper = (rule: Rule): Identified<Rule> => ({ item: rule, key: rule.type, line: rule.line })
-  return classifyArrayDelta(base.map(mapper), head.map(mapper), rulesEqual, lineFuzz)
+function diffRules(
+  base: readonly Rule[],
+  head: readonly Rule[],
+  origins: Origins,
+  lineFuzz: number,
+): ArrayDelta {
+  const [b, h] = identifyEach(base, head, origins, (rule, origin) => ({
+    item: rule,
+    key: rule.type,
+    line: rule.line - origin,
+  }))
+  return classifyArrayDelta(b, h, rulesEqual, lineFuzz)
 }
 
 function rulesEqual(a: Rule, b: Rule): boolean {
@@ -209,18 +242,17 @@ function rulesEqual(a: Rule, b: Rule): boolean {
   )
 }
 
-function diffEffects(base: readonly Effect[], head: readonly Effect[]): ArrayDelta {
-  const mapper = (effect: Effect): Identified<Effect> => ({
+function diffEffects(
+  base: readonly Effect[],
+  head: readonly Effect[],
+  origins: Origins,
+): ArrayDelta {
+  const [b, h] = identifyEach(base, head, origins, (effect, origin) => ({
     item: effect,
     key: `${effect.id}::${effect.target}`,
-    line: effect.line ?? 0,
-  })
-  return classifyArrayDelta(
-    base.map(mapper),
-    head.map(mapper),
-    effectsEqual,
-    Number.POSITIVE_INFINITY,
-  )
+    line: effect.line === undefined ? 0 : effect.line - origin,
+  }))
+  return classifyArrayDelta(b, h, effectsEqual, Number.POSITIVE_INFINITY)
 }
 
 function effectsEqual(a: Effect, b: Effect): boolean {
@@ -237,13 +269,18 @@ function effectsEqual(a: Effect, b: Effect): boolean {
   )
 }
 
-function diffCalls(base: readonly Call[], head: readonly Call[], lineFuzz: number): ArrayDelta {
-  const mapper = (call: Call): Identified<Call> => ({
+function diffCalls(
+  base: readonly Call[],
+  head: readonly Call[],
+  origins: Origins,
+  lineFuzz: number,
+): ArrayDelta {
+  const [b, h] = identifyEach(base, head, origins, (call, origin) => ({
     item: call,
     key: call.target,
-    line: call.line,
-  })
-  return classifyArrayDelta(base.map(mapper), head.map(mapper), callsEqual, lineFuzz)
+    line: call.line - origin,
+  }))
+  return classifyArrayDelta(b, h, callsEqual, lineFuzz)
 }
 
 function callsEqual(a: Call, b: Call): boolean {
@@ -253,14 +290,15 @@ function callsEqual(a: Call, b: Call): boolean {
 function diffDecorators(
   base: readonly Decorator[],
   head: readonly Decorator[],
+  origins: Origins,
   lineFuzz: number,
 ): ArrayDelta {
-  const mapper = (decorator: Decorator): Identified<Decorator> => ({
+  const [b, h] = identifyEach(base, head, origins, (decorator, origin) => ({
     item: decorator,
     key: decorator.name,
-    line: decorator.line,
-  })
-  return classifyArrayDelta(base.map(mapper), head.map(mapper), decoratorsEqual, lineFuzz)
+    line: decorator.line - origin,
+  }))
+  return classifyArrayDelta(b, h, decoratorsEqual, lineFuzz)
 }
 
 function decoratorsEqual(a: Decorator, b: Decorator): boolean {

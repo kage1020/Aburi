@@ -619,13 +619,18 @@ For each array, **three kinds of delta** are computed:
 
 Element identity criteria — the key that makes two elements *candidates*; choosing among
 several candidates is §5.2.0:
-- Rule: `(type)`; an edited one is paired within ±2 lines (§5.2.1)
+- Rule: `(type)`; an edited one is paired within ±2 lines of where it sat in its Symbol (§5.2.1)
 - Effect: `(id, target)`, with no line window at all
 - Call: `(target)`; an edited one is paired within the line window
 - Decorator: `(name)`; an edited one is paired within the line window (§5.2.2)
 
 An element whose content is unchanged has no line window in any array: it pairs with its
 counterpart however far the body moved (§5.2.0).
+
+Every line this section compares is an **offset**: the element's `line` less its own Symbol's
+`source.startLine`, so a base element and a head element are measured from the first line of the
+base and the head Symbol respectively. A propagated effect, which has no line, sits at offset 0 on
+both sides.
 
 ##### 5.2.0 Choosing among elements that share a key
 
@@ -638,11 +643,11 @@ time:
 ```
 for admissible in [exact, near]:
   exact(b, h) = same key and content equal
-  near(b, h)  = same key and |b.line - h.line| <= lineFuzz
+  near(b, h)  = same key and |b.offset - h.offset| <= lineFuzz
   for each key, take the best set of admissible pairings over its elements still free, where
     - the pairings do not cross: i1 < i2 implies j1 < j2
     - more pairings beats fewer
-    - among sets of equal size, less total |b.line - h.line| wins
+    - among sets of equal size, less total |b.offset - h.offset| wins
 
 unpaired head -> added
 unpaired base -> removed
@@ -714,13 +719,23 @@ answer — and a non-canonical Document. §3.8 achieves order-independence for S
 because ids give it a total order that comes from content; §5.2 has no counterpart, and
 §3.7 records the distinction.
 
+**Why offsets and not file lines.** A Symbol whose file gained a function above it moves down
+the file whole, and every element in it moves with it. Measured in file lines, the near pass then
+saw an edited guard thirty lines from its predecessor and reported a deletion and an unrelated
+insertion; over 45 of Aburi's own pull requests, 595 of the 699 changed Symbols had moved, and
+298 removed and added pairs in them were edits the window refused only for that reason. Measured
+from the Symbol's first line, the edit sits beside its predecessor, as it does in the code. Lines
+inserted inside the body, above the element, still move its offset, and that is the movement the
+window is for.
+
 ##### 5.2.1 Rationale for line fuzz
 
 Line fuzz decides one question: whether an edited element is the same element as the one it
 replaced. A guard whose condition changed from `!user` to `!admin` one line lower is an edit
 and reads as `modified`; the same pair forty lines apart is more likely a deletion and an
 unrelated insertion, and reads as `removed` and `added`. By default a difference of up to ±2
-lines is tolerated for this; beyond that the two are treated as distinct elements.
+lines between the two offsets (§5.2) is tolerated for this; beyond that the two are treated as
+distinct elements.
 
 It does not decide whether an *unchanged* element survived. That one is paired by the exact
 pass (§5.2.0), which has no window, so a body that moved any distance reports nothing for the
@@ -1077,6 +1092,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF17 | Rule of one type whose condition changed, with a large line difference (>2) | delta as added + removed |
 | DF17a | Same-condition rule with a large line difference (>2) — a body that moved | no delta.rules entry; the exact pass has no window (§5.2.0) |
 | DF17b | Two same-type rules where one moved past the other by more than the window | the one that crossed as added + removed; the other unchanged — non-crossing takes the nearer exact pairing, and the window then refuses the one it displaced. A crossing within the window is repaired by the second pass and reports nothing |
+| DF17c | A Symbol that moved 30 lines down its file, one guard's condition edited, a call's resolution changed and a decorator's arguments edited, each at the same offset from the Symbol's first line | each in `modified`; the window compares offsets, not file lines (§5.2). A guard edited on the same file line as its predecessor but at an offset 14 lines away reads as added + removed |
 | DF18 | Only syntax changed (logic/api unchanged) | changed, only delta.syntaxChanged true → in Markdown: "syntax-only, collapsed" |
 | DF18a | Only `confidence` changed (`high` → `medium`), fingerprints equal | changed: 1, only delta.confidenceChanged true → in Markdown: the Confidence changes section |
 | DF18b | DF18a on a Symbol that also moved file | moved+changed: 1 |
