@@ -80,6 +80,23 @@ export function partition(changes: readonly SymbolChange[]): Buckets {
   return out
 }
 
+/** The head's Symbol where the change has one, the only one where it does not. */
+export function entrySymbol(change: SymbolChange): IRSymbol {
+  switch (change.status) {
+    case "added":
+    case "removed":
+    case "unknown":
+      return change.symbol
+    case "changed":
+    case "moved+changed":
+    case "dropped-toggled":
+    case "moved":
+      return change.after
+    default:
+      return assertNeverChange(change)
+  }
+}
+
 export function assertNeverChange(change: never): never {
   throw new Error(`Unhandled SymbolChange status: ${JSON.stringify(change)}`)
 }

@@ -62,6 +62,33 @@ directory a container owns does not stop a scan. The rule has to exclude the dir
 itself: `data/pg/*` leaves `data/pg` to be listed. A directory a `pnpm-workspace.yaml` or
 `workspaces` pattern names is the exception, because pnpm and npm never read `.gitignore`.
 
+## Mark test code
+
+Tests, fixtures and mocks are scanned like the rest of your code, so the calls out of them stay in
+the graph, but they are rarely what a pull request asks a reviewer about. Aburi marks the Symbols
+of a test file, lists their changes in a folded `🧪 Test files` section at the end of `diff.md`,
+and lets the gate skip them with `--fail-on-scope non-test` (or the action's `fail-on-scope`).
+
+With no `testFiles` in your config, these files are test code:
+
+```
+**/*.test.*  **/*.spec.*  **/*.test-d.*  **/*.spec-d.*
+**/__tests__/**  **/__mocks__/**  **/__fixtures__/**
+**/test/**  **/tests/**  **/e2e/**
+```
+
+Set `testFiles` to use your own list instead. It replaces the default one, so copy the patterns you
+keep:
+
+```jsonc
+{
+  "testFiles": ["**/*.test.*", "**/test/**", "examples/**"]
+}
+```
+
+The globs read like `ignore`'s, and `[]` marks nothing. Use `testFiles` rather than `ignore` for
+tests: an ignored file is never read, and the calls a test makes leave the graph with it.
+
 ## Choose plugins
 
 Three lists, one per plugin kind:
@@ -212,6 +239,7 @@ setting in CI.
 |---|---|---|
 | `ignore` | `[]` | Extra glob patterns to skip. |
 | `respectGitignore` | `true` | Honour `.gitignore` files, in the scan and in finding components. |
+| `testFiles` | test-file globs | Files whose Symbols are test code: reported apart in `diff.md` and skipped by `--fail-on-scope non-test`. |
 | `languages` | `[]` | Language plugins to load. A scan needs at least one; `aburi init` writes the ones it detects. |
 | `frameworks` | `[]` | Framework plugins to load. |
 | `effects` | `[]` | Effects plugins, in priority order. |

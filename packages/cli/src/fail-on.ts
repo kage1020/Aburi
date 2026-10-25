@@ -1,4 +1,4 @@
-import type { DiffResult, SymbolChange, SymbolId } from "@aburi/types"
+import type { DiffResult, Symbol as IRSymbol, SymbolChange, SymbolId } from "@aburi/types"
 import { assertNever } from "./errors"
 
 export type FailOnStatusToken =
@@ -20,6 +20,8 @@ export type FailOnDeltaAxis =
   | "confidence-changed"
 
 export type FailOnToken = FailOnStatusToken | FailOnDeltaAxis
+
+export type FailOnScope = "all" | "non-test"
 
 export interface FailOnClause {
   token: FailOnToken
@@ -128,8 +130,14 @@ export interface ClauseOutcome {
   symbols: SymbolId[]
 }
 
-export function evaluateClause(clause: FailOnClause, diff: DiffResult): ClauseOutcome {
-  const symbols = diff.symbols.filter((change) => counts(clause.token, change)).map(entryId)
+export function evaluateClause(
+  clause: FailOnClause,
+  diff: DiffResult,
+  scope: FailOnScope = "all",
+): ClauseOutcome {
+  const symbols = diff.symbols
+    .filter((change) => inScope(scope, change) && counts(clause.token, change))
+    .map((change) => entrySymbol(change).id)
   const observed = symbols.length
   const triggered = clause.threshold === null ? observed > 0 : observed > clause.threshold
   return { triggered, observed, symbols }
@@ -139,22 +147,24 @@ export interface TrippedClause {
   clause: FailOnClause
   observed: number
   symbols: SymbolId[]
+  scope: FailOnScope
 }
 
 export function evaluateFailOn(
   clauses: readonly FailOnClause[],
   diff: DiffResult,
+  scope: FailOnScope = "all",
 ): {
   firstTriggered: TrippedClause | null
   evaluations: ({ clause: FailOnClause } & ClauseOutcome)[]
 } {
-  const evaluations = clauses.map((clause) => ({ clause, ...evaluateClause(clause, diff) }))
+  const evaluations = clauses.map((clause) => ({ clause, ...evaluateClause(clause, diff, scope) }))
   const first = evaluations.find((e) => e.triggered)
   return {
     firstTriggered:
       first === undefined
         ? null
-        : { clause: first.clause, observed: first.observed, symbols: first.symbols },
+        : { clause: first.clause, observed: first.observed, symbols: first.symbols, scope },
     evaluations,
   }
 }
@@ -199,8 +209,13 @@ function deltaMoved(
   )
 }
 
-function entryId(change: SymbolChange): SymbolId {
-  return "symbol" in change ? change.symbol.id : change.after.id
+/** The head decides for a pair, as it does where the report lists the entry. */
+function inScope(scope: FailOnScope, change: SymbolChange): boolean {
+  return scope === "all" || entrySymbol(change).inTestFile !== true
+}
+
+function entrySymbol(change: SymbolChange): IRSymbol {
+  return "symbol" in change ? change.symbol : change.after
 }
 
 // Enough to find each in the report; a threshold clause can trip on thousands.
@@ -210,12 +225,14 @@ export function formatTriggered(
   clause: FailOnClause,
   observed: number,
   symbols: readonly SymbolId[] = [],
+  scope: FailOnScope = "all",
 ): string {
   const rendered = clause.threshold === null ? clause.token : `${clause.token}:>${clause.threshold}`
   const named = symbols.slice(0, NAMED_AT_MOST).map((id) => `  ${id}`)
   const unnamed = symbols.length - named.length
+  const where = scope === "all" ? "" : " outside test files"
   return [
-    `--fail-on ${rendered} tripped (observed: ${observed} ${clause.token})`,
+    `--fail-on ${rendered} tripped (observed: ${observed} ${clause.token}${where})`,
     ...named,
     ...(unnamed > 0 ? [`  … and ${unnamed} more`] : []),
   ].join("\n")

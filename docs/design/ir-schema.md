@@ -61,6 +61,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | `Component.description` | **yes** | **A** | always emitted; `null` when the component carries no description |
 | `Symbol.component` | **yes** | **A** | always emitted; `null` when the Symbol lies outside every Component |
 | `Symbol.signature` | **yes** | **A** | always emitted; `null` for Symbols with no callable signature |
+| `Symbol.inTestFile` | no | B | present iff `true`: the Symbol's file matched the config's `testFiles` (schema-enforced by `const: true`, §5.7) |
 | `Decorator.qualifier` | no | B | omitted when the decorator was written as a bare name; never `""` (§6) |
 | `Signature.inferredThrows` | no | B | omitted when nothing was inferred; never `[]` (§7) |
 | `Signature.inputs[].optional` | no | B | present iff `true`: a caller may omit the argument (schema-enforced by `const: true`, which refuses `false`, §7) |
@@ -304,7 +305,8 @@ The core entity of the review unit.
   "confidence": "high",                       // required, enum §5.4
   "derivedBy": ["framework:nestjs:controller", "branch-condition"],  // required
   "dropped": false,                           // required
-  "dropReason": null                          // required, non-null when dropped=true
+  "dropReason": null,                         // required, non-null when dropped=true
+  "inTestFile": true                          // Class B (§1.1) — present only on a Symbol of test code, §5.7
 }
 ```
 
@@ -371,6 +373,12 @@ A Symbol's `derivedBy` entry that names something the source wrote — the call 
 - `true`: judged to be decoration, but kept for transparency about what was dropped
 
 Symbols with `dropped: true` have `rules`/`effects`/`calls`/`fingerprint` set to their prescribed values (empty arrays / all fingerprints = "0"*12). The Markdown projection aggregates them in a collapsed `## Dropped` section (see [markdown-projection.md](./markdown-projection.md) §3.6). `aburi explain` outputs the full details. `dropReason` is a short human-readable phrase (e.g. `"pure DTO"`, `"logger boilerplate"`, `"generated file"`).
+
+### 5.7 `inTestFile`
+
+`true` on every Symbol whose `source.file` matches the config's `testFiles` patterns, or the default list when the config gives none ([`config.md`](./config.md) §4.1); absent on every other Symbol. Dropped Symbols are marked like any other.
+
+The mark says the Symbol is test code, and nothing about how it was analysed: a Symbol of a test file has the same rules, effects, calls and edges it would have anywhere else, so a call graph through a fixture stays whole. No fingerprint reads it, so a change to `testFiles` alone moves no Symbol in `aburi diff`. Its readers are downstream: the Markdown projection lists the changes of marked Symbols apart ([`markdown-projection.md`](./markdown-projection.md) §6.2), and `aburi diff --fail-on-scope non-test` leaves them out of the gate ([`cli-spec.md`](./cli-spec.md) §6.7). A diff entry with both a base and a head Symbol is judged by the head's mark, as the report places it by the head's file.
 
 ## 6. Decorator
 

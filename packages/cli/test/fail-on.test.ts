@@ -16,6 +16,7 @@ import {
   evaluateClause,
   evaluateFailOn,
   FailOnParseError,
+  type FailOnScope,
   formatTriggered,
   parseFailOn,
 } from "../src"
@@ -44,10 +45,10 @@ function removedEntry(name: string, fold: Pick<SymbolRemoved, "foldedInto"> = {}
 const FOLDED = { foldedInto: symbolId("ts:src/fixtures.ts#emptyIR") }
 const BARE = { foldedInto: null }
 
-function evaluation(spec: string, diff: DiffResult) {
+function evaluation(spec: string, diff: DiffResult, scope?: FailOnScope) {
   const [clause] = parseFailOn(spec)
   if (clause === undefined) throw new Error(`no clause in ${spec}`)
-  return evaluateClause(clause, diff)
+  return evaluateClause(clause, diff, scope)
 }
 
 function observed(spec: string, diff: DiffResult): number {
@@ -222,6 +223,29 @@ describe("evaluateClause — what a clause counts", () => {
   })
 })
 
+describe("evaluateClause — the non-test scope", () => {
+  const inTest = (file: string, name: string) =>
+    makeSymbol({ id: `ts:${file}#${name}`, name, inTestFile: true })
+  const outside = (file: string, name: string) => makeSymbol({ id: `ts:${file}#${name}`, name })
+
+  it("leaves out the entries of test files, judging a pair by its head", () => {
+    const diff = diffWith([
+      { status: "removed", symbol: inTest("src/a.test.ts", "fixture") },
+      removedEntry("gone", BARE),
+      movedChanged(inTest("src/a.test.ts", "parse"), outside("src/parse.ts", "parse"), {
+        apiChanged: true,
+      }),
+      movedChanged(outside("src/b.ts", "mock"), inTest("test/mock.ts", "mock"), {
+        apiChanged: true,
+      }),
+    ])
+    expect(evaluation("removed", diff, "non-test").symbols).toEqual(["ts:src/a.ts#gone"])
+    expect(evaluation("api-changed", diff, "non-test").symbols).toEqual(["ts:src/parse.ts#parse"])
+    expect(evaluation("removed", diff).observed).toBe(2)
+    expect(evaluation("api-changed", diff, "all").observed).toBe(2)
+  })
+})
+
 describe("evaluateFailOn — which clause trips", () => {
   it("returns the first clause that trips, and every clause's count", () => {
     const diff = diffWith([...changedEntries(2), removedEntry("gone", BARE)])
@@ -233,6 +257,7 @@ describe("evaluateFailOn — which clause trips", () => {
       clause: { token: "changed", threshold: null },
       observed: 2,
       symbols: ["ts:src/a.ts#f0", "ts:src/a.ts#f1"],
+      scope: "all",
     })
     expect(evaluations.map((e) => [e.clause.token, e.observed, e.triggered])).toEqual([
       ["added", 0, false],
@@ -254,6 +279,12 @@ describe("evaluateFailOn — which clause trips", () => {
     ],
   ] as const)("phrases %j tripping on %i", (clause, count, line) => {
     expect(formatTriggered(clause, count)).toBe(line)
+  })
+
+  it("says when it counted outside test files alone", () => {
+    expect(formatTriggered({ token: "removed", threshold: null }, 2, [], "non-test")).toBe(
+      "--fail-on removed tripped (observed: 2 removed outside test files)",
+    )
   })
 
   it.each([
@@ -280,8 +311,8 @@ describe("aburi diff --fail-on", () => {
   const ALPHA_EDITED = { ...ALPHA, fingerprint: fp("bbb") }
   const BASE = documentWith({ symbols: [ALPHA, BETA] })
 
-  async function diffTo(head: IR, gate: readonly string[]) {
-    const paths = await writeIRs(workspace.root, BASE, head)
+  async function diffTo(head: IR, gate: readonly string[], base = BASE) {
+    const paths = await writeIRs(workspace.root, base, head)
     const { code, stderr } = await runCliIn(workspace.root, [
       "diff",
       "--base",
@@ -330,6 +361,65 @@ describe("aburi diff --fail-on", () => {
     expect(run.stderr).toContain(
       "--fail-on removed tripped (observed: 1 removed)\n  ts:src/b.ts#beta\n",
     )
+  })
+
+  describe("under --fail-on-scope", () => {
+    const FIXTURE = { ...symbolFor("ts:src/a.test.ts#fixture"), inTestFile: true as const }
+    const WITH_FIXTURE = documentWith({ symbols: [ALPHA, BETA, FIXTURE] })
+
+    const FIXTURE_GONE = documentWith({ symbols: [ALPHA, BETA] })
+    const BOTH_GONE = documentWith({ symbols: [ALPHA] })
+
+    it.each<[string, string, IR, ExitCode, string[]]>([
+      ["non-test", "a removed fixture", FIXTURE_GONE, EXIT.SUCCESS, []],
+      [
+        "all",
+        "a removed fixture",
+        FIXTURE_GONE,
+        EXIT.GATE,
+        ["--fail-on removed tripped (observed: 1 removed)"],
+      ],
+      [
+        "non-test",
+        "a removed fixture and a removed Symbol beside it",
+        BOTH_GONE,
+        EXIT.GATE,
+        ["--fail-on removed tripped (observed: 1 removed outside test files)"],
+      ],
+    ])("%s, over %s, exits %i and prints %j", async (scope, _over, head, code, tripped) => {
+      const run = await diffTo(
+        head,
+        ["--fail-on", "removed", "--fail-on-scope", scope],
+        WITH_FIXTURE,
+      )
+      expect({ code: run.code, tripped: run.tripped }).toEqual({ code, tripped })
+    })
+
+    it("names only the Symbols it counted", async () => {
+      const run = await diffTo(
+        BOTH_GONE,
+        ["--fail-on", "removed", "--fail-on-scope", "non-test"],
+        WITH_FIXTURE,
+      )
+      expect(run.stderr).toContain(
+        "--fail-on removed tripped (observed: 1 removed outside test files)\n  ts:src/b.ts#beta\n",
+      )
+      expect(run.stderr).not.toContain("fixture")
+    })
+
+    it("refuses a scope it does not know at exit 2", async () => {
+      const { code, stderr } = await runCliIn(workspace.root, [
+        "diff",
+        "--base",
+        "./missing.json",
+        "--head",
+        "./also.json",
+        "--fail-on-scope",
+        "tests",
+      ])
+      expect(code).toBe(EXIT.INPUT_ERROR)
+      expect(stderr).toContain("--fail-on-scope must be one of: all | non-test")
+    })
   })
 
   const EMPTY_VALUE =

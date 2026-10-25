@@ -41,6 +41,9 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
   "ignore": ["docs/**", "scripts/legacy/**"],
   "respectGitignore": true,
 
+  // Test code: scanned, but reported and gated apart (§4.1)
+  "testFiles": ["**/*.test.*", "**/test/**", "examples/**"],
+
   // Plugin enablement (extension-vocab §4)
   "languages": ["lang-typescript"],
   "frameworks": ["framework-nestjs"],
@@ -117,6 +120,23 @@ These are **appended** to the core standard patterns of drop-list §3.1 (existin
 - While it holds, a directory it excludes may go unlisted: failing to list one is passed over rather than ending the run (drop-list.md §3)
 
 Setting it to `false` makes git-ignored files (build artifacts, etc.) extraction targets as well. Intended for special cases such as deliberately inspecting built code in CI.
+
+## 4.1 `testFiles`
+
+Glob patterns naming the files that hold test code.
+
+```jsonc
+{
+  "testFiles": ["**/*.test.*", "**/test/**", "examples/**"]
+}
+```
+
+- The syntax of `ignore` (§3): POSIX, relative to the workspace root, a `*` or `**` matching a name that starts with a dot. A pattern is read in NFC, the form every IR path is in
+- Absent, the default list applies: `**/*.test.*`, `**/*.spec.*`, `**/*.test-d.*`, `**/*.spec-d.*`, `**/__tests__/**`, `**/__mocks__/**`, `**/__fixtures__/**`, `**/test/**`, `**/tests/**`, `**/e2e/**`. Given, the list **replaces** the default one, so a workspace whose `src/test/` is production code can leave that pattern out; `[]` marks no file
+- A file it names is scanned like any other. Its Symbols keep their calls, effects and edges, so Slice View and `aburi explain` still read them, and each carries `inTestFile: true` (ir-schema.md §5.7)
+- What the mark changes is downstream: `diff.md` lists those Symbols' changes in a trailing folded section instead of the sections above it (markdown-projection.md §6.2), and `aburi diff --fail-on-scope non-test` leaves them out of the gate (cli-spec.md §6.7)
+
+`ignore` is the other way to keep tests out of a report, and the wrong one for them: a file it names is never read, so the calls out of a test file leave the dependency graph with its Symbols.
 
 ## 5. Plugin Enablement
 
@@ -507,6 +527,9 @@ writes it down, mapping each detected language and framework to the first-party 
 | C21a | `components: [{ …, "frameworks": ["lang-typescript"] }]`, a plugin that provides no framework | Exit 0; stderr says to remove it or write the component's framework id |
 | C22 | A config that opens with one byte order mark (U+FEFF) | Loads as without it; a key named twice is reported at the column an editor shows. Two of them, or one after the first character, is `config-parse-failed` naming `InvalidSymbol` and its offset |
 | C23 | `components: [{ …, "publicApi": ["src\\index.ts"] }]` | Exit 2 naming the component and the entry |
+| C24 | `testFiles` omitted, over `src/a.test.ts`, `src/__tests__/b.ts`, `test/c.ts`, `tools/.harness/test/d.ts` and `src/testing.ts` | Every Symbol of the first four carries `inTestFile: true`; the last file's carry no key |
+| C25 | `testFiles: ["src/order.ts"]` | Only that file's Symbols carry the key: the default list no longer applies |
+| C26 | `testFiles: []` | No Symbol carries the key, and every fingerprint is the one the default list gives |
 
 ## 14.1 Config Schema Compatibility Policy
 

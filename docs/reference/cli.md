@@ -213,6 +213,7 @@ scanning.
 | `<base>..<head>` | Ref-spec dispatch. A ref git cannot resolve exits `2`, and the message says whether that is because the directory is not a repository, the repository has no commits, or the name is unknown. |
 | `--base <path>` `--head <path>` | File-mode dispatch. Mutually exclusive with the ref-spec. |
 | `--fail-on <spec>` | The CI gate. Repeatable. See below. |
+| `--fail-on-scope <scope>` | `all` (default) or `non-test`: whether the gate counts the Symbols of test files. See below. |
 | `--output-dir <dir>` | Where to write. Falls back to `output.dir`, then `out`. Created if missing; a path a file already stands on exits `2` and names it. Any `diff.json`, `diff.md` or `diff.full.md` already there is removed before the comparison starts, so a run that fails leaves no earlier report to be mistaken for its own. |
 | `--format <fmt>` | `json`, `md`, or `both`. |
 | `--compact` | JSON without indentation. |
@@ -299,6 +300,25 @@ clause (`added,`, `added,,removed`), and an empty value all exit `2`, and with
 `--fail-on` repeated the message quotes the occurrence at fault. Aburi
 treats an empty gate as a mistake rather than as "no gate", because it would
 turn a regression into a green pipeline.
+
+### `--fail-on-scope`
+
+A Symbol of a file your config's [`testFiles`](https://aburi.kage1020.com/guide/configuration#mark-test-code)
+names is test code. `diff.md` lists its changes in a folded `🧪 Test files` section at the end,
+and `--fail-on-scope non-test` leaves them out of the gate, so deleting a fixture does not fail
+the build:
+
+```bash
+aburi diff main..HEAD --fail-on removed --fail-on-scope non-test
+```
+
+```
+--fail-on removed tripped (observed: 1 removed outside test files)
+  ts:src/billing/legacy.ts#refundInvoice
+```
+
+Every clause counts that way. A pair is judged by its head: a helper moved out of a test file
+into `src/` counts, one moved into a test file does not. The default, `all`, counts every change.
 
 ---
 

@@ -94,6 +94,7 @@ describe("aburi diff in a repository with a submodule", () => {
       clause: { token: "added", threshold: null },
       observed: 1,
       symbols: ["ts:src/main.ts#main2"],
+      scope: "all",
     })
     expect(report.exitCode).toBe(EXIT.GATE)
     expect(warnings).toEqual([WARNING("libs/sub")])

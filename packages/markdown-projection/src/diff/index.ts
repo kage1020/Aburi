@@ -1,5 +1,5 @@
 import type { DiffResult } from "@aburi/types"
-import { inlineCode } from "../format"
+import { counted, inlineCode } from "../format"
 import { renderComponentChanges } from "./component-changes"
 import { renderDependencyChanges } from "./dependency-changes"
 import {
@@ -16,14 +16,15 @@ import {
 import {
   indexChanged,
   indexConfidence,
-  indexMovedChanged,
+  indexMoved,
   indexRemoved,
   indexSymbols,
   indexUnknown,
 } from "./names-only"
-import { partition } from "./partition"
+import { entrySymbol, partition } from "./partition"
 import { assemble, foldedSection, plainSection, type Section } from "./size-cap"
 import { renderSliceView } from "./slice-view"
+import { inTestFile, renderTestFiles } from "./test-files"
 
 export interface ProjectDiffOptions {
   readonly maxBytes?: number
@@ -49,7 +50,13 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     "",
   ]
 
-  const buckets = partition(diff.symbols)
+  const testChanges = diff.symbols.filter(inTestFile)
+  const buckets = partition(diff.symbols.filter((change) => !inTestFile(change)))
+  const testIds = new Set(testChanges.map((change) => entrySymbol(change).id))
+  // A Slice with no members is left for the Slice View to refuse.
+  const slices = diff.slices.filter(
+    ({ members }) => members.length === 0 || members.some((id) => !testIds.has(id)),
+  )
   const sections = [
     plainSection(
       "## ⚠ API changes",
@@ -61,7 +68,7 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
       renderChangedList(buckets.logicOnly),
       indexChanged(buckets.logicOnly),
     ),
-    plainSection("## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols)),
+    plainSection("## 🧵 Slice View", renderSliceView(slices, diff.symbols)),
     plainSection("## ➕ Added", renderAdded(buckets.added), indexSymbols(buckets.added)),
     plainSection("## ➖ Removed", renderRemoved(buckets.removed), indexRemoved(buckets.removed)),
     plainSection("## ❔ Unknown", renderUnknown(buckets.unknown), indexUnknown(buckets.unknown)),
@@ -69,7 +76,7 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     plainSection(
       "## 🔀 Moved + Changed",
       renderMovedChanged(buckets.movedChanged),
-      indexMovedChanged(buckets.movedChanged),
+      indexMoved(buckets.movedChanged),
     ),
     foldedSection(
       "## 🔀 Moved",
@@ -93,13 +100,14 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
       renderSyntaxOnly(buckets.syntaxOnly),
       `${counted(buckets.syntaxOnly.length, "symbol", "symbols")} (implementation refactor only, no semantic change)`,
     ),
+    foldedSection(
+      "## 🧪 Test files",
+      renderTestFiles(testChanges),
+      counted(testChanges.length, "symbol in a test file", "symbols in test files"),
+    ),
   ].filter((entry): entry is Section => entry !== null)
 
   return assemble(heading, sections, maxBytes, fullReportLocation)
-}
-
-function counted(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`
 }
 
 export function projectDiffSummaryLine(diff: DiffResult): string {
@@ -121,10 +129,12 @@ function summaryLine(diff: DiffResult): string {
   const summary = diff.summary
   const folded = summary.removedFolded ?? 0
   const removed = folded === 0 ? "removed" : `removed (${folded} folded)`
-  return withUnknown(
+  const line = withUnknown(
     `+${summary.added} added · -${summary.removed} ${removed} · ~${summary.changed} changed · ${summary.moved} moved · ${summary.movedChanged} moved+changed`,
     diff,
   )
+  const inTests = diff.symbols.filter(inTestFile).length
+  return inTests === 0 ? line : `${line} · ${inTests} in test files`
 }
 
 function withUnknown(line: string, diff: DiffResult): string {

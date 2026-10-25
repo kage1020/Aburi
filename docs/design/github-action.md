@@ -25,6 +25,7 @@ prefixing a marker, and never decides what is worth failing on — `--fail-on` i
 | `version` | `latest` | `@aburi/cli` version for `cli: dlx`. Not read under `cli: workspace`. |
 | `refspec` | *(empty)* | `<base>..<head>` for `aburi diff`, used as given. Empty, on `pull_request` and `pull_request_target`, is resolved from what is checked out (§2.1); any other event with an empty `refspec` is exit 2. |
 | `fail-on` | *(empty)* | Forwarded to `--fail-on` verbatim. Empty runs report-only. |
+| `fail-on-scope` | *(empty)* | Forwarded to `--fail-on-scope` verbatim (cli-spec.md §6.7). Empty passes no flag, which counts every change. |
 | `config` | *(empty)* | Forwarded to `--config`. |
 | `output-dir` | `out` | Forwarded to `--output-dir`, always, because the action reads `diff.md` back. A workspace that sets `config.output.dir` must set this to match. Relative to `working-directory`, or absolute; how the comment step finds the file either way is §4. Empty is exit 2. |
 | `format` | `both` | Forwarded to `--format`. Must include Markdown when `comment: true`. |

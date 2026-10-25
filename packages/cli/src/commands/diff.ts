@@ -19,6 +19,7 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import {
   evaluateFailOn,
   type FailOnClause,
+  type FailOnScope,
   formatTriggered,
   parseFailOn,
   type TrippedClause,
@@ -59,6 +60,7 @@ export interface DiffOptions {
   outputDir?: string
   format?: "json" | "md" | "both"
   failOn?: string | readonly string[]
+  failOnScope?: FailOnScope
   configPath?: string
   compact?: boolean
   maxBytes?: number
@@ -130,7 +132,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   }
 
   const written = await writeReport(diff, outputDir, options, warn)
-  const { firstTriggered } = evaluateFailOn(failOn, diff)
+  const { firstTriggered } = evaluateFailOn(failOn, diff, options.failOnScope)
   const faultedScans = faultedSides(compared.scans)
   const exitCode: ExitCode =
     firstTriggered === null && (faultedScans === null || faultedScans.length === 0)
@@ -157,7 +159,7 @@ function parseFailOnValues(failOn: string | readonly string[]): FailOnClause[] {
 }
 
 export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {
-  return formatTriggered(triggered.clause, triggered.observed, triggered.symbols)
+  return formatTriggered(triggered.clause, triggered.observed, triggered.symbols, triggered.scope)
 }
 
 async function removeEarlierReport(outputDir: string): Promise<void> {

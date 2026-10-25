@@ -43,6 +43,7 @@ rewrites it in place instead of piling up a new one.
 |---|---|
 | `version` | Which `@aburi/cli` version to run (`latest`, `0.1.0`, and so on). Applies to `cli: dlx`. |
 | `fail-on` | Passed to `aburi diff --fail-on`. Leave it empty to report without ever failing. |
+| `fail-on-scope` | Passed to `aburi diff --fail-on-scope`. `non-test` keeps changes to test code from tripping `fail-on`. |
 | `cli` | How the binary is resolved: `dlx` (default) or `workspace`. See below. |
 | `max-bytes` | Size cap for the report, in bytes. Defaults to what a GitHub comment holds; see below. |
 

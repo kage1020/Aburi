@@ -20,6 +20,24 @@
       "default": true,
       "description": "Whether to merge .gitignore patterns into drop-list category A."
     },
+    "testFiles": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": [
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/*.test-d.*",
+        "**/*.spec-d.*",
+        "**/__tests__/**",
+        "**/__mocks__/**",
+        "**/__fixtures__/**",
+        "**/test/**",
+        "**/tests/**",
+        "**/e2e/**"
+      ],
+      "description": "Glob patterns, in the syntax of ignore, naming the files that hold test code. Their Symbols are scanned and kept in the dependency graph like any other, carry inTestFile in the IR, are listed apart in the diff report, and are left out of a gate scoped to non-test Symbols. Given, the list replaces the default one; [] marks no file."
+    },
     "languages": {
       "type": "array",
       "items": { "$ref": "#/$defs/PluginRef" },

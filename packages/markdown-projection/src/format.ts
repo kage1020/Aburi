@@ -79,6 +79,10 @@ export function appendAll<T>(target: T[], items: readonly T[]): void {
 
 export const EMPTY_VALUE = "(empty)"
 
+export function counted(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`
+}
+
 export function inlineCode(value: string): string {
   const collapsed = value.replace(new RegExp(`\\s*(?:${LINE_ENDING.source})\\s*`, "g"), " ")
   if (collapsed.length === 0) return EMPTY_VALUE

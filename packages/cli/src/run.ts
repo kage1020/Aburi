@@ -5,6 +5,7 @@ import {
   deriveFormat,
   deriveStrict,
   type OutputFormat,
+  parseFailOnScope,
   parseFormat,
   parseLogLevel,
   parseMaxBytes,
@@ -19,7 +20,7 @@ import { resolveConfigPath } from "./config-path"
 import { type LogLevel, readEnv } from "./env"
 import { assertNever, CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
-import { FailOnParseError } from "./fail-on"
+import { FailOnParseError, type FailOnScope } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
 import { describeWorkspaceDetection, UNNAMEABLE_BECAUSE } from "./unresolved-report"
 import { VOCAB_DISCOVERED_FILENAME } from "./vocab-discovered"
@@ -234,6 +235,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       collect,
       [],
     )
+    .option(
+      "--fail-on-scope <scope>",
+      "all | non-test: whether --fail-on counts the Symbols of the files config testFiles names (default: all)",
+      parseFailOnScope,
+    )
     .option("--compact", "compact JSON output")
     .option(
       "--max-bytes <n>",
@@ -250,6 +256,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           outputDir?: string
           format?: OutputFormat
           failOn?: string[]
+          failOnScope?: FailOnScope
           compact?: boolean
           maxBytes?: number
           config?: string
@@ -268,6 +275,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
                 cmdOptions.failOn !== undefined && cmdOptions.failOn.length > 0
                   ? cmdOptions.failOn
                   : undefined,
+              failOnScope: cmdOptions.failOnScope,
               compact: cmdOptions.compact,
               maxBytes: cmdOptions.maxBytes,
               logLevel: logLevel(),

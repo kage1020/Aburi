@@ -15,7 +15,7 @@ import {
   ProjectionInvariantError,
 } from "../format"
 import { fileLine, moveRoute, skippedFile } from "./entries"
-import { assertNeverChange } from "./partition"
+import { assertNeverChange, entrySymbol } from "./partition"
 
 /**
  * A resolved call from one changed Symbol to another: the line of its first call, and whether only
@@ -73,7 +73,7 @@ export function renderSliceView(
         throw new ProjectionInvariantError("members[0]", `Slice(id=${slice.id})`)
       }
       const change = requireChangeForMember(memberId, slice.id, changeById)
-      const symbol = symbolForMember(change)
+      const symbol = entrySymbol(change)
       rows.push(
         `- ${inlineCode(symbol.name)} — ${renderMemberFollowup(change)} · ${fileLine(symbol)}${unresolvedCallMarker(crossings.get(memberId))}`,
       )
@@ -96,7 +96,7 @@ function renderSliceSection(
 ): string[] {
   const symbolOf = new Map<SymbolId, IRSymbol>()
   for (const memberId of slice.members) {
-    symbolOf.set(memberId, symbolForMember(requireChangeForMember(memberId, slice.id, changeById)))
+    symbolOf.set(memberId, entrySymbol(requireChangeForMember(memberId, slice.id, changeById)))
   }
   const member = (id: SymbolId): IRSymbol => {
     const symbol = symbolOf.get(id)
@@ -290,7 +290,7 @@ function resolvedCallSites(symbols: readonly SymbolChange[]): CallSites {
   }
   const sites = new Map<SymbolId, Map<SymbolId, CallSite>>()
   for (const change of symbols) {
-    const caller = symbolForMember(change).id
+    const caller = entrySymbol(change).id
     const callees = sites.get(caller) ?? new Map<SymbolId, CallSite>()
     sites.set(caller, callees)
     const revisions = revisionsOf(change)
@@ -355,7 +355,7 @@ function unresolvedCrossings(
     for (const memberId of slice.members) {
       const change = changeById.get(memberId)
       if (change === undefined) continue
-      const { name, owner } = nameParts(symbolForMember(change).name)
+      const { name, owner } = nameParts(entrySymbol(change).name)
       const named = membersByName.get(name) ?? []
       named.push({ owner, slice: slice.id })
       membersByName.set(name, named)
@@ -466,22 +466,6 @@ function requireChangeForMember(
   return change
 }
 
-function symbolForMember(change: SymbolChange): IRSymbol {
-  switch (change.status) {
-    case "added":
-    case "removed":
-    case "unknown":
-      return change.symbol
-    case "changed":
-    case "moved+changed":
-    case "dropped-toggled":
-    case "moved":
-      return change.after
-    default:
-      return assertNeverChange(change)
-  }
-}
-
 function renderMemberFollowup(change: SymbolChange): string {
   switch (change.status) {
     case "added":
@@ -529,6 +513,6 @@ function deltaAxisSummary(delta: SymbolDelta): string {
 
 function indexChangesById(symbols: readonly SymbolChange[]): Map<SymbolId, SymbolChange> {
   const map = new Map<SymbolId, SymbolChange>()
-  for (const change of symbols) map.set(symbolForMember(change).id, change)
+  for (const change of symbols) map.set(entrySymbol(change).id, change)
   return map
 }

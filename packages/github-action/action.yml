@@ -35,6 +35,13 @@ inputs:
       Leave empty to run in report-only mode.
     required: false
     default: ""
+  fail-on-scope:
+    description: >-
+      Value passed to `aburi diff --fail-on-scope`: `all`, or `non-test` to leave the Symbols of
+      the files the config's `testFiles` names out of the `fail-on` gate. Empty passes no flag,
+      which counts all of them.
+    required: false
+    default: ""
   config:
     description: "Path to an `aburi.json` / `aburi.jsonc` (forwarded to `--config`)."
     required: false
@@ -191,6 +198,7 @@ runs:
         FORMAT: ${{ inputs.format }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         FAIL_ON: ${{ inputs.fail-on }}
+        FAIL_ON_SCOPE: ${{ inputs.fail-on-scope }}
         CONFIG: ${{ inputs.config }}
         CLI: ${{ inputs.cli }}
         MAX_BYTES: ${{ inputs.max-bytes }}
@@ -198,6 +206,7 @@ runs:
         set -euo pipefail
         args=(diff "$REFSPEC" --format "$FORMAT" --output-dir "$OUTPUT_DIR")
         if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
+        if [ -n "$FAIL_ON_SCOPE" ]; then args+=(--fail-on-scope "$FAIL_ON_SCOPE"); fi
         if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
 
         if [ "$CLI" = "workspace" ]; then

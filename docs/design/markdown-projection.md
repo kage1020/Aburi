@@ -521,6 +521,7 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ## 💧 Dropped changes
 ## 🎚 Confidence changes
 ## 🎨 Syntax-only changes
+## 🧪 Test files
 ```
 
 Each ref of the title is in a span (§3.4.2), unless it is a commit SHA, which is written bare: hex
@@ -531,13 +532,23 @@ The section order is fixed, **highest importance → lowest**, and this list is 
 sections from the bottom of it, and MP13 is stated against it, so a list that has drifted from the
 projection is a size cap that drops the wrong thing.
 
-Three sections — **Moved**, **Dropped changes** and **Syntax-only changes** — are folded in
-`<details>`. They are not contiguous: Component changes and Dependency changes sit between Moved
-and Dropped changes, unfolded, and Confidence changes between Dropped changes and Syntax-only
-changes. Moved + Changed is not folded either, because it carries semantic
+Four sections — **Moved**, **Dropped changes**, **Syntax-only changes** and **Test files** — are
+folded in `<details>`. They are not contiguous: Component changes and Dependency changes sit
+between Moved and Dropped changes, unfolded, and Confidence changes between Dropped changes and
+Syntax-only changes. Moved + Changed is not folded either, because it carries semantic
 change worth reading.
 
+Every Symbol change lands in exactly one place. A change whose Symbol carries `inTestFile`
+([`ir-schema.md`](./ir-schema.md) §5.7) — the head's for a pair, as the head's file is the one the
+entry names — is in **Test files** and in none of the sections above it, so a pull request that
+only edits fixtures reads as one. The Component and Dependency sections are not split: an edge
+names its ends by id and carries no mark, and both stay as the diff gives them.
+
 The `· ?N unknown` suffix on the Summary line appears only when `summary.unknown` is non-zero, so the line a reviewer skims on every PR does not carry a permanent `?0`. It qualifies the counts beside it: added and removed are both smaller than the truth by that much.
+
+The line ends `· N in test files` when N of its changes are in **Test files**, so the counts it
+gives still count every change and say how many of them are test code; a diff with none carries no
+`· 0 in test files`.
 
 `-N removed` reads `-N removed (M folded)` when `summary.removedFolded` is non-zero: M of the N removals left their body in a head Symbol ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2), which is why `--fail-on removed` passed while the line counts N. The CLI's glyph line (`+A -R ~C ↔M ⤴MC`) is left as it is: it is read by scripts, and `-R` stays the count of `removed` entries.
 
@@ -808,6 +819,37 @@ The Unknown group is not split by level the way the added and removed groups are
 </details>
 ```
 
+#### 🧪 Test files (folded)
+
+The changes of test code, by name, grouped in the order of the sections above:
+
+```md
+<details>
+<summary>3 symbols in test files</summary>
+
+**2 added**
+- `documentWith` *(function)* — `packages/cli/test/ir-documents.ts:24`
+- `scratch` *(const)* — `packages/cli/test/serializer-refusal.test.ts:31`
+
+**1 moved**
+- `mock` *(const)* — `packages/cli/test/serializer.test.ts:21` (from `packages/cli/test/serializer-refusal.test.ts`)
+
+</details>
+```
+
+Each row is the names-only row of the section the change would otherwise be in (§6.4), so a
+reviewer who does open the fold finds each Symbol where its full entry would have been. A moved
+pair is listed once, under moved + changed or moved, where the sections above list a moved pair
+with a changed body in both Moved + Changed and the section of its delta. A group counts one in
+the singular (`1 API change`, `1 added`), and so does the fold's summary (`1 symbol in a test file`).
+
+The Slice View leaves out a Slice whose members are all test code, and the singleton of a test
+Symbol, so a fixture that calls a fixture draws no call tree. A Slice that reaches from test code
+into the code under test is drawn whole, test members included: the slice is about the code it
+reaches, and its calls are the reason it is one.
+
+The section is the last, so the size cap (§6.4) omits it before any other.
+
 ### 6.3 One-line summary (CLI stdout)
 
 When `aburi diff` runs, a one-line summary is printed to stdout:
@@ -1074,6 +1116,10 @@ All Markdown projection output is **English, with fixed wording**.
 | MP18 | diff whose `dependencies.added` holds a call edge between two Symbols of one file, one between two files, and one from a Component to a Symbol | The first reads `` `a` → `b` in `<file>` (via `call`) ``, the second `` `a` in `<file>` → `b` in `<file>` (via `call`) ``, the third `` `billing` → `b` in `<file>` (via `import`) ``; no Symbol id appears |
 | MP19 | diff with an added, a removed and an unknown Symbol, each with a non-zero fingerprint | No entry carries a `<sub>` fingerprint line; the same Symbol on its component page does |
 | MP20 | Symbol block whose calls are `log` (L3), `svc.save` (L5), `log` (L9) and `log` (L9) | **Calls** reads ``- `log` (L3, L9)`` then ``- `svc.save` (L5)`` |
+| MP21 | diff with an added Symbol outside test files and, inside them, two added, one removed, one API, one logic and one syntax-only change, a moved + changed and a moved pair | `## ➕ Added` holds only the first; `## 🧪 Test files` is last, folded under `8 symbols in test files`, with one bold group per section in §6.1's order, each row its names-only row, the moved + changed pair under that group alone; the Summary line ends `· 8 in test files` |
+| MP21a | diff whose one pair moved out of a test file, and one whose pair moved into one | The first in `## 🔀 Moved`, the second in `## 🧪 Test files`: the head decides |
+| MP21b | diff with a Slice of two test Symbols, a test singleton, and a Slice from a test Symbol into code under test | No Slice View for the first two; the third drawn with its test member |
+| MP21c | diff with one change outside test files and ten inside, projected with a budget that holds the first and the note but not the fold | The note names `🧪 Test files` as the one section omitted |
 
 ## 12. Design decisions
 
