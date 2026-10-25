@@ -100,7 +100,7 @@ describe("findReturnedJsxElementNames", () => {
     ],
     ["no JSX", "function C() { return 1 }", []],
     [
-      "nothing for an element handed to a call",
+      "nothing for a returned call, whatever its callback returns",
       "function C({ items }) { return items.map((item) => <Ctx.Provider value={item} />) }",
       [],
     ],
@@ -115,8 +115,8 @@ describe("findReturnedJsxElementNames", () => {
       [],
     ],
     [
-      "nothing for a return inside a nested function, generator or method",
-      "function C() { function a() { return <A.Provider /> } ; const b = function* () { return <B.Provider /> } ; class K { m() { return <K.Provider /> } } ; return <div /> }",
+      "nothing for a return inside a nested function, generator, arrow or method",
+      "function C() { function a() { return <A.Provider /> } ; const b = function* () { return <B.Provider /> } ; class K { m() { return <K.Provider /> } } ; const r = (i) => { return <R.Provider value={i} /> } ; const e = function () { return <E.Provider /> } ; function* g() { return <G.Provider /> } ; return <div /> }",
       ["div"],
     ],
   ])("reads %s", async (_label, source, names) => {

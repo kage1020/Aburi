@@ -39,7 +39,7 @@ element, so a loading guard above it (`if (!user) return <Spinner />`) does not
 make it a plain component. Every `return` in the function's own body is read,
 and a concise arrow's body is its return; a `return` inside a nested function,
 generator or method belongs to that function. The returned value is read
-through parentheses, `as`, `satisfies` and `!`, into both arms of a conditional,
+through `as`, `satisfies`, `!` and parentheses, into both arms of a conditional,
 both sides of `||` and `??`, and the last operand of `&&`. Only the returned
 element itself is read, not the elements inside it.
 
@@ -51,9 +51,12 @@ Not classified today (documented for completeness):
   plugin's responsibility.
 - A provider that is not the returned element itself: one inside a fragment
   (`<><Ctx.Provider>…</Ctx.Provider></>`) or inside another element
-  (`<ErrorBoundary><Ctx.Provider>…`), and one handed to a call
-  (`return items.map((item) => <Ctx.Provider>…</Ctx.Provider>)`). Such a
-  function is a `component`.
+  (`<ErrorBoundary><Ctx.Provider>…`), and one anywhere else in an expression
+  the function returns, such as a call
+  (`return items.map((item) => <Ctx.Provider>…</Ctx.Provider>)`,
+  `return useMemo(() => <Ctx.Provider>…</Ctx.Provider>, deps)`,
+  `return createPortal(<Ctx.Provider>…</Ctx.Provider>, el)`) or an array
+  (`return [<Ctx.Provider …/>]`). Such a function is a `component`.
 - React 19's `<Ctx value={…}>` provider spelling. The element names the
   context itself, which the plugin cannot tell from a component by its name,
   so the function is a `component`.

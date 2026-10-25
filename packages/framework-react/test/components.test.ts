@@ -65,9 +65,9 @@ describe("returnsContextProvider", () => {
       "const C = ({ children }) => <MyCtx.Provider>{children}</MyCtx.Provider>",
     ],
     [
-      "<X.Provider> past a guard that returns an element",
+      "<X.Provider> between a guard and a fallback",
       true,
-      "function C({ user, children }) { if (!user) return <Spinner /> ; return <MyCtx.Provider value={user}>{children}</MyCtx.Provider> }",
+      "function C({ user, error, children }) { if (!user) return <Spinner /> ; if (!error) return <MyCtx.Provider value={user}>{children}</MyCtx.Provider> ; return <ErrorPage /> }",
     ],
     ["a bare <Provider>", false, "function C() { return <Provider>x</Provider> }"],
     [
@@ -76,7 +76,7 @@ describe("returnsContextProvider", () => {
       "function C({ children }) { return <><MyCtx.Provider value={1}>{children}</MyCtx.Provider></> }",
     ],
     [
-      "React 19's <Ctx value>, which names no Provider",
+      "React 19's <Ctx value> (no .Provider in its name)",
       false,
       "function C({ children }) { return <MyCtx value={1}>{children}</MyCtx> }",
     ],

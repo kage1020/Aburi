@@ -77,7 +77,7 @@ describe("scan — React source shapes across .tsx and .jsx files", () => {
     })
   })
 
-  it("classifies a provider by every element it returns, so a guard returning JSX does not hide it", async () => {
+  it("classifies a provider by every element it returns, while a guarded layout and a helper's provider stay components", async () => {
     await workspace.writeSource(
       "src/auth.tsx",
       [
@@ -99,9 +99,13 @@ describe("scan — React source shapes across .tsx and .jsx files", () => {
         "  return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>",
         "}",
         "",
-        "export function PlainProvider({ children }: { children: ReactNode }) {",
+        "export const ParenArrow = ({ children }: { children: ReactNode }) => (",
+        "  <AuthContext.Provider value={null}>{children}</AuthContext.Provider>",
+        ")",
+        "",
+        "export function Conditional({ children, loading }: { children: ReactNode; loading: boolean }) {",
         "  const [user] = useState<User | null>(null)",
-        "  return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>",
+        "  return loading ? <Spinner /> : <AuthContext.Provider value={user}>{children}</AuthContext.Provider>",
         "}",
         "",
         "export function Gate({ children }: { children: ReactNode }) {",
@@ -127,7 +131,8 @@ describe("scan — React source shapes across .tsx and .jsx files", () => {
     expect(extKinds).toMatchObject({
       AuthProvider: "framework:react:provider",
       GuardNull: "framework:react:provider",
-      PlainProvider: "framework:react:provider",
+      ParenArrow: "framework:react:provider",
+      Conditional: "framework:react:provider",
       Gate: "framework:react:component",
       Badge: "framework:react:component",
     })

@@ -23,7 +23,6 @@ const FUNCTION_SCOPE_TYPES: ReadonlySet<string> = new Set([
   "method_definition",
 ])
 
-// `ready && <X />` evaluates to `ready` only when it is falsy, which no element is.
 const FALLBACK_OPERATORS: ReadonlySet<string> = new Set(["||", "??"])
 
 export function hasJsxReturn(body: unknown): boolean {
@@ -86,6 +85,8 @@ function branchesOf(value: SyntaxNode): (SyntaxNode | null)[] {
       return [value.childForFieldName("consequence"), value.childForFieldName("alternative")]
     case "binary_expression": {
       const operator = value.childForFieldName("operator")?.type ?? ""
+      // An element is never falsy, so `<A /> && b` always yields `b`: only the right operand can
+      // be the returned element.
       if (operator === "&&") return [value.childForFieldName("right")]
       if (!FALLBACK_OPERATORS.has(operator)) return []
       return [value.childForFieldName("left"), value.childForFieldName("right")]
