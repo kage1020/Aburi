@@ -1,4 +1,4 @@
-import { component, dependency, makeSymbol, zeroFp } from "@aburi/test-support"
+import { component, dependency, makeSymbol, symbolAt, zeroFp } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { droppedFoldout, ProjectionInvariantError } from "../src"
 import { componentPage, droppedSymbol } from "./fixtures"
@@ -47,10 +47,8 @@ describe("projectComponent — header", () => {
 
 describe("projectComponent — Symbols", () => {
   it("groups Symbols by file in path order, each file's by line and then id", () => {
-    const at = (file: string, name: string, startLine: number) => {
-      const symbol = makeSymbol({ id: `ts:${file}#${name}`, name, fingerprint: zeroFp() })
-      return { ...symbol, source: { ...symbol.source, startLine } }
-    }
+    const at = (file: string, name: string, startLine: number) =>
+      symbolAt(file, name, startLine, { fingerprint: zeroFp() })
     const md = componentPage([
       at("src/b.ts", "late", 9),
       at("src/b.ts", "second", 2),

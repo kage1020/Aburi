@@ -128,8 +128,10 @@ Files: `src/app/orders/actions.ts`, `src/lib/payments.ts`
 ```
 
 A member reached twice is written out once, and *(see above)* where it recurs.
-The symbols that call no other changed symbol are folded under **Standalone
-changes**, one line each.
+A call that only the base made is still drawn, since it is what joined the
+slice, and says *(call removed)*. The symbols with no resolved call to or from
+another symbol in the view are folded under **Standalone changes**, one line
+each.
 
 Two slices that should be one can come apart when Aburi could not tell what a
 call reaches. When an unresolved call looks like a call to a changed symbol in
@@ -139,8 +141,9 @@ another slice, the member says so, and a note under the heading counts them:
 - `submitOrder` — logic changed · `actions.ts:18` · ⚠ unresolved call to `getRepo.save`
 ```
 
-Read the slice that holds `Repo.save` together with this one. Calls into
-libraries or built-ins are never marked: they could not have joined two slices.
+Read the slice that holds `Repo.save` together with this one. A call is marked
+only when its name matches a changed symbol in another slice, so calls into
+libraries and built-ins rarely are.
 
 ## Confidence
 

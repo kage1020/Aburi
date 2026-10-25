@@ -1,46 +1,38 @@
-import { changed, makeDiff, makeSymbol, moved, movedChanged, sliceId } from "@aburi/test-support"
+import { changed, makeDiff, moved, movedChanged, sliceId, symbolAt } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { projectChanges } from "./fixtures"
 import { sectionOf } from "./markdown"
 
-function at(id: string, name: string, startLine: number): IRSymbol {
-  const symbol = makeSymbol({ id, name })
-  return { ...symbol, source: { ...symbol.source, startLine } }
-}
-
 const renamedInFile = moved(
-  at("ts:src/output-file.ts#isADirectory", "isADirectory", 40),
-  at("ts:src/output-file.ts#outputIsADirectory", "outputIsADirectory", 60),
+  symbolAt("src/output-file.ts", "isADirectory", 40),
+  symbolAt("src/output-file.ts", "outputIsADirectory", 60),
   "logic-fingerprint",
 )
-const relocated = moved(
-  at("ts:src/util.ts#slug", "slug", 7),
-  at("ts:src/text/slug.ts#slug", "slug", 1),
-)
+const relocated = moved(symbolAt("src/util.ts", "slug", 7), symbolAt("src/text/slug.ts", "slug", 1))
 const reownedInFile = movedChanged(
-  at("ts:src/repo.ts#Repo.save", "Repo.save", 12),
-  at("ts:src/repo.ts#UserRepo.save", "UserRepo.save", 30),
+  symbolAt("src/repo.ts", "Repo.save", 12),
+  symbolAt("src/repo.ts", "UserRepo.save", 30),
   { logicChanged: true },
   "name-signature",
 )
 const acrossFiles = movedChanged(
-  at("ts:src/old.ts#Foo", "Foo", 5),
-  at("ts:src/new.ts#Foo", "Foo", 5),
+  symbolAt("src/old.ts", "Foo", 5),
+  symbolAt("src/new.ts", "Foo", 5),
   {
     logicChanged: true,
   },
 )
 const renamedAcrossFiles = movedChanged(
-  at("ts:src/parse.ts#parseAmount", "parseAmount", 1),
-  at("ts:src/amount.ts#readAmount", "readAmount", 1),
+  symbolAt("src/parse.ts", "parseAmount", 1),
+  symbolAt("src/amount.ts", "readAmount", 1),
   { apiChanged: true, syntaxChanged: true },
   "logic-fingerprint",
 )
 const reownedAcrossFiles = moved(
-  at("ts:src/strings.ts#Slugger.slugify", "Slugger.slugify", 7),
-  at("ts:src/text/slug.ts#TextSlugger.slugify", "TextSlugger.slugify", 1),
+  symbolAt("src/strings.ts", "Slugger.slugify", 7),
+  symbolAt("src/text/slug.ts", "TextSlugger.slugify", 1),
   "logic-fingerprint",
 )
 
@@ -84,7 +76,7 @@ describe("a move's route in diff.md", () => {
 })
 
 describe("a move's route on a Slice member's row", () => {
-  const caller = changed(at("ts:src/cli.ts#run", "run", 3), { logicChanged: true })
+  const caller = changed(symbolAt("src/cli.ts", "run", 3), { logicChanged: true })
 
   function projectSlice(...moves: (SymbolChange & { after: IRSymbol })[]): string {
     const md = projectDiff(
