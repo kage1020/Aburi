@@ -56,16 +56,6 @@ describe("the export keyword is evidence on every kind", () => {
   })
 
   it.each([
-    ["a named clause", "interface I {}\nexport { I }", "#I", "export-keyword"],
-    ["a default clause", "const P = () => 1\nexport { P as default }", "#P", "export-default"],
-  ])("%s is not read for exportedness", async (_label, source, id, token) => {
-    const symbol = byId(await symbolsOf(source), id)
-
-    expect(symbol.visibility).toBe("internal")
-    expect(symbol.derivedBy).not.toContain(token)
-  })
-
-  it.each([
     ["a plain binding", "export default const x = 1", "#x", ["export-default"]],
     [
       "a destructuring",

@@ -14,6 +14,7 @@ export const langTypescriptManifest: LangManifest = {
     derivedByPrefixes: [
       "export-keyword",
       "export-default",
+      "export-clause",
       "variable-assigned-function",
       "class-method",
       "field-assigned-function",

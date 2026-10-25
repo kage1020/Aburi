@@ -27,7 +27,7 @@ describe("NextFrameworkPlugin", () => {
 
   it("dispatches classifySymbol to classifyNextSymbol, from the class and the singleton alike", () => {
     const file = "app/dashboard/page.tsx"
-    const candidate = symbolIn(file, "Page", { exportDefault: true })
+    const candidate = symbolIn(file, "Page", { derivedBy: ["export-default"] })
     const expected = classifyNextSymbol(candidate, makeCtx(file))
 
     expect(expected?.extKind).toBe("framework:next:page")
