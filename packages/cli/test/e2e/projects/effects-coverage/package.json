@@ -1,0 +1,14 @@
+{
+  "name": "effects-coverage",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fixture project for Aburi integration tests. A NestJS-shaped orders service that writes through Prisma and Drizzle, calls a payments service over tRPC and publishes through the Nest event emitter, so every shipped effects plugin attributes something in it. Not a runnable app; the TypeScript is scanned in place, no install ever happens.",
+  "type": "commonjs",
+  "dependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/event-emitter": "^2.0.0",
+    "@prisma/client": "^5.0.0",
+    "@trpc/client": "^11.0.0",
+    "drizzle-orm": "^0.30.0"
+  }
+}

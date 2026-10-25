@@ -50,6 +50,10 @@ pnpm --filter @aburi/<name> add -D '@aburi/lang-typescript@workspace:*' '@aburi/
   (`@aburi/cli`, plugin catalog), so `aburi init` proposes it.
 - Pipeline tests that combine several plugins live in `packages/cli/test/e2e`; add the plugin as a
   devDependency of `@aburi/cli` if one needs it.
+- Effects plugins: add calls to the `effects-coverage` fixture under `packages/cli/test/e2e/projects`,
+  name the plugin in its `aburi.json`, and record what it attributes in `effects-coverage.test.ts`.
+  Aburi's own code calls no effects library, so that test is the only place CI sees the plugin's
+  effects reach a report.
 - Docs: `docs/guide/supported-stacks.md`, the root `README.md` list, and — worth it for anything users
   will search for — a showcase example (see the `add-showcase-example` skill).
 - `pnpm changeset` for the new package and every published package you touched.

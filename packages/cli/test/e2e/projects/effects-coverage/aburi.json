@@ -1,0 +1,6 @@
+{
+  "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
+  "languages": ["lang-typescript"],
+  "frameworks": ["framework-nestjs"],
+  "effects": ["effects-prisma", "effects-drizzle", "effects-trpc", "effects-nest"]
+}

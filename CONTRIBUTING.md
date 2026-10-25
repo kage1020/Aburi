@@ -48,6 +48,13 @@ contains, and posts the report as a comment it rewrites on every push. Its gate
 (`removed,dropped-toggled:to-dropped:>10`) turns the check red when a symbol disappears or
 bodies are emptied in bulk.
 
+This repository calls no Prisma, Drizzle, tRPC or NestJS, so the self-run's report never shows an
+effect. CI covers them instead:
+[`effects-coverage.test.ts`](packages/cli/test/e2e/effects-coverage.test.ts) scans a fixture that
+calls into every shipped effects plugin, diffs one edit per plugin, and compares the effects each
+attributes with a recorded list, so a change in what a plugin attributes fails until that list is
+updated.
+
 From a fork, that run's token is read-only and cannot post, so a third workflow does it:
 [`aburi-comment.yml`](.github/workflows/aburi-comment.yml) picks the report up from the
 `aburi-diff` artifact afterwards and comments with this repository's own token. It posts no
