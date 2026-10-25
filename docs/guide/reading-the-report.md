@@ -114,28 +114,29 @@ branches. A removed `guard` line means somebody removed a condition.
 ## A slice
 
 The Slice View groups the changed symbols that call one another, so a feature
-reads end to end. Each member says in a line what happened to it:
+reads end to end. Each slice is drawn as its calls, from the symbol nothing else
+in it calls, with each member on one line saying what happened to it:
 
 ```md
-### `slice:ts:src/app/orders/actions.ts#submitOrder` (2 members)
+### From `submitOrder` (3 symbols)
 
-- `submitOrder` — *(changed)*
-  **File**: `src/app/orders/actions.ts:18`
-  ↳ API and logic changed
-- `chargeCard` — *(added)*
-  **File**: `src/lib/payments.ts:7`
-  ↳ new function with network.http
+Files: `src/app/orders/actions.ts`, `src/lib/payments.ts`
+
+- `submitOrder` — API and logic changed · `actions.ts:18`
+  - `chargeCard` — new function with network.http · `payments.ts:7`
+  - `recordOrder` — logic changed · `actions.ts:40`
 ```
 
+A member reached twice is written out once, and *(see above)* where it recurs.
 The symbols that call no other changed symbol are folded under **Standalone
 changes**, one line each.
 
 Two slices that should be one can come apart when Aburi could not tell what a
-call reaches. When an unresolved call is named like a changed symbol in another
-slice, the member says so, and a note under the heading counts them:
+call reaches. When an unresolved call looks like a call to a changed symbol in
+another slice, the member says so, and a note under the heading counts them:
 
 ```md
-  ↳ logic changed · ⚠ unresolved call to `getRepo.save`
+- `submitOrder` — logic changed · `actions.ts:18` · ⚠ unresolved call to `getRepo.save`
 ```
 
 Read the slice that holds `Repo.save` together with this one. Calls into

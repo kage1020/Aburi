@@ -244,7 +244,7 @@ The `members[]` array of each Slice (§11) is sorted in ascending Symbol id orde
 
 DFS order, topological order, and Controller → Repository chain order are legitimate reading orders for the reviewer, but constructing them requires either a "start node" heuristic (which itself needs a determinism argument) or a full DFS whose output depends on tie-break rules over multi-parent nodes. Neither is worth the complexity when ascending id already groups Symbols by file within the same directory — the natural reading order of a filesystem — and is stable under any membership change.
 
-The Markdown projection layer (§12) MAY re-render members in a call-order-informed layout for display (e.g. anchor at the top followed by depth-first children); the `members[]` array in the JSON stays sorted.
+The Markdown projection (§12.2) does draw each Slice in call order, for display only: it starts from the members no other member calls and walks their calls depth first, and its tie-breaks (the line of the first call, then the id) never reach the JSON. The `members[]` array stays sorted.
 
 ## 9. Failure Modes
 
@@ -351,35 +351,32 @@ A new section `## 🧵 Slice View` is added to `out/diff.md`, positioned between
 
 ### 12.2 Per-Slice rendering
 
-Each Slice becomes a `###` subsection under `## 🧵 Slice View`:
+Each Slice becomes a `###` subsection under `## 🧵 Slice View`, drawn as the calls that join it:
 
 ```md
-### `slice:ts:apps/billing/src/RefundController.ts#RefundController.refund` (3 members)
+### From `RefundController.refund` (4 symbols)
 
-- `RefundController.refund` — *(changed)*
-  **File**: `apps/billing/src/RefundController.ts:42`
-  ↳ API and logic changed
-- `RefundService.refund` — *(changed)*
-  **File**: `apps/billing/src/RefundService.ts:88`
-  ↳ logic changed
-- `RefundRepo.saveRefund` — *(added)*
-  **File**: `apps/billing/src/RefundRepo.ts:15`
-  ↳ new method with db.write
+Files: `apps/billing/src/RefundController.ts`, `apps/billing/src/RefundRepo.ts`, `apps/billing/src/RefundService.ts`
 
----
+- `RefundController.refund` — API and logic changed · `RefundController.ts:42`
+  - `RefundService.refund` — logic changed · `RefundService.ts:88`
+    - `RefundRepo.saveRefund` — new method with db.write · `RefundRepo.ts:15`
+    - `RefundService.audit` — logic changed · `RefundService.ts:120`
+  - `RefundRepo.saveRefund` *(see above)*
 ```
 
-- The heading contains the full `sliceId` and the member count.
-- Each member is a bullet with: Symbol short-form (last-segment qname), the status in italics, file:line, and a `↳` follow-up line saying, in words, what changed about it:
+- The heading names the members the tree starts from, those no other member of the Slice calls, up to three and then `and N more`, and counts the members. A Slice whose members all call one another in a ring has no such member, so its tree opens at its first member in `members[]` order. The heading writes no Slice id: `slice:` and the anchor's id reads as a key rather than as code, and the anchor is the least id, not where the code starts.
+- The `Files` line lists each file the Slice touches by its full path, in ascending order (`File` for one). The rows below write a file by the fewest trailing path segments that tell it apart from the others on that line (`RefundService.ts`; `a/index.ts` beside `b/index.ts`), so a long path is read once per Slice rather than once per member.
+- Each member is a row: its name, then what changed about it in words, then `file:line`:
   - a `changed` member names the delta axes that tripped, in the order API, logic, syntax, component, visibility, confidence: `API and logic changed`, `logic, syntax and visibility changed`. A member whose only axis is syntax reads `syntax only`, the reading [`markdown-projection.md`](./markdown-projection.md) §6.2 gives the section such a change lands in;
   - an `added` or `removed` member names its kind and, when it has any, the effects that make it worth reading, each id once: `new method with db.write, event.publish`, `removed const`;
-  - a `moved+changed` member opens with where it moved, as [`markdown-projection.md`](./markdown-projection.md) writes a move, then its axes: `↳ moved: <route>; logic changed`. A `moved` member has the route alone;
+  - a `moved+changed` member opens with where it moved, as [`markdown-projection.md`](./markdown-projection.md) writes a move, then its axes: `moved: <route>; logic changed`. A `moved` member has the route alone;
   - a `dropped-toggled` member reads `now dropped` or `no longer dropped`.
 
-  The line is for a reader, so it carries no field name of the diff document: `delta.logicChanged` says the same thing as `logic changed` to someone who has the schema open, and nothing to someone reading a pull request.
-- Members appear in ascending Symbol id order per §8.2. A projection variant that arranges members in call-order (anchor first, then callees) is left for a future iteration — the JSON side stays as specified.
-- Slices are separated by a `---` thematic break for visual boundary marking.
-- Column choices reuse existing [`markdown-projection.md`](./markdown-projection.md) §3 conventions: file paths POSIX and backtick-wrapped (§3.3), no emoji for the default status. A member row carries no confidence badge (§3.5 keeps it to headings and names-only rows); a member whose confidence moved says so on its `↳` line.
+  The wording is for a reader, so it carries no field name of the diff document: `delta.logicChanged` says the same thing as `logic changed` to someone who has the schema open, and nothing to someone reading a pull request. Nor does the row carry the member's status in italics, which the wording already says.
+- Under each member, one level in, are the members it calls, in the order of the line of its first call to each. The calls are the edges of §5.3: a call only the base revision made is drawn between the members its ends became, and where both revisions make a call, the head's line places it, since the head is the code under review. A member the tree reaches again is written by name with *(see above)* and not expanded twice, so each member's row appears once.
+- Past five levels of indentation a list stops reading as a tree: a member that deep which calls others ends its branch there, and its calls carry on under a new top-level row, ``- `name` *(continued)*``.
+- Column choices reuse existing [`markdown-projection.md`](./markdown-projection.md) §3 conventions: file paths POSIX and backtick-wrapped (§3.3), no emoji for the default status. A member row carries no confidence badge (§3.5 keeps it to headings and names-only rows); a member whose confidence moved says so in its wording.
 
 ### 12.3 Singletons folded
 
@@ -391,21 +388,21 @@ Singleton Slices (§6.3) are collected into a single `<details>` block appended 
 <details>
 <summary>4 symbols with no resolved call to or from another changed symbol</summary>
 
-- `log` — *(changed)* · `packages/shared/src/logger.ts:3` · logic changed
-- `formatMoney` — *(changed)* · `packages/shared/src/util.ts:12` · syntax only
-- `RefundDto` — *(dropped-toggled)* · `apps/billing/src/dto/refund.dto.ts:5` · now dropped
-- `health` — *(added)* · `apps/billing/src/routes/health.ts:8` · new function
+- `log` — logic changed · `packages/shared/src/logger.ts:3`
+- `formatMoney` — syntax only · `packages/shared/src/util.ts:12`
+- `RefundDto` — now dropped · `apps/billing/src/dto/refund.dto.ts:5`
+- `health` — new function · `apps/billing/src/routes/health.ts:8`
 
 </details>
 ```
 
-Each row is a §12.2 member on one line: name, status, `file:line` and the follow-up. The singleton's Slice id is not written: it is `slice:` and the member's own id, so the name and the file already say it. The summary counts in the singular for one (`1 symbol`).
+Each row is a §12.2 member row with the full path, as no `Files` line precedes it. The singleton's Slice id is not written: it is `slice:` and the member's own id, so the name and the file already say it. The summary counts in the singular for one (`1 symbol`).
 
 The reviewer sees the count at a glance and can expand for the list. This matches the collapsed-section policy of [`markdown-projection.md`](./markdown-projection.md) §12.2 ("Keeping dropped entries, folded") — the fact is retained, the reader is not.
 
 ### 12.4 Cross-links to the flat sections
 
-Each member in the Slice View rendering IS the same Symbol that appears in the corresponding flat section (`## ⚠ API changes`, `## 🔧 Logic changes`, `## ➕ Added`, etc.). To avoid duplicating the full delta detail in both places, the Slice View bullets contain the **summary** only — status label, file:line, delta-axis summary — and the flat sections retain the **full** rendering. Anchor links from Slice View to the flat section entries are planned but out of scope for the initial spec; see [`markdown-projection.md`](./markdown-projection.md) §5.8 for the parallel "future release will consider internal links" note on call rendering.
+Each member in the Slice View rendering IS the same Symbol that appears in the corresponding flat section (`## ⚠ API changes`, `## 🔧 Logic changes`, `## ➕ Added`, etc.). To avoid duplicating the full delta detail in both places, the Slice View rows contain the **summary** only — what changed in words and file:line — and the flat sections retain the **full** rendering. Anchor links from Slice View to the flat section entries are planned but out of scope for the initial spec; see [`markdown-projection.md`](./markdown-projection.md) §5.8 for the parallel "future release will consider internal links" note on call rendering.
 
 ### 12.5 Empty Slice View
 
@@ -415,7 +412,12 @@ Per §9.4, if `slices[]` is empty the entire `## 🧵 Slice View` section is omi
 
 §5.4 explains why an unresolved call contributes no edge. The consequence a reviewer actually feels is a Slice that split — or a singleton that looks disconnected but is not. The projection surfaces that directly.
 
-It marks only the unresolved calls that could have joined two Slices: those whose target ends in the name of a member of **another** Slice. The last segment of the target is compared with the last segment of each member's qualified name (`this.repo.save` and `getRepo.save`, the target `getRepo().save()` is written as, name `Repo.save`), so a call to a member of the caller's own Slice, or to nothing the diff changed, is not marked. Directly under the section heading, when any member makes such a call:
+It marks only the unresolved calls that could have joined two Slices: those that could be a call to a member of **another** Slice. Such a call ends in the member's name, the last segment of the target matching the last segment of the member's qualified name, and is written the way that member is called:
+
+- a bare call (`audit()`) can reach a plain function, never a method;
+- a call through a receiver can reach a method, never a plain function, and only one whose owner (the segment before its name) and the receiver (the segment before the target's name) contain one another, ignoring case. `this.repo.save` and `getRepo.save`, the target `getRepo().save()` is written as, can reach `Repo.save`; `part.text` cannot reach `rulePayload.text`. A receiver of `this` stands for the caller's own owner, so `this.save` in `UserRepo.load` can reach `Repo.save`.
+
+So a call to a member of the caller's own Slice, or to nothing the diff changed, is not marked. Directly under the section heading, when any member makes such a call:
 
 ```md
 ## 🧵 Slice View
@@ -423,21 +425,19 @@ It marks only the unresolved calls that could have joined two Slices: those whos
 > ⚠ 3 calls below name a changed symbol in another Slice but were not resolved to it, so those Slices may belong together.
 ```
 
-And on the individual members — appended to the `↳` follow-up line of a §12.2 bullet, and to the row of a §12.3 singleton — naming each such target once:
+And on the individual members — appended to the member's row, in a §12.2 tree or a §12.3 fold — naming each such target once:
 
 ```md
-- `Ctl.route` — *(changed)*
-  **File**: `apps/billing/src/RefundController.ts:42`
-  ↳ logic changed · ⚠ unresolved call to `getService.saveRecord`
+- `RefundController.refund` — logic changed · `RefundController.ts:42` · ⚠ unresolved call to `getService.saveRecord`
 ```
 
 ```md
-- `health` — *(added)* · `apps/billing/src/routes/health.ts:8` · new function · ⚠ unresolved calls to `this.repo.save`, `audit`
+- `health` — new function · `apps/billing/src/routes/health.ts:8` · ⚠ unresolved calls to `this.repo.save`, `audit`
 ```
 
 Members whose unresolved calls name no member of another Slice carry no marker, and a diff where none does renders exactly as it would if every call had resolved. The marker has to stay rare to stay meaningful, and counting every `resolved: null` call did not keep it rare: a call into `node:path`, a library or an array method can never resolve to a Symbol, so on Aburi's own pull requests three members in four carried a marker, and of the 2,719 unresolved calls those members made, 76 named a changed symbol at all. A reader learned to skip the line, and the 76 went with it.
 
-The name match is the over-approximation that stays useful. It flags a call that only shares a name with a member — `map.get` beside a changed `Cache.get` — because the projection cannot see what the resolver could not; and it misses a call written under another name than the member's, an aliased import or a default one, which the resolver links whenever the import is relative and only misses across a bare package specifier. Both are rare beside what the old count flagged.
+The name match is the over-approximation that stays useful. It flags a call that only looks like a call to a member — `repo.find` beside a changed `UserRepo.find` when `repo` holds an `OrderRepo` — because the projection cannot see what the resolver could not; and it misses a call written under another name than the member's, an aliased import, a default one or a function reached through a namespace import, which the resolver links whenever the import is relative and only misses across a bare package specifier. Both are rare beside what the old count flagged. A match on the last segment alone was not rare: it tied `id.slice(…)` to a changed helper named `slice` and `part.text` to an object-literal method `rulePayload.text`, which is why the call has to be written the way the member is called.
 
 **Where the targets come from.** `diff.symbols[]` already embeds the full IR `Symbol` on each entry, `calls[].resolved` included, so the projection reads them directly — the head Symbol for a member both revisions hold, the one revision's Symbol for an added or removed one. No field is added to `SliceRecord` and no new pass runs; this keeps §14.12's "a Slice is a derived view, not a new fact" intact.
 
@@ -504,8 +504,11 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV20 | Some singleton and some multi-member Slices | Multi-member Slices rendered first, then the "Standalone changes" fold (§12.3) |
 | SV21 | Cross-language PR (TS + Python nodes) | Two disjoint singleton-or-multi Slices per language; no cross-language edges attempted (§5.5, §14.13) |
 | SV22 | Any output | `aburi.diff.v1.json` validates unchanged against the schema (§11.3) |
-| SV22a | Members that are `changed` on one axis, on several, on syntax alone, `added` with effects, `removed`, `dropped-toggled` | The `↳` line, or the singleton row, says it in words — `logic changed`, `API and logic changed`, `syntax only`, `new method with db.write`, `removed function`, `now dropped` — and names no field of the diff document (§12.2, §12.3) |
-| SV22b | A member with unresolved calls to `rows.push`, to a member of its own Slice and to `getRepo.save` where `Repo.save` is a member of another Slice | The note under the heading counts one call, and the member's line ends ``⚠ unresolved call to `getRepo.save` ``; with only the first two, no note and no marker (§12.6) |
+| SV22a | Members that are `changed` on one axis, on several, on syntax alone, `added` with effects, `removed`, `dropped-toggled` | The member's row says it in words — `logic changed`, `API and logic changed`, `syntax only`, `new method with db.write`, `removed function`, `now dropped` — and names no field of the diff document (§12.2, §12.3) |
+| SV22b | A member with unresolved calls to `rows.push`, to a member of its own Slice and to `getRepo.save` where `Repo.save` is a member of another Slice | The note under the heading counts one call, and the member's row ends ``⚠ unresolved call to `getRepo.save` ``; with only the first two, no note and no marker. Calls to `user.save`, to a bare `save` and to `id.format` beside a plain function `format` in another Slice are not marked either; `this.save` from `UserRepo.load` and a bare `format` are (§12.6) |
+| SV22c | A Slice where `a` calls `c` on line 9 and `b` on line 3, and `b` calls `c` | Heading ``From `a` (3 symbols)``; under `a`, `b` and then `c` as *(see above)*, with `c` written out under `b` (§12.2) |
+| SV22d | A Slice whose members only call one another in a ring; a chain of eight members | The ring opens at its first member, which recurs as *(see above)* where it closes. The chain indents five levels, then carries on from ``- `c5` *(continued)*`` (§12.2) |
+| SV22e | A call only the base revision made, from a `changed` member to one that moved | Drawn between the two members' head ids (§12.2) |
 
 ### 13.7 Anchor derivation enforcement
 
@@ -594,7 +597,7 @@ The existing horizontal sections (`## ⚠ API changes`, `## 🔧 Logic changes`,
 
 ### 14.11 Why cluster naming is out of scope
 
-Assigning a human-readable label like "Refund flow" to a Slice requires understanding what the Symbols in the Slice *mean* — a semantic judgment that [`overview.md`](./overview.md) §2 rules out for the static analyser ("LLM judgment (verifiability and diff stability disappear)"). [`roadmap.md`](../roadmap.md) explicitly parks this under "Under consideration" as a downstream LLM concern. Slice ids reveal the anchor Symbol id, which is enough for a reviewer to click into the anchor's L2 view and read the code themselves.
+Assigning a human-readable label like "Refund flow" to a Slice requires understanding what the Symbols in the Slice *mean* — a semantic judgment that [`overview.md`](./overview.md) §2 rules out for the static analyser ("LLM judgment (verifiability and diff stability disappear)"). [`roadmap.md`](../roadmap.md) explicitly parks this under "Under consideration" as a downstream LLM concern. Slice ids reveal the anchor Symbol id, and the Markdown heading names the members a Slice's calls start from (§12.2): names the code already carries, which is enough for a reviewer to open them and read the code themselves.
 
 ### 14.12 Why `SliceRecord` carries no confidence or `derivedBy`
 

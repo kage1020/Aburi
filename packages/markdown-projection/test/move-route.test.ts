@@ -3,6 +3,7 @@ import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { projectChanges } from "./fixtures"
+import { sectionOf } from "./markdown"
 
 function at(id: string, name: string, startLine: number): IRSymbol {
   const symbol = makeSymbol({ id, name })
@@ -82,11 +83,11 @@ describe("a move's route in diff.md", () => {
   })
 })
 
-describe("a move's route on a Slice member's follow-up line", () => {
+describe("a move's route on a Slice member's row", () => {
   const caller = changed(at("ts:src/cli.ts#run", "run", 3), { logicChanged: true })
 
   function projectSlice(...moves: (SymbolChange & { after: IRSymbol })[]): string {
-    return projectDiff(
+    const md = projectDiff(
       makeDiff({
         symbols: [...moves, caller],
         slices: [
@@ -97,16 +98,17 @@ describe("a move's route on a Slice member's follow-up line", () => {
         ],
       }),
     )
+    return sectionOf(md, "## 🧵 Slice View").join("\n")
   }
 
   it("leads a moved+changed member with its route, then its axes", () => {
     const md = projectSlice(reownedInFile, acrossFiles, renamedAcrossFiles)
     expect(md).toContain(
-      "↳ moved: within `src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); logic changed",
+      "— moved: within `src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); logic changed",
     )
-    expect(md).toContain("↳ moved: `src/old.ts` → `src/new.ts`; logic changed")
+    expect(md).toContain("— moved: `src/old.ts` → `src/new.ts`; logic changed")
     expect(md).toContain(
-      "↳ moved: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts`; " +
+      "— moved: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts`; " +
         "API and syntax changed",
     )
   })
@@ -114,11 +116,11 @@ describe("a move's route on a Slice member's follow-up line", () => {
   it("renders a pure moved member the same way, though `@aburi/diff` never lists one", () => {
     const md = projectSlice(renamedInFile, relocated, reownedAcrossFiles)
     expect(md).toContain(
-      "↳ moved: within `src/output-file.ts`: `isADirectory` (L40) → `outputIsADirectory` (L60)",
+      "— moved: within `src/output-file.ts`: `isADirectory` (L40) → `outputIsADirectory` (L60)",
     )
-    expect(md).toContain("↳ moved: `src/util.ts` → `src/text/slug.ts`")
+    expect(md).toContain("— moved: `src/util.ts` → `src/text/slug.ts`")
     expect(md).toContain(
-      "↳ moved: `Slugger.slugify` in `src/strings.ts` → `TextSlugger.slugify` in `src/text/slug.ts`",
+      "— moved: `Slugger.slugify` in `src/strings.ts` → `TextSlugger.slugify` in `src/text/slug.ts`",
     )
   })
 })

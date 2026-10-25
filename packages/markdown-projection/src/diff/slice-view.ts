@@ -7,9 +7,23 @@ import type {
   SymbolDelta,
   SymbolId,
 } from "@aburi/types"
-import { appendAll, inlineCode, lastSegment, ProjectionInvariantError } from "../format"
+import {
+  appendAll,
+  compareStrings,
+  inlineCode,
+  lastSegment,
+  ProjectionInvariantError,
+} from "../format"
 import { fileLine, moveRoute, skippedFile } from "./entries"
 import { assertNeverChange } from "./partition"
+
+/** Each caller's resolved callees among the changed Symbols, with the line of the first call. */
+type CallLines = ReadonlyMap<SymbolId, ReadonlyMap<SymbolId, number>>
+
+const NAMED_STARTS = 3
+
+/** Deeper than this, a list stops reading as a tree; a call chain carries on from a new row. */
+const MAX_DEPTH = 5
 
 export function renderSliceView(
   slices: readonly SliceRecord[],
@@ -19,15 +33,14 @@ export function renderSliceView(
 
   const changeById = indexChangesById(symbols)
   const crossings = unresolvedCrossings(slices, changeById)
+  const callLines = resolvedCallLines(symbols)
   const nonSingleton = slices.filter((s) => s.members.length >= 2)
   const singleton = slices.filter((s) => s.members.length < 2)
 
   const rows: string[] = []
   rows.push(...renderUnresolvedCallNote(crossings))
   for (const slice of nonSingleton) {
-    appendAll(rows, renderSliceSection(slice, changeById, crossings))
-    rows.push("---")
-    rows.push("")
+    appendAll(rows, renderSliceSection(slice, changeById, callLines, crossings))
   }
 
   if (singleton.length > 0) {
@@ -46,7 +59,7 @@ export function renderSliceView(
       const change = requireChangeForMember(memberId, slice.id, changeById)
       const symbol = symbolForMember(change)
       rows.push(
-        `- ${inlineCode(symbol.name)} — *(${change.status})* · ${fileLine(symbol)} · ${renderMemberFollowup(change)}${unresolvedCallMarker(crossings.get(memberId))}`,
+        `- ${inlineCode(symbol.name)} — ${renderMemberFollowup(change)} · ${fileLine(symbol)}${unresolvedCallMarker(crossings.get(memberId))}`,
       )
     }
     rows.push("")
@@ -55,42 +68,182 @@ export function renderSliceView(
   return rows
 }
 
+/**
+ * A Slice drawn as the calls that join it, from the members nothing else in it calls, so it reads
+ * in the order the code runs rather than in the order of its ids.
+ */
 function renderSliceSection(
   slice: SliceRecord,
   changeById: ReadonlyMap<SymbolId, SymbolChange>,
+  callLines: CallLines,
   crossings: ReadonlyMap<SymbolId, readonly Call[]>,
 ): string[] {
-  const rows: string[] = []
-  rows.push(`### ${inlineCode(slice.id)} (${slice.members.length} members)`)
-  rows.push("")
+  const members = new Set(slice.members)
+  const symbolOf = new Map<SymbolId, IRSymbol>()
   for (const memberId of slice.members) {
-    const change = requireChangeForMember(memberId, slice.id, changeById)
-    const symbol = symbolForMember(change)
-    rows.push(`- ${inlineCode(symbol.name)} — *(${change.status})*`)
-    rows.push(`  **File**: ${fileLine(symbol)}`)
-    rows.push(`  ↳ ${renderMemberFollowup(change)}${unresolvedCallMarker(crossings.get(memberId))}`)
+    symbolOf.set(memberId, symbolForMember(requireChangeForMember(memberId, slice.id, changeById)))
   }
-  rows.push("")
-  return rows
+  const callees = (caller: SymbolId): SymbolId[] =>
+    [...(callLines.get(caller) ?? new Map<SymbolId, number>())]
+      .filter(([callee]) => members.has(callee) && callee !== caller)
+      .sort(([a, lineA], [b, lineB]) => lineA - lineB || compareStrings(a, b))
+      .map(([callee]) => callee)
+
+  const called = new Set(slice.members.flatMap(callees))
+  const starts = slice.members.filter((id) => !called.has(id))
+  const shown = new Set<SymbolId>()
+  const labels = shortFileLabels([...symbolOf.values()].map((symbol) => symbol.source.file))
+  const tree: string[] = []
+  const resumed: SymbolId[] = []
+  const draw = (id: SymbolId, depth: number) => {
+    const indent = "  ".repeat(depth)
+    const symbol = symbolOf.get(id)
+    const change = changeById.get(id)
+    if (symbol === undefined || change === undefined) return
+    if (shown.has(id)) {
+      tree.push(`${indent}- ${inlineCode(symbol.name)} *(see above)*`)
+      return
+    }
+    shown.add(id)
+    const at = inlineCode(`${labels.get(symbol.source.file)}:${symbol.source.startLine}`)
+    tree.push(
+      `${indent}- ${inlineCode(symbol.name)} — ${renderMemberFollowup(change)} · ${at}${unresolvedCallMarker(crossings.get(id))}`,
+    )
+    const next = callees(id)
+    if (depth === MAX_DEPTH && next.length > 0) {
+      resumed.push(id)
+      return
+    }
+    for (const callee of next) draw(callee, depth + 1)
+  }
+  const drawFrom = (id: SymbolId) => {
+    draw(id, 0)
+    // Rows a resumed chain defers are resumed in turn, as the iterator reads the length each step.
+    for (const from of resumed) {
+      tree.push(`- ${inlineCode(symbolOf.get(from)?.name ?? from)} *(continued)*`)
+      for (const callee of callees(from)) draw(callee, 1)
+    }
+    resumed.length = 0
+  }
+  for (const id of starts) drawFrom(id)
+  // Members that only call one another in a ring have no start; each ring opens at its first member.
+  for (const id of slice.members) {
+    if (shown.has(id)) continue
+    starts.push(id)
+    drawFrom(id)
+  }
+
+  const files = [...new Set([...symbolOf.values()].map((symbol) => symbol.source.file))].sort(
+    compareStrings,
+  )
+  return [
+    `### From ${startNames(starts, symbolOf)} (${slice.members.length} symbols)`,
+    "",
+    `${files.length === 1 ? "File" : "Files"}: ${files.map(inlineCode).join(", ")}`,
+    "",
+    ...tree,
+    "",
+  ]
+}
+
+function startNames(
+  starts: readonly SymbolId[],
+  symbolOf: ReadonlyMap<SymbolId, IRSymbol>,
+): string {
+  const names = starts.map((id) => inlineCode(symbolOf.get(id)?.name ?? id))
+  if (names.length <= NAMED_STARTS) return names.join(", ")
+  return `${names.slice(0, NAMED_STARTS).join(", ")} and ${names.length - NAMED_STARTS} more`
+}
+
+/** The fewest trailing path segments that tell each file apart from the others listed with it. */
+function shortFileLabels(files: readonly string[]): Map<string, string> {
+  const labels = new Map<string, string>()
+  let unsettled = [...new Set(files)]
+  for (let take = 1; unsettled.length > 0; take++) {
+    const byTail = new Map<string, string[]>()
+    for (const file of unsettled) {
+      const tail = file.split("/").slice(-take).join("/")
+      const group = byTail.get(tail)
+      if (group === undefined) byTail.set(tail, [file])
+      else group.push(file)
+    }
+    unsettled = []
+    for (const [tail, group] of byTail) {
+      for (const file of group) {
+        if (group.length === 1 || tail === file) labels.set(file, tail)
+        else unsettled.push(file)
+      }
+    }
+  }
+  return labels
 }
 
 /**
- * Each member's unresolved calls whose target ends in the name of a member of another Slice. Only
- * such a call could have drawn the edge that joins two Slices; one to `push` or `join` cannot.
+ * The calls each changed Symbol makes to another, read from both revisions as the Slices were:
+ * a base call is named by the head ids of the pairs at its ends. A head call's line wins over a
+ * base one's, since the head is the code under review.
+ */
+function resolvedCallLines(symbols: readonly SymbolChange[]): CallLines {
+  const headIdOf = new Map<SymbolId, SymbolId>()
+  for (const change of symbols) {
+    if ("before" in change) headIdOf.set(change.before.id, change.after.id)
+  }
+  const lines = new Map<SymbolId, Map<SymbolId, number>>()
+  for (const change of symbols) {
+    const caller = symbolForMember(change).id
+    const callees = lines.get(caller) ?? new Map<SymbolId, number>()
+    lines.set(caller, callees)
+    for (const [symbol, isBase] of revisionsOf(change)) {
+      for (const call of symbol.calls) {
+        if (call.resolved === null || call.resolved === undefined) continue
+        const callee = isBase ? (headIdOf.get(call.resolved) ?? call.resolved) : call.resolved
+        const known = callees.get(callee)
+        if (known === undefined || (!isBase && call.line < known)) callees.set(callee, call.line)
+      }
+    }
+  }
+  return lines
+}
+
+/** Head first, so that a call both revisions make keeps the head's line. */
+function revisionsOf(change: SymbolChange): Array<readonly [IRSymbol, boolean]> {
+  switch (change.status) {
+    case "added":
+      return [[change.symbol, false]]
+    case "removed":
+      return [[change.symbol, true]]
+    case "unknown":
+      return [[change.symbol, change.absentFrom === "head"]]
+    case "changed":
+    case "moved+changed":
+    case "dropped-toggled":
+    case "moved":
+      return [
+        [change.after, false],
+        [change.before, true],
+      ]
+    default:
+      return assertNeverChange(change)
+  }
+}
+
+/**
+ * Each member's unresolved calls that could be a call to a member of another Slice. Only such a
+ * call could have drawn the edge that joins two Slices; one to `push` or `join` cannot.
  */
 function unresolvedCrossings(
   slices: readonly SliceRecord[],
   changeById: ReadonlyMap<SymbolId, SymbolChange>,
 ): Map<SymbolId, Call[]> {
-  const slicesByName = new Map<string, Set<SliceId>>()
+  const membersByName = new Map<string, Array<{ owner: string | null; slice: SliceId }>>()
   for (const slice of slices) {
     for (const memberId of slice.members) {
       const change = changeById.get(memberId)
       if (change === undefined) continue
-      const name = lastSegment(symbolForMember(change).name)
-      const named = slicesByName.get(name) ?? new Set<SliceId>()
-      named.add(slice.id)
-      slicesByName.set(name, named)
+      const { name, owner } = nameParts(symbolForMember(change).name)
+      const named = membersByName.get(name) ?? []
+      named.push({ owner, slice: slice.id })
+      membersByName.set(name, named)
     }
   }
   const crossings = new Map<SymbolId, Call[]>()
@@ -98,15 +251,46 @@ function unresolvedCrossings(
     for (const memberId of slice.members) {
       const change = changeById.get(memberId)
       if (change === undefined) continue
-      const calls = symbolForMember(change).calls.filter((call) => {
+      const caller = symbolForMember(change)
+      const callerOwner = nameParts(caller.name).owner
+      const calls = caller.calls.filter((call) => {
         if (call.resolved !== null) return false
-        const named = slicesByName.get(lastSegment(call.target))
-        return named !== undefined && [...named].some((id) => id !== slice.id)
+        const target = nameParts(call.target)
+        const receiver = target.owner === "this" ? callerOwner : target.owner
+        return (membersByName.get(target.name) ?? []).some(
+          (member) =>
+            member.slice !== slice.id && ownersAgree(receiver, member.owner, target.owner),
+        )
       })
       if (calls.length > 0) crossings.set(memberId, calls)
     }
   }
   return crossings
+}
+
+/** The last segment of a qualified name or call target, and the one before it, if any. */
+function nameParts(qualified: string): { name: string; owner: string | null } {
+  const name = lastSegment(qualified)
+  const head = qualified.slice(0, qualified.length - name.length).replace(/(\.|::)$/, "")
+  return { name, owner: head.length === 0 ? null : lastSegment(head) }
+}
+
+/**
+ * Whether a call's receiver could be a member's class or object: `this.repo.save` and
+ * `getRepo().save` can reach `Repo.save`, `part.text` cannot reach `rulePayload.text`. Names alone
+ * would tie every `id.slice(…)` to a helper called `slice`, so a call through a receiver reaches
+ * only a method and a bare call only a plain function.
+ */
+function ownersAgree(
+  receiver: string | null,
+  owner: string | null,
+  written: string | null,
+): boolean {
+  if (written === null || owner === null) return written === null && owner === null
+  if (receiver === null) return true
+  const a = receiver.toLowerCase()
+  const b = owner.toLowerCase()
+  return a.includes(b) || b.includes(a)
 }
 
 function renderUnresolvedCallNote(crossings: ReadonlyMap<SymbolId, readonly Call[]>): string[] {

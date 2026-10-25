@@ -54,7 +54,7 @@ describe("projectDiff — the Unknown section", () => {
     expect(projectChanges([unknown(overrides)])).toContain(`**Why**: ${why}\n`)
   })
 
-  it("names the renamed path in the Slice View too, where the member line shows the other", () => {
+  it("names the renamed path in the Slice View too, where the member row shows the other", () => {
     const md = projectDiff(
       makeDiff({
         symbols: [
@@ -70,9 +70,9 @@ describe("projectDiff — the Unknown section", () => {
       }),
     )
     expect(md).toContain(
-      "↳ unknown: the head scan skipped this file under its head name, `src/billing.ts` (over-size)",
+      "— unknown: the head scan skipped this file under its head name, `src/billing.ts` (over-size)",
     )
-    expect(md).toContain("↳ unknown: the head scan skipped this file (parse-failed)")
+    expect(md).toContain("— unknown: the head scan skipped this file (parse-failed)")
   })
 })
 

@@ -105,24 +105,31 @@ describe("projections of workspace-sized lists", () => {
     expectPastSpreadLimit(section)
   })
 
-  it("renders a Slice of 50,000 members", { timeout: 30_000 }, () => {
-    const changes: SymbolChange[] = Array.from({ length: 50_000 }, (_, i) => ({
-      status: "added",
-      symbol: makeSymbol({ id: `ts:src/a.ts#f${i}`, name: `f${i}`, fingerprint: zeroFp() }),
-    }))
+  it.each<[string, (i: number) => number | null]>([
+    ["no calls between them", () => null],
+    ["each calling the next", (i) => (i + 1 < LARGE ? i + 1 : null)],
+  ])("renders a Slice of 200,000 members with %s", { timeout: 30_000 }, (_, callee) => {
+    const id = (i: number) => symbolId(`ts:src/a.ts#f${i}`)
+    const changes: SymbolChange[] = Array.from({ length: LARGE }, (_, i) => {
+      const next = callee(i)
+      return {
+        status: "added",
+        symbol: makeSymbol({
+          id: id(i),
+          name: `f${i}`,
+          fingerprint: zeroFp(),
+          calls: next === null ? [] : [{ target: `f${next}`, line: 2, resolved: id(next) }],
+        }),
+      }
+    })
     const md = projectDiff(
       makeDiff({
         symbols: changes,
-        slices: [
-          {
-            id: sliceId("slice:ts:src/a.ts#f0"),
-            members: changes.map((_, i) => symbolId(`ts:src/a.ts#f${i}`)),
-          },
-        ],
+        slices: [{ id: sliceId("slice:ts:src/a.ts#f0"), members: changes.map((_, i) => id(i)) }],
       }),
     )
 
-    expect(md).toContain("(50000 members)")
+    expect(md).toContain(`(${LARGE} symbols)`)
     expectPastSpreadLimit(sectionOf(md, "## 🧵 Slice View"))
   })
 })
