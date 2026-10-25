@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os"
 import { posix, resolve, win32 } from "node:path"
+import { ABURI_COMMENT_BODY_MAX_BYTES } from "@aburi/github-action"
 
 const COMPLETED_EXIT_CODES = new Set([0, 3])
 
@@ -115,12 +116,9 @@ function formatMiB(kb) {
   return kb == null ? "—" : (kb / 1024).toFixed(0)
 }
 
-/** The `--max-bytes` the GitHub Action passes, so a comment fits GitHub's 65,536-character body. */
-const COMMENT_BUDGET = 65_507
-
 function formatReportBytes(bytes) {
   if (bytes == null) return "—"
-  return `${(bytes / 1024).toFixed(1)} KiB${bytes > COMMENT_BUDGET ? " ⚠" : ""}`
+  return `${(bytes / 1024).toFixed(1)} KiB${bytes > ABURI_COMMENT_BODY_MAX_BYTES ? " ⚠" : ""}`
 }
 
 function formatSeconds(ms) {
@@ -284,8 +282,9 @@ export function renderReport(report) {
     if (reported) {
       lines.push("")
       lines.push(
-        `\`diff.md\` is the report without a size cap. The GitHub Action posts at most ` +
-          `${COMMENT_BUDGET.toLocaleString("en-US")} bytes of it, so a report marked ⚠ reaches the ` +
+        `\`diff.md\` is the report without a size cap. Left to its default, the GitHub Action ` +
+          `posts at most ${ABURI_COMMENT_BODY_MAX_BYTES.toLocaleString("en-US")} bytes of it, the ` +
+          "most a pull request comment holds beside its marker, so a report marked ⚠ reaches the " +
           "pull request with sections listing names only or left out.",
       )
     }

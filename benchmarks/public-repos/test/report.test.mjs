@@ -182,9 +182,10 @@ describe("renderReport — the Diff table", () => {
 
   it("gives each report's size, marking one over the comment budget", () => {
     const table = diffTable(sweep(["hono", 31_270], ["zod", 106_371], ["nest", null]))
-    expect(table[0]).toBe(
+    expect(table.slice(0, 2)).toEqual([
       "| Repo | Wall | Peak RSS | Exit | Added | Removed | Changed | Moved | diff.md |",
-    )
+      "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
     expect(table.slice(2, 5)).toEqual([
       "| `hono` | 2.00 s | 146 MiB | 0 | 1 | 0 | 2 | 0 | 30.5 KiB |",
       "| `zod` | 2.00 s | 146 MiB | 0 | 1 | 0 | 2 | 0 | 103.9 KiB ⚠ |",
@@ -195,7 +196,10 @@ describe("renderReport — the Diff table", () => {
 
   it("leaves the column out of a sweep recorded before the report was measured", () => {
     const table = diffTable(sweep(["hono"]))
-    expect(table[0]).toBe("| Repo | Wall | Peak RSS | Exit | Added | Removed | Changed | Moved |")
+    expect(table.slice(0, 2)).toEqual([
+      "| Repo | Wall | Peak RSS | Exit | Added | Removed | Changed | Moved |",
+      "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ])
     expect(table.join("\n")).not.toContain("size cap")
   })
 })
