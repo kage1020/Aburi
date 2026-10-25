@@ -50,7 +50,7 @@ const nxSearch: Walk = {
 
 const declaredPatterns: Walk = {
   plant: async (directory) => {
-    await tree.writePnpmWorkspace(`${posix.dirname(directory)}/*`)
+    await tree.writePnpmWorkspace(`${posix.dirname(directory)}/**`)
     await tree.writePackage(directory, { name: "b" })
   },
   run: (options) => detectManagers(tree.root, options),
@@ -105,9 +105,9 @@ describe.each(GITIGNORE_WALKS)("a directory %s cannot list but .gitignore exclud
 })
 
 describe.each(WALKS)("%s", (_, walk) => {
-  it("never lists a .git directory, at the root or in a nested repository", async () => {
-    await walk.plant("src")
-    const stores = [".git", "libs/vendored/.git"]
+  it("never lists a .git directory, at the root or under a directory whose name starts with a dot", async () => {
+    await walk.plant(".github/actions/deploy")
+    const stores = [".git", ".github/actions/deploy/.git"]
     for (const store of stores) await tree.mkdir(store)
     const refusable = stores.map((store) => unlistable(store))
 

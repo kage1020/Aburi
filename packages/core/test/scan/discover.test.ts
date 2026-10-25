@@ -2,7 +2,7 @@ import { chmod, symlink } from "node:fs/promises"
 import { join } from "node:path"
 import { errorFrom, linkDirectory, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { type DiscoverOptions, discoverFiles } from "../../src"
+import { CoreError, type DiscoverOptions, discoverFiles } from "../../src"
 
 const workspace = useScratchWorkspace("scan-discover")
 
@@ -54,6 +54,18 @@ describe("discoverFiles", () => {
       ],
       { languageExtensions: [] },
     ],
+    [
+      "framework caches, VitePress's dependency cache and a virtualenv, which a dot names",
+      [
+        ".next/server/page.js",
+        ".nuxt/dist/server.mjs",
+        ".svelte-kit/output/client.js",
+        ".output/server/index.mjs",
+        "docs/.vitepress/cache/deps/vue.js",
+        ".venv/lib/site.py",
+      ],
+      { languageExtensions: [] },
+    ],
     ["files whose extension no plugin claims", ["src/b.py", "README.md"], {}],
   ])("leaves out %s", async (_label, dropped, options) => {
     const result = await discover(["src/keep.ts", ...dropped], options)
@@ -87,8 +99,9 @@ describe("discoverFiles", () => {
         ".github/actions/deploy/dist/index.ts",
         "docs/.vitepress/config.ts",
         ".config/legacy/a.ts",
+        ".config/setup.ts",
       ],
-      { ignore: ["docs/**"], langDropPatterns: ["**/legacy/**"] },
+      { ignore: ["docs/**", "*/setup.ts"], langDropPatterns: ["**/legacy/**"] },
     )
 
     expect(result.files.map((f) => f.path)).toEqual([".storybook/main.ts"])
@@ -121,6 +134,45 @@ describe("discoverFiles", () => {
         expect(error.message).toContain(join(sealed, "a.ts"))
       } finally {
         await chmod(sealed, 0o755)
+      }
+    },
+  )
+})
+
+describe("discoverFiles — another checkout below the root", () => {
+  it.each([
+    ["a linked worktree in a dot directory", ".claude/worktrees/feat/.git", "gitdir: /r/.git/x\n"],
+    ["a linked worktree", "worktrees/feat/.git", "gitdir: /r/.git/worktrees/feat\n"],
+    ["a submodule", "libs/sub/.git", "gitdir: ../../.git/modules/sub\n"],
+    ["a nested repository", "libs/vendored/.git/HEAD", "ref: refs/heads/main\n"],
+  ])("lists none of the files of %s", async (_label, store, content) => {
+    await workspace.writeSource(store, content)
+    const checkout = store.slice(0, store.indexOf("/.git"))
+    const result = await discover(["src/keep.ts", `${checkout}/src/one.ts`])
+    expect(result.files.map((f) => f.path)).toEqual(["src/keep.ts"])
+  })
+
+  it("lists the files beside a .git file that is not a gitdir: pointer", async () => {
+    const result = await discover(["src/keep.ts", "libs/plain/.git", "libs/plain/a.ts"])
+    expect(result.files.map((f) => f.path)).toEqual(["libs/plain/a.ts", "src/keep.ts"])
+  })
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "ends the run naming the directory whose .git file cannot be read",
+    async () => {
+      await workspace.writeSource("libs/sealed/a.ts", "1")
+      const store = join(workspace.root, "libs", "sealed", ".git")
+      await workspace.writeSource("libs/sealed/.git", "gitdir: ../../.git/modules/sealed\n")
+      await chmod(store, 0o000)
+      try {
+        const error = await errorFrom(CoreError, () => discover(["src/keep.ts"]))
+        expect(error).toMatchObject({
+          code: "scan-directory-unreadable",
+          value: join(workspace.root, "libs", "sealed"),
+        })
+        expect(error.message).toContain("EACCES")
+      } finally {
+        await chmod(store, 0o644)
       }
     },
   )

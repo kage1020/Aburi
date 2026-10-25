@@ -29,7 +29,7 @@ async function repository(directory: string, manifest = true): Promise<void> {
   await initRepository(directory)
   if (manifest) await writePackageJson(directory, { name: "demo", private: true })
   await writeConfig(directory, TYPESCRIPT)
-  await writeFileAt(directory, ".gitignore", "out/\n.worktrees/\n.tmp/\n")
+  await writeFileAt(directory, ".gitignore", "out/\n")
   await writeFileAt(directory, "src/one.ts", "export function one(): number { return 1 }\n")
   await commitAll(directory, "c1")
 }
@@ -67,6 +67,22 @@ describe("aburi diff — where the base revision is checked out", () => {
     expect(report.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
     expect(report.triggered).toEqual(ADDED_ONE)
     expect(report.faultedScans).toEqual([])
+    expect(warnings).toEqual([])
+  })
+
+  it.each([
+    ".claude/worktrees/feat",
+    "worktrees/feat",
+  ])("leaves a linked worktree at %s out of the main checkout's scan", async (at) => {
+    const main = resolve(workspace.root, "demo")
+    await repository(main)
+    await git(["worktree", "add", "-q", "-b", "feat", at], main)
+    await addFunction(resolve(main, at), "src/feat.ts", "featOnly")
+
+    const { report, warnings } = await diffIn(main, "HEAD..HEAD")
+
+    expect(report.summaryLine).toBe("+0 -0 ~0 ↔0 ⤴0")
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
     expect(warnings).toEqual([])
   })
 

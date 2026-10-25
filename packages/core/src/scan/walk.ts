@@ -1,8 +1,9 @@
 import { type Dirent, readdir, realpath, type Stats, stat } from "node:fs"
-import { isAbsolute, relative, resolve, sep } from "node:path"
+import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { type FileSystemAdapter, type GlobOptions, glob } from "tinyglobby"
 import { CoreError } from "../errors"
 import { compareBy } from "../order"
+import { isRepository, REPOSITORY_MARKER } from "../workspace-root"
 import { describeThrown, isVanishedFile } from "./faults"
 import type { GitignoreTree } from "./gitignore"
 
@@ -23,6 +24,11 @@ export interface WalkOptions
    * excuse a failed listing only: a match under a directory they exclude is still returned.
    */
   gitignore: GitignoreTree | null
+  /**
+   * Whether a directory below `cwd` that holds a `.git` goes unlisted: git takes it for another
+   * checkout and lists none of its files as this one's.
+   */
+  skipNestedCheckouts: boolean
 }
 
 interface UnreadPath {
@@ -34,20 +40,30 @@ interface UnreadPath {
 type Callback<T> = (error: NodeJS.ErrnoException | null, value: T) => void
 
 export async function walk(patterns: readonly string[], options: WalkOptions): Promise<string[]> {
-  const { gitignore, ...globOptions } = options
+  const { gitignore, skipNestedCheckouts, ...globOptions } = options
+  const root = resolve(options.cwd)
   const unread: UnreadPath[] = []
-  const matches = await glob(patterns, { ...globOptions, fs: recordingFailures(unread) })
-  await refuseUnread(resolve(options.cwd), unread, gitignore)
+  const fs = recordingFailures(unread, skipNestedCheckouts ? root : null)
+  const matches = await glob(patterns, { ...globOptions, fs })
+  await refuseUnread(root, unread, gitignore)
   return matches
 }
 
-function recordingFailures(unread: UnreadPath[]): FileSystemAdapter {
+function recordingFailures(unread: UnreadPath[], checkoutRoot: string | null): FileSystemAdapter {
   const listing = (path: string, options: { withFileTypes: true }, done: Callback<Dirent[]>) => {
     readdir(path, options, (error, entries) => {
-      if (error !== null && !vanishedDirectory(error, path)) {
-        unread.push({ path, step: "listed", error })
+      if (error !== null) {
+        if (!vanishedDirectory(error, path)) unread.push({ path, step: "listed", error })
+        done(error, entries)
+        return
       }
-      done(error, entries)
+      withoutGitStore(path, entries, checkoutRoot).then(
+        (kept) => done(null, kept),
+        (cause: NodeJS.ErrnoException) => {
+          unread.push({ path, step: "listed", error: cause })
+          done(cause, [])
+        },
+      )
     })
   }
   // The crawler stats what a link resolves to, and a failure there is named after the link.
@@ -73,6 +89,20 @@ function recordingFailures(unread: UnreadPath[]): FileSystemAdapter {
     realpath: resolving as typeof realpath,
     stat: statting as typeof stat,
   }
+}
+
+// The `.git` is dropped in the listing rather than by a glob, which would not reach it under a
+// pattern that spells a dot when `dot` is off.
+async function withoutGitStore(
+  path: string,
+  entries: Dirent[],
+  checkoutRoot: string | null,
+): Promise<Dirent[]> {
+  const store = entries.find((entry) => entry.name === REPOSITORY_MARKER)
+  if (store === undefined) return entries
+  const below = checkoutRoot !== null && resolve(path) !== checkoutRoot
+  if (below && (await isRepository(join(path, REPOSITORY_MARKER)))) return []
+  return entries.filter((entry) => entry !== store)
 }
 
 // A listing also fails when the lookup of an entry whose type the filesystem leaves unreported

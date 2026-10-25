@@ -10,7 +10,6 @@ import { fileExtension } from "./route"
 import { walk } from "./walk"
 
 export const CORE_IGNORE_PATTERNS: readonly string[] = [
-  "**/.git/**",
   "**/node_modules/**",
   "**/.yarn/**",
   "**/.pnp.cjs",
@@ -23,6 +22,7 @@ export const CORE_IGNORE_PATTERNS: readonly string[] = [
   "**/.nuxt/**",
   "**/.svelte-kit/**",
   "**/.output/**",
+  "**/.vitepress/cache/**",
   "**/coverage/**",
   "**/__snapshots__/**",
   "**/*.snap",
@@ -109,6 +109,7 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     // Followed, a link gives a file one Symbol id per path reaching it and brings in files from
     // outside the workspace. Git keeps the link itself as an entry, but never looks behind it.
     followSymbolicLinks: false,
+    skipNestedCheckouts: true,
     gitignore,
   })
 

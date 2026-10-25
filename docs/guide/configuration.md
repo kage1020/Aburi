@@ -36,9 +36,14 @@ that starts with a dot too, so `docs/**` also leaves out `docs/.vitepress`.
 A directory whose name starts with a dot is scanned like any other: a GitHub
 Action's source under `.github/actions`, Storybook's configuration in
 `.storybook` and a VitePress theme in `docs/.vitepress` are in the report. The
-built-in exclusions keep out `.git` and Yarn's `.yarn`, `.pnp.cjs` and
-`.pnp.loader.mjs`, beside dependency, build and cache directories such as
-`node_modules`, `dist` and `.next`.
+built-in exclusions keep out Yarn's `.yarn`, `.pnp.cjs` and `.pnp.loader.mjs`
+and VitePress's `.vitepress/cache`, beside dependency, build and cache
+directories such as `node_modules`, `dist` and `.next`.
+
+Aburi never reads `.git`, and it does not scan another checkout kept inside the
+repository as part of it: a linked worktree under `.worktrees` or
+`.claude/worktrees`, a nested repository and a submodule are left out, as git
+leaves them out of `git status`.
 
 Aburi honours `.gitignore` by default, every one in the tree, the way git reads
 them. Turn that off when you want to analyse build output on purpose:

@@ -48,9 +48,11 @@ export async function countLanguagesPerRoot(
     cwd: workspaceRoot,
     ignore: [...CORE_IGNORE_PATTERNS, ...(options.ignore ?? [])],
     onlyFiles: true,
-    // The census must match discovery's walk, or `languages` names a language no scanned file has.
+    // The census walks what discovery walks: a file only one of them reads would put a language in
+    // `languages` that no scanned file has, or leave out one that a scanned file has.
     dot: true,
     followSymbolicLinks: false,
+    skipNestedCheckouts: true,
     deep: Math.max(...roots.map((root) => rootDepth(root) + LANGUAGE_SCAN_DEPTH)),
     gitignore,
   })

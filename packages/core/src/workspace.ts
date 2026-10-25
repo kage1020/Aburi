@@ -242,13 +242,22 @@ async function detectNx(
   if (!(await pathExists(manifestPath))) return null
   const projectFiles = await walk(["**/project.json"], {
     cwd: root,
-    ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
+    // The directories nx's own file walk passes over, and `dist`.
+    ignore: [
+      "**/node_modules/**",
+      "**/.nx/cache/**",
+      "**/.nx/workspace-data/**",
+      "**/.yarn/cache/**",
+      "**/dist/**",
+    ],
     onlyFiles: true,
     absolute: true,
     // Nx looks for projects in dot directories, and discovery scans them.
     dot: true,
-    // Discovery does not walk through a link, so a project found there would own no scanned file.
+    // Discovery does not walk through a link or into a nested checkout, so a project found there
+    // would own no scanned file.
     followSymbolicLinks: false,
+    skipNestedCheckouts: true,
     deep: 10,
     gitignore,
   })
@@ -275,12 +284,15 @@ async function resolveDeclaredPackages(
   managerTool: string,
 ): Promise<WorkspaceCandidate[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
-  // Links are followed and a wildcard does not match a leading dot, because pnpm and npm resolve
-  // these same patterns that way.
+  // pnpm and npm resolve these same patterns this way: through links, into nested checkouts, and
+  // with no wildcard matching a leading dot.
   const manifests = await walk(manifestPatterns, {
     cwd: workspaceRoot,
-    ignore: ["**/node_modules/**", "**/.git/**"],
+    ignore: ["**/node_modules/**"],
     onlyFiles: true,
+    dot: false,
+    followSymbolicLinks: true,
+    skipNestedCheckouts: false,
     expandDirectories: false,
     absolute: true,
     deep: 10,
