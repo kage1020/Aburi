@@ -40,8 +40,9 @@ make it a plain component. Every `return` in the function's own body is read,
 and a concise arrow's body is its return; a `return` inside a nested function,
 generator or method belongs to that function. The returned value is read
 through `as`, `satisfies`, `!` and parentheses, into both arms of a conditional,
-both sides of `||` and `??`, and the last operand of `&&`. Only the returned
-element itself is read, not the elements inside it.
+both sides of `||` and `??` (only the left when it is an element, which is never
+falsy or nullish), and the last operand of `&&`. Only the returned element
+itself is read, not the elements inside it.
 
 Not classified today (documented for completeness):
 

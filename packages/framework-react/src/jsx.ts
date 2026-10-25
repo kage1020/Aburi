@@ -85,11 +85,13 @@ function branchesOf(value: SyntaxNode): (SyntaxNode | null)[] {
       return [value.childForFieldName("consequence"), value.childForFieldName("alternative")]
     case "binary_expression": {
       const operator = value.childForFieldName("operator")?.type ?? ""
-      // An element is never falsy, so `<A /> && b` always yields `b`: only the right operand can
-      // be the returned element.
+      const left = value.childForFieldName("left")
+      // An element is never falsy or nullish: `a && b` can only yield an element as `b`, and
+      // `<A /> || b` and `<A /> ?? b` always yield `<A />`.
       if (operator === "&&") return [value.childForFieldName("right")]
       if (!FALLBACK_OPERATORS.has(operator)) return []
-      return [value.childForFieldName("left"), value.childForFieldName("right")]
+      if (left !== null && JSX_ELEMENT_TYPES.has(unwrapValue(left).type)) return [left]
+      return [left, value.childForFieldName("right")]
     }
     default:
       return []

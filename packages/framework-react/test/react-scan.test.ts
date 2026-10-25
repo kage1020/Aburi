@@ -115,7 +115,7 @@ describe("scan — React source shapes across .tsx and .jsx files", () => {
         "}",
         "",
         "export function Badge({ user }: { user: User }) {",
-        "  const provide = (node: ReactNode) => <AuthContext.Provider value={user}>{node}</AuthContext.Provider>",
+        "  const provide = (node: ReactNode) => { return <AuthContext.Provider value={user}>{node}</AuthContext.Provider> }",
         "  return <span>{provide(user.id)}</span>",
         "}",
         "",

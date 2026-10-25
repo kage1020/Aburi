@@ -89,6 +89,11 @@ describe("findReturnedJsxElementNames", () => {
       ["First", "Second"],
     ],
     [
+      "only the left of || or ?? when it is an element, which is never falsy or nullish",
+      "function C({ a }) { return a ? <A /> || <X.Provider value={1} /> : (<B /> ?? <Y.Provider value={1} />) }",
+      ["A", "B"],
+    ],
+    [
       "the outer element, not a provider inside it",
       "function C() { return <Boundary><Ctx.Provider value={1} /></Boundary> }",
       ["Boundary"],
