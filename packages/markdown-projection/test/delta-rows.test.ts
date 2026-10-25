@@ -192,6 +192,19 @@ describe("a changed Symbol's decorator rows", () => {
   })
 })
 
+describe("a changed Symbol's export name rows", () => {
+  it("names the names gained and lost on rows of their own", () => {
+    const md = renderDelta({
+      exportedAs: { added: ["DELETE", "PUT"], removed: ["GET"], modified: [] },
+    })
+    expect(md).toContain("- export name added: `DELETE`, `PUT`\n- export name removed: `GET`\n")
+  })
+
+  it("writes no row when the names did not move", () => {
+    expect(renderDelta({ exportedAs: none() })).not.toContain("export name")
+  })
+})
+
 describe("a changed Symbol's rule, effect and call rows", () => {
   it.each<[string, Partial<SymbolDelta>, string]>([
     [

@@ -99,6 +99,9 @@ const check = (...condition: string[]) =>
     "",
   ].join("\n")
 
+const CONNECT = "function connect() {\n  return open()\n}\n"
+const PAGE = "function Page() {\n  return render()\n}\n"
+
 const SYNTAX_ONLY = delta({ syntaxChanged: true })
 
 describe("an edit to what a caller passes is an api change", () => {
@@ -126,6 +129,52 @@ describe("an edit to what a caller passes is an api change", () => {
     expect(changedSymbols(diff)).toMatchObject([
       { name: "f", apiChanged: true, logicChanged: false },
     ])
+  })
+})
+
+describe("an edit to the names a declaration is exported under is an api change", () => {
+  it.each([
+    [
+      "a name added to an export clause",
+      "const handler = NextAuth(options)\nexport { handler as GET }\n",
+      "const handler = NextAuth(options)\nexport { handler as GET, handler as DELETE }\n",
+      "handler",
+      { added: ["DELETE"], removed: [] },
+    ],
+    [
+      "a clause renaming its export",
+      `${CONNECT}export { connect as open }\n`,
+      `${CONNECT}export { connect as start }\n`,
+      "connect",
+      { added: ["start"], removed: ["open"] },
+    ],
+    [
+      "a default export made a named one",
+      `export default ${PAGE}`,
+      `export ${PAGE}`,
+      "Page",
+      { added: ["Page"], removed: ["default"] },
+    ],
+  ])("reports %s", async (_label, before, after, name, exportedAs) => {
+    const diff = await diffOfEdit(workspace, FILE, before, after)
+
+    expect(diff.summary).toMatchObject({ added: 0, removed: 0, changed: 1 })
+    expect(changedSymbols(diff)).toMatchObject([
+      { name, apiChanged: true, logicChanged: false, exportedAs: { ...exportedAs, modified: [] } },
+    ])
+  })
+
+  it("keeps the api fingerprint when a clause exports a declaration under its own name, as the keyword does", async () => {
+    const { base, head } = await editOf(
+      workspace,
+      FILE,
+      `export ${CONNECT}`,
+      `${CONNECT}export { connect }\n`,
+    )
+
+    expect(symbolNamed(head, "connect").fingerprint.api).toBe(
+      symbolNamed(base, "connect").fingerprint.api,
+    )
   })
 })
 

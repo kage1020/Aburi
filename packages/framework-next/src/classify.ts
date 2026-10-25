@@ -1,7 +1,6 @@
+import { exportNames } from "@aburi/core"
 import {
-  EXPORT_CLAUSE_DERIVED_BY_PREFIX,
   EXPORT_DEFAULT_DERIVED_BY,
-  EXPORT_KEYWORD_DERIVED_BY,
   type ExtractionContext,
   type OpaqueAstNode,
   type SymbolCandidate,
@@ -46,7 +45,7 @@ function classifyRouteSymbol(
   ctx: ExtractionContext,
 ): SymbolClassification | null {
   if (!ROUTE_HANDLER_KINDS.has(symbol.kind)) return null
-  const verbs = exportedNames(symbol).filter(isNextHttpVerb)
+  const verbs = exportNames(symbol).filter(isNextHttpVerb)
   if (verbs.length === 0) return null
   return withDirective(
     {
@@ -55,18 +54,6 @@ function classifyRouteSymbol(
     },
     ctx,
   )
-}
-
-/** `export-keyword` on a namespace member exports it from the namespace, not the module; matching the whole qname keeps `N.GET` from reading as a verb. */
-function exportedNames(symbol: SymbolCandidate<OpaqueAstNode>): string[] {
-  const names = new Set<string>()
-  if (symbol.derivedBy.includes(EXPORT_KEYWORD_DERIVED_BY)) names.add(symbol.name)
-  for (const token of symbol.derivedBy) {
-    if (token.startsWith(EXPORT_CLAUSE_DERIVED_BY_PREFIX)) {
-      names.add(token.slice(EXPORT_CLAUSE_DERIVED_BY_PREFIX.length))
-    }
-  }
-  return [...names]
 }
 
 function classifyComponentSymbol(

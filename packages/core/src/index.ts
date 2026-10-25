@@ -20,6 +20,7 @@ export {
   type CoreErrorDetail,
   type IntegrityViolation,
 } from "./errors"
+export { type ExportEvidence, exportNames } from "./export-names"
 export {
   apiFingerprint,
   type ComputeFingerprintInput,

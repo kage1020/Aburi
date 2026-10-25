@@ -45,11 +45,11 @@ and a `const` where it cannot (a destructuring, a call's result). Both get the o
 plugin's reading. Export clauses are read by `@aburi/lang-typescript`, which records the name
 each clause exports a declaration under.
 
-The verbs a route serves are recorded in `derivedBy`, which no fingerprint reads, so `aburi diff`
-does not report a clause-exported handler gaining or losing a verb
-(`export { handler as GET }` becoming `export { handler as GET, handler as DELETE }`). A handler
-exported by its keyword is named by its verb, so changing the verb reports it as removed and
-added.
+The names a declaration is exported under are an input of its `api` fingerprint, so a
+clause-exported handler gaining or losing a verb (`export { handler as GET }` becoming
+`export { handler as GET, handler as DELETE }`) is an API change in `aburi diff`, reported with
+the export names it gained and lost. A handler exported by its keyword is named by its verb, so
+changing the verb reports it as removed and added.
 
 Component roles accept both React (`.tsx` / `.jsx`) and non-React (`.ts` / `.js`)
 extensions. `route.*` intentionally does **not** accept `.tsx` / `.jsx`: route

@@ -1,4 +1,4 @@
-import { compareCodeUnit, stringArraysEqual } from "@aburi/core"
+import { compareCodeUnit, exportNames, stringArraysEqual } from "@aburi/core"
 import type {
   ArrayDelta,
   Call,
@@ -43,6 +43,7 @@ export function computeSymbolDelta(
     effects: diffEffects(base.effects, head.effects, origins),
     calls: diffCalls(base.calls, head.calls, origins, fuzz),
     decorators: diffDecorators(base.decorators, head.decorators, origins, fuzz),
+    exportedAs: diffStringSet(exportNames(base), exportNames(head)),
     signature: diffSignature(base.signature ?? null, head.signature ?? null),
   }
 }

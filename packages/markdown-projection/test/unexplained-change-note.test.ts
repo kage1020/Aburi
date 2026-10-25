@@ -59,6 +59,14 @@ describe("the note under a fingerprint flag no row explains", () => {
       },
       "  - try (L2)",
     ],
+    [
+      "export name",
+      {
+        apiChanged: true,
+        exportedAs: { added: ["DELETE"], removed: [], modified: [] },
+      },
+      "- export name added: `DELETE`",
+    ],
   ])("gives way to a %s row, which explains the fingerprint", (_, flags, row) => {
     const md = projectChanges([changed(f, flags, { visibility: "internal" })])
     expect(md).toContain(row)

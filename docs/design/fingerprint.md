@@ -62,6 +62,7 @@ Represents the symbol's **externally observable contract**. Changes when the "pu
   "extKind": <Symbol.extKind>,
   "shortName": <lastSegment(Symbol.name)>,     // see §3.3
   "visibility": <Symbol.visibility>,
+  "exportedAs": [<name>],                       // sorted; left out for its own name alone or none, see §3.8
   "decorators": [
     {
       "name": <Decorator.name>,
@@ -122,6 +123,7 @@ Examples:
 - Changing local variable names, the function body, or rules/effects does not change `api`
 - Reordering the **occurrence order** of decorators does not change `api` (because of the sort convention)
 - **Changing only the class-scope portion of `Symbol.name` (`InvoiceService.createInvoice` → `BillingService.createInvoice`) does not change `api`** (the last segment is the same)
+- Exporting a declaration under its own name by an export clause instead of the `export` keyword (`export function f` → `function f` with `export { f }`), or reordering the names a clause exports it under, does not change `api` (§3.8)
 
 ### 3.5 Guaranteed change conditions
 
@@ -132,6 +134,7 @@ Examples:
 - `shortName` change (= renaming the method/function itself) → changes
 - `async` / `generator` flag change → changes
 - `kind` / `extKind` change → changes
+- The names the module exports the declaration under change → changes: a name added to or removed from an export clause (`export { handler as GET }` → `export { handler as GET, handler as DELETE }`), a clause renaming its export (`export { connect as open }` → `export { connect as start }`), a default export made a named one (`export default function Page` → `export function Page`), or an export under the declaration's own name dropped beside an alias (§3.8)
 
 ### 3.6 Why decorator arguments are included in api
 
@@ -141,6 +144,12 @@ The URL portion of `@Post('/invoices')` and the Guard of `@UseGuards(RolesGuard)
 
 Renaming a class such as `InvoiceService` → `BillingService` is common implementation work, but the public contract of each method (signature, decorators, return type) is unchanged.
 A class rename is **detected as `moved` in stage 4 (name+signature similarity)**, with `delta.apiChanged: false`. It is never mass-listed in the API changes section (the highest-severity section).
+
+### 3.8 The names a declaration is exported under
+
+An importer reaches a declaration by the name its module exports it under, and that name is not always the one it was declared with: `const handler = NextAuth(options)` with `export { handler as GET, handler as POST }` is the module's `GET` and `POST`, and Next.js serves a request by which of them the module exports. Adding `handler as DELETE` opens an endpoint, and `export { connect as open }` becoming `export { connect as start }` breaks every `import { open }`, while `shortName` and `visibility` stay as they were. The names are part of the contract for §3.6's reason.
+
+They are read from `derivedBy` ([lang-plugin.md](./lang-plugin.md) LP6a–LP6c): `export-keyword` names the Symbol's own `name`, `export-default` names `default`, and `export-clause:<name>` names `<name>`. The input holds each once, sorted, so the order a module writes its clauses in is no contract. When the names are the Symbol's own name alone, or none, `exportedAs` is left out: `visibility` already tells those two apart, the keyword and a clause exporting a declaration under its own name are one export, and every such Symbol keeps the fingerprint it had before the names were read. An anonymous default export is named `<default>` and exported as `default`, which is its own name in that reading.
 
 ## 4. `logic` fingerprint
 
@@ -364,6 +373,7 @@ The reference implementation and every language plugin must pass the following t
 | A13 | Change `language` (never happens in practice; defensive) | api unchanged (`language` is not part of the input) |
 | A22 | Change `signature.inputs[].name` from `ids` to `...ids` | api unchanged (A1's case: rest-ness is `rest`, and a marker spelled into `name` reaches no axis) |
 | A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value) |
+| A24 | Export a declaration under its own name by a clause instead of the keyword, or reorder the names a clause exports it under | api unchanged (§3.8) |
 
 ### 7.3 api change conditions
 
@@ -380,6 +390,7 @@ The reference implementation and every language plugin must pass the following t
 | A14 | Change `shortName` (last segment) | api changes |
 | A20 | Toggle `signature.inputs[].optional` (absent ↔ `true`) | api changes |
 | A21 | Toggle `signature.inputs[].rest` (absent ↔ `true`) | api changes |
+| A25 | Change the names a module exports a declaration under (`export { handler as GET }` → `export { handler as DELETE }`, `export default function Page` → `export function Page`) | api changes (§3.8) |
 
 ### 7.4 logic invariance conditions
 
@@ -534,8 +545,14 @@ export function apiFingerprint(sym) {
     typeParameters: sym.signature.typeParameters.map(canonical)
   } : null
 
+  // §3.8: every name the module exports sym under, unless it is sym's own name alone
+  const exportedAs = [...new Set(sym.derivedBy.flatMap(token => exportName(sym, token)))].sort()
+  const ownName = sym.name === '<default>' ? 'default' : sym.name
+  const ownOnly = exportedAs.length === 0 || (exportedAs.length === 1 && exportedAs[0] === ownName)
+
   return hash({
     decorators,
+    ...(ownOnly ? {} : { exportedAs }),
     extKind: sym.extKind,
     kind: sym.kind,
     shortName: lastSegment(sym.name),   // §3.3
@@ -543,6 +560,12 @@ export function apiFingerprint(sym) {
     visibility: sym.visibility
     // language excluded: already separated by the <language>: prefix of Symbol.id
   })
+}
+
+function exportName(sym, token) {
+  if (token === 'export-keyword') return [sym.name]
+  if (token === 'export-default') return ['default']
+  return token.startsWith('export-clause:') ? [token.slice('export-clause:'.length)] : []
 }
 
 export function logicFingerprint(sym) {

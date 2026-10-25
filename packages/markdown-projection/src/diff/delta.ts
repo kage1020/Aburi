@@ -33,6 +33,8 @@ export function renderDeltaBody(change: ChangedEntry): string[] {
   const nameRows = rows.length
   appendSignatureDelta(rows, delta.signature ?? null, [before.signature, after.signature])
   appendDecoratorDelta(rows, delta.decorators, [before.decorators, after.decorators])
+  appendInlineRow(rows, "export name added", delta.exportedAs?.added ?? [])
+  appendInlineRow(rows, "export name removed", delta.exportedAs?.removed ?? [])
   appendArrayGroup(rows, "rules", delta.rules, RULES, [before.rules, after.rules])
   appendArrayGroup(rows, "effects", delta.effects, EFFECTS, [before.effects, after.effects])
   appendArrayGroup(rows, "calls", delta.calls, CALLS, [before.calls, after.calls])

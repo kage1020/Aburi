@@ -29,6 +29,13 @@ describe("fingerprints are pinned across releases", () => {
     expect(apiFingerprint(makeSymbol("ts:src/a.ts#foo"))).toBe("abf3a0597098")
   })
 
+  it.each([
+    [["export-keyword"]],
+    [["export-clause:foo"]],
+  ])("apiFingerprint of a declaration exported under its own name alone, by %j", (derivedBy) => {
+    expect(apiFingerprint(makeSymbol("ts:src/a.ts#foo", { derivedBy }))).toBe("abf3a0597098")
+  })
+
   it("apiFingerprint of a parameter with neither marker, whether absent or written false", () => {
     const withInputs = (inputs: Array<{ name: string; type: string }>) =>
       makeSymbol("ts:src/a.ts#find", { signature: sig({ inputs, outputs: ["User[]"] }) })
