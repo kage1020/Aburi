@@ -197,7 +197,7 @@ A `return` statement is **not turned into a rule** when its returned expression 
 - new expressions composed with something else (`return new Foo() ?? bar`)
 - bracket access with a non-trivial index (`return cache[computeKey(k)]`, `return LABELS[await count()]`) — a type-level wrapper around the index is read through, so `return obj[key as keyof T]` stays trivial (§5.5)
 
-An arrow that is a Symbol's walk root has its expression body read as its returned value, so it goes through the same determination as `return <expr>`: `(u) => u.role === "admin"` gets the `return` rule `function f(u) { return u.role === "admin" }` gets, `(id) => fetchUser(id)` gets none and records the call (§5.4), and `(u) => u.role` gets none (§5.5). An arrow written inside another body, such as the callback in `return xs.map((x) => x * 2)`, is not a walk root: its expression body adds no rule to the enclosing Symbol, where a block-bodied callback's `return` does. A function a `const` hands its initializer's call is one (`lang-plugin.md` LP7c), so `export const doubled = xs.map((x) => x * 2)` gets `return: x * 2`, as its block spelling does. So is a property holding an arrow in a binding's object literal (LP7d): `const can = { admin: (u) => u.role === "admin" }` gives `can.admin` that `return` rule. One pair of parentheses around the body is not part of `expr` — the grammar requires them around an object literal (`() => ({ a: 1 })`), and the block spelling `return { a: 1 }` has nothing to match them. The rule's `line` is the body's first line — the opening parenthesis's when the body is parenthesized — not a `return` keyword's.
+An arrow that is a Symbol's walk root has its expression body read as its returned value, so it goes through the same determination as `return <expr>`: `(u) => u.role === "admin"` gets the `return` rule `function f(u) { return u.role === "admin" }` gets, `(id) => fetchUser(id)` gets none and records the call (§5.4), and `(u) => u.role` gets none (§5.5). An arrow written inside another body, such as the callback in `return xs.map((x) => x * 2)`, is not a walk root: its expression body adds no rule to the enclosing Symbol, where a block-bodied callback's `return` does. A function a `const` hands its initializer's call is one (`lang-plugin.md` LP7c), so `export const doubled = xs.map((x) => x * 2)` gets `return: x * 2`, as its block spelling does. So is a property holding an arrow in a binding's object literal (LP7d): `const can = { admin: (u) => u.role === "admin" }` gives `can.admin` that `return` rule. Parentheses around the returned value are not part of the determination or of `expr`, in either spelling: every pair is taken off, past a comment written inside one, before the tests run (`throughParentheses` below). The grammar requires a pair around an object literal (`() => ({ a: 1 })`), and a formatter puts one around a multi-line value (`return (` before a JSX element), so a pair says how the value was laid out and nothing about what it is: `return (g())` is call-only as `return g()` is, `return (x)` is trivial, and `return (a > b ? a : b)` gives `expr: a > b ? a : b`, as `() => (a > b ? a : b)` does. While a block `return` read its value as written, adding or removing such a pair moved `logic`, and rewriting `() => (x ? a : b)` as `{ return (x ? a : b) }` did too. A pair whose contents the grammar had to repair is kept, since what it holds is not one expression. The rule's `line` is the body's first line — the opening parenthesis's when the body is parenthesized — not a `return` keyword's.
 
 ### 5.4 When the return is a single call only
 
@@ -220,15 +220,19 @@ isTrivialExpr(node):
   subscript_expression → isTrivialExpr(node.object) and isTrivialExpr(unwrapType(node.index))
   unary_expression     → isTrivialExpr(node.argument)
   update_expression    → isTrivialExpr(node.argument)
-  parenthesized        → isTrivialExpr(node.expression)
+  parenthesized        → isTrivialExpr(throughParentheses(node))
   otherwise            → false
+
+throughParentheses(node):   # comments inside a pair are skipped
+  while node is parenthesized and holds exactly one expression → node = that expression
+  return node
 
 unwrapType(index):     # an index only, never the returned expression itself
   while index is as / satisfies / non-null (!) / <T> / parenthesized → index = its expression
   return index
 
 isTrivialReturn(returnStatement):
-  arg = returnStatement.argument
+  arg = throughParentheses(returnStatement.argument)
   if arg is null            → true   # return without a value
   if isTrivialExpr(arg)     → true
   if arg is call_expression or new_expression → "call-only" (no Rule; the call is recorded normally)
@@ -403,6 +407,9 @@ Properties the extraction pipeline must satisfy.
 | T17 | `key as keyof T` | no |
 | T18 | `` a[`k`] `` | no |
 | T19 | `a[i++]` | yes |
+| T20 | `(foo())`, `((foo()))`, `(/* c */ foo())` | call-only, as T7; `expr` would carry no parentheses |
+| T21 | `(x)`, `(/* c */ x)` | yes |
+| T22 | `(x ? a : b)` | no, with `expr` `x ? a : b`, as T10 |
 
 ## 9. Configuration examples
 

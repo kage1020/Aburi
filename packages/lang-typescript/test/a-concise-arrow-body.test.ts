@@ -141,27 +141,45 @@ describe("a concise arrow body is read as the block spelling's `return`", () => 
   })
 })
 
-describe("the parentheses around a concise body", () => {
-  it("are taken off where a block `return` keeps them in `expr`", async () => {
-    const concise = await rulesOf("export const f = (a: any, b: any) => (a > b ? a : b)")
-    const block = await rulesOf("export function f(a: any, b: any) { return (a > b ? a : b) }")
+describe("parentheses around a returned value", () => {
+  it.each([
+    ["one pair", "(a > b ? a : b)", "a > b ? a : b"],
+    ["every pair", "((a + 1))", "a + 1"],
+    ["a pair past a comment inside it", "(/* keep */ { a: 1 })", "{ a: 1 }"],
+    [
+      "a formatter's pair around multi-line JSX",
+      '(\n    <div className="a">{b}</div>\n  )',
+      '<div className="a">{b}</div>',
+    ],
+  ])("are taken off %s, in a concise body and a block alike", async (_label, value, expr) => {
+    const concise = await rulesOf(`export const f = (a: any, b: any) => ${value}`, "src/a.tsx")
+    const block = await rulesOf(
+      `export function f(a: any, b: any) { return ${value} }`,
+      "src/a.tsx",
+    )
 
-    expect(concise.map((r) => r.expr)).toEqual(["a > b ? a : b"])
-    expect(block.map((r) => r.expr)).toEqual(["(a > b ? a : b)"])
+    expect(concise.map((r) => r.expr)).toEqual([expr])
+    expect(block.map((r) => r.expr)).toEqual([expr])
   })
 
   it.each([
-    ["one pair only", "export const f = (a: number) => ((a + 1))", "(a + 1)"],
-    ["past a comment inside them", "export const f = () => (/* keep */ { a: 1 })", "{ a: 1 }"],
-  ])("are taken off %s", async (_label, source, expr) => {
-    expect((await rulesOf(source)).map((r) => r.expr)).toEqual([expr])
+    ["export const f = () => (g())"],
+    ["export function f() { return (g()) }"],
+    ["export function f() { return ((g())) }"],
+    ["export function f() { return (/* c */ g()) }"],
+  ])("leave a call call-only: %s", async (source) => {
+    const { rules, calls } = await walkFirstSymbol(source)
+
+    expect(rules).toEqual([])
+    expect(calls.map((c) => c.target)).toEqual(["g"])
   })
 
-  it("leave a parenthesized call call-only, where the block spelling takes a rule", async () => {
-    const block = await walkFirstSymbol("export function f() { return (g()) }")
-
-    expect(block.rules.map((r) => r.expr)).toEqual(["(g())"])
-    expect(block.calls.map((c) => c.target)).toEqual(["g"])
+  it.each([
+    ["export function f(x: any) { return (x) }"],
+    ["export function f(x: any) { return ((x.y)) }"],
+    ["export function f(x: any) { return (/* c */ x) }"],
+  ])("leave a trivial value trivial: %s", async (source) => {
+    expect(await rulesOf(source)).toEqual([])
   })
 })
 
