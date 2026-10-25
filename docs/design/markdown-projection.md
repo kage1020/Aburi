@@ -726,15 +726,24 @@ component whose only difference is in a field this version of the projection has
 #### 🔗 Dependency changes
 
 ```md
-### Added
+### Component-level added
 - `billing` → `payments` (via `import`)
 
-### Removed
+### Component-level removed
 - `billing` → `legacy-auth` (via `import`)
 
+### Symbol-level added
+- `exitsFrom` → `scopeInside` in `packages/lang-typescript/src/walk-body.ts` (via `call`)
+- `wrappedExpression` in `packages/lang-typescript/src/walk-body.ts` → `firstNonCommentChild` in `packages/lang-typescript/src/ast-helpers.ts` (via `call`)
+
 ### Unknown — the other revision never read one end
-- `ts:src/route.ts#handleRequest` → `ts:src/log.ts#log` (via `call`) — the head scan skipped `src/route.ts` (parse-failed)
+- `handleRequest` in `src/route.ts` → `log` in `src/log.ts` (via `call`) — the head scan skipped `src/route.ts` (parse-failed)
 ```
+
+A Symbol end is written by its name and file, the way a moved Symbol's route is, rather than by its
+id: the id repeats the language on every end, and an edge between two Symbols of one file, the
+common case for a call, wrote the same path twice. Such an edge names the file once, after both
+names. A Component end is its id, which is already its name.
 
 The Unknown group is not split by level the way the added and removed groups are. Only a Symbol endpoint has a file to lose ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1), so every entry in it is a symbol-level edge by construction. Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
 
@@ -1039,6 +1048,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP17a | `modified` rule, effect, call, decorator or input whose entry's `before` holds the base element it was paired with, differing in a compared field | That field reads `<base> → <head>` in its place: ``loop (`for` → `while`)``, `[effects-drizzle → effects-prisma]`, an origin `(L5) → [propagated from …]`, ``resolved: `<id>` → none``, `` `@nest.Post()` → `@Post()` ``, `` `limit: number` → `limit?: number` ``; a confidence as `⚠ medium (was high)`, or `(was ⚠ medium)` when it rose to `high`. A field the diff does not compare (`line`, `derivedBy`) gets no base value, and neither does a field whose base value reads like its head value. A base element under another key, in `removed`, or equal to the head element is not taken for the paired one, nor are the base elements equal to an unchanged head element while there are no more of them than of such head elements |
 | MP17b | `modified` element with several candidate bases: several `modified` elements under one key, or base elements equal but for their line | A field the candidates disagree on, or one of them shares with the head element, shows the head value alone; a field they agree on and differ from the head element on still gets their value |
 | MP17c | diff entry whose delta flags `asyncChanged`, `generatorChanged`, `typeParametersChanged`, `componentChanged` or `visibilityChanged` | One row per flag with the base value before the head one: `- signature.async: false → true`, ``- signature.typeParameters: none → `<T>` ``, ``- component: `billing` → none``, ``- visibility: `internal` → `public` `` |
+| MP18 | diff whose `dependencies.added` holds a call edge between two Symbols of one file, one between two files, and one from a Component to a Symbol | The first reads `` `a` → `b` in `<file>` (via `call`) ``, the second `` `a` in `<file>` → `b` in `<file>` (via `call`) ``, the third `` `billing` → `b` in `<file>` (via `import`) ``; no Symbol id appears |
 
 ## 12. Design decisions
 

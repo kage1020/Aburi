@@ -343,10 +343,19 @@ export function renderDocument(lines: readonly string[]): string {
   return `${body.trimEnd()}\n`
 }
 
-const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
+const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:([^#]+)#(.+)$/
 
 export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
+}
+
+export function symbolIdParts(
+  endpoint: DependencyEndpoint,
+): { readonly file: string; readonly name: string } | null {
+  const match = SYMBOL_ID_PATTERN.exec(endpoint)
+  if (match === null) return null
+  const [, file = "", name = ""] = match
+  return { file, name }
 }
 
 export function isSymbolEdge(dependency: Dependency): boolean {

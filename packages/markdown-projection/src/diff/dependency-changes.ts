@@ -1,5 +1,5 @@
 import type { Dependency, DependencyUnknown, DiffResult } from "@aburi/types"
-import { inlineCode, isSymbolEdge } from "../format"
+import { inlineCode, isSymbolEdge, symbolIdParts } from "../format"
 
 export function renderDependencyChanges(diff: DiffResult): string[] {
   const { added, removed } = diff.dependencies
@@ -37,6 +37,18 @@ function appendUnknownDependencies(rows: string[], unknown: readonly DependencyU
   rows.push("")
 }
 
+/** A Symbol id repeats its language on every end, and an edge inside one file writes the path twice. */
 function edge(d: Dependency): string {
-  return `${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)})`
+  const from = symbolIdParts(d.from)
+  const to = symbolIdParts(d.to)
+  const via = ` (via ${inlineCode(d.via)})`
+  if (from !== null && to !== null && from.file === to.file) {
+    return `${inlineCode(from.name)} → ${inlineCode(to.name)} in ${inlineCode(from.file)}${via}`
+  }
+  return `${endpoint(d.from)} → ${endpoint(d.to)}${via}`
+}
+
+function endpoint(id: Dependency["from"]): string {
+  const parts = symbolIdParts(id)
+  return parts === null ? inlineCode(id) : `${inlineCode(parts.name)} in ${inlineCode(parts.file)}`
 }

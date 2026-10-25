@@ -43,10 +43,22 @@ describe("projectDiff — Dependency changes", () => {
       "- `old` → `gone` (via `import`)",
       "",
       "### Symbol-level added",
-      "- `ts:src/caller.ts#caller` → `ts:src/helper.ts#helper` (via `call`)",
-      "- `billing` → `ts:src/util.ts#format` (via `import`)",
+      "- `caller` in `src/caller.ts` → `helper` in `src/helper.ts` (via `call`)",
+      "- `billing` → `format` in `src/util.ts` (via `import`)",
       "",
     ])
+  })
+
+  it("names the file once for an edge between two Symbols of one file", () => {
+    expect(
+      changes([
+        dependency({
+          from: "ts:src/walk.ts#Walker.visit",
+          to: "ts:src/walk.ts#exitsFrom",
+          via: "call",
+        }),
+      ]),
+    ).toContain("- `Walker.visit` → `exitsFrom` in `src/walk.ts` (via `call`)")
   })
 
   it("omits the section when nothing changed at any level", () => {
@@ -77,10 +89,10 @@ describe("projectDiff — the Unknown dependency group", () => {
       "- `billing` → `payments` (via `import`)",
       "",
       "### Symbol-level removed",
-      "- `ts:src/caller.ts#caller` → `ts:src/callee.ts#callee` (via `call`)",
+      "- `caller` in `src/caller.ts` → `callee` in `src/callee.ts` (via `call`)",
       "",
       "### Unknown — the other revision never read one end",
-      "- `ts:src/handleRequest.ts#handleRequest` → `ts:src/log.ts#log` (via `call`) — " +
+      "- `handleRequest` in `src/handleRequest.ts` → `log` in `src/log.ts` (via `call`) — " +
         "the head scan skipped `src/handleRequest.ts` (parse-failed)",
       "",
     ])
