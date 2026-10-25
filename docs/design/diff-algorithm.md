@@ -722,7 +722,7 @@ because ids give it a total order that comes from content; §5.2 has no counterp
 **Why offsets and not file lines.** A Symbol whose file gained a function above it moves down
 the file whole, and every element in it moves with it. Measured in file lines, the near pass then
 saw an edited guard thirty lines from its predecessor and reported a deletion and an unrelated
-insertion; over 45 of Aburi's own pull requests, 595 of the 699 changed Symbols had moved, and
+insertion; over 45 of Aburi's own pull requests, 595 of the 699 changed Symbols had shifted in their file, and
 298 removed and added pairs in them were edits the window refused only for that reason. Measured
 from the Symbol's first line, the edit sits beside its predecessor, as it does in the code. Lines
 inserted inside the body, above the element, still move its offset, and that is the movement the
@@ -1088,11 +1088,11 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF14 | Dropped Symbol disappeared (basename also changed) | Counted in droppedRemoved |
 | DF14b | Dropped Symbol moved to another directory (same basename) | moved: 1, rationale: "dropped-weak-match" |
 | DF15 | Schema version mismatch | fatal error |
-| DF16 | Same rule differing only in line (within ±2) | no delta.rules.modified — the exact pass pairs it, at any `lineFuzz` including `0`; DF17a is the same at any distance |
-| DF17 | Rule of one type whose condition changed, with a large line difference (>2) | delta as added + removed |
-| DF17a | Same-condition rule with a large line difference (>2) — a body that moved | no delta.rules entry; the exact pass has no window (§5.2.0) |
+| DF16 | Same rule differing only in its offset from the Symbol's first line (within ±2) | no delta.rules.modified — the exact pass pairs it, at any `lineFuzz` including `0`; DF17a is the same at any distance |
+| DF17 | Rule of one type whose condition changed, with a large difference in offset (>2) | delta as added + removed |
+| DF17a | Same-condition rule with a large difference in offset (>2) — lines inserted in the body above it | no delta.rules entry; the exact pass has no window (§5.2.0) |
 | DF17b | Two same-type rules where one moved past the other by more than the window | the one that crossed as added + removed; the other unchanged — non-crossing takes the nearer exact pairing, and the window then refuses the one it displaced. A crossing within the window is repaired by the second pass and reports nothing |
-| DF17c | A Symbol that moved 30 lines down its file, one guard's condition edited, a call's resolution changed and a decorator's arguments edited, each at the same offset from the Symbol's first line | each in `modified`; the window compares offsets, not file lines (§5.2). A guard edited on the same file line as its predecessor but at an offset 14 lines away reads as added + removed |
+| DF17c | A Symbol that moved 30 lines down its file, one guard's condition edited, a call's resolution changed and a decorator's arguments edited, each at the same offset from the Symbol's first line | each in `modified`; the window compares offsets, not file lines (§5.2). A guard edited on the same file line as its predecessor but at an offset 14 lines away reads as added + removed. Of two effects with one key, the one at the same offset is the one kept: base `db.write` at offsets 2 and 10, head one at offset 2, reports the second removed |
 | DF18 | Only syntax changed (logic/api unchanged) | changed, only delta.syntaxChanged true → in Markdown: "syntax-only, collapsed" |
 | DF18a | Only `confidence` changed (`high` → `medium`), fingerprints equal | changed: 1, only delta.confidenceChanged true → in Markdown: the Confidence changes section |
 | DF18b | DF18a on a Symbol that also moved file | moved+changed: 1 |
@@ -1148,7 +1148,7 @@ Stage 4.5 runs with the false-positive risk priced in, under the premise that "d
 ### 11.3 Why line fuzz (±2) is used only for delta display
 
 Including line numbers in fingerprint computation would change every logic FP the moment a single blank line is inserted. Fingerprints are kept line-free ([`fingerprint.md`](./fingerprint.md) §4).
-However, listing rules that differ only in line as distinct items hurts delta readability. Lines therefore enter the delta only to pair an edited element with its predecessor (±2), and to rank equal sets of pairings (§5.2.0); both happen at display time only.
+However, listing rules that differ only in line as distinct items hurts delta readability. Lines therefore enter the delta only as offsets from the Symbol's first line, to pair an edited element with its predecessor (±2) and to rank equal sets of pairings (§5.2.0); both happen at display time only.
 
 ### 11.4 Why unchanged is excluded from the output
 

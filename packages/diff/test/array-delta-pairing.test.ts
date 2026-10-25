@@ -227,6 +227,17 @@ describe("an element's line is counted from its Symbol's first line", () => {
     expect(delta.decorators).toEqual({ ...NOTHING, modified: [get(60, "/b")] })
   })
 
+  it("keeps an effect at its place in a body that moved, where another shares its key", () => {
+    const write = (line: number) =>
+      effect({ id: "db.write", target: "prisma.user.create", plugin: "effects-prisma", line })
+    expect(
+      deltaOf(
+        { ...startingAt(10), effects: [write(12), write(20)] },
+        { ...startingAt(40), effects: [write(42)] },
+      ).effects,
+    ).toEqual({ ...NOTHING, removed: [write(20)] })
+  })
+
   it("keeps an edit apart from a predecessor on the same file line but elsewhere in its body", () => {
     expect(
       deltaOf(
