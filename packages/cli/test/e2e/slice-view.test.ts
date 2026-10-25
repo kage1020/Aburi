@@ -64,13 +64,16 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     const md = projectDiff(diff)
     expect(md).toContain("➕ Added")
     const section = sliceViewSection(md)
-    expect(section).toContain(slice.id)
-    expect(section).toContain("handleRequest")
-    expect(section).toContain("saveRecordService")
-    expect(section).toContain("writeRecord")
-    expect(section).toContain("(3 members)")
+    expect(section).toContain("### From `handleRequest` (3 symbols)")
+    expect(section).toContain(
+      [
+        "- `handleRequest` — new function · `ctl.ts:3`",
+        "  - `saveRecordService` — new function · `svc.ts:3`",
+        "    - `writeRecord` — new function · `repo.ts:1`",
+      ].join("\n"),
+    )
 
-    expect(section).not.toContain("unresolved call")
+    expect(section).not.toContain("⚠")
     expect(headScan.ir.stats.callResolution?.unresolved).toEqual({
       localScope: 0,
       external: 0,
@@ -85,9 +88,16 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
 
     await writeHead({
       repo: REPO_HEAD,
-      svc: SVC_HEAD,
+      svc: `import { writeRecord } from "./repo"
+
+export class RecordService {
+  save(amount: number): { id: string; amount: number } {
+    return writeRecord({ amount })
+  }
+}
+`,
       ctl: `export function handleRequest(payload: { amount: number }): { ok: boolean } {
-  getService().saveRecordService(payload.amount)
+  getRecordService().save(payload.amount)
   return { ok: true }
 }
 `,
@@ -105,7 +115,11 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     expect(ctlSlice, "the unresolved call should split the controller off").toBeDefined()
 
     const section = sliceViewSection(projectDiff(diff))
-    expect(section).toContain("the resolver could not identify")
-    expect(section).toContain("⚠ 2 unresolved calls")
+    expect(section).toContain(
+      "> ⚠ 1 call below names a changed symbol in another Slice but was not resolved to it",
+    )
+    expect(section).toContain(
+      "- `handleRequest` — new function · `src/ctl.ts:1` · ⚠ unresolved call to `getRecordService.save`",
+    )
   })
 })

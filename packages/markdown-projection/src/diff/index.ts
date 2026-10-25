@@ -73,13 +73,17 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
       renderMovedChanged(buckets.movedChanged),
       indexMovedChanged(buckets.movedChanged),
     ),
-    foldedSection("## 🔀 Moved", renderMoved(buckets.moved), buckets.moved.length),
+    foldedSection(
+      "## 🔀 Moved",
+      renderMoved(buckets.moved),
+      `${buckets.moved.length} moved (no semantic change)`,
+    ),
     plainSection("## 🧱 Component changes", renderComponentChanges(diff)),
     plainSection("## 🔗 Dependency changes", renderDependencyChanges(diff)),
     foldedSection(
       "## 💧 Dropped changes",
       renderDroppedToggled(buckets.droppedToggled),
-      buckets.droppedToggled.length,
+      counted(buckets.droppedToggled.length, "entry", "entries"),
     ),
     plainSection(
       "## 🎚 Confidence changes",
@@ -89,11 +93,15 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     foldedSection(
       "## 🎨 Syntax-only changes",
       renderSyntaxOnly(buckets.syntaxOnly),
-      buckets.syntaxOnly.length,
+      `${counted(buckets.syntaxOnly.length, "symbol", "symbols")} (implementation refactor only, no semantic change)`,
     ),
   ].filter((entry): entry is Section => entry !== null)
 
   return assemble(heading, sections, maxBytes, fullReportLocation)
+}
+
+function counted(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`
 }
 
 export function projectDiffSummaryLine(diff: DiffResult): string {

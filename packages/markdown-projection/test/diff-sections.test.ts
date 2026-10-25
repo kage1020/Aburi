@@ -139,18 +139,38 @@ describe("projectDiff — folded sections", () => {
   ]
   const md = projectChanges(changes)
 
-  it("folds the moves, one line each, under a count of entries", () => {
+  it("folds the moves, one row for the Symbols that took the same route", () => {
     expect(sectionOf(md, "## 🔀 Moved")).toEqual([
       "## 🔀 Moved",
       "",
       "<details>",
-      "<summary>2 entries</summary>",
+      "<summary>2 moved (no semantic change)</summary>",
       "",
-      "- `MovedA`: `src/old.ts` → `src/new.ts` (`git-rename`)",
-      "- `MovedB`: `src/old.ts` → `src/new.ts` (`git-rename`)",
+      "- `MovedA`, `MovedB`: `src/old.ts` → `src/new.ts` (`git-rename`)",
       "",
       "</details>",
       "",
+    ])
+  })
+
+  it("keeps a row of its own for a move along another route, and for a rename", () => {
+    const renamed = moved(
+      makeSymbol({ id: "ts:src/old.ts#Before", name: "Before" }),
+      makeSymbol({ id: "ts:src/new.ts#After", name: "After" }),
+      "logic-fingerprint",
+    )
+    const elsewhere = moved(
+      makeSymbol({ id: "ts:src/old.ts#Gone", name: "Gone" }),
+      makeSymbol({ id: "ts:src/far.ts#Gone", name: "Gone" }),
+    )
+    const section = sectionOf(
+      projectChanges([movedFromOld("MovedA"), renamed, elsewhere, movedFromOld("MovedB")]),
+      "## 🔀 Moved",
+    )
+    expect(section.filter((line) => line.startsWith("- "))).toEqual([
+      "- `Gone`: `src/old.ts` → `src/far.ts` (`git-rename`)",
+      "- `Before` in `src/old.ts` → `After` in `src/new.ts` (`logic-fingerprint`)",
+      "- `MovedA`, `MovedB`: `src/old.ts` → `src/new.ts` (`git-rename`)",
     ])
   })
 
@@ -178,11 +198,23 @@ describe("projectDiff — folded sections", () => {
       "## 🎨 Syntax-only changes",
       "",
       "<details>",
-      "<summary>2 entries</summary>",
+      "<summary>2 symbols (implementation refactor only, no semantic change)</summary>",
       "",
       "- `SyntaxA` (`src/a.ts:1`)",
       "- `SyntaxB` (`src/a.ts:1`)",
     ])
+  })
+
+  it.each<[string, SymbolChange, string]>([
+    ["## 🔀 Moved", movedFromOld("MovedA"), "1 moved (no semantic change)"],
+    ["## 💧 Dropped changes", toggle("A", "to-dropped"), "1 entry"],
+    [
+      "## 🎨 Syntax-only changes",
+      changed(makeSymbol({ id: "ts:src/a.ts#SyntaxA", name: "SyntaxA" }), { syntaxChanged: true }),
+      "1 symbol (implementation refactor only, no semantic change)",
+    ],
+  ])("counts a single entry of %s in the singular", (heading, change, summary) => {
+    expect(sectionOf(projectChanges([change]), heading)).toContain(`<summary>${summary}</summary>`)
   })
 
   it("writes a moved and changed Symbol as a full entry outside any fold", () => {

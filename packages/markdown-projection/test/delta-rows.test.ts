@@ -1,5 +1,11 @@
-import { call, changed, decorator, effect, rule, sig } from "@aburi/test-support"
-import type { ArrayDelta, Symbol as IRSymbol, SignatureDelta, SymbolDelta } from "@aburi/types"
+import { call, changed, componentId, decorator, effect, rule, sig } from "@aburi/test-support"
+import type {
+  ArrayDelta,
+  Symbol as IRSymbol,
+  Signature,
+  SignatureDelta,
+  SymbolDelta,
+} from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { LONG_CONDITION, namedSymbol, projectChanges, renamedPair } from "./fixtures"
 import { sectionOf } from "./markdown"
@@ -86,13 +92,60 @@ describe("a changed Symbol's signature rows", () => {
       { inputs: { ...none(), removed: [{ name: 1 }, "id"] } },
       "- signature.inputs removed: 2 item(s)\n",
     ],
-    [
-      "the async, generator and type-parameter toggles",
-      { asyncChanged: true, generatorChanged: true, typeParametersChanged: true },
-      "- signature.async: toggled\n- signature.generator: toggled\n- signature.typeParameters: changed\n",
-    ],
   ])("names %s", (_, overrides, rows) => {
     expect(renderDelta({ signature: signature(overrides) })).toContain(rows)
+  })
+
+  it.each<[string, Partial<SignatureDelta>, Signature | null, Signature | null, string]>([
+    [
+      "an async toggle",
+      { asyncChanged: true },
+      sig(),
+      sig({ async: true }),
+      "- signature.async: false → true\n",
+    ],
+    [
+      "a generator toggle",
+      { generatorChanged: true },
+      sig({ generator: true }),
+      sig(),
+      "- signature.generator: true → false\n",
+    ],
+    [
+      "an async toggle on a Symbol that had no signature",
+      { asyncChanged: true },
+      null,
+      sig({ async: true }),
+      "- signature.async: none → true\n",
+    ],
+    [
+      "a generator toggle on a Symbol that has no signature left",
+      { generatorChanged: true },
+      sig({ generator: true }),
+      null,
+      "- signature.generator: true → none\n",
+    ],
+    [
+      "type parameters gained",
+      { typeParametersChanged: true },
+      sig(),
+      sig({ typeParameters: ["N extends SyntaxNode"] }),
+      "- signature.typeParameters: none → `<N extends SyntaxNode>`\n",
+    ],
+    [
+      "type parameters edited",
+      { typeParametersChanged: true },
+      sig({ typeParameters: ["T"] }),
+      sig({ typeParameters: ["T", "U = T"] }),
+      "- signature.typeParameters: `<T>` → `<T,U = T>`\n",
+    ],
+  ])("sets the base value before the head one for %s", (_, overrides, before, after, row) => {
+    const md = renderDelta(
+      { signature: signature(overrides) },
+      { signature: before },
+      { signature: after },
+    )
+    expect(md).toContain(row)
   })
 })
 
@@ -747,22 +800,36 @@ describe("a changed Symbol's delta entries that cannot be read", () => {
 })
 
 describe("a changed Symbol's component, visibility and confidence rows", () => {
-  it("writes the confidence row after the component and visibility rows", () => {
+  it("sets each base value before the head one, the confidence row last", () => {
     const md = projectChanges([
       changed(
-        namedSymbol("Foo"),
+        namedSymbol("Foo", { component: "framework-express", visibility: "internal" }),
         {
           apiChanged: true,
           componentChanged: true,
           visibilityChanged: true,
           confidenceChanged: true,
         },
-        { confidence: "low" },
+        { component: componentId("core"), visibility: "public", confidence: "low" },
       ),
     ])
     expect(md).toContain(
-      "- component: changed\n- visibility: changed\n- confidence: `high` → `low`\n",
+      "- component: `framework-express` → `core`\n- visibility: `internal` → `public`\n- confidence: `high` → `low`\n",
     )
+  })
+
+  it.each<[string, string | null, string | null, string]>([
+    ["joined one", null, "billing", "- component: none → `billing`\n"],
+    ["left every one", "billing", null, "- component: `billing` → none\n"],
+  ])("names no Component for a Symbol that %s", (_, from, to, row) => {
+    const md = projectChanges([
+      changed(
+        namedSymbol("Foo", { component: from }),
+        { logicChanged: true, componentChanged: true },
+        { component: to === null ? null : componentId(to) },
+      ),
+    ])
+    expect(md).toContain(row)
   })
 })
 

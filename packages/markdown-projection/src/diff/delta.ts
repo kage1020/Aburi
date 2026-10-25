@@ -1,4 +1,11 @@
-import type { ArrayDelta, Confidence, SignatureDelta, SymbolDelta } from "@aburi/types"
+import type {
+  ArrayDelta,
+  ComponentId,
+  Confidence,
+  Signature,
+  SignatureDelta,
+  SymbolDelta,
+} from "@aburi/types"
 import {
   callRowText,
   compareStrings,
@@ -8,7 +15,9 @@ import {
   formatInput,
   inlineCode,
   joinCode,
+  lastSegment,
   ruleRowText,
+  typeParametersText,
 } from "../format"
 import type { ChangedEntry } from "./partition"
 
@@ -22,17 +31,18 @@ export function renderDeltaBody(change: ChangedEntry): string[] {
   // only when that segment changed.
   const shortNameChanged = lastSegment(before.name) !== lastSegment(after.name)
   const nameRows = rows.length
-  appendSignatureDelta(rows, delta.signature ?? null, [
-    before.signature?.inputs ?? [],
-    after.signature?.inputs ?? [],
-  ])
+  appendSignatureDelta(rows, delta.signature ?? null, [before.signature, after.signature])
   appendDecoratorDelta(rows, delta.decorators, [before.decorators, after.decorators])
   appendArrayGroup(rows, "rules", delta.rules, RULES, [before.rules, after.rules])
   appendArrayGroup(rows, "effects", delta.effects, EFFECTS, [before.effects, after.effects])
   appendArrayGroup(rows, "calls", delta.calls, CALLS, [before.calls, after.calls])
   const explained = rows.length > nameRows || shortNameChanged || delta.visibilityChanged
-  if (delta.componentChanged) rows.push(`- component: changed`)
-  if (delta.visibilityChanged) rows.push(`- visibility: changed`)
+  if (delta.componentChanged) {
+    rows.push(`- component: ${componentText(before.component)} → ${componentText(after.component)}`)
+  }
+  if (delta.visibilityChanged) {
+    rows.push(`- visibility: ${inlineCode(before.visibility)} → ${inlineCode(after.visibility)}`)
+  }
   if (delta.confidenceChanged === true) {
     rows.push(
       `- confidence: ${inlineCode(change.before.confidence)} → ${inlineCode(change.after.confidence)}`,
@@ -54,18 +64,27 @@ function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
   rows.push(`- ${which} fingerprint changed; no field-level detail was recorded`)
 }
 
-function lastSegment(name: string): string {
-  const at = name.lastIndexOf("::")
-  const tail = at < 0 ? name : name.slice(at + 2)
-  return tail.slice(tail.lastIndexOf(".") + 1)
+// An absent key reads as null, as a Symbol outside every declared Component.
+function componentText(component: ComponentId | null | undefined): string {
+  return component === undefined || component === null ? "none" : inlineCode(component)
 }
 
-function appendSignatureDelta(rows: string[], sig: SignatureDelta | null, inputSides: Sides): void {
+type SignatureSides = readonly [
+  before: Signature | null | undefined,
+  after: Signature | null | undefined,
+]
+
+function appendSignatureDelta(
+  rows: string[],
+  sig: SignatureDelta | null,
+  [before, after]: SignatureSides,
+): void {
   if (sig === null) return
+  const inputSides: Sides = [before?.inputs ?? [], after?.inputs ?? []]
   if (sig.outputs.added.length > 0 || sig.outputs.removed.length > 0) {
-    const before = renderStringList(sig.outputs.removed)
-    const after = renderStringList(sig.outputs.added)
-    rows.push(`- signature.outputs: ${inlineCode(before)} → ${inlineCode(after)}`)
+    const removed = renderStringList(sig.outputs.removed)
+    const added = renderStringList(sig.outputs.added)
+    rows.push(`- signature.outputs: ${inlineCode(removed)} → ${inlineCode(added)}`)
   }
   appendInlineRow(rows, "signature.outputs modified", sig.outputs.modified)
   appendInlineRow(rows, "signature.throws added", sig.throws.added)
@@ -78,9 +97,29 @@ function appendSignatureDelta(rows: string[], sig: SignatureDelta | null, inputS
     const rendered = inputs[bucket].length > 0 ? inputs[bucket].join(", ") : `${count} item(s)`
     rows.push(`- signature.inputs ${bucket}: ${rendered}`)
   }
-  if (sig.asyncChanged) rows.push(`- signature.async: toggled`)
-  if (sig.generatorChanged) rows.push(`- signature.generator: toggled`)
-  if (sig.typeParametersChanged) rows.push(`- signature.typeParameters: changed`)
+  if (sig.asyncChanged) {
+    rows.push(`- signature.async: ${flagOrNone(before, "async")} → ${flagOrNone(after, "async")}`)
+  }
+  if (sig.generatorChanged) {
+    rows.push(
+      `- signature.generator: ${flagOrNone(before, "generator")} → ${flagOrNone(after, "generator")}`,
+    )
+  }
+  if (sig.typeParametersChanged) {
+    rows.push(
+      `- signature.typeParameters: ${typeParametersOrNone(before)} → ${typeParametersOrNone(after)}`,
+    )
+  }
+}
+
+/** A side with no signature never said whether it was async; `false` would claim it did. */
+function flagOrNone(signature: Signature | null | undefined, flag: "async" | "generator"): string {
+  return signature === null || signature === undefined ? "none" : String(signature[flag])
+}
+
+function typeParametersOrNone(signature: Signature | null | undefined): string {
+  const typeParameters = signature?.typeParameters ?? []
+  return typeParameters.length === 0 ? "none" : inlineCode(typeParametersText(typeParameters))
 }
 
 function appendDecoratorDelta(rows: string[], delta: ArrayDelta | undefined, sides: Sides): void {

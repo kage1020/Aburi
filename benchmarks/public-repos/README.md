@@ -70,7 +70,10 @@ fetches only the blobs a checkout touches. Reruns reuse the clones.
 6. Run `aburi diff <base>..<head>` once, with `--config` pointing at the
    rewritten config — the base ref is scanned inside a throwaway `git worktree`
    where the harness's untracked `aburi.json` does not exist, and without it the
-   base scan aborts with `No language plugin is configured` (exit 2).
+   base scan aborts with `No language plugin is configured` (exit 2). The size of
+   the `diff.md` it writes, which has no size cap, goes in the Diff table: a report
+   over the 65,507 bytes the GitHub Action posts by default reaches a pull request
+   shortened, and the timing columns cannot show a report that grew.
 
 Each measurement runs in its own process (`bench-child.mjs`) so
 `process.resourceUsage().maxRSS` reports the peak RSS of that run alone. The

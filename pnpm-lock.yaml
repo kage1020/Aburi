@@ -51,6 +51,9 @@ importers:
 
   benchmarks/public-repos:
     devDependencies:
+      '@aburi/github-action':
+        specifier: workspace:*
+        version: link:../../packages/github-action
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))

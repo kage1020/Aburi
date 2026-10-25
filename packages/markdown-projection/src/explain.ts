@@ -1,8 +1,8 @@
 import type { Dependency, Symbol as IRSymbol, UnresolvedCallDiagnostic } from "@aburi/types"
 import {
-  callRow,
   compareStrings,
   effectRow,
+  groupedCallRows,
   inlineCode,
   orderEffects,
   renderDocument,
@@ -81,7 +81,7 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   if (symbol.calls.length > 0) {
     lines.push("## Calls")
     lines.push("")
-    for (const c of [...symbol.calls].sort((a, b) => a.line - b.line)) lines.push(callRow(c))
+    lines.push(...groupedCallRows(symbol.calls))
     lines.push("")
   }
 

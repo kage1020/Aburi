@@ -48,7 +48,8 @@ function symbolEntry(symbol: IRSymbol, extraRows: readonly string[]): string[] {
     `### ${symbolTitle(symbol)}`,
     `**File**: ${fileLine(symbol)}`,
     ...extraRows,
-    ...renderSymbolBlock(symbol).slice(1),
+    // One side's hashes explain nothing a reviewer could compare them with.
+    ...renderSymbolBlock(symbol, { fingerprint: false }).slice(1),
     "",
   ]
 }
@@ -99,14 +100,33 @@ export function moveRoute(before: IRSymbol, after: IRSymbol): string {
   )
 }
 
+/**
+ * A file that moved takes its Symbols with it, so the Symbols that kept their names along one
+ * route share one row; a rename names itself in its route, and stays a row of its own.
+ */
 export function renderMoved(items: readonly SymbolMoved[]): string[] {
-  return items.map((entry) => {
-    const lead =
-      entry.before.source.file === entry.after.source.file || entry.before.name !== entry.after.name
-        ? ""
-        : `${inlineCode(entry.after.name)}: `
-    return `- ${lead}${moveRoute(entry.before, entry.after)} (${inlineCode(entry.rationale)})`
-  })
+  const rows: { route: string; names: string[] }[] = []
+  const shared = new Map<string, string[]>()
+  for (const entry of items) {
+    const route = `${moveRoute(entry.before, entry.after)} (${inlineCode(entry.rationale)})`
+    const keepsName =
+      entry.before.source.file !== entry.after.source.file && entry.before.name === entry.after.name
+    if (!keepsName) {
+      rows.push({ route, names: [] })
+      continue
+    }
+    const names = shared.get(route)
+    if (names !== undefined) {
+      names.push(inlineCode(entry.after.name))
+      continue
+    }
+    const first = [inlineCode(entry.after.name)]
+    shared.set(route, first)
+    rows.push({ route, names: first })
+  }
+  return rows.map(({ route, names }) =>
+    names.length === 0 ? `- ${route}` : `- ${names.join(", ")}: ${route}`,
+  )
 }
 
 export function renderDroppedToggled(items: readonly SymbolDroppedToggled[]): string[] {

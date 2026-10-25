@@ -152,10 +152,18 @@ function collectParseErrors(tree: Tree): ParseError[] {
   const root = tree.rootNode
   if (!root.hasError) return []
   const errors: ParseError[] = []
-  for (const node of walkDescendants(root, { anonymous: true, descend: (n) => n.hasError })) {
+  const descend = (n: Node) => n.hasError && !isTaggedTemplateEscapeArtifact(n)
+  for (const node of walkDescendants(root, { anonymous: true, descend })) {
     const message = node.isError ? "syntax error" : node.isMissing ? "missing token" : null
     if (message === null) continue
-    if (node.isError && (isJsxEntityArtifact(node) || isVarianceModifierArtifact(node))) continue
+    if (
+      node.isError &&
+      (isJsxEntityArtifact(node) ||
+        isVarianceModifierArtifact(node) ||
+        isTaggedTemplateEscapeArtifact(node))
+    ) {
+      continue
+    }
     errors.push({
       message,
       line: node.startPosition.row + 1,
@@ -164,6 +172,22 @@ function collectParseErrors(tree: Tree): ParseError[] {
     })
   }
   return errors
+}
+
+/**
+ * A tag reads a template's raw text, so since ES2018 a tagged template may hold an escape no
+ * string could, as the `\u` before a backslash in `String.raw` over `C:\Users\u\Aburi` is. The
+ * grammar holds every template to a string's escapes. Recovery can fold a broken substitution
+ * written right after such an escape into the same ERROR, which must still report.
+ */
+function isTaggedTemplateEscapeArtifact(node: Node): boolean {
+  const template = node.parent
+  if (!node.isError || template?.type !== "template_string") return false
+  if (!node.text.startsWith("\\") || node.text.includes("${")) return false
+  return (
+    template.parent?.type === "call_expression" &&
+    template.parent.childForFieldName("arguments")?.equals(template) === true
+  )
 }
 
 const JSX_TEXT_DELIMITERS: ReadonlySet<string> = new Set(["{", "}", "<", ">"])

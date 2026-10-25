@@ -271,9 +271,7 @@ describe("projectDiff — maxBytes weighs a names-only form with its name in the
     // At exactly its own size the same document comes back: only the budget in the note differs.
     const md = projectDiff(diff, { maxBytes: bytes(tight) })
     expect(md.replace(/within \d+ bytes/, "")).toBe(tight.replace(/within \d+ bytes/, ""))
-    expect(headings(projectDiff(diff, { maxBytes: bytes(tight) - 1 }))).toEqual([
-      "## ⚠ API changes",
-    ])
+    expect(headings(projectDiff(diff, { maxBytes: bytes(md) - 1 }))).toEqual(["## ⚠ API changes"])
   })
 })
 

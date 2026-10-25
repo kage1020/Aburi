@@ -79,6 +79,30 @@ export function makeSymbol(
   }
 }
 
+/** A Symbol named `name`, declared in `file` from `startLine`. */
+export function symbolAt(
+  file: string,
+  name: string,
+  startLine: number,
+  overrides: Omit<Partial<IRSymbol>, "id" | "name" | "component" | "source"> = {},
+): IRSymbol {
+  const symbol = makeSymbol({ ...overrides, id: `ts:${file}#${name}`, name })
+  return { ...symbol, source: { ...symbol.source, startLine } }
+}
+
+/** `caller` calling each callee, resolved to it, on the line given beside it. */
+export function withCallsTo(
+  caller: IRSymbol,
+  ...callees: ReadonlyArray<readonly [IRSymbol, number]>
+): IRSymbol {
+  return {
+    ...caller,
+    calls: callees.map(([callee, line]) =>
+      call({ target: callee.name, line, resolved: callee.id }),
+    ),
+  }
+}
+
 export function fp(seed: string): Fingerprint {
   const pad = (s: string) => s.padStart(12, "0").slice(0, 12)
   return {

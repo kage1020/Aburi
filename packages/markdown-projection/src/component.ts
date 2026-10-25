@@ -1,13 +1,13 @@
 import type { Component, ComponentId, Dependency, Symbol as IRSymbol } from "@aburi/types"
 import {
   appendAll,
-  callRow,
   compareEffectIdentity,
   compareStrings,
   decoratorRows,
   droppedFoldout,
   effectRow,
   fingerprintLine,
+  groupedCallRows,
   inlineCode,
   isSymbolIdEndpoint,
   joinCode,
@@ -153,7 +153,10 @@ function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
   return lines
 }
 
-export function renderSymbolBlock(symbol: IRSymbol): string[] {
+export function renderSymbolBlock(
+  symbol: IRSymbol,
+  options: { readonly fingerprint?: boolean } = {},
+): string[] {
   const rows: string[] = []
   let afterList = false
   const push = (row: string) => {
@@ -183,12 +186,9 @@ export function renderSymbolBlock(symbol: IRSymbol): string[] {
     )
   }
   if (symbol.calls.length > 0) {
-    pushList(
-      "**Calls**:",
-      [...symbol.calls].sort((a, b) => a.line - b.line).map((c) => callRow(c)),
-    )
+    pushList("**Calls**:", groupedCallRows(symbol.calls))
   }
-  const fp = fingerprintLine(symbol.fingerprint)
+  const fp = options.fingerprint === false ? null : fingerprintLine(symbol.fingerprint)
   if (fp !== null) push(fp)
   return rows
 }

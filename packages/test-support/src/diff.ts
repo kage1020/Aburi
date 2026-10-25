@@ -2,12 +2,19 @@ import type {
   DiffResult,
   Symbol as IRSymbol,
   MatchRationale,
+  SliceRecord,
   Summary,
   SymbolChanged,
   SymbolDelta,
   SymbolMoved,
   SymbolMovedChanged,
 } from "@aburi/types"
+import { sliceId } from "./ir"
+
+/** The Slice of `members` in the order given, under an id made from the first. */
+export function sliceOf(...members: readonly IRSymbol[]): SliceRecord {
+  return { id: sliceId(`slice:${members[0]?.id}`), members: members.map((member) => member.id) }
+}
 
 export function emptySummary(): Summary {
   return {

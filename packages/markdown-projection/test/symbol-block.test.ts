@@ -9,7 +9,7 @@ import {
   sig,
   zeroFp,
 } from "@aburi/test-support"
-import type { Decorator } from "@aburi/types"
+import type { Decorator, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectComponent, renderSymbolBlock } from "../src"
 import { LONG_CONDITION, projectChanges } from "./fixtures"
@@ -84,6 +84,25 @@ describe("renderSymbolBlock — what a Symbol block holds", () => {
       "- `svc.save` (L20)",
       "",
       "<sub>api=`000000api-v1` logic=`000000log-v1` syntax=`000000syn-v1`</sub>",
+    ])
+  })
+
+  it("writes a target called more than once on one row, with each line it is called on", () => {
+    const block = renderSymbolBlock(
+      handle({
+        calls: [
+          call({ target: "log", line: 3 }),
+          call({ target: "svc.save", line: 5 }),
+          call({ target: "log", line: 9 }),
+          call({ target: "log", line: 9 }),
+        ],
+        fingerprint: zeroFp(),
+      }),
+    )
+    expect(block.slice(block.indexOf("**Calls**:"))).toEqual([
+      "**Calls**:",
+      "- `log` (L3, L9)",
+      "- `svc.save` (L5)",
     ])
   })
 
@@ -182,6 +201,32 @@ describe("renderSymbolBlock — blank lines between list sections", () => {
     })
     const md = projectChanges([{ status: "added", symbol }])
     expect(md).toContain("- guard: `x > 0` (L3)\n\n**Effects**:\n")
+  })
+})
+
+describe("renderSymbolBlock — the fingerprint line", () => {
+  const symbol = handle({ effects: [EFFECT], fingerprint: fp("v1") })
+
+  it("is kept on a Symbol in a component file", () => {
+    const md = projectComponent({
+      component: component({ id: "core", name: "core" }),
+      symbols: [symbol],
+      dependencies: [],
+    })
     expect(md).toMatch(/\(L7\) \[effects-prisma\]\n\n<sub>api=/)
+  })
+
+  it("is left out when the caller asks for the block without it", () => {
+    expect(renderSymbolBlock(symbol, { fingerprint: false }).at(-1)).toBe(
+      "- db.write: `prisma.x.create` (L7) [effects-prisma]",
+    )
+  })
+
+  it.each<[string, SymbolChange]>([
+    ["an Added", { status: "added", symbol }],
+    ["a Removed", { status: "removed", symbol }],
+    ["an Unknown", { status: "unknown", symbol, absentFrom: "head", reason: "parse-failed" }],
+  ])("is left out of %s entry in diff.md, which has one side to show", (_, change) => {
+    expect(projectChanges([change])).not.toContain("<sub>")
   })
 })

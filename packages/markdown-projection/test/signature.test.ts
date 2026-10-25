@@ -29,7 +29,7 @@ describe("signatureLine", () => {
       },
       "`(a?: string, ...ids: string[]) → void`",
     ],
-    ["no outputs as void", { outputs: [] }, "`() → void`"],
+    ["no outputs as nothing after the inputs, not as void", { outputs: [] }, "`()`"],
     ["several outputs as a union", { outputs: ["A", "B"] }, "`() → A | B`"],
     ["type parameters ahead of the inputs", { typeParameters: ["T", "U"] }, "`<T,U>() → void`"],
     [

@@ -368,6 +368,13 @@ Grouped by file; within a file, ascending by source.startLine:
 A Symbol whose `confidence` is not `high` carries the badge (§3.5) at the end of its heading, as
 `#### \`XController\` *(class)* ⚠ medium`.
 
+A target called from more than one line is one **Calls** row that lists each line,
+``- `logger.warn` (L12, L30, L44)``, and the rows follow the line each target is first called on.
+A body that logs ten times listed `logger.warn` ten times: in the Added and Removed entries of 45
+of Aburi's own pull requests, 763 of 4,304 call rows repeated a target already listed. The
+`aburi explain` page groups its **Calls** the same way (§7); its Call resolution table, when it has
+one, still gives each unresolved call a row of its own, as each has its own reason.
+
 A blank line follows each list section that something comes after. Without it, the next label
 or the `<sub>` line is a lazy continuation of the last bullet's paragraph and renders inside that
 bullet, except after a fenced rule row, which a paragraph cannot continue (MP14).
@@ -394,7 +401,7 @@ A symbol with everything empty (class without boundary, no methods) is normally 
 
 ### 5.5 Signature display
 
-`(name: type, name: type) → output` form, in one code span. Multiple outputs are separated by `|`. ``throws `A`, `B` `` is appended, each thrown type in a span of its own: `Signature.throws` items are unconstrained strings ([ir-schema.md](./ir-schema.md) §7, §3.4.2).
+`(name: type, name: type) → output` form, in one code span. Multiple outputs are separated by `|`. An empty `outputs` prints nothing after the inputs, `(x: number)`: the source wrote no return type and nothing inferred one, which is not the `void` a function annotated `(): void` declares. ``throws `A`, `B` `` is appended, each thrown type in a span of its own: `Signature.throws` items are unconstrained strings ([ir-schema.md](./ir-schema.md) §7, §3.4.2).
 Type parameters lead the span (`<T,U>(…)`); `⚡async` and `*generator*` follow it.
 
 Each input is written as TypeScript writes it, whatever language the IR came from: an input's `optional` and `rest` fields ([ir-schema.md](./ir-schema.md) §7) print as `a?: string` and `...ids: string[]`, and a defaulted input as the optional one it is to a caller, `limit?`. An input with an empty `type` prints its name alone, `x`. The `signature.inputs` rows of a diff entry spell inputs the same way.
@@ -470,8 +477,10 @@ Symbol id in a span of its own (§3.4.2). The Boundary effect surface and the de
 ### 5.8 Call display
 
 ```
-- `<target>` (L<line>)
+- `<target>` (L<line>, L<line>, …)
 ```
+
+One row per target, with every line it is called on, in the order of the first (§5.2).
 
 When `resolved` is non-null this may be elided (a future release will consider internal links to the symbol id — see the [roadmap](../roadmap.md)):
 ```
@@ -485,7 +494,7 @@ The 3 axes on one line via `<sub>`:
 <sub>api=`9ee77913af43` logic=`7ecf8c1cebe7` syntax=`a3f2e1d0c9b8`</sub>
 ```
 
-Symbols whose fingerprint is all zeros (dropped) do not emit a fingerprint line.
+Symbols whose fingerprint is all zeros (dropped) do not emit a fingerprint line, and neither does a `diff.md` entry for an added, removed or unknown Symbol: with one revision, the hashes have nothing to be compared with (MP19).
 
 ## 6. Diff Markdown — `out/diff.md`
 
@@ -543,10 +552,15 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 - signature.outputs: `Promise<Invoice>` → `Promise<InvoiceWithReceipt>`
 - signature.throws added: `NotFoundError`
 - signature.inputs modified: `id: string` → `id: InvoiceId`
+- signature.typeParameters: none → `<T extends Invoice>`
 - decorator added: `@UseGuards(AuthGuard)`
 - decorator removed: `@UseGuards(LegacyGuard)`
 - decorator modified: `@nest.Post('/invoices')` → `@tsed.Post('/invoices')`
+- component: `billing` → `payments`
+- visibility: `internal` → `public`
 ```
+
+The rows for a single value — `signature.async`, `signature.generator`, `signature.typeParameters`, `component` and `visibility` — set the base value before the head one, read off the entry's `before` and `after` as the confidence row's are, because the flag alone says only that something moved and the reader's next question is from what to what. `async` and `generator` read `false` / `true`, or `none` on a side that has no signature, which never said either; no type parameters, and a Symbol outside every Component, read `none`; type parameters are spelled as the signature line leads with them (§5.5).
 
 Every decorator row prints the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4), and falls back to `qualifier.name` when `raw` is absent. A modified decorator differs from its base in its arguments or its receiver, the two things the diff compares beside the name ([`diff-algorithm.md`](./diff-algorithm.md) §5.2.2), and `raw` spells both, so its row sets the base's `raw` before the head's wherever the base element can be told (Delta rows, below).
 
@@ -595,7 +609,7 @@ The base element is looked up in the entry's `before` and `after`. The diff leav
 
 #### ➕ Added / ➖ Removed
 
-Full symbol rendering (same as §5.2):
+Full symbol rendering (same as §5.2), less the fingerprint line (§12.7):
 
 ```md
 ### `InvoiceService.refundInvoice` *(method)*
@@ -625,7 +639,7 @@ Entries with `status: "unknown"` — a Symbol one document has and the other nev
 
 `absentFrom: "base"` reads `may not be new` instead. The `reason` is quoted because it decides the next move: `parse-timeout` usually clears on a re-run, the rest clear only when the file is fixed.
 
-The path is the one the absent scan skipped, which is where its skip record is. When git renamed the file between the revisions that is `lostPath`, and the File line shows the other revision's name — a path the absent scan never had, so naming it as the skipped file would send the reader to raise a size cap or fix a parse for the wrong file. The line says how the two names relate instead, and the Slice View's member line does the same: ``unknown: the head scan skipped this file under its head name, `src/billing.ts` (over-size)``, where a file that kept its name reads `skipped this file`.
+The path is the one the absent scan skipped, which is where its skip record is. When git renamed the file between the revisions that is `lostPath`, and the File line shows the other revision's name — a path the absent scan never had, so naming it as the skipped file would send the reader to raise a size cap or fix a parse for the wrong file. The line says how the two names relate instead, and the Slice View's member row does the same: ``unknown: the head scan skipped this file under its head name, `src/billing.ts` (over-size)``, where a file that kept its name reads `skipped this file`.
 
 #### 🚫 Not compared
 
@@ -662,9 +676,9 @@ A Symbol can move without leaving its file: the diff counts any change of id in 
   - db.write: `prisma.user.upsert` (L33) [effects-prisma] ⚠ medium (was high)
 ```
 
-The folded list below reads the same way, less the head name it otherwise opens with, since the route already gives it. A Slice member's follow-up line opens with the route, ``↳ moved: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged``, as a move between files that kept its name opens with its two paths. A names-only row ends ``(from `Repo.save` at L12)`` where a move between files that kept its name ends ``(from `<path>`)``.
+The folded list below reads the same way, less the head name it otherwise opens with, since the route already gives it. A Slice member's row opens its wording with the route, ``moved: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); logic changed``, as a move between files that kept its name opens with its two paths. A names-only row ends ``(from `Repo.save` at L12)`` where a move between files that kept its name ends ``(from `<path>`)``.
 
-A move between files that changed the Symbol's name as well gives each path with its name, ``**Moved**: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts` ``, and so do the folded row (without the head name it would open with), the follow-up line, and the names-only row, ``(from `parseAmount` in `src/parse.ts`)``. The sections that render the pair again (API changes, Logic changes, Confidence changes) title it by its head name with no route, so wherever a pair whose name changed renders a delta body, the body opens with ``- name: `<base name>` → `<head name>` ``; in Moved + Changed it repeats the route, since the body is the same in every section. Their names-only rows carry the same ``(from …)`` as the Moved + Changed one (§6.4): the size cap can omit Moved + Changed and keep the other section, and the old name would then be on no line. The old name of an exported function is the name its callers use, which is the fact a reviewer needs.
+A move between files that changed the Symbol's name as well gives each path with its name, ``**Moved**: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts` ``, and so do the folded row (without the head name it would open with), the Slice member row, and the names-only row, ``(from `parseAmount` in `src/parse.ts`)``. The sections that render the pair again (API changes, Logic changes, Confidence changes) title it by its head name with no route, so wherever a pair whose name changed renders a delta body, the body opens with ``- name: `<base name>` → `<head name>` ``; in Moved + Changed it repeats the route, since the body is the same in every section. Their names-only rows carry the same ``(from …)`` as the Moved + Changed one (§6.4): the size cap can omit Moved + Changed and keep the other section, and the old name would then be on no line. The old name of an exported function is the name its callers use, which is the fact a reviewer needs.
 
 #### 🔀 Moved (folded)
 
@@ -672,11 +686,18 @@ A move between files that changed the Symbol's name as well gives each path with
 <details>
 <summary>2 moved (no semantic change)</summary>
 
-- `formatMoney`: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
-- `parseAmount`: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
+- `formatMoney`, `parseAmount`: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
 
 </details>
 ```
+
+The Symbols that kept their names along one route share a row, in the section's order. A file that
+moved takes every Symbol in it along, and a row each repeated the same two paths down the fold, so
+the row a reviewer reads is the file's. A move within a file, or one that changed the name, names
+the Symbol in its route and keeps a row of its own.
+
+Each fold's summary says what it counts, and counts one in the singular: `1 moved (no semantic
+change)`, `1 entry`, `1 symbol (implementation refactor only, no semantic change)`.
 
 #### 🧱 Component changes
 
@@ -714,15 +735,24 @@ component whose only difference is in a field this version of the projection has
 #### 🔗 Dependency changes
 
 ```md
-### Added
+### Component-level added
 - `billing` → `payments` (via `import`)
 
-### Removed
+### Component-level removed
 - `billing` → `legacy-auth` (via `import`)
 
+### Symbol-level added
+- `exitsFrom` → `scopeInside` in `packages/lang-typescript/src/walk-body.ts` (via `call`)
+- `wrappedExpression` in `packages/lang-typescript/src/walk-body.ts` → `firstNonCommentChild` in `packages/lang-typescript/src/ast-helpers.ts` (via `call`)
+
 ### Unknown — the other revision never read one end
-- `ts:src/route.ts#handleRequest` → `ts:src/log.ts#log` (via `call`) — the head scan skipped `src/route.ts` (parse-failed)
+- `handleRequest` in `src/route.ts` → `log` in `src/log.ts` (via `call`) — the head scan skipped `src/route.ts` (parse-failed)
 ```
+
+A Symbol end is written by its name and file, the way a moved Symbol's route is, rather than by its
+id: the id repeats the language on every end, and an edge between two Symbols of one file, the
+common case for a call, wrote the same path twice. Such an edge names the file once, after both
+names. A Component end is written by its id.
 
 The Unknown group is not split by level the way the added and removed groups are. Only a Symbol endpoint has a file to lose ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1), so every entry in it is a symbol-level edge by construction. Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
 
@@ -1010,8 +1040,9 @@ All Markdown projection output is **English, with fixed wording**.
 | MP10 | diff where only `delta.syntaxChanged` is true | Classified into the Syntax-only section (folded) |
 | MP10a | diff where `delta.confidenceChanged` is true and neither `apiChanged` nor `logicChanged` is | Classified into the Confidence changes section, with a `- confidence: <base> → <head>` row |
 | MP11 | diff containing a moved+changed symbol | Moved + Changed section (not folded) |
-| MP11a | diff containing a moved or moved+changed Symbol whose base and head files are the same | Every place the move is written (the Moved + Changed entry and its names-only row, the folded Moved list, a Slice member's follow-up) names the file once with the base and head names and lines, never the path twice. A move between files still writes both paths |
+| MP11a | diff containing a moved or moved+changed Symbol whose base and head files are the same | Every place the move is written (the Moved + Changed entry and its names-only row, the folded Moved list, a Slice member's row) names the file once with the base and head names and lines, never the path twice. A move between files still writes both paths |
 | MP11b | diff containing a moved or moved+changed Symbol whose name changed, within one file or between files | Every place the move is written carries the base name: a move between files writes each path with its name, every delta body of the pair opens with ``- name: `<base>` → `<head>` ``, and every names-only row of the pair carries the Moved + Changed row's ``(from …)``, in API changes, Logic changes and Confidence changes as in Moved + Changed, so a size cap that omits Moved + Changed still names the base. A change of the last segment explains the API flag, so no "no field-level detail" row follows; a new owner alone (`Repo.save` → `UserRepo.save`) does not explain it |
+| MP11c | diff with several Symbols moved between the same two files under their own names, beside a rename and a move to a third file | The folded Moved list writes the first group on one row, `` `A`, `B`: `<old>` → `<new>` ``, and the other two on a row each; its summary reads `4 moved (no semantic change)`, and one entry `1 moved (no semantic change)` |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, in either form, beside every more important section that stayed, and no omitted section would fit back into the result, not even with the lists below it made names-only where names-only would then be smaller; among the sections with a names-only form, the full ones come first and every one after the first short one is short, omitted, or full where names-only would be no smaller. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
@@ -1025,6 +1056,10 @@ All Markdown projection output is **English, with fixed wording**.
 | MP17 | diff entry whose delta lists a loop, an effect, a call or a decorator, in any bucket | The loop row carries its kind, ``loop (`<loopKind>`) (L<line>)``, and the effect row its `[plugin]` and, at medium or low confidence, its badge, as on the component page. Under `calls modified` the row names what the call resolves to (`none` when nothing); a decorator row prints its `raw`, arguments included, in every bucket |
 | MP17a | `modified` rule, effect, call, decorator or input whose entry's `before` holds the base element it was paired with, differing in a compared field | That field reads `<base> → <head>` in its place: ``loop (`for` → `while`)``, `[effects-drizzle → effects-prisma]`, an origin `(L5) → [propagated from …]`, ``resolved: `<id>` → none``, `` `@nest.Post()` → `@Post()` ``, `` `limit: number` → `limit?: number` ``; a confidence as `⚠ medium (was high)`, or `(was ⚠ medium)` when it rose to `high`. A field the diff does not compare (`line`, `derivedBy`) gets no base value, and neither does a field whose base value reads like its head value. A base element under another key, in `removed`, or equal to the head element is not taken for the paired one, nor are the base elements equal to an unchanged head element while there are no more of them than of such head elements |
 | MP17b | `modified` element with several candidate bases: several `modified` elements under one key, or base elements equal but for their line | A field the candidates disagree on, or one of them shares with the head element, shows the head value alone; a field they agree on and differ from the head element on still gets their value |
+| MP17c | diff entry whose delta flags `asyncChanged`, `generatorChanged`, `typeParametersChanged`, `componentChanged` or `visibilityChanged` | One row per flag with the base value before the head one: `- signature.async: false → true`, ``- signature.typeParameters: none → `<T>` ``, ``- component: `billing` → none``, ``- visibility: `internal` → `public` `` |
+| MP18 | diff whose `dependencies.added` holds a call edge between two Symbols of one file, one between two files, and one from a Component to a Symbol | The first reads `` `a` → `b` in `<file>` (via `call`) ``, the second `` `a` in `<file>` → `b` in `<file>` (via `call`) ``, the third `` `billing` → `b` in `<file>` (via `import`) ``; no Symbol id appears |
+| MP19 | diff with an added, a removed and an unknown Symbol, each with a non-zero fingerprint | No entry carries a `<sub>` fingerprint line; the same Symbol on its component page does |
+| MP20 | Symbol block whose calls are `log` (L3), `svc.save` (L5), `log` (L9) and `log` (L9) | **Calls** reads ``- `log` (L3, L9)`` then ``- `svc.save` (L5)`` |
 
 ## 12. Design decisions
 
@@ -1055,6 +1090,11 @@ Accounts for international teams and OSS usage. All projection output is fixed-w
 ### 12.7 Why fingerprints are displayed
 
 Unnecessary during review, but valuable for debugging and for explaining "why did this appear in the diff". The `<sub>` rendering keeps the display unobtrusive.
+
+`diff.md` leaves the line out of an Added, Removed or Unknown entry. Such an entry has one side, so
+its three hashes explain nothing a reviewer could compare them with, and at some 70 bytes an entry
+they were the part of a large refactor's Added list most likely to push the report over the size
+cap. The component pages keep it, and the IR keeps every hash.
 
 ### 12.8 Whether to use emoji
 

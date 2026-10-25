@@ -74,6 +74,14 @@ beside the new one:
 When several elements of one kind were edited at once, such as two guards, and
 their old values differ, that field shows only the new value.
 
+A single value that changed reads the same way, old value first:
+
+```md
+- signature.typeParameters: none → `<T extends Order>`
+- component: `orders` → `checkout`
+- visibility: `internal` → `public`
+```
+
 For an added or removed symbol, Aburi renders the whole thing:
 
 ```md
@@ -102,6 +110,40 @@ branches. A removed `guard` line means somebody removed a condition.
 **Effects** are what the symbol does to the world: `db.read`, `db.write`,
 `db.transaction`, `event.publish`, `network.rpc`. A method that gained
 `db.write` now writes to your database.
+
+## A slice
+
+The Slice View groups the changed symbols that call one another, so a feature
+reads end to end. Each slice is drawn as its calls, from the symbol nothing else
+in it calls, with each member on one line saying what happened to it:
+
+```md
+### From `submitOrder` (3 symbols)
+
+Files: `src/app/orders/actions.ts`, `src/lib/payments.ts`
+
+- `submitOrder` — API and logic changed · `actions.ts:18`
+  - `chargeCard` — new function with network.http · `payments.ts:7`
+  - `recordOrder` — logic changed · `actions.ts:40`
+```
+
+A member reached twice is written out once, and *(see above)* where it recurs.
+A call that only the base made is still drawn, since it is what joined the
+slice, and says *(call removed)*. The symbols with no resolved call to or from
+another symbol in the view are folded under **Standalone changes**, one line
+each.
+
+Two slices that should be one can come apart when Aburi could not tell what a
+call reaches. When an unresolved call looks like a call to a changed symbol in
+another slice, the member says so, and a note under the heading counts them:
+
+```md
+- `submitOrder` — logic changed · `actions.ts:18` · ⚠ unresolved call to `getRepo.save`
+```
+
+Read the slice that holds `Repo.save` together with this one. A call is marked
+only when its name matches a changed symbol in another slice, so calls into
+libraries and built-ins rarely are.
 
 ## Confidence
 

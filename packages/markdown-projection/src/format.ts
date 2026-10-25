@@ -149,13 +149,25 @@ export function renderDecoratorList(decorators: readonly Decorator[]): string {
 export function signatureLine(signature: Signature | null | undefined): string | null {
   if (signature === null || signature === undefined) return null
   const inputs = signature.inputs.map(formatInput).join(", ")
-  const outputs = signature.outputs.length > 0 ? signature.outputs.join(" | ") : "void"
+  // An empty list means nothing was written or inferred, which is not `void`.
+  const outputs = signature.outputs.length > 0 ? ` → ${signature.outputs.join(" | ")}` : ""
   const throwsPart = signature.throws.length > 0 ? ` throws ${joinCode(signature.throws)}` : ""
   const asyncBadge = signature.async ? " ⚡async" : ""
   const genBadge = signature.generator ? " *generator*" : ""
   const typeParams =
-    signature.typeParameters.length > 0 ? `<${signature.typeParameters.join(",")}>` : ""
-  return `${inlineCode(`${typeParams}(${inputs}) → ${outputs}`)}${throwsPart}${asyncBadge}${genBadge}`
+    signature.typeParameters.length > 0 ? typeParametersText(signature.typeParameters) : ""
+  return `${inlineCode(`${typeParams}(${inputs})${outputs}`)}${throwsPart}${asyncBadge}${genBadge}`
+}
+
+export function typeParametersText(typeParameters: readonly string[]): string {
+  return `<${typeParameters.join(",")}>`
+}
+
+/** The segment of a qualified name, or of a call target, that follows its last `.` or `::`. */
+export function lastSegment(name: string): string {
+  const at = name.lastIndexOf("::")
+  const tail = at < 0 ? name : name.slice(at + 2)
+  return tail.slice(tail.lastIndexOf(".") + 1)
 }
 
 export function ruleRow(rule: Rule): string[] {
@@ -285,6 +297,20 @@ export function callRowText(call: { readonly target: string; readonly line: numb
   return `${inlineCode(call.target)} (L${call.line})`
 }
 
+/** A body that logs ten times would otherwise list `log` ten times, a line apart. */
+export function groupedCallRows(calls: readonly Call[]): string[] {
+  const linesByTarget = new Map<string, Set<number>>()
+  for (const call of [...calls].sort((a, b) => a.line - b.line)) {
+    const lines = linesByTarget.get(call.target) ?? new Set<number>()
+    lines.add(call.line)
+    linesByTarget.set(call.target, lines)
+  }
+  return [...linesByTarget].map(
+    ([target, lines]) =>
+      `- ${inlineCode(target)} (${[...lines].map((line) => `L${line}`).join(", ")})`,
+  )
+}
+
 export function fingerprintLine(fp: Fingerprint): string | null {
   if (isZeroFingerprint(fp)) return null
   return `<sub>api=${inlineCode(fp.api)} logic=${inlineCode(fp.logic)} syntax=${inlineCode(fp.syntax)}</sub>`
@@ -332,10 +358,19 @@ export function renderDocument(lines: readonly string[]): string {
   return `${body.trimEnd()}\n`
 }
 
-const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
+const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:([^#]+)#(.+)$/
 
 export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
+}
+
+export function symbolIdParts(
+  endpoint: DependencyEndpoint,
+): { readonly file: string; readonly name: string } | null {
+  const match = SYMBOL_ID_PATTERN.exec(endpoint)
+  if (match === null) return null
+  const [, file = "", name = ""] = match
+  return { file, name }
 }
 
 export function isSymbolEdge(dependency: Dependency): boolean {

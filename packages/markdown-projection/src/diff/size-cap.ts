@@ -38,7 +38,7 @@ export function plainSection(
 export function foldedSection(
   heading: string,
   body: readonly string[],
-  entryCount: number,
+  summary: string,
 ): Section | null {
   if (body.length === 0) return null
   return {
@@ -47,7 +47,7 @@ export function foldedSection(
       heading,
       "",
       "<details>",
-      `<summary>${entryCount} entries</summary>`,
+      `<summary>${summary}</summary>`,
       "",
       ...body,
       "",

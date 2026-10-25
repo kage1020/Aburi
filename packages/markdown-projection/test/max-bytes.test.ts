@@ -36,17 +36,17 @@ function crowdedDiff(addedCount: number) {
 
 describe("projectDiff — maxBytes", () => {
   it("emits the whole document when no budget is given", () => {
-    const md = projectDiff(crowdedDiff(400))
+    const md = projectDiff(crowdedDiff(600))
     expect(bytes(md)).toBeGreaterThan(GITHUB_LIMIT)
     expect(md).toContain("## 🎨 Syntax-only changes")
     expect(md).not.toContain("omitted")
   })
 
   it("keeps a diff that would 422 under GitHub's comment limit", () => {
-    const md = projectDiff(crowdedDiff(400), { maxBytes: GITHUB_LIMIT })
+    const md = projectDiff(crowdedDiff(600), { maxBytes: GITHUB_LIMIT })
     expect(bytes(md)).toBeLessThanOrEqual(GITHUB_LIMIT)
     expect(md).toContain("# Aburi diff: `main`..`HEAD`")
-    expect(md).toContain("**Summary**: +400 added")
+    expect(md).toContain("**Summary**: +600 added")
   })
 
   it("leaves a document that already fits byte-identical, with no note to point anywhere", () => {
@@ -62,14 +62,14 @@ describe("projectDiff — maxBytes", () => {
     GITHUB_LIMIT,
     2000,
   ])("renders the same bytes on every run when a %i-byte cap trims the document", (maxBytes) => {
-    const capped = projectDiff(crowdedDiff(400), { maxBytes })
+    const capped = projectDiff(crowdedDiff(600), { maxBytes })
 
-    expect(bytes(capped)).toBeLessThan(bytes(projectDiff(crowdedDiff(400))))
-    expect(projectDiff(crowdedDiff(400), { maxBytes })).toBe(capped)
+    expect(bytes(capped)).toBeLessThan(bytes(projectDiff(crowdedDiff(600))))
+    expect(projectDiff(crowdedDiff(600), { maxBytes })).toBe(capped)
   })
 
   it("keeps what fits below a section too large to fit even as names", () => {
-    const md = projectDiff(crowdedDiff(400), { maxBytes: 2000 })
+    const md = projectDiff(crowdedDiff(600), { maxBytes: 2000 })
     expect(headings(md)).toEqual([
       "## ⚠ API changes",
       "## 🔧 Logic changes",
@@ -103,7 +103,7 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("keeps the ordinary wording when nothing is left but the document still fits", () => {
-    const diff = crowdedDiff(400)
+    const diff = crowdedDiff(600)
     const floor = bytes(projectDiff(diff, { maxBytes: 1 }))
     const md = projectDiff(diff, { maxBytes: floor })
     expect(headings(md)).toEqual([])
@@ -118,7 +118,7 @@ describe("projectDiff — maxBytes", () => {
   })
 
   it("names where the full report is", () => {
-    const md = projectDiff(crowdedDiff(400), {
+    const md = projectDiff(crowdedDiff(600), {
       maxBytes: GITHUB_LIMIT,
       fullReportLocation: "`diff.full.md` beside `diff.md`",
     })
@@ -148,11 +148,11 @@ describe("projectDiff — maxBytes", () => {
 })
 
 describe("projectDiff — maxBytes at a budget nothing fits", () => {
-  const md = projectDiff(crowdedDiff(400), { maxBytes: 1 })
+  const md = projectDiff(crowdedDiff(600), { maxBytes: 1 })
 
   it("keeps the title and the Summary", () => {
     expect(md).toContain("# Aburi diff: `main`..`HEAD`")
-    expect(md).toContain("**Summary**: +400 added")
+    expect(md).toContain("**Summary**: +600 added")
     expect(headings(md)).toEqual([])
   })
 

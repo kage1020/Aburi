@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os"
 import { posix, resolve, win32 } from "node:path"
+import { ABURI_COMMENT_BODY_MAX_BYTES } from "@aburi/github-action"
 
 const COMPLETED_EXIT_CODES = new Set([0, 3])
 
@@ -113,6 +114,11 @@ export function resolveRepos(manifest, only) {
 
 function formatMiB(kb) {
   return kb == null ? "—" : (kb / 1024).toFixed(0)
+}
+
+function formatReportBytes(bytes) {
+  if (bytes == null) return "—"
+  return `${(bytes / 1024).toFixed(1)} KiB${bytes > ABURI_COMMENT_BODY_MAX_BYTES ? " ⚠" : ""}`
 }
 
 function formatSeconds(ms) {
@@ -237,11 +243,25 @@ export function renderReport(report) {
     )
   }
   if (results.some((result) => result.diff)) {
+    // A sample recorded before the report was measured renders as it always did.
+    const reported = results.some((result) => result.diff?.reportBytes != null)
     lines.push("")
     lines.push("## Diff (`base..head`, 50 commits apart)")
     lines.push("")
-    lines.push(row(["Repo", "Wall", "Peak RSS", "Exit", "Added", "Removed", "Changed", "Moved"]))
-    lines.push("|---|---:|---:|---:|---:|---:|---:|---:|")
+    lines.push(
+      row([
+        "Repo",
+        "Wall",
+        "Peak RSS",
+        "Exit",
+        "Added",
+        "Removed",
+        "Changed",
+        "Moved",
+        ...(reported ? ["diff.md"] : []),
+      ]),
+    )
+    lines.push(`|---|---:|---:|---:|---:|---:|---:|---:|${reported ? "---:|" : ""}`)
     for (const result of results) {
       if (!result.diff) continue
       const summary = result.diff.summary ?? {}
@@ -255,7 +275,17 @@ export function renderReport(report) {
           formatCount(summary.removed),
           formatCount(summary.changed),
           formatCount(summary.moved),
+          ...(reported ? [formatReportBytes(result.diff.reportBytes)] : []),
         ]),
+      )
+    }
+    if (reported) {
+      lines.push("")
+      lines.push(
+        `\`diff.md\` is the report without a size cap. Left to its default, the GitHub Action ` +
+          `posts at most ${ABURI_COMMENT_BODY_MAX_BYTES.toLocaleString("en-US")} bytes of it, the ` +
+          "most a pull request comment holds beside its marker, so a report marked ⚠ reaches the " +
+          "pull request with sections listing names only or left out.",
       )
     }
   }
