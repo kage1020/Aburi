@@ -28,6 +28,13 @@ describe("a callee the walk can name", () => {
     ["a literal index the callee itself is written with", 'handlers["run"]()', "handlers.run"],
     ["a literal index in the method's slot", 'prisma.user["create"]({})', "prisma.user.create"],
     ["literal indexes in both slots", 'prisma["user"]["create"]({})', "prisma.user.create"],
+    ["a name behind `as`", "(x as Foo).m()", "x.m"],
+    ["a name behind `satisfies`", "(x satisfies Foo).m()", "x.m"],
+    ["a name behind an old-style assertion", "(<Foo>x).m()", "x.m"],
+    ["a name behind `as` a dotted type", "(emitter as Foo.Bar).update(x)", "emitter.update"],
+    ["a member path behind `as`", "(this.repo as Repo).save()", "this.repo.save"],
+    ["a name behind `as` a type that spells a spread", "(x as [...T]).map(g)", "x.map"],
+    ["a name behind `as` a type that spans lines", "(x as {\n    a: string\n  }).m()", "x.m"],
   ])("names %s and flags nothing", async (_label, body, target) => {
     expect((await callsIn(body)).map((c) => [c.target, c.dynamicReceiver])).toEqual([
       [target, undefined],
@@ -43,9 +50,6 @@ describe("a receiver the walk cannot name is flagged dynamic", () => {
     ["a call, though the index after it folds", 'getRepo()["user"].save()', "getRepo.user.save"],
     ["a parenthesized expression", "(a ?? b).save()", "<computed>.save"],
     ["a parenthesized non-null assertion", "(svc!).save()", "svc!.save"],
-    ["a parenthesized `as`", "(x as Foo).m()", "x as Foo.m"],
-    ["a parenthesized `satisfies`", "(x satisfies Foo).m()", "x satisfies Foo.m"],
-    ["a parenthesized old-style assertion", "(<Foo>x).m()", "<Foo>x.m"],
     ["an identifier index", "prisma[model].create({})", "prisma.<computed>.create"],
     ["a numeric index", "items[0].save()", "items.<computed>.save"],
     ["a substituting template index", `prisma[\`\${m}s\`].create({})`, "prisma.<computed>.create"],
@@ -77,8 +81,6 @@ describe("a receiver the walk cannot name is flagged dynamic", () => {
     ["an IIFE", "(async () => {\n    await load()\n  })()", "<computed>"],
     ["an array literal behind `as`", "return ([...a] as string[]).map(g)", "<computed>.map"],
     ["an array literal behind `!`", "return [...a]!.map(g)", "<computed>.map"],
-    ["a type that spells a spread", "return (x as [...T]).map(g)", "<computed>.map"],
-    ["a type that spans lines", "return (x as {\n    a: string\n  }).m()", "<computed>.m"],
   ])("flags %s", async (_label, body, target) => {
     const calls = await callsIn(body)
 

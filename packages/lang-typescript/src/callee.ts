@@ -130,13 +130,20 @@ export function describeCallee(node: Node): CalleeShape | null {
       if (inner === null) return null
       return { target: inner.target, dynamic: true, opaque: false }
     }
+    case "as_expression":
+    case "satisfies_expression":
+    case "type_assertion": {
+      const innerNode = wrappedExpression(node)
+      return innerNode === null ? null : describeCallee(innerNode)
+    }
+    case "non_null_expression":
+      return describeNonNull(node)
     default:
-      if (TYPE_WRAPPER_TYPES.has(node.type)) return describeTypeWrapper(node)
       return node.text.length > 0 ? UNMODELLED_EXPRESSION : null
   }
 }
 
-function describeTypeWrapper(node: Node): CalleeShape | null {
+function describeNonNull(node: Node): CalleeShape | null {
   const innerNode = wrappedExpression(node)
   if (innerNode === null) return null
   const inner = describeCallee(innerNode)

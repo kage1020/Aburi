@@ -289,12 +289,19 @@ carries `dynamicReceiver`: `[...names].sort()` is `<computed>.sort`, and an IIFE
 Its text would break the contract above (`[...names]` holds two empty segments, `(.5)` a leading
 dot) or put a function body, indentation included, into the IR.
 
-A type-level wrapper — `svc!`, `x as Foo`, `x satisfies Foo`, `<Foo>x` — still answers with its
-own text around a name, so `svc!.save()` is `svc!.save` and is not dynamic. Around anything else it
-answers what the wrapped expression does (`([...a] as T).m()` is `<computed>.m`, `getRepo()!.save()`
-is the dynamic `getRepo.save`), and a text that would still hold an empty segment (`(x as [...T]).m()`)
-or a line break (a type literal written over several lines) answers `<computed>`: a target is
-read as a name, and reformatting must not change it. The keyword callee of a dynamic
+A type assertion — `x as Foo`, `x satisfies Foo`, `<Foo>x` — states a type and leaves the value as
+it was, so it answers what the expression it wraps answers, and its type never reaches `target`:
+`(emitter as Foo.Bar).update(x)` is `emitter.update`, `(this.repo as Repo).save()` is
+`this.repo.save`, and `([...a] as T).m()` is `<computed>.m`. The parentheses the assertion needs
+hold a name in the first two, so neither is dynamic, as `(svc).save()` is not. While the assertion
+answered with its own text, the type's dots became segments (`(db as Drizzle.DB).insert(r)` had
+the three a Prisma delegate call has, and classified as one in a file importing `@prisma/client`),
+a type that spelled a spread or spanned lines collapsed the receiver to `<computed>`, and the
+target resolved against nothing. A non-null assertion still answers with its own text around a
+name, so `svc!.save()` is `svc!.save` and is not dynamic. Around anything else it answers what the
+wrapped expression does (`getRepo()!.save()` is the dynamic `getRepo.save`), and a text that would
+still hold an empty segment or a line break answers `<computed>`: a target is read as a name, and
+reformatting must not change it. The keyword callee of a dynamic
 `import("./m")` is `import`, and `import.meta` and `new.target` are their own spellings.
 
 #### A bracket access in a callee

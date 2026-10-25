@@ -64,6 +64,33 @@ describe("scan — Prisma calls in a service file", () => {
     ])
   })
 
+  it("reads a receiver behind a type assertion as the name it asserts about", async () => {
+    await workspace.writeSource(
+      "src/users.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "",
+        "export function notify(emitter: any, x: any) {",
+        "  return (emitter as Foo.Bar).update(x)",
+        "}",
+        "",
+        "export function createUser(prisma: any, data: unknown) {",
+        "  return (prisma as PrismaClient).user.create({ data })",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+
+    const notify = symbolNamed(result, "notify")
+    expect(notify.effects).toEqual([])
+    expect(notify.calls.map((c) => c.target)).toEqual(["emitter.update"])
+    expect(symbolNamed(result, "createUser").effects).toMatchObject([
+      { id: "db.write", target: "prisma.user.create", confidence: "high" },
+    ])
+  })
+
   it("keeps a write whose argument list carries a comment", async () => {
     await workspace.writeSource(
       "src/users.ts",
