@@ -38,7 +38,7 @@ describe("projectWorkspace — component dependency graph", () => {
       "",
       "Fallback list:",
       "",
-      "- billing → payments (via `import`)",
+      "- `billing` → `payments` (via `import`)",
       "",
     ])
   })
@@ -76,8 +76,8 @@ describe("projectWorkspace — component dependency graph", () => {
     )
     const section = sectionOf(md, HEADING)
     expect(section.filter((line) => line.includes("-->"))).toEqual(["  c_billing --> c_payments"])
-    expect(section).toContain("- billing → payments (via `event`)")
-    expect(section).toContain("- billing → payments (via `import`)")
+    expect(section).toContain("- `billing` → `payments` (via `event`)")
+    expect(section).toContain("- `billing` → `payments` (via `import`)")
   })
 
   it("draws an edge to an endpoint no component declares, without declaring it", () => {
@@ -88,7 +88,7 @@ describe("projectWorkspace — component dependency graph", () => {
       }),
     )
     expect(md).toContain("  c_billing --> c_stray")
-    expect(md).toContain("- billing → stray (via `import`)")
+    expect(md).toContain("- `billing` → `stray` (via `import`)")
     expect(md).not.toContain('stray["')
   })
 
@@ -118,9 +118,22 @@ describe("projectWorkspace — component dependency graph", () => {
 
   it("escapes the characters that would break a node label", () => {
     const md = projectWorkspace(
-      makeIR({ components: [component({ id: "foo", name: 'A "b" & <c> [d]\nnext' })] }),
+      makeIR({ components: [component({ id: "foo", name: 'A "b" & <c> [d]' })] }),
     )
-    expect(md).toContain('  c_foo["A &quot;b&quot; &amp; &lt;c&gt; [d&rbrack;<br/>next"]\n')
+    expect(md).toContain('  c_foo["A &quot;b&quot; &amp; &lt;c&gt; [d&rbrack;"]\n')
+  })
+
+  it.each([
+    "\n",
+    "\r\n",
+    "\r",
+  ])("keeps a label holding the line ending %j on its own line", (ending) => {
+    const md = projectWorkspace(
+      makeIR({
+        components: [component({ id: "foo", name: `A${ending}\`\`\`${ending}# Injected` })],
+      }),
+    )
+    expect(md).toContain('  c_foo["A<br/>```<br/># Injected"]\n')
   })
 })
 
@@ -184,7 +197,7 @@ describe("projectWorkspace — component dependency graph size limit", () => {
     expect(md).toContain(
       `_Component graph omitted: ${MERMAID_NODE_LIMIT + 1} nodes exceeds the render limit (${MERMAID_NODE_LIMIT}). See list below._`,
     )
-    expect(md).toContain("Fallback list:\n\n- c-000 → outside (via `import`)\n")
+    expect(md).toContain("Fallback list:\n\n- `c-000` → `outside` (via `import`)\n")
   })
 
   it("follows the note past the limit with a list saying there is no component edge", () => {

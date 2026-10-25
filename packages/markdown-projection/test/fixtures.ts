@@ -1,11 +1,22 @@
-import { call, fp, makeDiff, makeSymbol, movedChanged, rule } from "@aburi/test-support"
+import {
+  call,
+  component,
+  fp,
+  makeDiff,
+  makeSymbol,
+  movedChanged,
+  rule,
+  zeroFp,
+} from "@aburi/test-support"
 import type {
+  Component,
+  Dependency,
   Symbol as IRSymbol,
   SymbolChange,
   SymbolDelta,
   SymbolMovedChanged,
 } from "@aburi/types"
-import { type ProjectDiffOptions, projectDiff } from "../src"
+import { type ProjectDiffOptions, projectComponent, projectDiff } from "../src"
 
 /** Longer than a code span may be, so a rule carrying it fences. */
 export const LONG_CONDITION =
@@ -17,6 +28,29 @@ export function projectChanges(
   options?: ProjectDiffOptions,
 ): string {
   return projectDiff(makeDiff({ symbols: [...changes] }), options)
+}
+
+/** The page of the `billing` Component unless `of` names another. */
+export function componentPage(
+  symbols: IRSymbol[],
+  options: { dependencies?: Dependency[]; of?: Component } = {},
+): string {
+  return projectComponent({
+    component: options.of ?? component({ id: "billing", name: "Billing" }),
+    symbols,
+    dependencies: options.dependencies ?? [],
+  })
+}
+
+export function droppedSymbol(id: string, dropReason: string | null): IRSymbol {
+  return makeSymbol({
+    id,
+    name: id.slice(id.indexOf("#") + 1),
+    kind: "class",
+    dropped: true,
+    dropReason,
+    fingerprint: zeroFp(),
+  })
 }
 
 export function namedSymbol(

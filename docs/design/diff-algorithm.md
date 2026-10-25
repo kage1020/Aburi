@@ -967,59 +967,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
 
 ### 7.2 Markdown projection (`out/diff.md`)
 
-A format intended for pasting into PR comments:
-
-```md
-# Aburi diff: main..HEAD
-
-**Summary**: +5 added, -3 removed, ~12 changed, 2 moved, 1 moved+changed
-
-## ⚠ API changes (review required)
-
-### `InvoiceService.createInvoice` *(method)*
-- **signature**: outputs `Promise<Invoice>` → `Promise<InvoiceWithReceipt>`
-- decorator added: `@UseGuards(AuthGuard)`
-
-## 🔧 Logic changes
-
-### `RolesGuard.canActivate` *(method)*
-- **effects added**:
-  - `db.write: prisma.audit.create` (L75)
-- **rules added**:
-  - guard: `!user.verified` (L42)
-
-## ➕ Added (5)
-
-### `InvoiceService.refund` *(method)*
-- boundary: `@Post('/refund')`
-- effects: `db.write`, `event.publish`
-- rules: guard, throw
-
-## ➖ Removed (3)
-
-### `ObsoleteController.endpoint` *(method)*
-- was: `@Get('/old')`
-
-## 🔀 Moved (no semantic change)
-
-<details>
-<summary>2 items (collapsed)</summary>
-
-- `apps/billing/old.ts#X` → `apps/billing/new.ts#X` (git rename)
-- `packages/util/a.ts#formatAmount` → `packages/util/b.ts#formatAmount` (logic fingerprint match)
-</details>
-
-## 🧱 Component changes
-
-### added: `payments`
-- roots: `apps/payments`
-- public API: `apps/payments/src/routes/**`
-
-## 🔗 Dependency changes
-
-### added
-- `billing` → `payments` (via: import)
-```
+A format intended for pasting into PR comments. [`markdown-projection.md`](./markdown-projection.md) §6 specifies it, with an example of each section.
 
 Section order is **high importance → low**. [`markdown-projection.md`](./markdown-projection.md) §6.1 is the list the renderer and the size cap follow; this copy must match it:
 

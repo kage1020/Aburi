@@ -252,7 +252,7 @@ describe("a changed Symbol's rule, effect and call rows", () => {
           ],
         },
       },
-      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from ts:src/repository.ts#Repository.save] [effects-prisma]\n",
+      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from `ts:src/repository.ts#Repository.save`] [effects-prisma]\n",
     ],
     [
       "a removed call by target and line",
@@ -375,7 +375,7 @@ describe("a modified element's row beside the base element the diff paired it wi
           ],
         },
       },
-      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from ts:src/a.ts#a] → [propagated from ts:src/a.ts#a, ts:src/b.ts#b] [effects-prisma]\n",
+      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from `ts:src/a.ts#a`] → [propagated from `ts:src/a.ts#a`, `ts:src/b.ts#b`] [effects-prisma]\n",
     ],
     [
       "the line of a local effect that is now propagated",
@@ -387,7 +387,7 @@ describe("a modified element's row beside the base element the diff paired it wi
           modified: [userCreate({ propagated: true, derivedFrom: ["ts:src/a.ts#a"] })],
         },
       },
-      "- effects modified:\n  - db.write: `prisma.user.create` (L5) → [propagated from ts:src/a.ts#a] [effects-prisma]\n",
+      "- effects modified:\n  - db.write: `prisma.user.create` (L5) → [propagated from `ts:src/a.ts#a`] [effects-prisma]\n",
     ],
     [
       "a call's old resolution before its new one",
@@ -677,7 +677,7 @@ describe("a modified element's row beside the base element the diff paired it wi
           modified: [userCreate({ propagated: true, derivedFrom: ["ts:src/a.ts#a"] })],
         },
       },
-      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from ts:src/a.ts#a] [effects-prisma]\n",
+      "- effects modified:\n  - db.write: `prisma.user.create` [propagated from `ts:src/a.ts#a`] [effects-prisma]\n",
     ],
     [
       "a decorator whose arguments changed only in their line breaks",

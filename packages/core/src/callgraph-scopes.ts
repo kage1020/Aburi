@@ -1,4 +1,10 @@
-import type { Confidence, ImportEdge, Symbol as IRSymbol, SymbolId } from "@aburi/types"
+import {
+  type Confidence,
+  EXPORT_DEFAULT_DERIVED_BY,
+  type ImportEdge,
+  type Symbol as IRSymbol,
+  type SymbolId,
+} from "@aburi/types"
 import { componentKeyOf, type SymbolTable } from "./callgraph-index"
 import { dirname, isRelativeSpecifier, resolveRelativeSpecifier } from "./callgraph-specifier"
 import { DEFAULT_EXPORT_QNAME, trySymbolId } from "./id"
@@ -197,7 +203,10 @@ function defaultExportsOf(ctx: ResolveTargetContext, file: string): string[] {
   const found: string[] = []
   for (const bucket of ctx.run.table.topLevelByFile.get(file)?.values() ?? []) {
     for (const symbol of bucket) {
-      if (symbol.name === DEFAULT_EXPORT_QNAME || symbol.derivedBy.includes("export-default")) {
+      if (
+        symbol.name === DEFAULT_EXPORT_QNAME ||
+        symbol.derivedBy.includes(EXPORT_DEFAULT_DERIVED_BY)
+      ) {
         found.push(symbol.name)
       }
     }

@@ -116,7 +116,7 @@ export function renderDroppedToggled(items: readonly SymbolDroppedToggled[]): st
   if (toDropped.length > 0) {
     rows.push(`**${toDropped.length} to-dropped**`)
     for (const entry of toDropped) {
-      rows.push(`- ${inlineCode(entry.after.id)} — ${requireDropReason(entry.after)}`)
+      rows.push(`- ${inlineCode(entry.after.id)} — ${inlineCode(requireDropReason(entry.after))}`)
     }
   }
   if (toKept.length > 0) {

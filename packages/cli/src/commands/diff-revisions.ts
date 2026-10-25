@@ -63,13 +63,14 @@ export async function scanRevisions(
   const worktreeParent = resolve(tempParent, "base")
   const worktreeDir = resolve(worktreeParent, baseWorktreeLeaf(headWorkspaceRoot))
 
+  const said = new Set<string>()
   const scanSide = (dir: string, outputDir: string, target: ScanTarget): Promise<ScanReport> =>
     runScan({
       cwd: dir,
       command: "diff",
       outputDir,
       format: "json",
-      incidents: { warn, label: labelFor(target) },
+      incidents: { warn, label: labelFor(target), said },
       pinnedConfig,
       pluginRefRoot: headWorkspaceRoot,
       ...(submoduleIgnore.length === 0 ? {} : { ignore: submoduleIgnore }),

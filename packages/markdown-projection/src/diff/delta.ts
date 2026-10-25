@@ -7,6 +7,7 @@ import {
   effectRowText,
   formatInput,
   inlineCode,
+  joinCode,
   ruleRowText,
 } from "../format"
 import type { ChangedEntry } from "./partition"
@@ -493,10 +494,7 @@ function renderStringList(values: readonly unknown[]): string {
 }
 
 function appendInlineRow(rows: string[], label: string, values: readonly unknown[]): void {
-  const rendered = values
-    .filter((v): v is string => typeof v === "string")
-    .map((s) => inlineCode(s))
-    .join(", ")
+  const rendered = joinCode(values.filter((v): v is string => typeof v === "string"))
   if (rendered === "") return
   rows.push(`- ${label}: ${rendered}`)
 }

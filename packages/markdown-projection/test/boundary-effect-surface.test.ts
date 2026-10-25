@@ -1,16 +1,8 @@
-import { component, decorator, effect, makeSymbol } from "@aburi/test-support"
+import { decorator, effect, makeSymbol } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { projectComponent } from "../src"
+import { componentPage } from "./fixtures"
 import { sectionOf } from "./markdown"
-
-function page(symbols: IRSymbol[]): string {
-  return projectComponent({
-    component: component({ id: "billing", name: "Billing" }),
-    symbols,
-    dependencies: [],
-  })
-}
 
 const write = effect({ id: "db.write", target: "prisma.invoice.create", plugin: "effects-prisma" })
 
@@ -29,11 +21,11 @@ describe("projectComponent — Boundary effect surface", () => {
       }),
     ],
   ])("omits the section given only %s", (_, symbol) => {
-    expect(page([symbol])).not.toContain("Boundary effect surface")
+    expect(componentPage([symbol])).not.toContain("Boundary effect surface")
   })
 
   it("lists each boundary's local and propagated effects, Symbols by id and effects by id then target", () => {
-    const md = page([
+    const md = componentPage([
       makeSymbol({
         id: "ts:src/ctl.ts#Ctl.update",
         name: "Ctl.update",
@@ -62,7 +54,7 @@ describe("projectComponent — Boundary effect surface", () => {
       "## Boundary effect surface",
       "",
       "- `Ctl.create` — db.write(`prisma.audit.create`), db.write(`prisma.invoice.create`) " +
-        "[propagated from ts:src/svc.ts#Svc.persist, ts:src/other.ts#Other.helper], " +
+        "[propagated from `ts:src/svc.ts#Svc.persist`, `ts:src/other.ts#Other.helper`], " +
         "queue.publish(`bus.emit`)",
       "- `Ctl.update` — db.write(`prisma.invoice.create`)",
       "",
@@ -70,7 +62,7 @@ describe("projectComponent — Boundary effect surface", () => {
   })
 
   it("treats a framework:* extKind as a boundary even when no decorator flags it", () => {
-    const md = page([
+    const md = componentPage([
       makeSymbol({
         id: "ts:src/app/api/orders/route.ts#POST",
         name: "POST",
