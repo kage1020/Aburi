@@ -10,22 +10,24 @@ tested, and exercised end to end against a NestJS-shaped fixture project.
 ## Working today
 
 **Analysis.** TypeScript and JavaScript, parsed with tree-sitter WASM. Aburi
-detects pnpm and npm workspaces on its own, recognises NestJS, Next.js App
+detects pnpm, npm, Yarn, and Bun workspaces and nx projects on its own, recognises NestJS, Next.js App
 Router, Express, and React as frameworks, and reads Prisma, Drizzle, tRPC, and
 NestJS events as effects.
 
 **Dependencies.** Aburi resolves calls to the symbols they reach within a file,
 an import, a component, or the workspace, and builds a symbol-level dependency
 graph from them. It counts and buckets the calls it could not resolve, so you
-can see what the graph is missing.
+can see what the graph is missing. Effects propagate along that graph, so a
+controller that reaches `prisma.invoice.create` through a service carries the
+`db.write` too.
 
-**Diff.** All six statuses (`added`, `removed`, `moved`, `changed`,
-`moved+changed`, `dropped-toggled`), a `--fail-on` gate, and Slice View, which
+**Diff.** All seven statuses (`added`, `removed`, `moved`, `changed`,
+`moved+changed`, `dropped-toggled`, and `unknown` for a file one revision could
+not read), a `--fail-on` gate, and Slice View, which
 clusters changed symbols along the call graph so a feature cutting through
 controller, service, and repository reads as one section.
 
-**Output.** The JSON analysis, a workspace overview with a dependency diagram,
-per-component detail, the pull request diff, and per-symbol explain views.
+**Output.** The JSON analysis, a workspace overview, per-component detail, the pull request diff, and per-symbol explain views.
 
 **Delivery.** `@aburi/cli` on npm, and `@aburi/github-action` for pull request
 comments.
@@ -41,8 +43,8 @@ consecutive scans of an unchanged tree produce byte-identical IR.
 | Limitation | Status |
 |---|---|
 | TypeScript and JavaScript only | Other languages planned below |
-| Effects sit where the call happens, without propagating to callers | [Designed](./design/effect-propagation.md), not implemented |
-| Call resolution is syntactic unless a language server is configured — 2–19% of call sites resolve on public repositories | Opt-in [LSP enrichment](./design/lsp-enrichment.md) (`lsp.servers.ts`) resolves `this.` / `super.` calls; interface-typed receivers are not resolved yet |
+| No edges between components: the workspace overview's component graph shows the components alone | Planned. Symbol-level call edges are recorded today |
+| Call resolution is syntactic unless a language server is configured — 2–19% of call sites resolve on public repositories | Opt-in [LSP enrichment](./design/lsp-enrichment.md) (`lsp.enabled` with `lsp.servers.ts`) resolves `this.` / `super.` calls; interface-typed receivers are not resolved yet |
 | No graph visualisation beyond the workspace overview and Slice View | No design yet |
 | No LLM integration | Deliberate. Aburi produces the facts, and interpreting them belongs to a separate tool. |
 
@@ -84,6 +86,12 @@ Nothing here is committed.
 - Expose Aburi as an MCP server, callable from AI coding agents.
 - `aburi review`, feeding the diff to a model for automated review comments.
 - Name Slice View clusters automatically. They carry ids today.
+- `aburi vocab`, listing the effect ids and extension kinds the loaded plugins
+  declare, and which plugin owns each.
+- `--quiet` for `scan` and `diff`, and `aburi diff --filter`, narrowing the
+  report to chosen statuses.
+- Colour and a progress line on an interactive terminal, honouring `NO_COLOR`
+  and `FORCE_COLOR`.
 - Browse the analysis in a web UI.
 
 ---

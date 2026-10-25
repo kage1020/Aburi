@@ -32,8 +32,8 @@ pnpm add @aburi/lang-typescript
 ```ts
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 
-// Pass to @aburi/core scan or the CLI's plugin loader — @aburi/cli discovers
-// this plugin by name (`typescript` / `ts`) from an autodetected config.
+// Pass to @aburi/core scan, or name it in aburi.json for the CLI's plugin loader:
+// `"languages": ["lang-typescript"]`, which `aburi init` writes. A bare `ts` is refused.
 ```
 
 ## See also

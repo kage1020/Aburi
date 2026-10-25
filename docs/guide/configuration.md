@@ -11,8 +11,11 @@ projects that generated file is the last you will think about it:
 }
 ```
 
-Every field is optional. Even `{}` works, because autodetect fills in the rest.
-The sections below cover what people change in practice.
+Every field is optional, but `aburi scan` needs a language plugin to parse
+anything: with `{}`, or with no config at all, it exits `2` and says so. Components
+are inferred from your workspace manifests; the plugin lists are not, which is
+what `aburi init` writes them for. The sections below cover what people change in
+practice.
 
 ::: tip JSONC is fine
 Name the file `aburi.jsonc` if you want comments. Keep the `$schema` line either
@@ -209,9 +212,9 @@ setting in CI.
 |---|---|---|
 | `ignore` | `[]` | Extra glob patterns to skip. |
 | `respectGitignore` | `true` | Honour `.gitignore` files, in the scan and in finding components. |
-| `languages` | autodetect | Language plugins to load. |
-| `frameworks` | autodetect | Framework plugins to load. |
-| `effects` | autodetect | Effects plugins, in priority order. |
+| `languages` | `[]` | Language plugins to load. A scan needs at least one; `aburi init` writes the ones it detects. |
+| `frameworks` | `[]` | Framework plugins to load. |
+| `effects` | `[]` | Effects plugins, in priority order. |
 | `pluginOptions` | `{}` | Per-plugin options, keyed by plugin name. |
 | `components` | autodetect | Explicit component boundaries. |
 | `suppress` | `[]` | Identifier prefixes to drop from effects and calls. |
@@ -223,7 +226,7 @@ setting in CI.
 | `parseTimeoutMs` | `5000` | Per-file budget for parse, extract, and walk. |
 | `classifyTimeoutMs` | `50` | Per-call budget for an effects plugin. A call over it keeps its result and is listed in `stats.effectClassifyTimeouts`. |
 | `minParsedFileRatio` | *(unset)* | Smallest share of discovered files a scan may parse and still pass. |
-| `lsp` | off | Opt-in enrichment from a language server you install: column ranges and `this.` / `super.` call resolution. `servers` is keyed by language plugin id: `"servers": { "ts": { "command": "typescript-language-server", "args": ["--stdio"] } }` for `lang-typescript`. |
+| `lsp` | off | Opt-in enrichment from a language server you install: column ranges and `this.` / `super.` call resolution. Turn it on with `enabled` (or `aburi scan --lsp`); `servers` is keyed by language plugin id: `"lsp": { "enabled": true, "servers": { "ts": { "command": "typescript-language-server", "args": ["--stdio"] } } }` for `lang-typescript`. |
 
 The [JSON Schema](https://aburi.kage1020.com/schema/aburi.config.v1.json) is the
 authoritative definition — that URL is the one the `$schema` line points at, and it

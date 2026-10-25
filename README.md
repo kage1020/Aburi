@@ -16,7 +16,7 @@ Documentation: **[aburi.kage1020.com](https://aburi.kage1020.com)**
 ```md
 # Aburi diff: `main`..`HEAD`
 
-**Summary**: +2 added · -1 removed · ~3 changed · 1 moved
+**Summary**: +2 added · -1 removed · ~3 changed · 1 moved · 0 moved+changed
 
 ## ⚠ API changes
 

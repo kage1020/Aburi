@@ -36,7 +36,7 @@ inputs:
     required: false
     default: ""
   config:
-    description: "Path to an `aburi.json` / `aburi.config.jsonc` (forwarded to `--config`)."
+    description: "Path to an `aburi.json` / `aburi.jsonc` (forwarded to `--config`)."
     required: false
     default: ""
   output-dir:

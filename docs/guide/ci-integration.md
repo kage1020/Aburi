@@ -46,6 +46,10 @@ rewrites it in place instead of piling up a new one.
 | `cli` | How the binary is resolved: `dlx` (default) or `workspace`. See below. |
 | `max-bytes` | Size cap for the report, in bytes. Defaults to what a GitHub comment holds; see below. |
 
+[The action's README](https://github.com/kage1020/Aburi/blob/main/packages/github-action/README.md#inputs)
+lists the rest — `refspec`, `config`, `output-dir`, `format`, `working-directory`, `comment`,
+`token` — and the outputs.
+
 ::: tip A large pull request still gets a comment
 GitHub refuses a comment body over 65536 bytes, which is about 310 added symbols' worth of
 report. The action renders to fit rather than being refused: sections of whole symbols are cut
@@ -185,7 +189,8 @@ The CLI has no opinion about your platform. Run it and read the exit code.
 |---|---|---|
 | `0` | Clean. | Nothing. |
 | `3` | A gate tripped, or the scan was too damaged to trust. | Fail the build. |
-| `2` | Your invocation is wrong: bad flag, malformed `--fail-on`. | Fix the pipeline. |
+| `2` | Your invocation is wrong: bad flag, malformed `--fail-on`, no language plugin configured. | Fix the pipeline. |
+| `1` | Aburi itself failed: an I/O error or an unexpected exception. | Fail the build and read stderr. |
 
 ```bash
 aburi diff "origin/${BASE_BRANCH}..HEAD" --fail-on 'removed,changed:>20'
@@ -193,8 +198,9 @@ aburi diff "origin/${BASE_BRANCH}..HEAD" --fail-on 'removed,changed:>20'
 
 `out/diff.md` is the report. Post it wherever your platform takes Markdown.
 
-Set the `CI` environment variable and `aburi scan` drops the timestamp from its
-output, so identical commits produce identical bytes.
+`aburi.ir.json` carries no timestamp, so identical commits produce identical bytes.
+With the `CI` environment variable set, `aburi-vocab-discovered.json` leaves out its
+`discoveredAt` as well.
 
 ## Choosing a gate
 

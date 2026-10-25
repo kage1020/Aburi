@@ -61,8 +61,10 @@ Key rules:
 - `derivedByPrefixes` claims the tag prefixes your plugin will emit in
   `derivedBy`. Every `derivedBy` entry the plugin returns at runtime must fall
   under one of these prefixes.
-- `frameworks` is used by `aburi init` autodetect to route framework names in
-  `aburi.json` to your plugin.
+- `frameworks` claims the framework ids your plugin provides (`mytool`), the
+  values a component's `frameworks` in `aburi.json` holds. Two plugins claiming
+  one id are refused at load time. `aburi init` does not read it: it detects
+  the first-party frameworks alone.
 
 Two plugins declaring the same `extKind` id make the registry throw at register
 time. We chose a loud failure over a silent takeover. `aburi scan` then exits `3`
@@ -284,7 +286,7 @@ call-shape recognition, with no decorators involved.
 ## Effects plugin
 
 Classifies a `CallCandidate` into a core effect vocabulary
-(`db.read` / `db.write` / `db.transaction` / `event.publish` / `net.fetch` /
+(`db.read` / `db.write` / `db.transaction` / `event.publish` / `network.http` /
 `fs.read` / `fs.write` / …).
 
 ```ts
@@ -300,7 +302,7 @@ class MyEffectsPlugin implements EffectPlugin {
     // by default and stateful classifiers are the reason it exists.
     if (!looksLikeMyEffect(call, ctx)) return null
     return {
-      effectId: "net.fetch",
+      effectId: "network.http",
       confidence: "high",
       derivedBy: `effects-plugin:mytool:${call.target}`,
     }
@@ -379,7 +381,7 @@ Contracts:
     const fits = call.argumentCount <= (MAX_ARGUMENTS.get(last) ?? 1)
     const confidence = named && fits && call.dynamicReceiver !== true ? "high" : "medium"
 
-    return { effectId: "net.fetch", confidence, derivedBy: `effects-plugin:mytool:${last}` }
+    return { effectId: "network.http", confidence, derivedBy: `effects-plugin:mytool:${last}` }
   }
   ```
 
