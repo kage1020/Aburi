@@ -114,4 +114,10 @@ export type {
   WalkContext,
   WrittenSourceRange,
 } from "./plugins"
-export { COMPUTED_TARGET_SEGMENT, UNNAMED_DECORATOR } from "./vocabulary"
+export {
+  COMPUTED_TARGET_SEGMENT,
+  EXPORT_CLAUSE_DERIVED_BY_PREFIX,
+  EXPORT_DEFAULT_DERIVED_BY,
+  EXPORT_KEYWORD_DERIVED_BY,
+  UNNAMED_DECORATOR,
+} from "./vocabulary"

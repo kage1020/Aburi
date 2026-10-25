@@ -363,9 +363,9 @@ Four details are deliberate:
   EACCES on the store and a CLI that crashes at startup all exit non-zero, and reporting them as
   "this CLI has no `--max-bytes`" would name a cause nothing established. They get their own
   warning, carrying the first line the probe wrote. The output is captured rather than piped into
-  `grep`: `grep -q` closes the pipe at its first match, and a writer still going takes SIGPIPE,
-  which under `pipefail` turns a successful match into a failed pipeline once the help text
-  outgrows the pipe buffer.
+  `grep`: `grep -q` closes the pipe at its first match, and an older `@aburi/cli` exits 1 on the
+  `EPIPE` of its next write, which under `pipefail` turns a successful match into a failed
+  pipeline once the help text outgrows the pipe buffer.
 - **`format: json` caps nothing.** That run writes no `diff.md`, so there is no document to fit
   and no reason to spend a probe. The CLI says the same thing from its end, with a warning rather
   than an error: the action passes the flag without consulting `format`, and an input error there

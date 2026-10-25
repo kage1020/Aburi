@@ -4,6 +4,8 @@ import {
   compareStrings,
   inlineCode,
   isSymbolEdge,
+  joinCode,
+  LINE_ENDING,
   renderDocument,
   sortDependencies,
   tableHeader,
@@ -29,10 +31,11 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
   lines.push(`**Languages**: ${[...ir.workspace.languages].sort().join(", ")}`)
   lines.push(`**Managers**: ${renderManagers(ir)}`)
   lines.push(`**Symbols**: ${renderSymbolCounts(ir)}`)
+  const generator = `${inlineCode(ir.generator.name)} ${inlineCode(ir.generator.version)}`
   if (!options.suppressTimestamp && ir.generatedAt !== undefined) {
-    lines.push(`**Generated**: ${ir.generator.name} ${ir.generator.version} at ${ir.generatedAt}`)
+    lines.push(`**Generated**: ${generator} at ${inlineCode(ir.generatedAt)}`)
   } else {
-    lines.push(`**Generated**: ${ir.generator.name} ${ir.generator.version}`)
+    lines.push(`**Generated**: ${generator}`)
   }
   lines.push("")
 
@@ -99,7 +102,7 @@ function renderManagers(ir: IR): string {
   if (ir.workspace.managers.length === 0) return "—"
   return [...ir.workspace.managers]
     .sort((a, b) => compareStrings(a.tool, b.tool))
-    .map((m) => `${m.tool} (${m.roots.map((root) => inlineCode(root)).join(", ")})`)
+    .map((m) => `${m.tool} (${joinCode(m.roots)})`)
     .join(", ")
 }
 
@@ -110,7 +113,7 @@ function renderComponentsTable(ir: IR): string[] {
   const rows: string[] = [...tableHeader(["id", "roots", "languages", "frameworks", "symbols"])]
   const symbolCountsByComponent = countSymbolsPerComponent(ir)
   for (const c of [...ir.components].sort((a, b) => compareStrings(a.id, b.id))) {
-    const roots = c.roots.map((root) => inlineCode(root)).join(", ")
+    const roots = joinCode(c.roots)
     const languages = c.languages.join(", ")
     const frameworks = (c.frameworks ?? []).length > 0 ? (c.frameworks ?? []).join(", ") : "—"
     const symbolCount = symbolCountsByComponent.get(c.id) ?? 0
@@ -165,7 +168,7 @@ function renderDependencies(ir: IR): string[] {
   rows.push("")
   if (componentDeps.length === 0) rows.push(NO_COMPONENT_EDGES)
   for (const d of sortDependencies(componentDeps)) {
-    rows.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})`)
+    rows.push(`- ${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)})`)
   }
   return rows
 }
@@ -182,7 +185,7 @@ function escapeMermaidLabel(label: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\]/g, "&rbrack;")
-    .replace(/\r?\n/g, "<br/>")
+    .replace(new RegExp(LINE_ENDING, "g"), "<br/>")
 }
 
 function renderEffectSurface(ir: IR): string[] {

@@ -100,8 +100,9 @@ export async function writeStubWorkspace(
 export async function writeStubRepository(
   directory: string,
   files: { base: readonly string[]; head: readonly string[] },
+  config: Record<string, unknown> = {},
 ): Promise<void> {
-  await writeStubWorkspace(directory, files.base)
+  await writeStubWorkspace(directory, files.base, config)
   await initRepository(directory)
   await commitAll(directory, "base")
   for (const file of files.base) {

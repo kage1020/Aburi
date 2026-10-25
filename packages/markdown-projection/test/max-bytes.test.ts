@@ -45,7 +45,7 @@ describe("projectDiff — maxBytes", () => {
   it("keeps a diff that would 422 under GitHub's comment limit", () => {
     const md = projectDiff(crowdedDiff(400), { maxBytes: GITHUB_LIMIT })
     expect(bytes(md)).toBeLessThanOrEqual(GITHUB_LIMIT)
-    expect(md).toContain("# Aburi diff: main..HEAD")
+    expect(md).toContain("# Aburi diff: `main`..`HEAD`")
     expect(md).toContain("**Summary**: +400 added")
   })
 
@@ -151,7 +151,7 @@ describe("projectDiff — maxBytes at a budget nothing fits", () => {
   const md = projectDiff(crowdedDiff(400), { maxBytes: 1 })
 
   it("keeps the title and the Summary", () => {
-    expect(md).toContain("# Aburi diff: main..HEAD")
+    expect(md).toContain("# Aburi diff: `main`..`HEAD`")
     expect(md).toContain("**Summary**: +400 added")
     expect(headings(md)).toEqual([])
   })

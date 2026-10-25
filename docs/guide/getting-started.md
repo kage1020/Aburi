@@ -173,7 +173,7 @@ The symbol's Markdown goes to stdout, so you can pipe it into a pager or a file:
 
 ## Signature
 
-`(cart: Cart) → Promise<Order>` throws EmptyCart ⚡async
+`(cart: Cart) → Promise<Order>` throws `EmptyCart` ⚡async
 
 ## Rules
 

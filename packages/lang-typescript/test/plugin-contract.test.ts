@@ -34,6 +34,7 @@ describe("every rationale extraction emits is one the manifest declares", () => 
     ["export declare interface I {}", ["interface-declaration", "export-keyword"]],
     ["export default function () {}", ["export-default"]],
     ["export default interface I {}", ["interface-declaration", "export-default"]],
+    ["const x = 1\nexport { x, x as y, x as default }", ["export-clause:x", "export-clause:y"]],
     ["export class A { get v() { return 1 } }", ["accessor-declaration"]],
     [
       "export class A { get v() { return 1 } set v(n) {} }",

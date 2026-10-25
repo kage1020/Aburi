@@ -52,7 +52,7 @@ export const frameworkNextManifest = {
         id: "framework:next:route",
         baseKind: "function",
         description:
-          "Next.js App Router route handler — a named HTTP verb export (GET / POST / PUT / DELETE / PATCH / OPTIONS / HEAD) in app/**/route.{ts,js}.",
+          "Next.js App Router route handler — what app/**/route.{ts,js} exports under an HTTP verb name (GET / POST / PUT / DELETE / PATCH / OPTIONS / HEAD). Its kind is const where the language plugin cannot see the value is a function (export const { GET, POST } = handlers).",
       },
     ],
     extKindPrefixes: ["framework:next"],

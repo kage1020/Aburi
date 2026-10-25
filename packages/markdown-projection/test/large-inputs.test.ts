@@ -96,7 +96,7 @@ describe("projections of workspace-sized lists", () => {
           ),
         }),
       "## Component dependencies",
-      "- c199999 → hub (via `import`)",
+      "- `c199999` → `hub` (via `import`)",
     ],
   ])("renders a workspace page of 200,000 %s", (_, ir, heading, line) => {
     const section = sectionOf(projectWorkspace(ir()), heading)

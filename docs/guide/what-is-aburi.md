@@ -25,7 +25,7 @@ the effects they perform.
 ## What the report looks like
 
 ```md
-# Aburi diff: main..HEAD
+# Aburi diff: `main`..`HEAD`
 
 **Summary**: +2 added · -1 removed · ~3 changed · 1 moved
 

@@ -99,8 +99,6 @@ describe("scan — decorator placement through @aburi/framework-nestjs", () => {
         `  find() { return null }`,
         `}`,
         ``,
-        `export { CService }`,
-        ``,
       ].join("\n"),
     )
 
