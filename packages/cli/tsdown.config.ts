@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown"
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/bin/aburi.ts"],
+  entry: ["src/index.ts", "src/bin/aburi.ts", "src/scan-worker.ts"],
   format: ["esm"],
   outDir: "dist",
   dts: { isolatedDeclarations: false },

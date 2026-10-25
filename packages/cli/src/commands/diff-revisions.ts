@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, rmSync, writeSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { availableParallelism, tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
 import type { GitRenameMap } from "@aburi/diff"
 import type { IR } from "@aburi/types"
@@ -13,12 +13,15 @@ import { collectRenames } from "../git/renames"
 import { defaultGitRunner, type GitRunner, gitChildEnv } from "../git/runner"
 import { submoduleIgnorePatterns } from "../git/submodules"
 import { readIR } from "../ir-io"
+import { writeToStderr } from "../logger"
 import { cleanUpOnFatalSignal } from "../signal-cleanup"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import type { RefSpec } from "./diff-inputs"
 import { runScan } from "./scan"
+import { reportScanIncidents } from "./scan-incidents"
 import type { ScanReport } from "./scan-report"
+import { scanInThread, type ThreadScanOptions } from "./scan-thread"
 
 export type DiffSide = "base" | "head"
 
@@ -40,6 +43,7 @@ export interface RevisionScanContext {
   logLevel: LogLevel | undefined
   pinConfigOnce: () => Promise<PinnedConfig>
   warn: WarnFn
+  concurrency: number | undefined
 }
 
 type ScanTarget = { side: "base"; ref: string } | { side: "head" }
@@ -64,19 +68,38 @@ export async function scanRevisions(
   const worktreeDir = resolve(worktreeParent, baseWorktreeLeaf(headWorkspaceRoot))
 
   const said = new Set<string>()
-  const scanSide = (dir: string, outputDir: string, target: ScanTarget): Promise<ScanReport> =>
-    runScan({
-      cwd: dir,
-      command: "diff",
-      outputDir,
-      format: "json",
-      incidents: { warn, label: labelFor(target), said },
-      pinnedConfig,
-      pluginRefRoot: headWorkspaceRoot,
-      ...(submoduleIgnore.length === 0 ? {} : { ignore: submoduleIgnore }),
-      ...(context.compact === undefined ? {} : { compact: context.compact }),
-      ...(context.logLevel === undefined ? {} : { logLevel: context.logLevel }),
-    })
+  const optionsFor = (dir: string, outputDir: string): ThreadScanOptions => ({
+    cwd: dir,
+    command: "diff",
+    outputDir,
+    format: "json",
+    pinnedConfig,
+    pluginRefRoot: headWorkspaceRoot,
+    ...(submoduleIgnore.length === 0 ? {} : { ignore: submoduleIgnore }),
+    ...(context.compact === undefined ? {} : { compact: context.compact }),
+    ...(context.logLevel === undefined ? {} : { logLevel: context.logLevel }),
+  })
+  const readBase = async (report: ScanReport): Promise<IR> => {
+    reportScanIncidents(report, warn, labelFor({ side: "base", ref: spec.base }), said)
+    if (report.workspaceRoot !== worktreeDir) {
+      throw internalFault(
+        ` while scanning base ref "${spec.base}"`,
+        `the scan rooted at ${report.workspaceRoot} instead of the worktree ${worktreeDir}, so the two sides would describe different trees`,
+        null,
+      )
+    }
+    if (report.irPath === null) {
+      throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
+    }
+    return readIR(report.irPath)
+  }
+  const readHead = async (report: ScanReport): Promise<IR> => {
+    reportScanIncidents(report, warn, labelFor({ side: "head" }), said)
+    if (report.irPath === null) {
+      throw new CliError("scan for head ref produced no IR file.", "runtime-error")
+    }
+    return readIR(report.irPath)
+  }
 
   let worktreeAdded = false
   const releaseSignals = cleanUpOnFatalSignal(() =>
@@ -86,28 +109,13 @@ export async function scanRevisions(
     await mkdir(worktreeParent, { recursive: true })
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
     worktreeAdded = true
-    const baseReport = await scanSide(worktreeDir, resolve(tempParent, "base-out"), {
-      side: "base",
-      ref: spec.base,
-    })
-    if (baseReport.workspaceRoot !== worktreeDir) {
-      throw internalFault(
-        ` while scanning base ref "${spec.base}"`,
-        `the scan rooted at ${baseReport.workspaceRoot} instead of the worktree ${worktreeDir}, so the two sides would describe different trees`,
-        null,
-      )
-    }
-    if (baseReport.irPath === null) {
-      throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
-    }
-    const baseIR = await readIR(baseReport.irPath)
-
-    const headReport = await scanSide(cwd, resolve(tempParent, "head-out"), { side: "head" })
-    if (headReport.irPath === null) {
-      throw new CliError("scan for head ref produced no IR file.", "runtime-error")
-    }
-    const headIR = await readIR(headReport.irPath)
-    return { baseIR, headIR, gitRenames, scans: { base: baseReport, head: headReport } }
+    const baseOptions = optionsFor(worktreeDir, resolve(tempParent, "base-out"))
+    const headOptions = optionsFor(cwd, resolve(tempParent, "head-out"))
+    const scanned =
+      (context.concurrency ?? availableParallelism()) >= 2
+        ? await scanTogether(baseOptions, headOptions, readBase, readHead)
+        : await scanInTurn(baseOptions, headOptions, readBase, readHead)
+    return { ...scanned, gitRenames }
   } finally {
     // Failures here only warn: a throw from `finally` would replace the error that ended the scan.
     if (worktreeAdded) {
@@ -127,6 +135,69 @@ export async function scanRevisions(
       )
     }
     releaseSignals()
+  }
+}
+
+type ReadSide = (report: ScanReport) => Promise<IR>
+
+type ScannedSides = Omit<ScannedRevisions, "gitRenames">
+
+async function scanInTurn(
+  baseOptions: ThreadScanOptions,
+  headOptions: ThreadScanOptions,
+  readBase: ReadSide,
+  readHead: ReadSide,
+): Promise<ScannedSides> {
+  const base = await runScan(baseOptions)
+  const baseIR = await readBase(base)
+  const head = await runScan(headOptions)
+  const headIR = await readHead(head)
+  return { baseIR, headIR, scans: { base, head } }
+}
+
+/**
+ * The base on a thread of its own while the head runs here. What the run says, and which failure
+ * ends it, is what `scanInTurn` would have: the head's log is held until the base is through, and
+ * a base that fails waits for the head and discards it, as the head would never have started.
+ */
+async function scanTogether(
+  baseOptions: ThreadScanOptions,
+  headOptions: ThreadScanOptions,
+  readBase: ReadSide,
+  readHead: ReadSide,
+): Promise<ScannedSides> {
+  const headLog = heldLog()
+  const headScan = runScan({ ...headOptions, log: headLog.write })
+  const headStopped = headScan.then(
+    () => undefined,
+    () => undefined,
+  )
+  let base: ScanReport
+  let baseIR: IR
+  try {
+    base = await scanInThread(baseOptions, writeToStderr)
+    baseIR = await readBase(base)
+  } catch (error) {
+    await headStopped
+    throw error
+  }
+  headLog.release()
+  const head = await headScan
+  const headIR = await readHead(head)
+  return { baseIR, headIR, scans: { base, head } }
+}
+
+function heldLog(): { write: (line: string) => void; release: () => void } {
+  let held: string[] | null = []
+  return {
+    write: (line) => {
+      if (held === null) writeToStderr(line)
+      else held.push(line)
+    },
+    release: () => {
+      for (const line of held ?? []) writeToStderr(line)
+      held = null
+    },
   }
 }
 

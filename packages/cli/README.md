@@ -26,7 +26,9 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 - **`aburi diff`** — two dispatch paths:
   - `<base>..<head>` — `git rev-parse --verify` on both refs, shallow-repo
     guard, `git worktree add --detach` to materialise base, scan both sides,
-    diff. Rename collection failures warn on stderr rather than silently
+    diff. The two scans run at once, the base on a worker thread, with output
+    and failures identical to running them in turn; `--concurrency 1` runs them
+    in turn. Rename collection failures warn on stderr rather than silently
     degrading `moved` to `removed + added`.
   - `--base <ir.json> --head <ir.json>` — file mode, skips git entirely.
   `--fail-on <spec>` supports the full grammar (see below) and returns

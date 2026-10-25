@@ -6,7 +6,7 @@
 
 - [cli-spec.md](./cli-spec.md) §10 — progress reporting.
 - [cli-spec.md](./cli-spec.md) §12 — CI mode.
-- [cli-spec.md](./cli-spec.md) §14 — the existing concurrency defaults and per-worker heap cap.
+- [cli-spec.md](./cli-spec.md) §14.2 — the existing concurrency defaults and per-worker heap cap.
 - [lang-plugin.md](./lang-plugin.md) §4.3 — the `Symbol` and `SymbolCandidate` shape returned from `parseFile`.
 - [lang-plugin.md](./lang-plugin.md) §8 — parser implementation options table.
 - [lang-plugin.md](./lang-plugin.md) §8.1 — WASM memory-management rules that this document refines.
@@ -51,7 +51,7 @@ The corpus is deliberately many small files, which is the shape the pool exists 
 
 The corpus above does not exist yet. Nine public repositories at pinned commits do, under [`benchmarks/public-repos/`](https://github.com/kage1020/Aburi/blob/main/benchmarks/public-repos/README.md), and they carry the same two numbers. On a 4 vCPU / 16 GiB runner, single-threaded, with no pool at all, the 2026-09-01 sweep finished 1,081 files in 3.7 s, 1,914 in 3.9 s and 5,002 in 14.7 s, and no *scan*'s peak RSS passed 466 MiB — the diffs in the same sweep, which run two scans each, reached 822 MiB. Cost is roughly linear in file count: a least-squares fit over the nine gives 2.8 ms per file plus 326 ms of fixed grammar-load and config cost, though the residuals are wide enough (`nest` 45% under the fit, `zod` 34% over) that the fit predicts an order of magnitude rather than a wall time.
 
-That does not retire this document, but it prices it. The pool would buy roughly 4× on a workload that already finishes well inside both SLAs, so §1's premise — that a 1,000-file scan makes Aburi uncomfortable to keep in the pull request loop — is not what the measurement says. The scan worth being impatient with is `aburi diff`'s, which runs two of them at a measured 1.7–2.2× a single scan; those two are *independent* scans, which is a cheaper parallelism than sharding one, and it needs none of §4 through §7.
+That does not retire this document, but it prices it. The pool would buy roughly 4× on a workload that already finishes well inside both SLAs, so §1's premise — that a 1,000-file scan makes Aburi uncomfortable to keep in the pull request loop — is not what the measurement says. The scan worth being impatient with was `aburi diff`'s, which ran two of them at a measured 1.7–2.2× a single scan; those two are *independent* scans, which is a cheaper parallelism than sharding one, and it needs none of §4 through §7. They now run at once ([cli-spec.md](./cli-spec.md) §14.1).
 
 Rule PF-11 (§7.1) has its single-threaded half confirmed on the way: three consecutive `aburi scan --no-timestamp` runs over an unchanged tree produced byte-identical IR on all nine repositories. What remains unmeasured is the equality *across* `--concurrency` values, which is the half only the pool can exercise, and which §13 tests as PT2.
 
@@ -66,7 +66,7 @@ Rule PF-11 (§7.1) has its single-threaded half confirmed on the way: three cons
 
 Rule PF-1: the pool is Node `worker_threads`, one WASM parser instance per worker, workers long-lived for the duration of the scan.
 
-Rule PF-2: pool size = `min(--concurrency, floor(availableMemoryMB / maxWasmHeapPerWorkerMB))` where the numerator defaults to `max(1, CPU_count - 1)` from [cli-spec.md](./cli-spec.md) §14. When multiple language plugins are loaded, `maxWasmHeapPerWorkerMB` = max of each plugin's declared `capabilities.wasmHeapPerWorkerMB` (also cli-spec §14).
+Rule PF-2: pool size = `min(--concurrency, floor(availableMemoryMB / maxWasmHeapPerWorkerMB))` where the numerator defaults to `max(1, CPU_count - 1)` from [cli-spec.md](./cli-spec.md) §14.2. When multiple language plugins are loaded, `maxWasmHeapPerWorkerMB` = max of each plugin's declared `capabilities.wasmHeapPerWorkerMB` (also cli-spec §14).
 
 ## 4. Work partitioning
 
@@ -118,11 +118,11 @@ Rule PF-8: `Symbol.calls[].resolved` is left as string-form callee references on
 
 ### 6.1 Concurrency default
 
-Unchanged from [cli-spec.md](./cli-spec.md) §14: default `--concurrency = max(1, CPU_count - 1)`. Clamped by the memory rule (Rule PF-2).
+Unchanged from [cli-spec.md](./cli-spec.md) §14.2: default `--concurrency = max(1, CPU_count - 1)`. Clamped by the memory rule (Rule PF-2).
 
 ### 6.2 WASM heap cap per worker
 
-Each worker is spawned with `resourceLimits: { maxOldGenerationSizeMb: <cap> }` where `<cap>` is the language plugin's declared `capabilities.wasmHeapPerWorkerMB` (default 256 MiB per [cli-spec.md](./cli-spec.md) §14). Exceeding the cap crashes the worker, which the failure-isolation rule (§8) handles.
+Each worker is spawned with `resourceLimits: { maxOldGenerationSizeMb: <cap> }` where `<cap>` is the language plugin's declared `capabilities.wasmHeapPerWorkerMB` (default 256 MiB per [cli-spec.md](./cli-spec.md) §14.2). Exceeding the cap crashes the worker, which the failure-isolation rule (§8) handles.
 
 ### 6.3 Bounded queue
 

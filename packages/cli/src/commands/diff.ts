@@ -56,6 +56,7 @@ export interface DiffOptions {
   configPath?: string
   compact?: boolean
   maxBytes?: number
+  concurrency?: number
   logLevel?: LogLevel
   git?: GitRunner
   warn?: WarnFn
@@ -85,6 +86,15 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       "input-error",
     )
   }
+  if (
+    options.concurrency !== undefined &&
+    (!Number.isInteger(options.concurrency) || options.concurrency <= 0)
+  ) {
+    throw new CliError(
+      `--concurrency must be a positive integer (got ${String(options.concurrency)}).`,
+      "input-error",
+    )
+  }
   let pinned: PinnedConfig | null = null
   const pinConfigOnce = async (): Promise<PinnedConfig> => {
     pinned ??= await pinConfig(cwd, options.configPath)
@@ -105,6 +115,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     logLevel: options.logLevel,
     pinConfigOnce,
     warn,
+    concurrency: options.concurrency,
   })
 
   const generator = await readGeneratorInfo()

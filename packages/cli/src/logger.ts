@@ -10,11 +10,7 @@ export interface LoggerOptions {
 
 export function createLogger(options: LoggerOptions = {}): Logger {
   const threshold = LOG_LEVEL_RANK[options.minimum ?? "warn"]
-  const write =
-    options.write ??
-    ((line: string): void => {
-      process.stderr.write(line)
-    })
+  const write = options.write ?? writeToStderr
   const at =
     (level: LogLevel) =>
     (message: string): void => {
@@ -27,4 +23,8 @@ export function createLogger(options: LoggerOptions = {}): Logger {
     warn: at("warn"),
     error: at("error"),
   }
+}
+
+export function writeToStderr(line: string): void {
+  process.stderr.write(line)
 }

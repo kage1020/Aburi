@@ -19,6 +19,9 @@
   "bin": {
     "aburi": "./dist/bin/aburi.mjs"
   },
+  "imports": {
+    "#scan-worker": "./dist/scan-worker.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
