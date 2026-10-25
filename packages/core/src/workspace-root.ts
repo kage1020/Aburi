@@ -5,7 +5,7 @@ import { CoreError } from "./errors"
 import { isVanishedFile } from "./scan/faults"
 import { pathExists, readJson } from "./workspace-fs"
 
-const REPOSITORY_MARKER = ".git"
+export const REPOSITORY_MARKER = ".git"
 
 const GITDIR_POINTER = "gitdir: "
 
@@ -99,7 +99,7 @@ async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
   return { marker: null, failure }
 }
 
-async function isRepository(path: string): Promise<boolean> {
+export async function isRepository(path: string): Promise<boolean> {
   let entry: Awaited<ReturnType<typeof stat>>
   try {
     entry = await stat(path)

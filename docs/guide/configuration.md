@@ -30,7 +30,20 @@ Generated code, vendored trees, and fixtures rarely belong in the report.
 ```
 
 Write POSIX globs relative to the workspace root. Aburi adds them to the
-built-in exclusions rather than replacing them.
+built-in exclusions rather than replacing them. A `*` or `**` matches a name
+that starts with a dot too, so `docs/**` also leaves out `docs/.vitepress`.
+
+A directory whose name starts with a dot is scanned like any other: a GitHub
+Action's source under `.github/actions`, Storybook's configuration in
+`.storybook` and a VitePress theme in `docs/.vitepress` are in the report. The
+built-in exclusions keep out Yarn's `.yarn`, `.pnp.cjs` and `.pnp.loader.mjs`
+and VitePress's `.vitepress/cache`, beside dependency, build and cache
+directories such as `node_modules`, `dist` and `.next`.
+
+Aburi never reads `.git`, and it does not scan another checkout kept inside the
+repository as part of it: a linked worktree under `.worktrees` or
+`.claude/worktrees`, a nested repository and a submodule are left out, since git
+counts none of their files as the repository's.
 
 Aburi honours `.gitignore` by default, every one in the tree, the way git reads
 them. Turn that off when you want to analyse build output on purpose:

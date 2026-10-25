@@ -101,7 +101,7 @@ Array of glob patterns appended to drop-list Category A.
 
 - POSIX globs (forward slashes)
 - Relative to the workspace root
-- micromatch-compatible
+- micromatch-compatible, except that `*` and `**` match a name that starts with a dot, as git's globs do: `docs/**` covers `docs/.vitepress/` (drop-list.md §3)
 
 These are **appended** to the core standard patterns of drop-list §3.1 (existing patterns are not replaced).
 

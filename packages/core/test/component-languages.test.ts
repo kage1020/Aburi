@@ -52,9 +52,21 @@ describe("detection drops what discovery drops", () => {
     expect(await languagesOfRoot()).toEqual(["ts"])
   })
 
-  it("does not count a dot-directory", async () => {
+  it.each([
+    [["py", "ts"], ".config"],
+    [["ts"], ".git"],
+    [["ts"], ".yarn"],
+  ])("counts %j when the .py files sit in %s", async (languages, directory) => {
     await tree.writeLanguageFiles("src", ".ts")
-    await tree.writeLanguageFiles(".venv", ".py")
+    await tree.writeLanguageFiles(directory, ".py")
+
+    expect(await languagesOfRoot()).toEqual(languages)
+  })
+
+  it("does not count a checkout nested below the root", async () => {
+    await tree.writeLanguageFiles("src", ".ts")
+    await tree.writeLanguageFiles(".claude/worktrees/feat", ".py")
+    await tree.writeSource(".claude/worktrees/feat/.git", "gitdir: /r/.git/worktrees/feat\n")
 
     expect(await languagesOfRoot()).toEqual(["ts"])
   })

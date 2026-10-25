@@ -62,6 +62,22 @@ describe("detectManagers", () => {
     expect(result.workspaces.map((w) => w.relativeRoot)).toEqual(["libs/shared"])
   })
 
+  it("finds an nx project.json in a dot directory, and none under .git or in a nested checkout", async () => {
+    await tree.writeJson("nx.json", {})
+    await tree.writeJson("libs/shared/project.json", {})
+    await tree.writeJson(".github/actions/deploy/project.json", {})
+    await tree.writeJson(".git/modules/vendored/project.json", {})
+    await tree.writeJson(".worktrees/feat/libs/shared/project.json", {})
+    await tree.writeSource(".worktrees/feat/.git", "gitdir: /r/.git/worktrees/feat\n")
+
+    const result = await detectManagers(tree.root)
+
+    expect(result.workspaces.map((w) => w.relativeRoot)).toEqual([
+      ".github/actions/deploy",
+      "libs/shared",
+    ])
+  })
+
   it.each([
     ["leaves out a project.json .gitignore excludes, as nx does", {}, ["libs/shared"]],
     [
@@ -78,6 +94,18 @@ describe("detectManagers", () => {
     const result = await detectManagers(tree.root, options)
 
     expect(result.managers).toEqual([{ tool: "nx", roots }])
+  })
+
+  it("passes over the caches nx's own walk skips, whatever .gitignore says", async () => {
+    await tree.writeJson("nx.json", {})
+    await tree.writeJson("libs/shared/project.json", {})
+    for (const cache of [".nx/cache/a", ".nx/workspace-data/b", ".yarn/cache/c"]) {
+      await tree.writeJson(`${cache}/project.json`, {})
+    }
+
+    const result = await detectManagers(tree.root, { respectGitignore: false })
+
+    expect(result.managers).toEqual([{ tool: "nx", roots: ["libs/shared"] }])
   })
 
   it("records turbo as a co-marker without emitting workspaces", async () => {
