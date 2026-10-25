@@ -22,6 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      # A Windows runner now and then fails to start a child process among many (0xC0000142), and
+      # the task dies before printing: two at a time, each log whole, so a failure names its task.
+      TURBO_ARGS: ${{ matrix.os == 'windows-latest' && '--concurrency=2 --output-logs=full --log-order=grouped' || '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -44,10 +48,13 @@ jobs:
         run: pnpm hygiene
 
       - name: Typecheck
-        run: pnpm typecheck
+        shell: bash
+        run: pnpm typecheck $TURBO_ARGS
 
       - name: Build
-        run: pnpm build
+        shell: bash
+        run: pnpm build $TURBO_ARGS
 
       - name: Test
-        run: pnpm test
+        shell: bash
+        run: pnpm test $TURBO_ARGS
