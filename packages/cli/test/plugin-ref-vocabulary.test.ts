@@ -17,7 +17,7 @@ beforeEach(async () => {
 async function scanWith(config: Record<string, unknown>) {
   await writeConfig(workspace.root, config)
   const { code, stdout, stderr } = await runCliIn(workspace.root, ["scan", "--no-timestamp"])
-  return { code, output: `${stderr}${stdout}` }
+  return { code, stderr, output: `${stderr}${stdout}` }
 }
 
 async function componentFrameworks(): Promise<unknown> {
@@ -115,5 +115,55 @@ describe("aburi scan — a plugin name where a framework id belongs", () => {
 
     expect(code, output).toBe(EXIT.SUCCESS)
     expect(output).not.toContain("names a plugin")
+  })
+})
+
+describe("aburi scan — pluginOptions keys and the plugins it loaded", () => {
+  const PRISMA = { ...TYPESCRIPT, effects: ["effects-prisma"] }
+  const unmatched = (key: string, loaded: string) =>
+    `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}); its options are ignored.`
+
+  it.each([
+    [
+      "warns about a misspelled plugin name",
+      { ...PRISMA, pluginOptions: { "effects-prsima": {} } },
+      [unmatched("effects-prsima", "lang-typescript, effects-prisma")],
+    ],
+    [
+      "warns about a plugin no list enables",
+      { ...TYPESCRIPT, pluginOptions: { "effects-prisma": {} } },
+      [unmatched("effects-prisma", "lang-typescript")],
+    ],
+    [
+      "warns about each of several keys, in config order, and not the one that matches",
+      {
+        ...PRISMA,
+        pluginOptions: { "framework-nestjs": {}, "effects-prisma": {}, "effects-pino": {} },
+      },
+      [
+        unmatched("framework-nestjs", "lang-typescript, effects-prisma"),
+        unmatched("effects-pino", "lang-typescript, effects-prisma"),
+      ],
+    ],
+    [
+      "says nothing about a loaded plugin's name",
+      { ...PRISMA, pluginOptions: { "effects-prisma": {} } },
+      [],
+    ],
+    [
+      "lists the plugins in load order, a frameworkHints entry's last, and says nothing about its name",
+      {
+        ...PRISMA,
+        frameworks: ["framework-nestjs"],
+        frameworkHints: [{ name: "acme", decorators: {} }],
+        pluginOptions: { "hint-acme": {}, "effects-prsima": {} },
+      },
+      [unmatched("effects-prsima", "lang-typescript, framework-nestjs, effects-prisma, hint-acme")],
+    ],
+  ])("%s, on stderr alone, and exits 0", async (_, config, expected) => {
+    const { code, stderr, output } = await scanWith(config)
+
+    expect(code, output).toBe(EXIT.SUCCESS)
+    expect(stderr).toBe(expected.map((line) => `${line}\n`).join(""))
   })
 })
