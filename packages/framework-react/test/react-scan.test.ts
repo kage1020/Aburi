@@ -76,6 +76,67 @@ describe("scan — React source shapes across .tsx and .jsx files", () => {
       label: null,
     })
   })
+
+  it("classifies a provider by every element it returns, while a guarded layout and a helper's provider stay components", async () => {
+    await workspace.writeSource(
+      "src/auth.tsx",
+      [
+        'import { createContext, useState, type ReactNode } from "react"',
+        'import { Spinner } from "./spinner"',
+        "",
+        "type User = { id: string }",
+        "export const AuthContext = createContext<User | null>(null)",
+        "",
+        "export function AuthProvider({ children }: { children: ReactNode }) {",
+        "  const [user] = useState<User | null | undefined>(undefined)",
+        "  if (user === undefined) return <Spinner />",
+        "  return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>",
+        "}",
+        "",
+        "export function GuardNull({ children }: { children: ReactNode }) {",
+        "  const [user] = useState<User | null | undefined>(undefined)",
+        "  if (user === undefined) return null",
+        "  return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>",
+        "}",
+        "",
+        "export const ParenArrow = ({ children }: { children: ReactNode }) => (",
+        "  <AuthContext.Provider value={null}>{children}</AuthContext.Provider>",
+        ")",
+        "",
+        "export function Conditional({ children, loading }: { children: ReactNode; loading: boolean }) {",
+        "  const [user] = useState<User | null>(null)",
+        "  return loading ? <Spinner /> : <AuthContext.Provider value={user}>{children}</AuthContext.Provider>",
+        "}",
+        "",
+        "export function Gate({ children }: { children: ReactNode }) {",
+        "  const [user] = useState<User | null | undefined>(undefined)",
+        "  if (user === undefined) return <Spinner />",
+        "  return <main>{children}</main>",
+        "}",
+        "",
+        "export function Badge({ user }: { user: User }) {",
+        "  const provide = (node: ReactNode) => { return <AuthContext.Provider value={user}>{node}</AuthContext.Provider> }",
+        "  return <span>{provide(user.id)}</span>",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const { ir } = await scanWith(workspace.root, {
+      languages: [langTypescriptPlugin],
+      frameworks: [reactFrameworkPlugin],
+    })
+    const extKinds = Object.fromEntries(ir.symbols.map((symbol) => [symbol.name, symbol.extKind]))
+
+    expect(extKinds).toMatchObject({
+      AuthProvider: "framework:react:provider",
+      GuardNull: "framework:react:provider",
+      ParenArrow: "framework:react:provider",
+      Conditional: "framework:react:provider",
+      Gate: "framework:react:component",
+      Badge: "framework:react:component",
+    })
+  })
 })
 
 describe("scan — a call's derivedBy", () => {

@@ -64,7 +64,22 @@ describe("returnsContextProvider", () => {
       true,
       "const C = ({ children }) => <MyCtx.Provider>{children}</MyCtx.Provider>",
     ],
+    [
+      "<X.Provider> between a guard and a fallback",
+      true,
+      "function C({ user, error, children }) { if (!user) return <Spinner /> ; if (!error) return <MyCtx.Provider value={user}>{children}</MyCtx.Provider> ; return <ErrorPage /> }",
+    ],
     ["a bare <Provider>", false, "function C() { return <Provider>x</Provider> }"],
+    [
+      "<X.Provider> only inside a fragment",
+      false,
+      "function C({ children }) { return <><MyCtx.Provider value={1}>{children}</MyCtx.Provider></> }",
+    ],
+    [
+      "React 19's <Ctx value> (no .Provider in its name)",
+      false,
+      "function C({ children }) { return <MyCtx value={1}>{children}</MyCtx> }",
+    ],
     ["no JSX", false, "function C() { return null }"],
   ])("reads a function returning %s as a provider: %s", async (_label, expected, source) => {
     expect(returnsContextProvider(await bodyOf(source))).toBe(expected)
