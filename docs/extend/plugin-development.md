@@ -426,6 +426,28 @@ the run.
 Your module must export the plugin as a default export, a `plugin` export, or
 any top-level export whose value has a `manifest` field. The first hit wins.
 
+## Options
+
+Users configure your plugin under `pluginOptions`, keyed by your manifest
+`name`:
+
+```jsonc
+{
+  "effects": ["@myorg/aburi-effects"],
+  "pluginOptions": {
+    "effects-myorg": { "queues": ["billing", "mail"] }
+  }
+}
+```
+
+Aburi does not look inside the value: the config schema accepts any object
+there. Every hook that takes a `ctx` gets the whole config, so read your key as
+`ctx.config.pluginOptions?.["effects-myorg"]`, check its shape before you rely
+on it, and document the options in your README. A value you cannot use is a
+fault in the plugin set rather than in a file: throw an error whose `code` is
+`scan-plugin-misconfigured`, and the run ends with exit `3` instead of
+recording the same failure against every file.
+
 ## Testing
 
 - Unit-test your plugin in isolation. See

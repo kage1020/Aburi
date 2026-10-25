@@ -32,7 +32,7 @@ describe("parseConfig", () => {
     ],
     [
       "pluginOptions as an opaque object",
-      { $schema: SCHEMA, pluginOptions: { "effects-prisma": { treatExtendsAsTx: true } } },
+      { $schema: SCHEMA, pluginOptions: { "effects-myorg": { queues: ["billing"] } } },
     ],
   ])("accepts %s as written", (_, config) => {
     expect(parseConfig(JSON.stringify(config), "inline")).toEqual(config)

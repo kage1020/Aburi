@@ -25,6 +25,12 @@ export interface PluginNamedFramework {
   frameworkIds: readonly string[]
 }
 
+export interface UnreadPluginOptions {
+  key: string
+  /** The `frameworkHints` entry whose plugin the key names; null when it names no loaded plugin. */
+  hintEntry: string | null
+}
+
 export interface ScanReport {
   irPath: string | null
   workspaceMdPath: string | null
@@ -56,6 +62,6 @@ export interface ScanReport {
   fellBackToSingleComponent: boolean
   pluginNamedFrameworks: readonly PluginNamedFramework[]
   loadedPlugins: readonly string[]
-  unmatchedPluginOptions: readonly string[]
+  unreadPluginOptions: readonly UnreadPluginOptions[]
   exitCode: ExitCode
 }

@@ -121,7 +121,9 @@ describe("aburi scan — a plugin name where a framework id belongs", () => {
 describe("aburi scan — pluginOptions keys and the plugins it loaded", () => {
   const PRISMA = { ...TYPESCRIPT, effects: ["effects-prisma"] }
   const unmatched = (key: string, loaded: string) =>
-    `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}); its options are ignored.`
+    `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}).`
+  const hint = (key: string, entry: string) =>
+    `⚠ pluginOptions["${key}"] names the plugin built from the frameworkHints entry "${entry}", which takes no options; write its rules in that entry.`
 
   it.each([
     [
@@ -151,14 +153,22 @@ describe("aburi scan — pluginOptions keys and the plugins it loaded", () => {
       [],
     ],
     [
-      "lists the plugins in load order, a frameworkHints entry's last, and says nothing about its name",
+      "lists the plugins in load order, a frameworkHints entry's last, and sends options for that entry's plugin to the entry, in config order",
       {
         ...PRISMA,
         frameworks: ["framework-nestjs"],
         frameworkHints: [{ name: "acme", decorators: {} }],
         pluginOptions: { "hint-acme": {}, "effects-prsima": {} },
       },
-      [unmatched("effects-prsima", "lang-typescript, framework-nestjs, effects-prisma, hint-acme")],
+      [
+        hint("hint-acme", "acme"),
+        unmatched("effects-prsima", "lang-typescript, framework-nestjs, effects-prisma, hint-acme"),
+      ],
+    ],
+    [
+      "names no frameworkHints entry for a key that only looks like one",
+      { ...PRISMA, pluginOptions: { "hint-acme": {} } },
+      [unmatched("hint-acme", "lang-typescript, effects-prisma")],
     ],
   ])("%s, on stderr alone, and exits 0", async (_, config, expected) => {
     const { code, stderr, output } = await scanWith(config)

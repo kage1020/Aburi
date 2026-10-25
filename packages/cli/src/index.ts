@@ -29,7 +29,12 @@ export {
 } from "./commands/init"
 export { runScan, type ScanOptions } from "./commands/scan"
 export { reportScanIncidents } from "./commands/scan-incidents"
-export type { CoverageFault, PluginNamedFramework, ScanReport } from "./commands/scan-report"
+export type {
+  CoverageFault,
+  PluginNamedFramework,
+  ScanReport,
+  UnreadPluginOptions,
+} from "./commands/scan-report"
 export {
   classifyConfigError,
   loadPinnedConfig,

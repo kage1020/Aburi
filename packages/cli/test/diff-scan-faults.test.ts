@@ -75,7 +75,7 @@ describe("aburi diff — the two scans it ran", () => {
     expect(report.exitCode).toBe(exitCode)
     expect(report.faultedScans).toEqual(faultedScans)
     expect(warnings.filter((line) => line.includes("pluginOptions"))).toEqual([
-      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-stub); its options are ignored.',
+      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-stub).',
     ])
     expect(warnings).toContain(baseLine)
   })
