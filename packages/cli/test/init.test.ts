@@ -60,6 +60,18 @@ describe("aburi init — the config it writes", () => {
     expect(loaded.config.languages).toEqual(["lang-typescript"])
   })
 
+  it("leaves a plugin the workspace already installed out of the banner", async () => {
+    await pnpmWorkspace()
+    await writePackageJson(resolve(workspace.root, "node_modules/@aburi/lang-typescript"), {
+      name: "@aburi/lang-typescript",
+    })
+
+    const report = await runInit({ cwd: workspace.root, withSuggestions: true })
+
+    expect(report.suggestedPlugins).toEqual([])
+    expect(await readFile(report.outputPath, "utf8")).not.toContain("Suggested install:")
+  })
+
   it("writes no banner without --with-suggestions", async () => {
     await pnpmWorkspace()
 
@@ -80,14 +92,25 @@ describe("aburi init — a config already there", () => {
     expect(error.message).toContain("already exists. Use --force to overwrite")
   })
 
-  it("overwrites it under --force, and says so", async () => {
+  it("overwrites it under --force, and says so on stderr", async () => {
     await pnpmWorkspace()
     await workspace.writeSource("aburi.json", '{"$schema": "old"}')
+    const path = resolve(workspace.root, "aburi.json")
 
-    const report = await runInit({ cwd: workspace.root, force: true })
+    const { code, stderr } = await runCliIn(workspace.root, ["init", "--force"])
 
-    expect(report.overwrote).toBe(true)
-    expect(await readFile(report.outputPath, "utf8")).not.toContain('"old"')
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(stderr).toContain(`⚠ Overwrote ${path}`)
+    expect(await readFile(path, "utf8")).not.toContain('"old"')
+  })
+
+  it("warns of no overwrite under --force when there was nothing to overwrite", async () => {
+    await pnpmWorkspace()
+
+    const { code, stderr } = await runCliIn(workspace.root, ["init", "--force"])
+
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(stderr).not.toContain("Overwrote")
   })
 })
 
