@@ -32,7 +32,7 @@ const views: [string, (symbol: IRSymbol) => string, (title: string) => string][]
   [
     "diff.md names-only row",
     (symbol) => {
-      const added = [symbol, ...Array.from({ length: 19 }, (_, i) => controller("high", i + 1))]
+      const added = [symbol, ...Array.from({ length: 49 }, (_, i) => controller("high", i + 1))]
       const changes = added.map((entry) => ({ status: "added" as const, symbol: entry }))
       return projectChanges(changes, { maxBytes: bytes(projectChanges(changes)) - 1 })
     },

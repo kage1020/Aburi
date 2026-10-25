@@ -48,7 +48,8 @@ function symbolEntry(symbol: IRSymbol, extraRows: readonly string[]): string[] {
     `### ${symbolTitle(symbol)}`,
     `**File**: ${fileLine(symbol)}`,
     ...extraRows,
-    ...renderSymbolBlock(symbol).slice(1),
+    // One side's hashes explain nothing a reviewer could compare them with.
+    ...renderSymbolBlock(symbol, { fingerprint: false }).slice(1),
     "",
   ]
 }

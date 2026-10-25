@@ -600,7 +600,7 @@ The base element is looked up in the entry's `before` and `after`. The diff leav
 
 #### ➕ Added / ➖ Removed
 
-Full symbol rendering (same as §5.2):
+Full symbol rendering (same as §5.2), less the fingerprint line (§12.7):
 
 ```md
 ### `InvoiceService.refundInvoice` *(method)*
@@ -1049,6 +1049,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP17b | `modified` element with several candidate bases: several `modified` elements under one key, or base elements equal but for their line | A field the candidates disagree on, or one of them shares with the head element, shows the head value alone; a field they agree on and differ from the head element on still gets their value |
 | MP17c | diff entry whose delta flags `asyncChanged`, `generatorChanged`, `typeParametersChanged`, `componentChanged` or `visibilityChanged` | One row per flag with the base value before the head one: `- signature.async: false → true`, ``- signature.typeParameters: none → `<T>` ``, ``- component: `billing` → none``, ``- visibility: `internal` → `public` `` |
 | MP18 | diff whose `dependencies.added` holds a call edge between two Symbols of one file, one between two files, and one from a Component to a Symbol | The first reads `` `a` → `b` in `<file>` (via `call`) ``, the second `` `a` in `<file>` → `b` in `<file>` (via `call`) ``, the third `` `billing` → `b` in `<file>` (via `import`) ``; no Symbol id appears |
+| MP19 | diff with an added, a removed and an unknown Symbol, each with a non-zero fingerprint | No entry carries a `<sub>` fingerprint line; the same Symbol on its component page does |
 
 ## 12. Design decisions
 
@@ -1079,6 +1080,11 @@ Accounts for international teams and OSS usage. All projection output is fixed-w
 ### 12.7 Why fingerprints are displayed
 
 Unnecessary during review, but valuable for debugging and for explaining "why did this appear in the diff". The `<sub>` rendering keeps the display unobtrusive.
+
+`diff.md` leaves the line out of an Added, Removed or Unknown entry. Such an entry has one side, so
+its three hashes explain nothing a reviewer could compare them with, and at some 70 bytes an entry
+they were the part of a large refactor's Added list most likely to push the report over the size
+cap. The component pages keep it, and the IR keeps every hash.
 
 ### 12.8 Whether to use emoji
 
