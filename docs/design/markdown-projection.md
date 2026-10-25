@@ -543,10 +543,15 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 - signature.outputs: `Promise<Invoice>` → `Promise<InvoiceWithReceipt>`
 - signature.throws added: `NotFoundError`
 - signature.inputs modified: `id: string` → `id: InvoiceId`
+- signature.typeParameters: none → `<T extends Invoice>`
 - decorator added: `@UseGuards(AuthGuard)`
 - decorator removed: `@UseGuards(LegacyGuard)`
 - decorator modified: `@nest.Post('/invoices')` → `@tsed.Post('/invoices')`
+- component: `billing` → `payments`
+- visibility: `internal` → `public`
 ```
+
+The rows for a single value — `signature.async`, `signature.generator`, `signature.typeParameters`, `component` and `visibility` — set the base value before the head one, read off the entry's `before` and `after` as the confidence row's are, because the flag alone says only that something moved and the reader's next question is from what to what. `async` and `generator` read `false` / `true`; no type parameters, and a Symbol outside every Component, read `none`; type parameters are spelled as the signature line leads with them (§5.5).
 
 Every decorator row prints the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4), and falls back to `qualifier.name` when `raw` is absent. A modified decorator differs from its base in its arguments or its receiver, the two things the diff compares beside the name ([`diff-algorithm.md`](./diff-algorithm.md) §5.2.2), and `raw` spells both, so its row sets the base's `raw` before the head's wherever the base element can be told (Delta rows, below).
 
@@ -1025,6 +1030,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP17 | diff entry whose delta lists a loop, an effect, a call or a decorator, in any bucket | The loop row carries its kind, ``loop (`<loopKind>`) (L<line>)``, and the effect row its `[plugin]` and, at medium or low confidence, its badge, as on the component page. Under `calls modified` the row names what the call resolves to (`none` when nothing); a decorator row prints its `raw`, arguments included, in every bucket |
 | MP17a | `modified` rule, effect, call, decorator or input whose entry's `before` holds the base element it was paired with, differing in a compared field | That field reads `<base> → <head>` in its place: ``loop (`for` → `while`)``, `[effects-drizzle → effects-prisma]`, an origin `(L5) → [propagated from …]`, ``resolved: `<id>` → none``, `` `@nest.Post()` → `@Post()` ``, `` `limit: number` → `limit?: number` ``; a confidence as `⚠ medium (was high)`, or `(was ⚠ medium)` when it rose to `high`. A field the diff does not compare (`line`, `derivedBy`) gets no base value, and neither does a field whose base value reads like its head value. A base element under another key, in `removed`, or equal to the head element is not taken for the paired one, nor are the base elements equal to an unchanged head element while there are no more of them than of such head elements |
 | MP17b | `modified` element with several candidate bases: several `modified` elements under one key, or base elements equal but for their line | A field the candidates disagree on, or one of them shares with the head element, shows the head value alone; a field they agree on and differ from the head element on still gets their value |
+| MP17c | diff entry whose delta flags `asyncChanged`, `generatorChanged`, `typeParametersChanged`, `componentChanged` or `visibilityChanged` | One row per flag with the base value before the head one: `- signature.async: false → true`, ``- signature.typeParameters: none → `<T>` ``, ``- component: `billing` → none``, ``- visibility: `internal` → `public` `` |
 
 ## 12. Design decisions
 

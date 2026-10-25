@@ -1,4 +1,4 @@
-import { changed, makeSymbol, movedChanged } from "@aburi/test-support"
+import { changed, componentId, makeSymbol, movedChanged } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectChanges, renamedPair } from "./fixtures"
@@ -28,8 +28,8 @@ describe("the note under a fingerprint flag no row explains", () => {
     [
       "component",
       { logicChanged: true, componentChanged: true },
-      {},
-      "- component: changed",
+      { component: componentId("core") },
+      "- component: none → `core`",
       "logic",
     ],
     [
@@ -46,7 +46,11 @@ describe("the note under a fingerprint flag no row explains", () => {
   })
 
   it.each<[string, Partial<SymbolDelta>, string]>([
-    ["visibility", { apiChanged: true, visibilityChanged: true }, "- visibility: changed"],
+    [
+      "visibility",
+      { apiChanged: true, visibilityChanged: true },
+      "- visibility: `public` → `internal`",
+    ],
     [
       "rule",
       {
@@ -56,7 +60,7 @@ describe("the note under a fingerprint flag no row explains", () => {
       "  - try (L2)",
     ],
   ])("gives way to a %s row, which explains the fingerprint", (_, flags, row) => {
-    const md = projectChanges([changed(f, flags)])
+    const md = projectChanges([changed(f, flags, { visibility: "internal" })])
     expect(md).toContain(row)
     expect(md).not.toContain("no field-level detail")
   })

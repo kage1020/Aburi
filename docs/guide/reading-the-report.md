@@ -74,6 +74,14 @@ beside the new one:
 When several elements of one kind were edited at once, such as two guards, and
 their old values differ, that field shows only the new value.
 
+A single value that changed reads the same way, old value first:
+
+```md
+- signature.typeParameters: none → `<T extends Order>`
+- component: `orders` → `checkout`
+- visibility: `internal` → `public`
+```
+
 For an added or removed symbol, Aburi renders the whole thing:
 
 ```md
