@@ -1,3 +1,5 @@
+import { COMPUTED_TARGET_SEGMENT } from "@aburi/types"
+
 export interface SyntaxNode {
   readonly type: string
   readonly text: string
@@ -76,13 +78,54 @@ export function calleeLeaf(callee: string): string {
   return dot < 0 ? callee : callee.slice(dot + 1)
 }
 
+export interface CalleeName {
+  readonly name: string
+  readonly leaf: string
+}
+
+export function calleeName(callNode: SyntaxNode): CalleeName | null {
+  const callee = callNode.childForFieldName("function")
+  if (callee === null) return null
+  if (callee.type === "identifier") {
+    return callee.text.length > 0 ? { name: callee.text, leaf: callee.text } : null
+  }
+  if (callee.type !== "member_expression") return null
+  const object = callee.childForFieldName("object")
+  const leaf = callee.childForFieldName("property")?.text ?? ""
+  if (object === null || leaf.length === 0) return null
+  return { name: `${chainRoot(object)}.${leaf}`, leaf }
+}
+
+const NAMED_ROOT_TYPES: ReadonlySet<string> = new Set(["identifier", "this"])
+
+function chainRoot(node: SyntaxNode): string {
+  let cursor = unwrapValue(node)
+  let next = chainStep(cursor)
+  while (next !== null) {
+    cursor = unwrapValue(next)
+    next = chainStep(cursor)
+  }
+  // Any other root's text would carry its line breaks and comments into the name.
+  return NAMED_ROOT_TYPES.has(cursor.type) && cursor.text.length > 0
+    ? cursor.text
+    : COMPUTED_TARGET_SEGMENT
+}
+
+function chainStep(node: SyntaxNode): SyntaxNode | null {
+  if (node.type === "call_expression") return node.childForFieldName("function")
+  if (node.type === "member_expression" || node.type === "subscript_expression") {
+    return node.childForFieldName("object")
+  }
+  return null
+}
+
 export function anyCallCalleeMatches(
   node: SyntaxNode,
   predicate: (leaf: string) => boolean,
 ): boolean {
   if (node.type === "call_expression") {
-    const callee = calleeText(node)
-    if (callee !== null && predicate(calleeLeaf(callee))) return true
+    const callee = calleeName(node)
+    if (callee !== null && predicate(callee.leaf)) return true
   }
   for (const child of node.namedChildren) {
     if (child !== null && anyCallCalleeMatches(child, predicate)) return true

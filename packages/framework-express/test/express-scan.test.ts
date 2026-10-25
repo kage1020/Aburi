@@ -1,6 +1,6 @@
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { scanWith } from "@aburi/test-harness"
-import { useScratchWorkspace } from "@aburi/test-support"
+import { frameworkEntries, useScratchWorkspace } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { expressFrameworkPlugin } from "../src/index"
@@ -17,9 +17,7 @@ async function scanWorkspace(): Promise<IR> {
 
 /** `"<extKind> <confidence> <derivedBy tags>"` for a classified Symbol. */
 function classification(s: IRSymbol): string {
-  // The scan appends the framework plugin's tags after the language plugin's.
-  const own = s.derivedBy.findIndex((tag) => tag.startsWith("framework:express:"))
-  return [s.extKind, s.confidence, ...s.derivedBy.slice(own)].join(" ")
+  return [s.extKind, s.confidence, ...frameworkEntries(s, "framework:express:")].join(" ")
 }
 
 /** `classification` per classified Symbol in `path`, sorted. */
@@ -31,10 +29,10 @@ function classifiedIn(ir: IR, path: string): string[] {
 }
 
 /**
- * The `classification` of the one call Symbol `source` produces, or `null` when it is unclassified.
- * Throws when there is not exactly one, so an abstention cannot pass because no call was extracted.
+ * The one call Symbol `source` produces. Throws when there is not exactly one, so an abstention
+ * cannot pass because no call was extracted.
  */
-async function callIn(source: string): Promise<string | null> {
+async function oneCallIn(source: string): Promise<IRSymbol> {
   await workspace.writeSource("src/app.ts", source)
   const ir = await scanWorkspace()
   const calls = ir.symbols.filter((s) => s.source.file === "src/app.ts" && s.kind === "call")
@@ -42,11 +40,37 @@ async function callIn(source: string): Promise<string | null> {
   if (call === undefined || calls.length > 1) {
     throw new Error(`expected one call Symbol, got: ${calls.map((s) => s.name)}`)
   }
+  return call
+}
+
+/** The `classification` of the one call Symbol `source` produces, or `null` when it is unclassified. */
+async function callIn(source: string): Promise<string | null> {
+  const call = await oneCallIn(source)
   return call.extKind === null ? null : classification(call)
+}
+
+/** `callIn`, for a call whose Express entry must name it as its `call-statement:` entry does. */
+async function namedCallIn(source: string): Promise<string | null> {
+  const call = await oneCallIn(source)
+  const [entry] = frameworkEntries(call, "framework:express:")
+  const statement = call.derivedBy.find((tag) => tag.startsWith("call-statement:"))
+  expect(entry?.replace(/^framework:express:[a-z-]+:/, "")).toBe(
+    statement?.slice("call-statement:".length),
+  )
+  return classification(call)
 }
 
 const inExpressApp = (line: string) =>
   [`import express from "express"`, `const app = express()`, line].join("\n")
+
+/** `classifiedIn` for a file declaring one const, `router`, initialised by `initializer`. */
+async function routerIn(initializer: string): Promise<string[]> {
+  await workspace.writeSource(
+    "src/app.ts",
+    [`import express from "express"`, `export const router = ${initializer}`].join("\n"),
+  )
+  return classifiedIn(await scanWorkspace(), "src/app.ts")
+}
 
 describe("scan — an Express app", () => {
   it("classifies its routers, routes, middleware, error middleware and mounts", async () => {
@@ -288,5 +312,106 @@ describe("scan — a .use argument behind a wrapper", () => {
 
   it("does not read an old-style assertion, as the language plugin does not", async () => {
     expect(await callIn(inExpressApp(`app.use(<RequestHandler>logger)`))).toBeNull()
+  })
+})
+
+describe("scan — a call's derivedBy", () => {
+  it.each([
+    [
+      "a route chain wrapped over several lines",
+      `app\n  .route("/users/:id")\n  .get(getUser)\n  .delete(deleteUser)`,
+      `app.route("/users/:id").get(getUser).delete(deleteUser)`,
+      "framework:express:route high framework:express:route:app.delete",
+    ],
+    [
+      "a route with a line comment in its chain",
+      `app // users\n  .get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route whose dot ends a line",
+      `app.\n  get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route on a receiver cast to its type",
+      `;(app as Express).get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route on a receiver that satisfies its type",
+      `;(app satisfies Express).get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "a route on a receiver with a non-null assertion",
+      `app!.get("/users", listUsers)`,
+      `app.get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+    [
+      "error middleware after a comment holding a ;",
+      `app // admin; see the runbook\n  .use((err, req, res, next) => res.end())`,
+      `app.use((err, req, res, next) => res.end())`,
+      "framework:express:error-middleware high framework:express:error-middleware:app.use arity-4",
+    ],
+    [
+      "a mount wrapped over two lines",
+      `app\n  .use("/api", adminRouter)`,
+      `app.use("/api", adminRouter)`,
+      "framework:express:mount high framework:express:mount:app.use router-identifier",
+    ],
+    [
+      "middleware after a block comment",
+      `app /* logs */ .use((req, res, next) => next())`,
+      `app.use((req, res, next) => next())`,
+      "framework:express:middleware high framework:express:middleware:app.use arity-3",
+    ],
+  ])("names %s as its one-line spelling does", async (_label, written, oneLine, expected) => {
+    expect(await namedCallIn(inExpressApp(written))).toBe(expected)
+    expect(await namedCallIn(inExpressApp(oneLine))).toBe(expected)
+  })
+
+  it.each([
+    [
+      "a mount chained after middleware",
+      `app.use(cors()).use("/api", adminRouter)`,
+      "framework:express:mount high framework:express:mount:app.use router-identifier",
+    ],
+    [
+      "error middleware chained after a path's middleware",
+      `app.use('/a; b', audit).use((err, req, res, next) => res.end())`,
+      "framework:express:error-middleware high framework:express:error-middleware:app.use arity-4",
+    ],
+    [
+      "a route on a Router made in the statement",
+      `express.Router().get("/users", listUsers)`,
+      "framework:express:route high framework:express:route:express.get",
+    ],
+    [
+      "a route chained past a call on a receiver cast to its type",
+      `;(app as Express).route("/users").get(listUsers)`,
+      "framework:express:route high framework:express:route:app.get",
+    ],
+  ])("names %s by the name its chain starts from", async (_label, line, expected) => {
+    expect(await namedCallIn(inExpressApp(line))).toBe(expected)
+  })
+
+  it.each([
+    [
+      "a factory wrapped onto a second line after a comment",
+      "express /* v5 */\n  .Router()",
+      "express.Router",
+    ],
+    ["a factory on a receiver cast to its type", "(express as any).Router()", "express.Router"],
+    ["a factory reached through require", `require("express").Router()`, "require.Router"],
+  ])("names a Router made by %s", async (_label, initializer, callee) => {
+    expect(await routerIn(initializer)).toEqual([
+      `framework:express:router high framework:express:router:${callee}`,
+    ])
   })
 })

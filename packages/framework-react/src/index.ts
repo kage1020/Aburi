@@ -1,7 +1,5 @@
 export {
   asSyntaxNode,
-  calleeLeaf,
-  calleeText,
   findFirstDescendantOfType,
   type SyntaxNode,
 } from "@aburi/core"

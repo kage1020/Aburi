@@ -9,7 +9,7 @@ async function routersOf(source: string, path = "src/a.ts"): Promise<string[]> {
   const { candidates } = await extractFile(langTypescriptPlugin, path, source)
   return candidates
     .filter((candidate) => candidate.kind === "const")
-    .map((c) => `${c.name} ${extractRouterCall(c.fullNode, c.name)?.callee ?? "-"}`)
+    .map((c) => `${c.name} ${extractRouterCall(c.fullNode, c.name)?.name ?? "-"}`)
     .sort()
 }
 
@@ -17,7 +17,7 @@ describe("extractRouterCall", () => {
   it.each([
     ["`Router()`", `import { Router } from "express"\nconst r = Router()\n`, ["r Router"]],
     [
-      "`express.Router()`, keeping the member text",
+      "`express.Router()`, named with its receiver",
       `import express from "express"\nconst r = express.Router()\n`,
       ["r express.Router"],
     ],
