@@ -34,6 +34,17 @@ wrapper call (in an array or object literal, handed to another call or to
 out of one, has no wrapper role: it holds that expression's value, not
 necessarily the wrapped component.
 
+That call is named in `derivedBy` by the name read off the syntax tree: the
+name the callee's receiver chain starts from, read through the same wrappers,
+and the name called. `React.memo(Inner)`, `(React as any).memo(Inner)` and the
+same call wrapped over two lines or with a comment before `.memo` all give
+`framework:react:memo:React.memo`, and `memo(Inner)` gives
+`framework:react:memo:memo`. A receiver that is not a name is `<computed>`
+(`new Registry().memo(Inner)` gives `framework:react:memo:<computed>.memo`), so
+no entry carries the source's line breaks, indentation or comments. A hook's
+`hook-call` signal reads the name called the same way, so `React.useState(0)`
+wrapped after its `.` or with a comment there still counts.
+
 A function is a provider when any of its returns hands back a `<X.Provider>`
 element, so a loading guard above it (`if (!user) return <Spinner />`) does not
 make it a plain component. Every `return` in the function's own body is read,

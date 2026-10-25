@@ -63,19 +63,19 @@ function classifyConstSymbol(symbol: SymbolCandidate<OpaqueAstNode>): ReactClass
   if (isContextCall(call)) {
     return {
       extKind: "framework:react:context",
-      derivedBy: `${REACT_DERIVED_BY_PREFIX}:context:${call.callee}`,
+      derivedBy: `${REACT_DERIVED_BY_PREFIX}:context:${call.name}`,
     }
   }
   if (isForwardRefCall(call)) {
     return {
       extKind: "framework:react:forward-ref",
-      derivedBy: `${REACT_DERIVED_BY_PREFIX}:forward-ref:${call.callee}`,
+      derivedBy: `${REACT_DERIVED_BY_PREFIX}:forward-ref:${call.name}`,
     }
   }
   if (isMemoCall(call)) {
     return {
       extKind: "framework:react:memo",
-      derivedBy: `${REACT_DERIVED_BY_PREFIX}:memo:${call.callee}`,
+      derivedBy: `${REACT_DERIVED_BY_PREFIX}:memo:${call.name}`,
     }
   }
   return null
