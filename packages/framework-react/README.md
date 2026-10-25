@@ -13,15 +13,26 @@ Recognised shapes:
 | `const Widget = () => <div/>` | `framework:react:component` | PascalCase name + JSX return |
 | `function useThing() { … }` | `framework:react:hook` | `/^use[A-Z]/` name |
 | `function useX() { useState(…); … }` | `framework:react:hook` (+ `hook-call` signal) | naming + inner hook call |
-| `const Ctx = createContext(…)` | `framework:react:context` | `createContext(...)` / `React.createContext(...)` |
-| `const B = forwardRef((p,r) => …)` | `framework:react:forward-ref` | `forwardRef(...)` / `React.forwardRef(...)` |
-| `const M = memo(Inner)` | `framework:react:memo` | `memo(...)` / `React.memo(...)` |
+| `const Ctx = createContext(…)` | `framework:react:context` | that const's own initializer is a `createContext(...)` / `React.createContext(...)` call |
+| `const B = forwardRef((p,r) => …)` | `framework:react:forward-ref` | that const's own initializer is a `forwardRef(...)` / `React.forwardRef(...)` call |
+| `const M = memo(Inner)` | `framework:react:memo` | that const's own initializer is a `memo(...)` / `React.memo(...)` call |
 | `function P() { return <Ctx.Provider>…</Ctx.Provider> }` | `framework:react:provider` | PascalCase + `<X.Provider>` root JSX |
 | `function withAuth(C) { … }` | `framework:react:hoc` | `/^with[A-Z]/` name |
 
 Priorities are first-match-wins in the order listed above: a `useX` function
 that also returns JSX still classifies as `hook`, and a `<Ctx.Provider>`-shaped
 component classifies as `provider` rather than `component`.
+
+A const is read from its own declarator, so in
+`export const PAGE_SIZE = 20, Row = memo(RowImpl)` only `Row` is a memo. The
+initializer must be the wrapper call itself, read through `as`, `satisfies`,
+`!` and parentheses as `@aburi/lang-typescript` reads it to name the Symbol
+(`memo(Row) as typeof Row` is a memo), and its outermost call names the role,
+so `memo(forwardRef(…))` is a memo. A const whose initializer only contains a
+wrapper call (in an array or object literal, handed to another call or to
+`new`, in one branch of a conditional), or that a destructuring pattern pulls
+out of one, has no wrapper role: it holds that expression's value, not
+necessarily the wrapped component.
 
 Not classified today (documented for completeness):
 
@@ -33,6 +44,10 @@ Not classified today (documented for completeness):
   type resolves to `ReactNode`, whether an HOC parameter is typed as a
   component). The JSX-body heuristic used here is the most reliable pre-LSP
   signal.
+- A wrapper behind an old-style type assertion (`<Context<T>>createContext(…)`,
+  `<any>memo(Inner)`, written in a `.ts` file) — the initializer is read
+  through `as`, `satisfies`, `!` and parentheses only, as
+  `@aburi/lang-typescript` reads it to name the Symbol.
 
 ## Install
 

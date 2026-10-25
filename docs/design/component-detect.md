@@ -243,7 +243,7 @@ Detected frameworks are **only recorded in `Component.frameworks[]`**; the corre
 
 ### 4.6 `publicApi`
 
-Resolve `exports` / `main` / `module` / `types` from `package.json`:
+Read the paths `package.json` names:
 
 ```jsonc
 // package.json
@@ -259,12 +259,23 @@ Resolve `exports` / `main` / `module` / `types` from `package.json`:
 
 ```jsonc
 {
-  "publicApi": ["src/index.ts", "src/client.ts"]
+  "publicApi": ["src/client.ts", "src/index.ts"]
 }
 ```
 
-If there is no `exports`, take the file path from `main` / `module` / `types`.
-If none exist, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
+Every string target of `exports`, through conditions and arrays, and `main`, `module`, `types` and `typings` are read, whether or not `exports` is present; the entries are their union, deduplicated and sorted.
+
+Each value is a path relative to the package directory, and its entry is written in one spelling: NFC, with no leading `./` however often it repeats, and no `.` or empty segment inside it, so `././src/index.ts`, `./src/./index.ts` and `src//index.ts` are all `src/index.ts`. These values contribute no entry:
+
+- the package directory itself: `""`, `"."`, `"./"`, `"./."`. `"main": "./"` is a legal npm value (it resolves to `./index.js`), and `"./": "./"` is the folder-mapping form of `exports` that Node accepted before subpath patterns
+- any other directory, which is a value whose last segment is empty or `.`: `"./lib/"`, `"./lib/."`, or the target of a folder mapping such as `"./lib/": "./lib/"`
+- an absolute path (`"/"`, `"/dist/index.js"`), one whose first segment reads as a Windows drive (`"C:/dist/index.js"`, `"a:index.js"`, though `"ab:index.js"` is kept), or one holding a `..` segment, even `"./src/../index.js"`, which stays inside the package: an entry is the value's own spelling, never a path resolved from it
+- a value holding a backslash, which a Document cannot spell ([`ir-schema.md`](./ir-schema.md) §14 #10)
+- a value that is not a string, such as `"main": 42`
+
+An entry is the file the manifest names, not a file a resolver would find for it. `index.js` inside a directory is Node's lookup, and a folder mapping exports whatever the directory holds at the time; neither is a path the manifest wrote. An empty entry in particular would be no glob at all, and the schema refuses it.
+
+If no value gives an entry, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
 
 For Python / Go / Rust, each language plugin will provide "public API file" inference logic in a future release (see the [roadmap](../roadmap.md)). Today only JS/TS is covered.
 
@@ -412,6 +423,9 @@ Implementation guidance:
 | CD42 | The same, at `data/pg`, with `.gitignore` holding `pg/` | The census and the nx search pass over `data/pg`, and with `respectGitignore` off end as in CD41. The resolution of `packages: ["data/*"]` ends as in CD41 either way |
 | CD42a | `nx.json`, `libs/shared/project.json` and `build/project.json`, with `.gitignore` holding `build/` | nx's roots are `["libs/shared"]`; with `respectGitignore` off, `["build", "libs/shared"]` |
 | CD42b | `packages: ["packages/*"]`, with `packages/foo` a link to `vendor/foo` whose resolution fails with `EACCES`, `EPERM` or `EIO` | Detection ends with `scan-directory-unreadable` naming `packages/foo`. With `ENOENT` or `ELOOP` it runs, without `packages/foo` |
+| CD47 | `package.json#main: "./"`, or `exports: {".": "./src/ok.js", "./": "./"}` | No entry for the package directory: no `publicApi` key, or `publicApi = ["src/ok.js"]`. The IR satisfies its schema |
+| CD48 | `main`, `module`, `types` or `typings` set to `"."`, `"./."`, `"././"`, `"./lib/"`, `"./lib/."`, `"/"`, `"/dist/index.mjs"`, `"C:/dist/index.d.ts"`, `"a:index.js"`, `"../shared/index.d.ts"` or `"./src/../index.js"`, or to a value that is not a string; or an `exports` folder mapping `"./lib/": "./lib/"` | No entry for any of them |
+| CD49 | `main: "././dist/index.js"`, `module: "./dist/./index.js"` or `types: "dist//index.js"` | publicApi = ["dist/index.js"] for each |
 
 ## 11. Design decisions
 

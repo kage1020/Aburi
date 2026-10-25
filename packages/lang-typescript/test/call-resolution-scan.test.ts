@@ -3,24 +3,27 @@ import { describe, expect, it } from "vitest"
 import { scanTypeScript } from "./fixtures/scan"
 
 const workspace = useScratchWorkspace("call-resolution")
-const MAIN = "ts:src/use.ts#main"
 
-/** Write `modules` and a `main` in `src/use.ts` that imports and calls into them, and scan. */
+/** Write `modules` and a `main` in `file` that imports and calls into them, and scan. */
 async function callsFromMain(
   modules: Record<string, string>,
   imports: readonly string[],
   calls: readonly string[],
+  file = "src/use.ts",
 ) {
   for (const [path, source] of Object.entries(modules)) await workspace.writeSource(path, source)
   const body = calls.map((call) => `  ${call}`)
   const use = [...imports, "", "export function main() {", ...body, "}", ""].join("\n")
-  await workspace.writeSource("src/use.ts", use)
+  await workspace.writeSource(file, use)
 
   const { ir, unresolvedCalls } = await scanTypeScript(workspace.root)
-  const main = ir.symbols.find((s) => s.id === MAIN)
+  const mainId = `ts:${file}#main`
+  const main = ir.symbols.find((s) => s.id === mainId)
   return {
     resolved: main?.calls.map((c) => [c.target, c.resolved]),
-    unresolved: unresolvedCalls.filter((d) => d.symbolId === MAIN).map((d) => [d.target, d.bucket]),
+    unresolved: unresolvedCalls
+      .filter((d) => d.symbolId === mainId)
+      .map((d) => [d.target, d.bucket]),
   }
 }
 
@@ -104,13 +107,14 @@ describe("scan — calls through a default import", () => {
     })
   })
 
-  it("leaves the default exports import scope does not reach unresolved, as known limits", async () => {
+  it("leaves the default exports import scope does not reach unresolved, as known limits, over a namesake", async () => {
     const result = await callsFromMain(
       {
         "src/clause.ts": "function connect() { return 1 }\nexport { connect as default }\n",
         "src/wrapped.ts":
           "function Page() { return 2 }\nfunction withAuth<T>(c: T): T { return c }\nexport default withAuth(Page)\n",
         "src/anon-class.ts": "export default class {\n  static run() { return 3 }\n}\n",
+        "src/namesake.ts": "export class Anon {\n  run() { return 5 }\n}\n",
         "src/impl.ts": "export default function impl() { return 4 }\n",
         "src/barrel.ts": 'export { default } from "./impl"\n',
         "src/renamed-barrel.ts": 'export { default as impl } from "./impl"\n',
@@ -164,5 +168,57 @@ describe("scan — a call through the name of a class a namespace merged into", 
 
     expect(resolved("ts:src/c.ts#f")).toEqual(["ts:src/c.ts#C::m"])
     expect(resolved("ts:src/g.ts#g")).toEqual(["ts:src/c.ts#C::m"])
+  })
+})
+
+describe("scan — a call through the name of a class that lacks the member", () => {
+  const MODULES = {
+    "src/audit-log.ts":
+      "export class Logger {\n  log(message: string) {\n    return message\n  }\n}\n",
+    "src/base-logger.ts": "export class Logger {}\n",
+    "src/barrel.ts":
+      'export { Logger } from "./audit-log"\nexport function other() {\n  return 1\n}\n',
+  }
+
+  it.each([
+    ["a class the caller's file declares", "class Logger {}"],
+    ["a class of fields the caller's file declares, dropped", "class Logger {\n  level = 1\n}"],
+    ["a named import of a class its module declares", 'import { Logger } from "./base-logger"'],
+  ])("stops at %s, bucketed `no-match`", async (_label, head) => {
+    expect(await callsFromMain(MODULES, [head], ['Logger.log("x")'])).toEqual({
+      resolved: [["Logger.log", null]],
+      unresolved: [["Logger.log", "no-match"]],
+    })
+  })
+
+  it.each([
+    ["a barrel that re-exports it", "src/use.ts", 'import { Logger } from "./barrel"'],
+    ["a workspace package", "src/use.ts", 'import { Logger } from "@acme/logging"'],
+    ["a `require` in JavaScript", "src/use.js", 'const { Logger } = require("./audit-log")'],
+    ["an ambient declaration", "src/use.ts", "declare const Logger: { log(m: string): string }"],
+  ])("searches on past %s to the class that declares the member", async (_label, file, head) => {
+    expect(await callsFromMain(MODULES, [head], ['Logger.log("x")'], file)).toEqual({
+      resolved: [["Logger.log", "ts:src/audit-log.ts#Logger.log"]],
+      unresolved: [],
+    })
+  })
+})
+
+describe("scan — a call through the name of a dropped class", () => {
+  it("reaches a member a namespace merged into the class keeps", async () => {
+    const head = [
+      "class Config {",
+      "  static readonly A = 1",
+      "}",
+      "namespace Config {",
+      "  export function load() {",
+      "    return 2",
+      "  }",
+      "}",
+    ]
+    expect(await callsFromMain({}, head, ["Config.load()"])).toEqual({
+      resolved: [["Config.load", "ts:src/use.ts#Config::load"]],
+      unresolved: [],
+    })
   })
 })

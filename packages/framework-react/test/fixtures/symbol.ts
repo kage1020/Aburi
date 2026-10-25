@@ -12,13 +12,21 @@ export function makeCandidate(overrides: CandidateOverrides): SymbolCandidate<un
   return makeSharedCandidate(overrides, { filePath: "src/a.tsx" })
 }
 
+/** The Symbols the TypeScript plugin extracts from `source`, nodes and all. */
+export async function candidatesOf(
+  source: string,
+  path = "src/f.tsx",
+): Promise<SymbolCandidate<unknown>[]> {
+  return (await extractFile(langTypescriptPlugin, path, source)).candidates
+}
+
 /** The Symbol the TypeScript plugin extracts from `source` under `name`, nodes and all. */
 export async function candidateNamed(
   source: string,
   name: string,
   path = "src/f.tsx",
 ): Promise<SymbolCandidate<unknown>> {
-  const { candidates } = await extractFile(langTypescriptPlugin, path, source)
+  const candidates = await candidatesOf(source, path)
   const found = candidates.find((candidate) => candidate.name === name)
   if (found === undefined) {
     throw new Error(`no Symbol named ${name}; have ${candidates.map((c) => c.name).join(", ")}`)

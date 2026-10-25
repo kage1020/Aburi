@@ -49,6 +49,7 @@ export {
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  posixSpellingViolation,
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
   type SegmentOptions,
@@ -149,9 +150,11 @@ export {
   asSyntaxNode,
   calleeLeaf,
   calleeText,
+  declaratorValue,
   findFirstDescendantOfType,
   findNamedChildOfType,
   type SyntaxNode,
+  unwrapValue,
 } from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {

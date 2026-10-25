@@ -261,20 +261,19 @@ function languageIdViolation(language: string): GrammarViolation | null {
 const PATH_SUBJECT = "path"
 const SYMBOL_ID_PATH_SUBJECT = "Symbol id file path"
 
+const PATH_BACKSLASH_REASON =
+  '"/" is the only separator a Document path has, so a native path must be converted before it reaches this rule, and a name holding one cannot be written here at all'
+
+export function posixSpellingViolation(value: string, subject: string): GrammarViolation | null {
+  return spellingViolation(value, subject, 'write "/" as the separator')
+}
+
 export function posixWorkspaceRelativeViolation(
   path: string,
   subject: string = PATH_SUBJECT,
 ): GrammarViolation | null {
-  if (path.length === 0) {
-    return { code: "non-posix-path", message: `${subject} is empty`, value: path }
-  }
-  if (backslashPrefix(path) !== null) {
-    return {
-      code: "non-posix-path",
-      message: `${subject} "${path}" contains a backslash; "/" is the only separator a Document path has, so a native path must be converted before it reaches this rule, and a name holding one cannot be written here at all`,
-      value: path,
-    }
-  }
+  const spelling = spellingViolation(path, subject, PATH_BACKSLASH_REASON)
+  if (spelling !== null) return spelling
   if (ABSOLUTE_PATH_PATTERN.test(path)) {
     return {
       code: "non-posix-path",
@@ -295,6 +294,24 @@ export function posixWorkspaceRelativeViolation(
       code: "non-posix-path",
       message: `${subject} "${path}" contains a "." segment; a path has one spelling, and "${segments.filter((s) => s !== ".").join("/")}" is it`,
       value: path,
+    }
+  }
+  return null
+}
+
+function spellingViolation(
+  value: string,
+  subject: string,
+  backslashReason: string,
+): GrammarViolation | null {
+  if (value.length === 0) {
+    return { code: "non-posix-path", message: `${subject} is empty`, value }
+  }
+  if (backslashPrefix(value) !== null) {
+    return {
+      code: "non-posix-path",
+      message: `${subject} "${value}" contains a backslash; ${backslashReason}`,
+      value,
     }
   }
   return null
