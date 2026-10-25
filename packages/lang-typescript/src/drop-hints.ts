@@ -1,6 +1,7 @@
 import type { DropHint, ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, functionValueOf } from "./ast-helpers"
+import { bodyNodesOf } from "./ast-helpers"
+import { functionAFieldHolds } from "./class-members"
 
 export const TYPESCRIPT_FILE_DROP_PATTERNS: readonly string[] = [
   "**/*.d.ts",
@@ -43,7 +44,7 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
       case "class_static_block":
         return null
       case "public_field_definition":
-        if (functionValueOf(member) !== null) return null
+        if (functionAFieldHolds(member) !== null) return null
         hasAnyField = true
         if (!isConstantLikeField(member)) allStaticLiteral = false
         break

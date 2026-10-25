@@ -8,7 +8,12 @@ import type {
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, thrownValue } from "./ast-helpers"
 import { readCall } from "./callee"
-import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
+import {
+  functionValuedField,
+  heldFunctionBodies,
+  isConstructorMember,
+  memberSymbolSegment,
+} from "./class-members"
 import { containsEarlyExit } from "./early-exit"
 import { objectEntryOf } from "./object-members"
 import { conditionText, isTrivialExpr, LOOP_KINDS, makeRule, ruleText } from "./rules"
@@ -53,18 +58,16 @@ function visitOwnClassBody(
 ): void {
   for (const member of body.namedChildren) {
     if (member === null) continue
-    const memberBody = memberBodySkippedHere(classNode, member)
-    if (memberBody === null) {
+    const memberBodies = memberBodiesSkippedHere(classNode, member)
+    if (memberBodies.length === 0) {
       visitNode(member, rules, calls)
       continue
     }
-    const parameters = memberBody.parent?.childForFieldName("parameters") ?? null
-    if (parameters === null) {
-      visitExcluding(member, [memberBody], rules, calls)
-      continue
-    }
-    visitExcluding(member, [memberBody, parameters], rules, calls)
-    visitParameterDecorators(parameters, rules, calls)
+    const parameterLists = memberBodies.flatMap(
+      (memberBody) => memberBody.parent?.childForFieldName("parameters") ?? [],
+    )
+    visitExcluding(member, [...memberBodies, ...parameterLists], rules, calls)
+    for (const parameters of parameterLists) visitParameterDecorators(parameters, rules, calls)
   }
 }
 
@@ -97,8 +100,13 @@ function visitExcluding(
 ): void {
   for (const part of node.namedChildren) {
     if (part === null || skipped.some((s) => s.id === part.id)) continue
-    if (skipped.some((s) => isAncestorOf(part, s))) visitExcluding(part, skipped, rules, calls)
-    else visitNode(part, rules, calls)
+    if (!skipped.some((s) => isAncestorOf(part, s))) {
+      visitNode(part, rules, calls)
+      continue
+    }
+    // A call on the way to a skipped body runs here: it is what the body is handed to.
+    if (part.type === "call_expression" || part.type === "new_expression") recordCall(part, calls)
+    visitExcluding(part, skipped, rules, calls)
   }
 }
 
@@ -118,10 +126,13 @@ function isAncestorOf(node: Node, descendant: Node): boolean {
   return false
 }
 
-function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
-  if (memberSymbolSegment(classNode, member) === null) return null
-  if (isConstructorMember(member)) return null
-  return (functionValuedField(member) ?? member).childForFieldName("body")
+function memberBodiesSkippedHere(classNode: Node, member: Node): Node[] {
+  if (memberSymbolSegment(classNode, member) === null) return []
+  if (isConstructorMember(member)) return []
+  const held = functionValuedField(member)
+  if (held !== null) return heldFunctionBodies(held)
+  const body = member.childForFieldName("body")
+  return body === null ? [] : [body]
 }
 
 function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {

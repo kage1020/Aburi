@@ -65,6 +65,30 @@ describe.each([
   })
 })
 
+describe("scan — a class whose field holds a function handed to a call", () => {
+  it("puts the write on the member, so constructing the class does not report it", async () => {
+    await workspace.writeSource(
+      "src/user.service.ts",
+      userService([
+        "handle = withAuth(async (data: unknown) => {",
+        "  return this.prisma.user.create({ data })",
+        "})",
+      ]),
+    )
+    await workspace.writeSource("src/factory.ts", FACTORY)
+
+    const result = await scanWorkspace()
+    const handle = symbolById(result, "ts:src/user.service.ts#UserService.handle")
+    const service = symbolById(result, "ts:src/user.service.ts#UserService")
+
+    expect([handle.kind, handle.dropped]).toEqual(["method", false])
+    expect(handle.effects.map((e) => e.id)).toEqual(["db.write"])
+    expect([service.dropped, service.effects]).toEqual([false, []])
+    expect(service.calls.map((c) => c.target)).toEqual(["withAuth"])
+    expect(symbolById(result, "ts:src/factory.ts#makeService").effects).toEqual([])
+  })
+})
+
 function writeBoot(className: string, module: string, args = ""): Promise<void> {
   return workspace.writeSource(
     "src/boot.ts",

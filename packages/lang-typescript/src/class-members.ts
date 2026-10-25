@@ -1,6 +1,8 @@
 import { isQnameSegment } from "@aburi/core"
+import type { MergedDeclaration } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { functionValueOf, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
+import { wrappedFunctions } from "./call-symbols"
 import { decodeStringLiteral } from "./string-escape"
 
 const CONSTRUCTION_SEGMENT = "constructor"
@@ -33,11 +35,33 @@ export function memberSymbolSegment(classNode: Node, member: Node): string | nul
   return functionValuedField(member) === null ? null : segment
 }
 
-export function functionValuedField(member: Node): Node | null {
+/** A function a field holds runs when the member is called, not when the class is constructed. */
+export type HeldFunction =
+  | { readonly kind: "function"; readonly fn: Node }
+  | {
+      readonly kind: "handed-to-a-call"
+      readonly handlers: readonly [MergedDeclaration<Node>, ...MergedDeclaration<Node>[]]
+    }
+
+export function functionValuedField(member: Node): HeldFunction | null {
   if (member.type !== "public_field_definition") return null
   const segment = memberNameSegment(member)
   if (segment === null || segment === CONSTRUCTION_SEGMENT) return null
-  return functionValueOf(member)
+  return functionAFieldHolds(member)
+}
+
+export function functionAFieldHolds(field: Node): HeldFunction | null {
+  const fn = functionValueOf(field)
+  if (fn !== null) return { kind: "function", fn }
+  const value = field.childForFieldName("value")
+  const [lead, ...rest] = value === null ? [] : wrappedFunctions(value, field)
+  return lead === undefined ? null : { kind: "handed-to-a-call", handlers: [lead, ...rest] }
+}
+
+export function heldFunctionBodies(held: HeldFunction): Node[] {
+  if (held.kind === "handed-to-a-call") return held.handlers.flatMap((h) => h.bodyNode ?? [])
+  const body = held.fn.childForFieldName("body")
+  return body === null ? [] : [body]
 }
 
 export function isConstructorMember(member: Node): boolean {

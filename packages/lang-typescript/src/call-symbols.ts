@@ -76,6 +76,11 @@ export function visitCallStatement(
   }
 }
 
+export function wrappedFunctions(value: Node, declaration: Node): MergedDeclaration<Node>[] {
+  const call = unwrapValue(value)
+  return call.type === "call_expression" ? inlineHandlers(call, declaration) : []
+}
+
 export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration<Node>[] {
   const bodies: Node[] = []
   for (const step of spineCalls(call)) {

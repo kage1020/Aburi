@@ -131,7 +131,7 @@ An index signature (`[key: string]: unknown`) is part of the shape, so it leaves
 
 A field whose value is a function *the plugin recognises as one* is a method for this rule (`create = (d) => { … }`, `create = function (d) { … }`). It declares behaviour, not a shape, and a class written entirely that way is not a data model. The question is the field's value, not whether the member became a Symbol: a member the plugin could not name — a computed name, say — is still not data.
 
-The recognised set is the language plugin's, and it is narrower than "holds a function": a generator, or a function behind a wrapper (`handle = withAuth(() => …)`), reads as data here. A class of nothing else is dropped, and the calls the owner was carrying for it go with it, which is a loss rather than a filter. Widening the set is one decision for the plugin and not three, since the same predicate decides whether the member gets a Symbol at all.
+The recognised set is the language plugin's, and it is narrower than "holds a function": a function handed directly to a call the field holds is in it (`handle = withAuth(() => …)`, [`lang-plugin.md`](./lang-plugin.md) LP20f1), and a generator, or a function deeper in the value (`handle = withAuth(withLogging(() => …))`), reads as data here. A class of nothing else is dropped, and the calls the owner was carrying for it go with it, which is a loss rather than a filter. Widening the set is one decision for the plugin and not three, since the same predicate decides whether the member gets a Symbol at all.
 
 Being such a function is the only way a field's value keeps the class. Any other initializer, a call included (`seed = makeSeed()`, `static rows = db.load()`), leaves the member a field declaration, although it runs on construction or definition and is walked on the class: a class of such fields is a DTO, and those calls go with it, the same loss as the wrapper's.
 
@@ -352,6 +352,7 @@ Properties the extraction pipeline must satisfy.
 | B1 | pure DTO (`class Foo { x: number; y: string }`) | `dropped: true, dropReason: "pure DTO"` |
 | B1b | a class of a field and a static block (`class Registry { static items: string[] = []; static { prisma.user.deleteMany() } }`), and the same class without the field | `dropped: false` with `prisma.user.deleteMany` in the class's `calls`, either way; without the block, `dropped: true, dropReason: "pure DTO"` |
 | B1c | a class of a field and a getter, a setter or a constructor | `dropped: false` |
+| B1c1 | a class of a field holding a function handed to a call (`handle = withAuth(() => { inner() })`), and the same field under a computed name | `dropped: false` either way; the named field's `inner` is in the member's `calls` and `withAuth` in the class's |
 | B1d | a class of a field and an index signature, a `declare` field, an `accessor` field, a field holding a call (`seed = compute()`) or a comment | `dropped: true, dropReason: "pure DTO"` |
 | B1e | a class of `static readonly` literals with a doc comment, a line comment or a stray `;` among them; the same class beside an index signature | `dropped: true, dropReason: "pure constants"`; beside the index signature, `"pure DTO"` |
 | B2 | `interface Foo { x: number }` | `dropped: true, dropReason: "interface (data model)"` |
