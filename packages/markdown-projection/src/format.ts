@@ -149,13 +149,14 @@ export function renderDecoratorList(decorators: readonly Decorator[]): string {
 export function signatureLine(signature: Signature | null | undefined): string | null {
   if (signature === null || signature === undefined) return null
   const inputs = signature.inputs.map(formatInput).join(", ")
-  const outputs = signature.outputs.length > 0 ? signature.outputs.join(" | ") : "void"
+  // An empty list means nothing was written or inferred, which is not `void`.
+  const outputs = signature.outputs.length > 0 ? ` → ${signature.outputs.join(" | ")}` : ""
   const throwsPart = signature.throws.length > 0 ? ` throws ${joinCode(signature.throws)}` : ""
   const asyncBadge = signature.async ? " ⚡async" : ""
   const genBadge = signature.generator ? " *generator*" : ""
   const typeParams =
     signature.typeParameters.length > 0 ? typeParametersText(signature.typeParameters) : ""
-  return `${inlineCode(`${typeParams}(${inputs}) → ${outputs}`)}${throwsPart}${asyncBadge}${genBadge}`
+  return `${inlineCode(`${typeParams}(${inputs})${outputs}`)}${throwsPart}${asyncBadge}${genBadge}`
 }
 
 export function typeParametersText(typeParameters: readonly string[]): string {

@@ -400,7 +400,7 @@ A symbol with everything empty (class without boundary, no methods) is normally 
 
 ### 5.5 Signature display
 
-`(name: type, name: type) → output` form, in one code span. Multiple outputs are separated by `|`. ``throws `A`, `B` `` is appended, each thrown type in a span of its own: `Signature.throws` items are unconstrained strings ([ir-schema.md](./ir-schema.md) §7, §3.4.2).
+`(name: type, name: type) → output` form, in one code span. Multiple outputs are separated by `|`. An empty `outputs` prints nothing after the inputs, `(x: number)`: the source wrote no return type and nothing inferred one, which is not the `void` a function annotated `(): void` declares. ``throws `A`, `B` `` is appended, each thrown type in a span of its own: `Signature.throws` items are unconstrained strings ([ir-schema.md](./ir-schema.md) §7, §3.4.2).
 Type parameters lead the span (`<T,U>(…)`); `⚡async` and `*generator*` follow it.
 
 Each input is written as TypeScript writes it, whatever language the IR came from: an input's `optional` and `rest` fields ([ir-schema.md](./ir-schema.md) §7) print as `a?: string` and `...ids: string[]`, and a defaulted input as the optional one it is to a caller, `limit?`. An input with an empty `type` prints its name alone, `x`. The `signature.inputs` rows of a diff entry spell inputs the same way.
