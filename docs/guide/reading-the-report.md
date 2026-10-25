@@ -59,8 +59,21 @@ does.
 - signature.throws added: `PaymentDeclined`
 ```
 
-A change entry lists what differs. For an added or removed symbol, Aburi
-renders the whole thing:
+A change entry lists what differs. A rule, effect, call or decorator that was
+edited rather than added or removed sits under `modified`, with the old value
+beside the new one:
+
+```md
+- rules modified:
+  - loop (`for` → `while`) (L3)
+- effects modified:
+  - db.write: `prisma.user.create` (L5) [effects-prisma] ⚠ medium (was high)
+```
+
+When several elements of one kind were edited at once, such as two guards, and
+their old values differ, that field shows only the new value.
+
+For an added or removed symbol, Aburi renders the whole thing:
 
 ```md
 ### `refundOrder` *(function)*
@@ -71,7 +84,7 @@ renders the whole thing:
 - throw: `new RefundNotAllowed()` (L68)
 
 **Effects**:
-- db.write: `prisma.order.update` (L72)
+- db.write: `prisma.order.update` (L72) [effects-prisma]
 ```
 
 Three field groups carry most of the meaning.
@@ -90,7 +103,8 @@ branches. A removed `guard` line means somebody removed a condition.
 
 Aburi flags anything it is less sure about. A symbol carries the badge on its
 heading; an effect, at the end of its row. When the badge on a symbol moves, the
-entry says so with a `confidence: before → after` line.
+entry says so with a `confidence: before → after` line; when an effect's moves,
+its row under `effects modified` ends with the old one, `(was high)`.
 
 | Marker | Meaning |
 |---|---|
@@ -145,7 +159,7 @@ grouped by file, with its boundaries, signature, rules, effects, and calls.
 - throw: `new EmptyCart()` (L22)
 
 **Effects**:
-- db.write: `prisma.order.create` (L34)
+- db.write: `prisma.order.create` (L34) [effects-prisma]
 ```
 
 To look at one symbol, skip the file and ask for it:

@@ -159,28 +159,46 @@ export function signatureLine(signature: Signature | null | undefined): string |
 }
 
 export function ruleRow(rule: Rule): string[] {
-  const lineTag = `(L${rule.line})`
-  switch (rule.type) {
+  const { type, line } = rule
+  switch (type) {
     case "guard":
     case "switch":
     case "match":
-      return payloadRow(rule.type, requireField(rule, "condition"), rule.line)
+      return payloadRow(type, requireField(rule, "condition"), line)
     case "throw":
-      return payloadRow(rule.type, requireField(rule, "what"), rule.line)
+      return payloadRow(type, requireField(rule, "what"), line)
     case "return":
-      return payloadRow(rule.type, requireField(rule, "expr"), rule.line)
-    case "loop":
-      return [`- loop (${inlineCode(requireField(rule, "loopKind"))}) ${lineTag}`]
+      return payloadRow(type, requireField(rule, "expr"), line)
+    case "loop": {
+      const loopKind = inlineCode(requireField(rule, "loopKind"))
+      return [`- ${ruleRowText({ type, payload: null, loopKind, line })}`]
+    }
     case "try":
-      return [`- try ${lineTag}`]
+      return [`- ${ruleRowText({ type, payload: null, loopKind: null, line })}`]
     default:
       return assertNeverRule(rule)
   }
 }
 
-function payloadRow(label: string, value: string, line: number): string[] {
-  if (fitsInline(value)) return [`- ${label}: ${inlineCode(value)} (L${line})`]
-  return [`- ${label} (L${line}):`, ...fencedBlock(value, LIST_ITEM_INDENT).split("\n")]
+/** A rule row's parts, each already rendered, so a diff's delta row can set a base value beside one. */
+export interface RuleRowParts {
+  readonly type: string
+  readonly payload: string | null
+  readonly loopKind: string | null
+  readonly line: number
+}
+
+export function ruleRowText(parts: RuleRowParts): string {
+  const payload = parts.payload === null ? "" : `: ${parts.payload}`
+  const loopKind = parts.loopKind === null ? "" : ` (${parts.loopKind})`
+  return `${parts.type}${payload}${loopKind} (L${parts.line})`
+}
+
+function payloadRow(type: string, value: string, line: number): string[] {
+  if (fitsInline(value)) {
+    return [`- ${ruleRowText({ type, payload: inlineCode(value), loopKind: null, line })}`]
+  }
+  return [`- ${type} (L${line}):`, ...fencedBlock(value, LIST_ITEM_INDENT).split("\n")]
 }
 
 export class ProjectionInvariantError extends Error {
@@ -208,10 +226,13 @@ function assertNeverRule(rule: Rule): never {
 }
 
 export function effectRow(eff: Effect): string {
-  if (eff.propagated === true) {
-    return `- ${eff.id}: ${inlineCode(eff.target)} ${propagatedFromSuffix(eff.derivedFrom ?? [])} [${eff.plugin}]${confidenceBadge(eff.confidence)}`
-  }
-  return `- ${eff.id}: ${inlineCode(eff.target)} (L${eff.line}) [${eff.plugin}]${confidenceBadge(eff.confidence)}`
+  return `- ${effectRowText({
+    id: eff.id,
+    target: inlineCode(eff.target),
+    origin: effectOrigin(eff),
+    plugin: eff.plugin,
+    badge: confidenceBadge(eff.confidence),
+  })}`
 }
 
 export function propagatedFromSuffix(derivedFrom: readonly string[]): string {
@@ -233,8 +254,35 @@ export function compareEffectIdentity(a: Effect, b: Effect): number {
   return compareStrings(a.id, b.id) || compareStrings(a.target, b.target)
 }
 
+/** An effect row's parts, each already rendered, so a diff's delta row can set a base value beside one. */
+export interface EffectRowParts {
+  readonly id: string
+  readonly target: string
+  readonly origin: string
+  readonly plugin: string | null
+  readonly badge: string
+}
+
+export function effectRowText(parts: EffectRowParts): string {
+  const plugin = parts.plugin === null ? "" : ` [${parts.plugin}]`
+  return `${parts.id}: ${parts.target} ${parts.origin}${plugin}${parts.badge}`
+}
+
+export function effectOrigin(eff: {
+  readonly line?: number | undefined
+  readonly propagated?: boolean | undefined
+  readonly derivedFrom?: readonly string[] | undefined
+}): string {
+  if (eff.propagated === true) return propagatedFromSuffix(eff.derivedFrom ?? [])
+  return `(L${eff.line})`
+}
+
 export function callRow(call: Call): string {
-  return `- ${inlineCode(call.target)} (L${call.line})`
+  return `- ${callRowText(call)}`
+}
+
+export function callRowText(call: { readonly target: string; readonly line: number }): string {
+  return `${inlineCode(call.target)} (L${call.line})`
 }
 
 export function fingerprintLine(fp: Fingerprint): string | null {
