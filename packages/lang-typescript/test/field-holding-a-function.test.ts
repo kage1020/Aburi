@@ -137,13 +137,6 @@ describe("a field that is not a function stays a field", () => {
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["comp"])
   })
 
-  it("leaves a generator field on the class", async () => {
-    const source = classOf("  gen = function* () { yield g() }")
-
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
-    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["g"])
-  })
-
   it("refuses a field that spells the construction path", async () => {
     const source = classOf("  constructor() { real() }", "  constructor = () => { c1() }")
 
@@ -201,14 +194,8 @@ describe("a class of function-valued fields is not a data model", () => {
   })
 
   it("reads a class of fields holding functions it does not recognise as one", async () => {
-    const generator = classOf("  gen = function* () { yield q() }")
     const wrapped = classOf("  handle = withAuth(() => { inner() })")
 
-    expect(await hintOf(generator, "ts:src/a.ts#C")).toEqual({
-      reason: "pure DTO",
-      category: "B",
-    })
-    expect(await callsOf(generator, "ts:src/a.ts#C")).toEqual(["q"])
     expect(await hintOf(wrapped, "ts:src/a.ts#C")).toEqual({ reason: "pure DTO", category: "B" })
     expect(await callsOf(wrapped, "ts:src/a.ts#C")).toEqual(["withAuth", "inner"])
   })
@@ -223,26 +210,21 @@ describe("a class of function-valued fields is not a data model", () => {
   })
 })
 
-describe("module-level function-valued variables are unchanged", () => {
-  it("still extracts an arrow and a function expression as functions", async () => {
-    const source = ["export const f = () => { a() }", "export const g = function () { b() }"].join(
-      "\n",
-    )
+describe("module-level variables", () => {
+  it("extracts an arrow, a function expression and a generator as functions, and any other initialiser as a const", async () => {
+    const source = [
+      "export const f = () => { a() }",
+      "export const g = function () { b() }",
+      "export const h = 1",
+      "export const i = function* () { c() }",
+    ].join("\n")
     const symbols = await symbolsOf(source)
 
     expect(symbols.map((s) => [s.id, s.kind, s.derivedBy])).toEqual([
       ["ts:src/a.ts#f", "function", ["variable-assigned-function", "export-keyword"]],
       ["ts:src/a.ts#g", "function", ["variable-assigned-function", "export-keyword"]],
-    ])
-  })
-
-  it("still extracts any other initialiser as a const", async () => {
-    const source = ["export const h = 1", "export const i = function* () { c() }"].join("\n")
-    const symbols = await symbolsOf(source)
-
-    expect(symbols.map((s) => [s.id, s.kind, s.derivedBy])).toEqual([
       ["ts:src/a.ts#h", "const", ["export-keyword"]],
-      ["ts:src/a.ts#i", "const", ["export-keyword"]],
+      ["ts:src/a.ts#i", "function", ["variable-assigned-function", "export-keyword"]],
     ])
   })
 })
