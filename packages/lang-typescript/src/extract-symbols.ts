@@ -24,6 +24,7 @@ import {
   topLevelVisibility,
 } from "./export-evidence"
 import { readLeadingJsDoc } from "./leading-jsdoc"
+import { isControlStatement, makeModuleScopeCandidate, runsCode } from "./module-scope"
 import { makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
 import {
@@ -39,11 +40,18 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
   const root = tree.rootNode
   if (root === null) return []
   const out = makeCandidateSink()
-  const callState = makeCallExtractionState()
+  const state: FileState = { calls: makeCallExtractionState(), moduleScope: [] }
   for (const stmt of root.namedChildren) {
-    if (stmt !== null) visitStatement(stmt, ctx, [], out, callState)
+    if (stmt !== null) visitStatement(stmt, ctx, [], out, state)
   }
+  const moduleScope = makeModuleScopeCandidate(state.moduleScope, ctx)
+  if (moduleScope !== null) out.add(moduleScope)
   return promoteDetachedExports(root, out.list())
+}
+
+interface FileState {
+  calls: CallExtractionState
+  moduleScope: Node[]
 }
 
 function visitStatement(
@@ -51,18 +59,18 @@ function visitStatement(
   ctx: ExtractionContext,
   namespacePath: readonly string[],
   out: CandidateSink,
-  callState: CallExtractionState,
+  state: FileState,
 ): void {
   if (node.type === "export_statement") {
     const declarationNode = exportedDeclaration(node)
     if (declarationNode === null) return
-    visitStatement(declarationNode, ctx, namespacePath, out, callState)
+    visitStatement(declarationNode, ctx, namespacePath, out, state)
     return
   }
   if (node.type === AMBIENT_DECLARATION_TYPE) {
     const declarationNode = ambientDeclaration(node)
     if (declarationNode === null) return
-    visitStatement(declarationNode, ctx, namespacePath, ambientSink(out), callState)
+    visitStatement(declarationNode, ctx, namespacePath, ambientSink(out), state)
     return
   }
   switch (node.type) {
@@ -99,7 +107,7 @@ function visitStatement(
     case "internal_module":
     case "module":
     case "namespace_declaration":
-      addNamespaceAndBody(node, ctx, namespacePath, out, callState)
+      addNamespaceAndBody(node, ctx, namespacePath, out, state)
       return
     case "lexical_declaration":
     case "variable_declaration":
@@ -113,15 +121,17 @@ function visitStatement(
     case "expression_statement": {
       const wrapped = wrappedDeclaration(node)
       if (wrapped !== null) {
-        visitStatement(wrapped, ctx, namespacePath, out, callState)
+        visitStatement(wrapped, ctx, namespacePath, out, state)
         return
       }
-      if (namespacePath.length !== 0) return
-      const candidate = visitCallStatement(node, ctx, callState)
+      const candidate =
+        namespacePath.length === 0 ? visitCallStatement(node, ctx, state.calls) : null
       if (candidate !== null) out.add(candidate)
+      else if (runsCode(node)) state.moduleScope.push(node)
       return
     }
     default:
+      if (isControlStatement(node) && runsCode(node)) state.moduleScope.push(node)
       return
   }
 }
@@ -199,7 +209,7 @@ function addNamespaceAndBody(
   ctx: ExtractionContext,
   namespacePath: readonly string[],
   out: CandidateSink,
-  callState: CallExtractionState,
+  state: FileState,
 ): void {
   const body = node.childForFieldName("body") ?? findChild(node, "statement_block")
   const declaredName = declaredNamespaceName(node, body)
@@ -228,7 +238,7 @@ function addNamespaceAndBody(
   for (const stmt of body.namedChildren) {
     if (stmt === null) continue
     const underMember = everyStatementUnderMember || stmt.type === "export_statement"
-    visitStatement(stmt, ctx, path, underMember ? members : out, callState)
+    visitStatement(stmt, ctx, path, underMember ? members : out, state)
   }
 }
 

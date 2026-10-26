@@ -358,6 +358,7 @@ Properties the extraction pipeline must satisfy.
 | B3 | `type Bar = string` | `dropped: true, dropReason: "type alias"` |
 | B4 | `export { x } from './y'` | `dropped: true, dropReason: "re-export"` |
 | B5 | class with a boundary decorator (`@Controller`), even without methods | `dropped: false` |
+| B6 | a file whose top level is `i18n.init({ lng: "en" })`, with and without `suppress: ["i18n"]` | its `<module>` is `dropped: false` either way, with the call `i18n.init` without the suppression and none under it (§10.9) |
 
 ### 8.3 Node-level (Category C)
 
@@ -472,3 +473,8 @@ A tool's directory earns its own pattern when the tool's own setup leaves it out
 A directory below the workspace root that holds a `.git` is a checkout of its own, and git treats it so: `git status` lists it as one entry, and none of its files is the outer commit's. Walking into it read files the outer commit does not hold. Three layouts put one there, the three the workspace-root walk stops at ([`component-detect.md` §11.1](./component-detect.md)): a linked worktree kept inside the main checkout, a nested repository or a submodule, and the base worktree `aburi diff` creates under an in-repository `TMPDIR`, which it keeps while it scans the head. Once dot directories were walked (§10.7), the layouts people keep in one came in too: with a worktree at `.claude/worktrees/feat`, `aburi diff HEAD..HEAD` in the main checkout reported that worktree's Symbols as added, and an nx project in it became a second Component. `.gitignore` could not be counted on to keep them out: Claude Code keeps worktrees in `.claude/worktrees/` without adding it there, and `.git/info/exclude` is not read (§3.3).
 
 So the walk stops where git stops. A submodule or a vendored clone that keeps its `.git` is scanned from its own root and not from the repository around it, which is what `aburi diff` already did with submodules: it leaves them out of both file scans ([`cli-spec.md`](./cli-spec.md) §6.4.1). The resolution of declared package patterns is the exception, because it stands for pnpm and npm, which walk into a nested checkout: a package declared there is still a candidate.
+
+### 10.9 Why the module scope has no drop pattern
+
+A file's `<module>` Symbol ([`ir-schema.md`](./ir-schema.md) §3.3) is kept whatever it holds. Whether what a module does on import is ceremony or the point is a question about the calls it makes, not about the Symbol: `i18n.init({ lng: "en" })` at the top of a file is ceremony and `prisma.user.deleteMany({})` is the point, and the two are the same kind of statement. So the answer sits where calls are answered. `suppress` (§6.1) takes a ceremony call out of it as out of any body, and `ignore` (§3.4) takes out a file whose top level is not worth reading at all — a test file's `describe` and `it` callbacks are its module scope, so a workspace that does not want its tests read lists them there. A pattern on the Symbol would drop the write along with the ceremony.
+

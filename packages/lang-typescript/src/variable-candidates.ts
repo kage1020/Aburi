@@ -2,7 +2,7 @@ import { unwrapValue } from "@aburi/core"
 import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { asFunctionValue, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
-import { inlineHandlers } from "./call-symbols"
+import { inlineHandlers, invokedFunction } from "./call-symbols"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
 import { exportEvidence, topLevelVisibility } from "./export-evidence"
@@ -84,7 +84,8 @@ function makeVariableCandidate(
       ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
     ]
   }
-  const [lead, ...rest] = initializer === null ? [] : wrappedFunctions(initializer, statement)
+  const { bodies, evidence } = initializerFunctions(initializer, statement)
+  const [lead, ...rest] = bodies
   return [
     {
       id,
@@ -95,10 +96,7 @@ function makeVariableCandidate(
       decorators: [],
       signature: null,
       source: makeSourceRange(statement, ctx),
-      derivedBy:
-        lead === undefined
-          ? exportEvidence(statement)
-          : ["call-argument-function", ...exportEvidence(statement)],
+      derivedBy: [...evidence, ...exportEvidence(statement)],
       bodyNode: lead?.bodyNode ?? null,
       fullNode: statement,
       ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
@@ -106,9 +104,24 @@ function makeVariableCandidate(
   ]
 }
 
-function wrappedFunctions(initializer: Node, statement: Node): MergedDeclaration<Node>[] {
-  const call = unwrapValue(initializer)
-  return call.type === "call_expression" ? inlineHandlers(call, statement) : []
+interface InitializerFunctions {
+  bodies: MergedDeclaration<Node>[]
+  evidence: string[]
+}
+
+function initializerFunctions(initializer: Node | null, statement: Node): InitializerFunctions {
+  const call = initializer === null ? null : unwrapValue(initializer)
+  if (call === null || call.type !== "call_expression") return { bodies: [], evidence: [] }
+  const handed = inlineHandlers(call, statement)
+  const invoked = invokedFunction(call)?.childForFieldName("body") ?? null
+  if (invoked === null || invoked.text.length === 0) {
+    return { bodies: handed, evidence: handed.length > 0 ? ["call-argument-function"] : [] }
+  }
+  return {
+    bodies: [{ bodyNode: invoked, fullNode: statement }, ...handed],
+    evidence:
+      handed.length > 0 ? ["invoked-function", "call-argument-function"] : ["invoked-function"],
+  }
 }
 
 function objectMemberCandidates(

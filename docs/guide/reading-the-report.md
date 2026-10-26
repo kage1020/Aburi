@@ -60,6 +60,11 @@ does.
 - signature.throws added: `PaymentDeclined`
 ```
 
+An entry is named after the symbol it is about. Two names are not written in
+the source: `<default>` is a file's anonymous default export, and `<module>` is
+what a file does when it is imported, the statements at its top level that
+declare nothing (`await seed()`, `process.on("SIGTERM", …)`).
+
 A change entry lists what differs. A rule, effect, call or decorator that was
 edited rather than added or removed sits under `modified`, with the old value
 beside the new one:

@@ -379,8 +379,11 @@ describe("what an object member does not reach", () => {
     expect(await idsOf("export default { fetch() { q() } }")).toEqual([])
   })
 
-  it("declares nothing for an object assigned to module.exports", async () => {
-    expect(await idsOf("module.exports = { m() { q() } }", "src/a.js")).toEqual([])
+  it("declares no member for an object assigned to module.exports, which runs at module scope", async () => {
+    const source = "module.exports = { m() { q() } }"
+
+    expect(await idsOf(source, "src/a.js")).toEqual(["ts:src/a.js#<module>"])
+    expect(await callsOf(source, "ts:src/a.js#<module>", "src/a.js")).toEqual(["q"])
   })
 
   it("leaves an object a class field holds on the class", async () => {

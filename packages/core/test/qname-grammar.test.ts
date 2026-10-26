@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { DEFAULT_EXPORT_QNAME, isQnameSegment, isQualifiedName, makeSymbolId } from "../src"
+import {
+  DEFAULT_EXPORT_QNAME,
+  isQnameSegment,
+  isQualifiedName,
+  MODULE_SCOPE_QNAME,
+  makeSymbolId,
+} from "../src"
 
 const ZWNJ = "\u200C"
 const ZWJ = "\u200D"
@@ -96,9 +102,19 @@ describe("what is not a name is still refused, and named", () => {
     )
   })
 
-  it("keeps the default sentinel, which is exempted before the segment check", () => {
-    expect(build(DEFAULT_EXPORT_QNAME)).toBe(`ts:src/a.ts#${DEFAULT_EXPORT_QNAME}`)
-    expect(() => build("<other>")).toThrowError(REFUSED)
+  it.each([
+    ["default", DEFAULT_EXPORT_QNAME],
+    ["module-scope", MODULE_SCOPE_QNAME],
+  ])("keeps the %s sentinel, which is exempted before the segment check", (_label, sentinel) => {
+    expect(build(sentinel)).toBe(`ts:src/a.ts#${sentinel}`)
+  })
+
+  it.each([
+    "<other>",
+    "<module>.m",
+    "<Module>",
+  ])("refuses %s, which no sentinel spells", (qname) => {
+    expect(() => build(qname)).toThrowError(REFUSED)
   })
 })
 
@@ -124,6 +140,7 @@ describe("a producer can ask whether a name is a segment before it builds one", 
     ["a private name, unless asked for", "#v"],
     ["a space", "a b"],
     ["the default sentinel", DEFAULT_EXPORT_QNAME],
+    ["the module-scope sentinel", MODULE_SCOPE_QNAME],
   ])("refuses %s", (_label, segment) => {
     expect(isQnameSegment(segment)).toBe(false)
   })

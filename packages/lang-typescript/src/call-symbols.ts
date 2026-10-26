@@ -95,6 +95,13 @@ export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration
     .map((body) => ({ bodyNode: body, fullNode: declaration }))
 }
 
+export function invokedFunction(call: Node): Node | null {
+  let root: Node | null = null
+  for (const step of spineCalls(call)) root = step
+  const callee = root?.childForFieldName("function") ?? null
+  return callee === null ? null : asFunctionValue(callee)
+}
+
 function* spineCalls(call: Node): Iterable<Node> {
   let cursor: Node | null = call
   while (cursor !== null) {
