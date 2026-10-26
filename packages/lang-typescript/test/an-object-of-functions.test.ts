@@ -65,6 +65,8 @@ describe("a function an object literal holds is a member Symbol", () => {
     ["an async method", "  async f(a: number) { q(a) },"],
     ["a generator method", "  *f(a: number) { yield q(a) },"],
     ["an async generator method", "  async *f(a: number) { yield q(a) },"],
+    ["a generator function", "  f: function* (a: number) { yield q(a) },"],
+    ["an async generator function", "  f: async function* (a: number) { yield q(a) },"],
     ["a wrapped arrow", "  f: ((a: number) => { q(a) }) as H,"],
   ])("declares one for %s", async (_label, entry) => {
     const source = ["export const api = {", entry, "}"].join("\n")

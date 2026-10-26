@@ -8,35 +8,58 @@ describe("a generator function is a function wherever one is read", () => {
       "export const g = function* () { yield fetchPage() }",
       "ts:src/a.ts#g",
       "function",
+      false,
     ],
     [
       "an async binding",
       "export const g = async function* () { yield fetchPage() }",
       "ts:src/a.ts#g",
       "function",
+      true,
     ],
     [
       "a binding behind a wrapper",
       "export const g = (function* () { yield fetchPage() }) as Pages",
       "ts:src/a.ts#g",
       "function",
+      false,
+    ],
+    [
+      "an anonymous default export",
+      "export default function* () { yield fetchPage() }",
+      "ts:src/a.ts#<default>",
+      "function",
+      false,
+    ],
+    [
+      "an async anonymous default export",
+      "export default async function* () { yield fetchPage() }",
+      "ts:src/a.ts#<default>",
+      "function",
+      true,
     ],
     [
       "a class field",
       classOf("  pages = function* () { yield fetchPage() }"),
       "ts:src/a.ts#C.pages",
       "method",
+      false,
     ],
     [
       "an object entry",
       "export const api = { pages: function* () { yield fetchPage() } }",
       "ts:src/a.ts#api.pages",
       "method",
+      false,
     ],
-  ])("gives %s a Symbol of its own whose body is the generator's", async (_site, source, id, kind) => {
+  ])("gives %s a Symbol of its own whose body is the generator's", async (_site, source, id, kind, async) => {
     const symbol = await symbolOf(source, id)
 
-    expect([symbol.kind, symbol.signature?.generator]).toEqual([kind, true])
+    expect([symbol.kind, symbol.signature?.async, symbol.signature?.generator]).toEqual([
+      kind,
+      async,
+      true,
+    ])
     expect(await callsOf(source, id)).toEqual(["fetchPage"])
   })
 

@@ -210,12 +210,13 @@ describe("a class of function-valued fields is not a data model", () => {
   })
 })
 
-describe("module-level function-valued variables are unchanged", () => {
-  it("still extracts an arrow and a function expression as functions", async () => {
+describe("module-level variables", () => {
+  it("extracts an arrow, a function expression and a generator as functions, and any other initialiser as a const", async () => {
     const source = [
       "export const f = () => { a() }",
       "export const g = function () { b() }",
       "export const h = 1",
+      "export const i = function* () { c() }",
     ].join("\n")
     const symbols = await symbolsOf(source)
 
@@ -223,6 +224,7 @@ describe("module-level function-valued variables are unchanged", () => {
       ["ts:src/a.ts#f", "function", ["variable-assigned-function", "export-keyword"]],
       ["ts:src/a.ts#g", "function", ["variable-assigned-function", "export-keyword"]],
       ["ts:src/a.ts#h", "const", ["export-keyword"]],
+      ["ts:src/a.ts#i", "function", ["variable-assigned-function", "export-keyword"]],
     ])
   })
 })
