@@ -56,6 +56,18 @@ export function findChild(node: Node, typeName: string): Node | null {
   return null
 }
 
+export function throughParentheses(node: Node): Node {
+  let cursor = node
+  while (cursor.type === "parenthesized_expression" && !hasErrorChild(cursor)) {
+    const [only, ...rest] = cursor.namedChildren.filter(
+      (child): child is Node => child !== null && child.type !== "comment",
+    )
+    if (only === undefined || rest.length > 0 || hasErrorChild(only)) return cursor
+    cursor = only
+  }
+  return cursor
+}
+
 export function firstNonCommentChild(node: Node): Node | null {
   for (const child of node.namedChildren) {
     if (child === null || child.type === "comment") continue

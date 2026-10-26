@@ -102,6 +102,18 @@ const check = (...condition: string[]) =>
 const CONNECT = "function connect() {\n  return open()\n}\n"
 const PAGE = "function Page() {\n  return render()\n}\n"
 
+const returning = (open: string, close: string) =>
+  [
+    "export function total(a: number, b: number): number {",
+    `  return ${open}compute(a, b)${close}`,
+    "}",
+    "",
+    "export function larger(a: number, b: number): number {",
+    `  return ${open}a > b ? a : b${close}`,
+    "}",
+    "",
+  ].join("\n")
+
 const SYNTAX_ONLY = delta({ syntaxChanged: true })
 
 describe("an edit to what a caller passes is an api change", () => {
@@ -230,6 +242,18 @@ describe("an edit outside every rule and signature is a syntax-only change", () 
       registry(),
       registry("static items: string[] = []"),
       ["Registry"],
+    ],
+    [
+      "parentheses a formatter puts around a returned call and a returned conditional",
+      returning("", ""),
+      returning("(\n    ", "\n  )"),
+      ["larger", "total"],
+    ],
+    [
+      "a concise conditional rewritten as a block that returns it in parentheses",
+      "export const larger = (a: number, b: number): number => (a > b ? a : b)\n",
+      "export const larger = (a: number, b: number): number => {\n  return (a > b ? a : b)\n}\n",
+      ["larger"],
     ],
   ])("reports %s", async (_label, before, after, names) => {
     const diff = await diffOfEdit(workspace, FILE, before, after)
