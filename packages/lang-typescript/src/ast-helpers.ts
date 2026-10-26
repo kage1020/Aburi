@@ -76,6 +76,12 @@ export function firstNonCommentChild(node: Node): Node | null {
   return null
 }
 
+export function wrappedExpression(node: Node): Node | null {
+  return node.type === "type_assertion"
+    ? (node.namedChildren.at(-1) ?? null)
+    : firstNonCommentChild(node)
+}
+
 export interface WalkOptions {
   anonymous?: boolean
   descend?: (node: Node) => boolean

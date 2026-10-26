@@ -1,7 +1,7 @@
 import { isQnameSegment } from "@aburi/core"
 import { type CallCandidate, COMPUTED_TARGET_SEGMENT } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { findChild, firstNonCommentChild, hasErrorChild } from "./ast-helpers"
+import { findChild, hasErrorChild, wrappedExpression } from "./ast-helpers"
 import { decodeStringLiteral, readStaticString } from "./string-escape"
 
 export function readCall(node: Node): CallCandidate | null {
@@ -47,13 +47,6 @@ interface CalleeShape {
   readonly opaque: boolean
 }
 
-export const TYPE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
-  "non_null_expression",
-  "as_expression",
-  "satisfies_expression",
-  "type_assertion",
-])
-
 const UNMODELLED_EXPRESSION: CalleeShape = {
   target: COMPUTED_TARGET_SEGMENT,
   dynamic: true,
@@ -61,14 +54,6 @@ const UNMODELLED_EXPRESSION: CalleeShape = {
 }
 
 const META_PROPERTIES: ReadonlySet<string> = new Set(["import.meta", "new.target"])
-
-const LINE_BREAK = /[\n\r\u2028\u2029]/
-
-export function wrappedExpression(node: Node): Node | null {
-  return node.type === "type_assertion"
-    ? (node.namedChildren.at(-1) ?? null)
-    : firstNonCommentChild(node)
-}
 
 export function describeCallee(node: Node): CalleeShape | null {
   switch (node.type) {
@@ -149,9 +134,7 @@ function describeNonNull(node: Node): CalleeShape | null {
   const inner = describeCallee(innerNode)
   if (inner === null) return null
   if (inner.dynamic) return { target: inner.target, dynamic: true, opaque: false }
-  if (LINE_BREAK.test(node.text)) return UNMODELLED_EXPRESSION
-  if (node.text.split(".").some((segment) => segment.length === 0)) return UNMODELLED_EXPRESSION
-  return { target: node.text, dynamic: false, opaque: true }
+  return { target: `${inner.target}!`, dynamic: false, opaque: true }
 }
 
 function subscriptSegment(node: Node): string | null {

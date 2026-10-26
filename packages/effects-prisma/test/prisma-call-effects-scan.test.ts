@@ -64,13 +64,14 @@ describe("scan — Prisma calls in a service file", () => {
     ])
   })
 
-  it("reads a receiver behind a type assertion as the name it asserts about", async () => {
+  it("classifies a call behind a type assertion as its unasserted spelling", async () => {
     await workspace.writeSource(
       "src/users.ts",
       [
         'import { PrismaClient } from "@prisma/client"',
         "",
         "export function notify(emitter: any, x: any) {",
+        "  (emitter as Foo.Bar)!.update(x)",
         "  return (emitter as Foo.Bar).update(x)",
         "}",
         "",
@@ -85,7 +86,7 @@ describe("scan — Prisma calls in a service file", () => {
 
     const notify = symbolNamed(result, "notify")
     expect(notify.effects).toEqual([])
-    expect(notify.calls.map((c) => c.target)).toEqual(["emitter.update"])
+    expect(notify.calls.map((c) => c.target)).toEqual(["emitter!.update", "emitter.update"])
     expect(symbolNamed(result, "createUser").effects).toMatchObject([
       { id: "db.write", target: "prisma.user.create", confidence: "high" },
     ])

@@ -1,8 +1,7 @@
 import { normalizeRuleText } from "@aburi/core"
 import type { Rule } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { throughParentheses, walkDescendants } from "./ast-helpers"
-import { TYPE_WRAPPER_TYPES, wrappedExpression } from "./callee"
+import { throughParentheses, walkDescendants, wrappedExpression } from "./ast-helpers"
 
 export const LOOP_KINDS: ReadonlyMap<string, NonNullable<Rule["loopKind"]>> = new Map([
   ["for_statement", "for"],
@@ -90,6 +89,13 @@ export function isTrivialExpr(node: Node): boolean {
       return false
   }
 }
+
+const TYPE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
+  "non_null_expression",
+  "as_expression",
+  "satisfies_expression",
+  "type_assertion",
+])
 
 function withoutTypeWrappers(index: Node): Node {
   let cursor = index
