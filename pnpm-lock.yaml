@@ -99,6 +99,9 @@ importers:
       '@aburi/framework-react':
         specifier: workspace:*
         version: link:../packages/framework-react
+      '@aburi/framework-trpc':
+        specifier: workspace:*
+        version: link:../packages/framework-trpc
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../packages/lang-typescript
@@ -169,6 +172,9 @@ importers:
       '@aburi/framework-react':
         specifier: workspace:*
         version: link:../framework-react
+      '@aburi/framework-trpc':
+        specifier: workspace:*
+        version: link:../framework-trpc
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
@@ -529,6 +535,37 @@ importers:
         version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/framework-react:
+    dependencies:
+      '@aburi/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aburi/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      '@aburi/lang-typescript':
+        specifier: workspace:*
+        version: link:../lang-typescript
+      '@aburi/test-harness':
+        specifier: workspace:*
+        version: link:../test-harness
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.0.1
+      tsdown:
+        specifier: ^0.22.3
+        version: 0.22.3(tsx@4.22.4)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/framework-trpc:
     dependencies:
       '@aburi/core':
         specifier: workspace:*
@@ -2027,10 +2064,6 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  obug@2.1.3:
-    resolution: {integrity: sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg==}
-    engines: {node: '>=12.20.0'}
-
   obug@2.2.1:
     resolution: {integrity: sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q==}
     engines: {node: '>=12.20.0'}
@@ -2264,10 +2297,6 @@ packages:
 
   tinybench@2.9.0:
     resolution: {integrity: sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==}
-
-  tinyexec@1.2.4:
-    resolution: {integrity: sha512-SHf/r48b7vOrjve9PxJo3MN5v5yuyjHvdUcrQffT3WXMUfnGmHDVbC4k3sHJaJTgZCwpUplIaAo5ANtMyp3YHg==}
-    engines: {node: '>=18'}
 
   tinyexec@1.3.1:
     resolution: {integrity: sha512-GCvB3aoys96IuDFBMcTB46JOR6mdMtAToqwiW8JlWhsoh1mhHi/xn9ss/Dg7N555GiJyEt2qzoG/NHCwM6h1EA==}
@@ -3674,8 +3703,6 @@ snapshots:
 
   nanoid@3.3.18: {}
 
-  obug@2.1.3: {}
-
   obug@2.2.1: {}
 
   oniguruma-parser@0.12.2: {}
@@ -3894,8 +3921,6 @@ snapshots:
 
   tinybench@2.9.0: {}
 
-  tinyexec@1.2.4: {}
-
   tinyexec@1.3.1: {}
 
   tinyglobby@0.2.17:
@@ -3921,12 +3946,12 @@ snapshots:
       empathic: 2.0.1
       hookable: 6.1.1
       import-without-cache: 0.4.0
-      obug: 2.1.3
-      picomatch: 4.0.4
+      obug: 2.2.1
+      picomatch: 4.0.7
       rolldown: 1.1.3
       rolldown-plugin-dts: 0.26.0(rolldown@1.1.3)(typescript@6.0.3)
       semver: 7.8.5
-      tinyexec: 1.2.4
+      tinyexec: 1.3.1
       tinyglobby: 0.2.17
       tree-kill: 1.2.2
       unconfig-core: 7.5.0

@@ -10,6 +10,7 @@ export const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
   ["nextjs", "framework-next"],
   ["react", "framework-react"],
   ["express", "framework-express"],
+  ["trpc", "framework-trpc"],
 ])
 
 export function pluginForDetectorId(
