@@ -5,6 +5,12 @@ async function callsIn(body: string) {
   return (await walkFirstSymbol(`export async function f() { ${body} }`)).calls
 }
 
+function expectEverySegmentNamed(calls: readonly { target: string }[]) {
+  for (const { target } of calls) {
+    for (const segment of target.split(".")) expect(segment).toMatch(/^[^\s()]+$/)
+  }
+}
+
 describe("a callee the walk can name", () => {
   it.each([
     ["a bare identifier", "save()", "save"],
@@ -28,10 +34,36 @@ describe("a callee the walk can name", () => {
     ["a literal index the callee itself is written with", 'handlers["run"]()', "handlers.run"],
     ["a literal index in the method's slot", 'prisma.user["create"]({})', "prisma.user.create"],
     ["literal indexes in both slots", 'prisma["user"]["create"]({})', "prisma.user.create"],
+    ["a name behind `as`", "(x as Foo).m()", "x.m"],
+    ["a name behind `satisfies`", "(x satisfies Foo).m()", "x.m"],
+    ["a name behind an old-style assertion", "(<Foo>x).m()", "x.m"],
+    ["a name behind `as` a dotted type", "(emitter as Foo.Bar).update(x)", "emitter.update"],
+    ["a member path behind `as`", "(this.repo as Repo).save()", "this.repo.save"],
+    ["a name behind `as` a type that spells a spread", "(x as [...T]).map(g)", "x.map"],
+    ["a name behind `as` a type that spans lines", "(x as {\n    a: string\n  }).m()", "x.m"],
+    ["`this` behind `as`", "(this as any).m()", "this.m"],
+    ["a name behind two assertions", "(x as unknown as Foo).m()", "x.m"],
+    ["a callee behind `as`", "(f as Fn)()", "f"],
+    ["a constructor behind `as`", "return new (X as any)()", "X"],
+    ["a non-null assertion around `as`", "(x as Foo)!.save()", "x!.save"],
+    ["a non-null method behind `as`", "(x as Foo).m!()", "x.m!"],
+    ["a non-null assertion around parentheses", "(x)!.save()", "x!.save"],
+    ["a non-null assertion after a comment", "x /* c */!.m()", "x!.m"],
+    [
+      "a non-null assertion on a literal index",
+      'prisma["user"]!.create({})',
+      "prisma.user!.create",
+    ],
+    [
+      "a non-null assertion on a chain over lines",
+      "this.repo\n    .items!.save()",
+      "this.repo.items!.save",
+    ],
   ])("names %s and flags nothing", async (_label, body, target) => {
-    expect((await callsIn(body)).map((c) => [c.target, c.dynamicReceiver])).toEqual([
-      [target, undefined],
-    ])
+    const calls = await callsIn(body)
+
+    expect(calls.map((c) => [c.target, c.dynamicReceiver])).toEqual([[target, undefined]])
+    expectEverySegmentNamed(calls)
   })
 })
 
@@ -43,9 +75,7 @@ describe("a receiver the walk cannot name is flagged dynamic", () => {
     ["a call, though the index after it folds", 'getRepo()["user"].save()', "getRepo.user.save"],
     ["a parenthesized expression", "(a ?? b).save()", "<computed>.save"],
     ["a parenthesized non-null assertion", "(svc!).save()", "svc!.save"],
-    ["a parenthesized `as`", "(x as Foo).m()", "x as Foo.m"],
-    ["a parenthesized `satisfies`", "(x satisfies Foo).m()", "x satisfies Foo.m"],
-    ["a parenthesized old-style assertion", "(<Foo>x).m()", "<Foo>x.m"],
+    ["a non-null assertion behind `as`", "(x! as Foo).m()", "x!.m"],
     ["an identifier index", "prisma[model].create({})", "prisma.<computed>.create"],
     ["a numeric index", "items[0].save()", "items.<computed>.save"],
     ["a substituting template index", `prisma[\`\${m}s\`].create({})`, "prisma.<computed>.create"],
@@ -77,15 +107,11 @@ describe("a receiver the walk cannot name is flagged dynamic", () => {
     ["an IIFE", "(async () => {\n    await load()\n  })()", "<computed>"],
     ["an array literal behind `as`", "return ([...a] as string[]).map(g)", "<computed>.map"],
     ["an array literal behind `!`", "return [...a]!.map(g)", "<computed>.map"],
-    ["a type that spells a spread", "return (x as [...T]).map(g)", "<computed>.map"],
-    ["a type that spans lines", "return (x as {\n    a: string\n  }).m()", "<computed>.m"],
   ])("flags %s", async (_label, body, target) => {
     const calls = await callsIn(body)
 
     expect(calls.find((c) => c.target === target)?.dynamicReceiver).toBe(true)
-    for (const { target: written } of calls) {
-      expect(written.split(".").every((segment) => segment.length > 0)).toBe(true)
-    }
+    expectEverySegmentNamed(calls)
   })
 
   it("keeps the calls inside an IIFE", async () => {

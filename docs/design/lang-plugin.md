@@ -289,13 +289,25 @@ carries `dynamicReceiver`: `[...names].sort()` is `<computed>.sort`, and an IIFE
 Its text would break the contract above (`[...names]` holds two empty segments, `(.5)` a leading
 dot) or put a function body, indentation included, into the IR.
 
-A type-level wrapper — `svc!`, `x as Foo`, `x satisfies Foo`, `<Foo>x` — still answers with its
-own text around a name, so `svc!.save()` is `svc!.save` and is not dynamic. Around anything else it
-answers what the wrapped expression does (`([...a] as T).m()` is `<computed>.m`, `getRepo()!.save()`
-is the dynamic `getRepo.save`), and a text that would still hold an empty segment (`(x as [...T]).m()`)
-or a line break (a type literal written over several lines) answers `<computed>`: a target is
-read as a name, and reformatting must not change it. The keyword callee of a dynamic
-`import("./m")` is `import`, and `import.meta` and `new.target` are their own spellings.
+A type assertion — `x as Foo`, `x satisfies Foo`, `<Foo>x` — states a type and leaves the value as
+it was, so it answers what the expression it wraps answers, and its type never reaches `target`:
+`(emitter as Foo.Bar).update(x)` is `emitter.update`, `(this.repo as Repo).save()` is
+`this.repo.save`, `(f as Fn)()` is `f`, and `([...a] as T).m()` is `<computed>.m`. The parentheses
+the assertion needs hold a name in the first three, so none is dynamic, as `(svc).save()` is not.
+Kept, the type's text would add segments of its own (`emitter as Foo.Bar.update` has the three a
+Prisma delegate call has), or break the contract above when it spells a spread or spans lines.
+
+A non-null assertion around a name answers that name's target with `!` after its last segment:
+`svc!.save()` is `svc!.save`, `(x as Foo)!.save()` is `x!.save`, `(x as Foo).m!()` is `x.m!` and
+`prisma["user"]!.create(d)` is `prisma.user!.create`, none of them dynamic. It is built from the
+target, not from the source text, so a type, a comment or a line break between the name and the
+`!` never reaches it: a target is read as a name, and reformatting must not change it. Around
+anything else the assertion answers what the wrapped expression does (`getRepo()!.save()` is the
+dynamic `getRepo.save`), and parentheses around it, a type assertion between or not, make the
+receiver dynamic: `(svc!).save()` and `(svc! as Foo).save()` are the dynamic `svc!.save`.
+
+The keyword callee of a dynamic `import("./m")` is `import`, and `import.meta` and `new.target` are
+their own spellings.
 
 #### A bracket access in a callee
 
@@ -362,7 +374,7 @@ Set it to `true` when the callee's receiver was an **expression rather than a na
 
 Normalization is lossy here in a way only the plugin can repair: `getRepo().save()` collapses to the target `getRepo.save`, which is spelled exactly like a genuine `Class.method` qname. Without the flag, [`call-resolution.md`](./call-resolution.md) §8.1 would have to file every such call under `no-match` and send reviewers hunting for a typo that does not exist; with it, the call is correctly reported as `dynamic`.
 
-Do **not** set it for `this.save()` / `super.save()` — §4.7 already keeps those unresolved through a separate rule, and the resolver buckets them itself. Be conservative: a receiver shape the plugin does not model (a non-null assertion, a type assertion) is not evidence of dynamic dispatch, and over-reporting would make the bucket useless. The flag never affects which calls resolve — it only decides which diagnostic bucket an already-unresolved call lands in.
+Do **not** set it for `this.save()` / `super.save()` — §4.7 already keeps those unresolved through a separate rule, and the resolver buckets them itself. Be conservative: a receiver the plugin reads through to a name (a non-null assertion, a type assertion) is not evidence of dynamic dispatch, and over-reporting would make the bucket useless. The flag never affects which calls resolve — it only decides which diagnostic bucket an already-unresolved call lands in.
 
 ### 4.5 `ExtractionContext` / `WalkContext` / `FrameworkClassifyContext`
 
@@ -754,7 +766,7 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | LP20j1 | `prisma["user" "audit"].create(d)`, `obj["a\u12b"].m()` | `prisma.<computed>.create` / `obj.<computed>.m` — an index the parser recovered rather than read names no segment, whether the ERROR stands beside the literal or inside it |
 | LP20k | `prisma[model].create(d)`, `items[0].save()`, `obj["a-b"].m()`, `obj["#v"].m()` | one call each, targets `prisma.<computed>.create`, `items.<computed>.save`, `obj.<computed>.m`, all `dynamicReceiver` — an index that names no segment is reported as one that names none, where dropping it would report a call the program does not contain. `"#v"` spells the private segment and still names none: `obj.#v` is another member (§4.4) |
 | LP20k1 | `handlers[name]()`, `prisma.user[verb](d)` | `handlers.<computed>` / `prisma.user.<computed>`, both `dynamicReceiver` — the terminal slot answers the same way, so a call whose *name* is computed is reported as a call rather than as a call to its receiver |
-| LP20l | `[...names].sort()`, `'a...'.trim()`, `(.5).toFixed(2)`, `new Date().getTime()`, `(async () => { … })()`, `([...a] as T).m()` | `<computed>.sort`, `<computed>.trim`, `<computed>.toFixed`, `<computed>.getTime`, `<computed>`, `<computed>.m`, all `dynamicReceiver` — an unmodelled receiver contributes the reserved segment, never its source text (§4.4). `svc!.save()` stays `svc!.save`, not dynamic, and `import("./m")` stays `import`. A wrapper whose text spans lines, `(x as {` … `}).m()`, is `<computed>.m` |
+| LP20l | `[...names].sort()`, `'a...'.trim()`, `(.5).toFixed(2)`, `new Date().getTime()`, `(async () => { … })()`, `([...a] as T).m()` | `<computed>.sort`, `<computed>.trim`, `<computed>.toFixed`, `<computed>.getTime`, `<computed>`, `<computed>.m`, all `dynamicReceiver` — an unmodelled receiver contributes the reserved segment, never its source text (§4.4). `svc!.save()` stays `svc!.save`, not dynamic, and `import("./m")` stays `import`. A type assertion around a name contributes the name, whatever its type spells: `(x as {` … `}).m()` is `x.m` |
 | LP20e | an owner-shaped node the walk *meets* rather than owns — `function f() { class Inner { m() { x() } } }` | walked whole. `Inner` is not extracted, so every call in it belongs to `f`; LP20a applies to the Symbol's own body nodes and to nothing else |
 | LP20m | `try { a() } catch (e) { if (!e) return; b() } finally { if (x) return; c() }` | rules `try` and the `finally` block's `guard`; calls `a`, `b`, `c`. The `try` block and the `finally` block are walked like any block, the `finally` block because it runs on every path. The `catch` clause is walked as a `try` block is, and every rule that walk produces is discarded (`ir-schema.md` §8.2), so it records exactly the calls the same statements would record in the `try` block: `try { return a[g()] } catch (e) { return a[h()] }` records `g` and `h` and keeps one `return` rule, the `try` block's, and a `finally` nested inside a `catch` gives no rule, whatever it holds. Collecting every call under the clause instead, as a `throw`'s argument is collected, would record the same calls today, but only because a trivial return holds no call (`drop-list.md` §5.5); walking the clause as a block does not depend on that. A `try` statement at module top level is in no Symbol's body, so nothing in it is walked |
 
