@@ -102,6 +102,14 @@ measured run compares nothing, and the report says `n/a` rather than a tick.
 run is allowed to claim, and how a sweep renders — and `test/` checks it, including
 that every committed sample in `results/` still renders to its committed report.
 
+## The `no-match` census
+
+`census.mjs` draws, and later re-checks, the hand-classified sample in
+[`no-match/`](./no-match/README.md), which says how much of the `no-match`
+bucket a rule without types would settle and how much needs type information.
+It reads the clones `run.mjs` keeps and the pins in `repos.json`, and
+`census-report.mjs` holds its parts that touch no disk, which `test/` checks.
+
 ## The pinned commits
 
 `repos.json` pins `head` for every repo and `base` at `head~50`, which gives
