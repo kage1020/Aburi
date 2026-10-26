@@ -1,7 +1,8 @@
 import { normalizeRuleText } from "@aburi/core"
 import type { Rule } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { throughParentheses, walkDescendants, wrappedExpression } from "./ast-helpers"
+import { throughParentheses, walkDescendants } from "./ast-helpers"
+import { wrappedExpression } from "./callee"
 
 export const LOOP_KINDS: ReadonlyMap<string, NonNullable<Rule["loopKind"]>> = new Map([
   ["for_statement", "for"],
