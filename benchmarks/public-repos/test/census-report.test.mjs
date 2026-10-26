@@ -1,3 +1,4 @@
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   callSiteKey,
@@ -78,7 +79,7 @@ describe("parseCensusArgs", () => {
       only: ["zod", "nest"],
       perRepo: 20,
       seed: "s",
-      workDir: "/tmp/w",
+      workDir: resolve("/tmp/w"),
     })
   })
 })
