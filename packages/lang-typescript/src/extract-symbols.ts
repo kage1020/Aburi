@@ -72,6 +72,7 @@ function visitStatement(
       out.add(makeFunctionCandidate(node, ctx, namespacePath))
       return
     case "function_expression":
+    case "generator_function":
     case "arrow_function":
       if (isDefaultExport(node)) {
         out.add(makeFunctionCandidate(node, ctx, namespacePath))
