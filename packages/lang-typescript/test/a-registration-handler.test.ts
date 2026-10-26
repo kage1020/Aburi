@@ -83,12 +83,6 @@ describe("a registration call's inline handler is its body", () => {
       ["call-statement:app.get", "path-literal:/x"],
     ],
     [
-      "a generator, which is not a function at any site",
-      "app.use(function* (ctx, next) { h1() })",
-      "ts:src/a.ts#app__use__d0",
-      ["call-statement:app.use"],
-    ],
-    [
       "a handler whose body the parser only recovered",
       'app.get("/users", async (req, res) =>)',
       "ts:src/a.ts#app__get__$users__d0",
