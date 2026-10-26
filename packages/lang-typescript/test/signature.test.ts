@@ -37,47 +37,61 @@ describe("what a function's signature records", () => {
   })
 })
 
-describe("a type broken over lines with a leading operator", () => {
-  const broken = [
-    "export function f(",
-    "  provider:",
-    "    | ClassProvider",
-    "    | FactoryProvider,",
-    "  parts: Array<",
-    "    | A",
-    "    | B",
-    "  >,",
-    "): & Base & Extra {}",
-  ].join("\n")
-
-  it("is recorded as the operator-free spelling", async () => {
-    const signature = await signatureOf(broken)
-
-    expect(signature?.inputs.map((i) => i.type)).toEqual([
-      "ClassProvider\n    | FactoryProvider",
-      "Array<\n    A\n    | B\n  >",
-    ])
-    expect(signature?.outputs).toEqual(["Base & Extra"])
-  })
-
+describe("a type is recorded as it reads on one line", () => {
   it.each([
-    ["a parameter", "(x: | A | B) {}", "(x: A | B) {}"],
-    ["a return type", "(): | A | B {}", "(): A | B {}"],
-    ["a generic argument", "(x: Map<string, | A | B>) {}", "(x: Map<string, A | B>) {}"],
-    ["an intersection", "(x: & A & B) {}", "(x: A & B) {}"],
-    ["a type predicate", "(x: unknown): x is | A | B {}", "(x: unknown): x is A | B {}"],
-    ["a function type's return", "(load: () => | A | B) {}", "(load: () => A | B) {}"],
-    ["a type parameter's constraint", "<T extends | A | B>() {}", "<T extends A | B>() {}"],
-  ])("gives %s the signature it has written on one line", async (_label, leading, joined) => {
-    expect(await signatureOf(`export function f${leading}`)).toEqual(
-      await signatureOf(`export function f${joined}`),
-    )
-  })
+    [
+      "a union broken with a leading operator",
+      "(\n  provider:\n    | ClassProvider\n    | FactoryProvider,\n) {}",
+      ["ClassProvider | FactoryProvider"],
+    ],
+    [
+      "a union broken inside a generic argument",
+      "(\n  parts: Array<\n    | A\n    | B\n  >,\n) {}",
+      ["Array<A | B>"],
+    ],
+    ["a union broken inside parentheses", "(xs: (\n  | A\n  | B\n)[]) {}", ["(A | B)[]"]],
+    [
+      "a leading operator in each of two arguments",
+      "(x: Map<| A | B, | C | D>) {}",
+      ["Map<A | B, C | D>"],
+    ],
+    ["an intersection broken after each operator", "(x: A &\n  B &\n  C) {}", ["A & B & C"]],
+    ["an intersection with a leading operator", "(): & Base & Extra {}", ["Base & Extra"]],
+    ["a type argument list broken over lines", "(m: Map<\n  K,\n  V\n>) {}", ["Map<K, V>"]],
+    [
+      "a function type's parameters broken with a trailing comma",
+      "(handler: (\n  req: Request,\n  res: Response,\n) => void) {}",
+      ["(req: Request, res: Response) => void"],
+    ],
+    ["a tuple broken with a trailing comma", "(pair: [\n  A,\n  B,\n]) {}", ["[A, B]"]],
+    ["an object type broken over lines", "(o: {\n  a: A\n  b?: B\n}) {}", ["{ a: A; b?: B }"]],
+    ["an object type's members separated by commas", "(o: { a: A, b: B, }) {}", ["{ a: A; b: B }"]],
+    ["a type predicate", "(x: unknown): x is | A | B {}", ["unknown", "x is A | B"]],
+    ["a function type's return", "(load: () => | A | B) {}", ["() => A | B"]],
+    [
+      "a type parameter's constraint and default",
+      "<T extends | A = | B>() {}",
+      ["T extends A = B"],
+    ],
+    ["a comment between the colon and the type", "(x: /* c */ | A | B) {}", ["A | B"]],
+    [
+      "a line comment above a broken union",
+      "(\n  x:\n    // the class form\n    | A\n    | B,\n) {}",
+      ["A | B"],
+    ],
+    ["a comment inside a type", "(x: A | /* legacy */ B) {}", ["A | B"]],
+    ["a comment before a return type", "(): /* c */ Foo {}", ["Foo"]],
+    ["a `,` and a `|` inside a string type", '(x: "a, | b" | C) {}', ['"a, | b" | C']],
+    ["the layout inside a template literal type", `(x: \`a \${ B }  c\`) {}`, [`\`a \${ B }  c\``]],
+    ["an operator the parser gave no operand", "(x: |) {}", ["|"]],
+  ])("records %s", async (_label, written, recorded) => {
+    const signature = await signatureOf(`export function f${written}`)
 
-  it("keeps the characters of a string type", async () => {
-    const signature = await signatureOf('export function f(x: "| a" | "& b") {}')
-
-    expect(signature?.inputs.map((i) => i.type)).toEqual(['"| a" | "& b"'])
+    expect([
+      ...(signature?.typeParameters ?? []),
+      ...(signature?.inputs ?? []).map((i) => i.type),
+      ...(signature?.outputs ?? []),
+    ]).toEqual(recorded)
   })
 })
 

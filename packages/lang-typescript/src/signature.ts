@@ -1,7 +1,7 @@
 import { compareCodeUnit } from "@aburi/core"
 import type { Signature } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { findChild, thrownValue, walkDescendants } from "./ast-helpers"
+import { findChild, firstNonCommentChild, thrownValue, walkDescendants } from "./ast-helpers"
 import { collectPatternBindings, isRepairedPattern } from "./pattern-bindings"
 
 export function buildSignature(declaration: Node, jsDocText: string | null): Signature {
@@ -100,14 +100,14 @@ function readPatternBindings(binding: Node | null): string[] {
 function extractParamType(param: Node): string {
   const typeAnn = param.childForFieldName("type") ?? findChild(param, "type_annotation")
   if (typeAnn === null) return ""
-  const inner = typeAnn.namedChild(0)
+  const inner = firstNonCommentChild(typeAnn)
   return inner !== null ? typeText(inner) : typeAnn.text.replace(/^:\s*/, "").trim()
 }
 
 function readReturnType(node: Node): string[] {
   const returnType = node.childForFieldName("return_type") ?? findChild(node, "type_annotation")
   if (returnType === null) return []
-  const inner = returnType.namedChild(0)
+  const inner = firstNonCommentChild(returnType)
   const text = inner !== null ? typeText(inner) : returnType.text.replace(/^:\s*/, "").trim()
   return text.length > 0 ? [text] : []
 }
@@ -117,21 +117,76 @@ const LEADING_OPERATORS: ReadonlyMap<string, string> = new Map([
   ["intersection_type", "&"],
 ])
 
-// A formatter writes `| A | B` when it breaks a union over lines and `A | B` when it joins it, so the
-// operator with no left operand is layout, and only the tree can tell it from one in a string type.
+const VERBATIM_TYPES: ReadonlySet<string> = new Set(["string", "template_literal_type"])
+
+const OPENING_BRACKETS: ReadonlySet<string> = new Set(["<", "(", "["])
+
+const CLOSING_BRACKETS: ReadonlySet<string> = new Set([">", ")", "]"])
+
+const SEPARATORS: ReadonlySet<string> = new Set([",", ";"])
+
+interface TypeToken {
+  readonly text: string
+  readonly start: number
+  readonly end: number
+}
+
+// A formatter that breaks a type over lines adds the layout, a trailing separator and a union's
+// leading `|`, and drops them when it joins the type again, so a type is recorded as it reads on
+// one line. On one line it separates an object type's members with `;`, and over lines with none.
 function typeText(type: Node): string {
-  const source = type.text
-  const base = type.startIndex
+  const tokens = typeTokens(type, [])
   let out = ""
-  let at = base
-  for (const node of walkDescendants(type)) {
-    const operator = node.child(0)
-    if (operator === null || operator.type !== LEADING_OPERATORS.get(node.type)) continue
-    out += source.slice(at - base, operator.startIndex - base)
-    at = node.child(1)?.startIndex ?? operator.endIndex
+  let previous: TypeToken | null = null
+  for (const [index, token] of tokens.entries()) {
+    const next = tokens[index + 1]
+    if (SEPARATORS.has(token.text) && next !== undefined && CLOSING_BRACKETS.has(next.text))
+      continue
+    const spaced =
+      previous !== null &&
+      previous.end < token.start &&
+      !OPENING_BRACKETS.has(previous.text) &&
+      !CLOSING_BRACKETS.has(token.text)
+    out += spaced ? ` ${token.text}` : token.text
+    previous = token
   }
-  out += source.slice(at - base)
-  return out.trim()
+  return out
+}
+
+function typeTokens(node: Node, out: TypeToken[]): TypeToken[] {
+  if (node.isMissing || node.isExtra) return out
+  if (node.childCount === 0 || VERBATIM_TYPES.has(node.type)) {
+    out.push({ text: node.text, start: node.startIndex, end: node.endIndex })
+    return out
+  }
+  if (node.type === "object_type") return objectTypeTokens(node, out)
+  const children = node.children
+  const leading = LEADING_OPERATORS.get(node.type)
+  const operand = children[1]
+  const operatorFirst =
+    leading !== undefined &&
+    children[0]?.type === leading &&
+    operand !== undefined &&
+    !operand.isMissing
+  for (const child of operatorFirst ? children.slice(1) : children) typeTokens(child, out)
+  return out
+}
+
+function objectTypeTokens(node: Node, out: TypeToken[]): TypeToken[] {
+  let previousMember: Node | null = null
+  for (const child of node.children) {
+    if (child.isNamed && !child.isExtra && !child.isMissing) {
+      if (previousMember !== null) {
+        const at = previousMember.endIndex
+        out.push({ text: ";", start: at, end: at })
+      }
+      previousMember = child
+    } else if (SEPARATORS.has(child.type)) {
+      continue
+    }
+    typeTokens(child, out)
+  }
+  return out
 }
 
 function readThrows(node: Node, jsDocText: string | null): string[] {
