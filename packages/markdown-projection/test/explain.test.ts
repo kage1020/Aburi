@@ -28,6 +28,7 @@ describe("projectSymbolExplain — a kept Symbol", () => {
       decorator({ name: "Post", raw: "Post('/x')", boundary: true }),
       decorator({ name: "UseGuards", raw: "UseGuards(Auth)" }),
     ],
+    middleware: ["requireAdmin", "validate(user)"],
     rules: [rule({ type: "throw", line: 8, what: "new E()" })],
     effects: [
       effect({ id: "db.read", target: "prisma.user.findFirst", plugin: "effects-prisma", line: 6 }),
@@ -43,11 +44,21 @@ describe("projectSymbolExplain — a kept Symbol", () => {
       "## Boundary",
       "## Decorators",
       "## Signature",
+      "## Middleware",
       "## Rules",
       "## Effects",
       "## Calls",
       "## Derived by",
       "## Fingerprint",
+    ])
+  })
+
+  it("lists the middleware in the order it runs", () => {
+    expect(sectionOf(md, "## Middleware")).toEqual([
+      "## Middleware",
+      "",
+      "`requireAdmin`, `validate(user)`",
+      "",
     ])
   })
 

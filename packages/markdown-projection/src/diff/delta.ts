@@ -2,6 +2,7 @@ import type {
   ArrayDelta,
   ComponentId,
   Confidence,
+  MiddlewareDelta,
   Signature,
   SignatureDelta,
   SymbolDelta,
@@ -33,6 +34,7 @@ export function renderDeltaBody(change: ChangedEntry): string[] {
   const nameRows = rows.length
   appendSignatureDelta(rows, delta.signature ?? null, [before.signature, after.signature])
   appendDecoratorDelta(rows, delta.decorators, [before.decorators, after.decorators])
+  appendMiddlewareDelta(rows, delta.middleware, [before.middleware ?? [], after.middleware ?? []])
   appendArrayGroup(rows, "rules", delta.rules, RULES, [before.rules, after.rules])
   appendArrayGroup(rows, "effects", delta.effects, EFFECTS, [before.effects, after.effects])
   appendArrayGroup(rows, "calls", delta.calls, CALLS, [before.calls, after.calls])
@@ -127,6 +129,19 @@ function appendDecoratorDelta(rows: string[], delta: ArrayDelta | undefined, sid
   const lines = bucketRows(delta, DECORATORS, sides)
   for (const bucket of BUCKETS) {
     for (const line of lines[bucket]) rows.push(`- decorator ${bucket}: ${line}`)
+  }
+}
+
+function appendMiddlewareDelta(
+  rows: string[],
+  delta: MiddlewareDelta | undefined,
+  [before, after]: readonly [before: readonly string[], after: readonly string[]],
+): void {
+  if (delta === undefined) return
+  appendInlineRow(rows, "middleware added", delta.added)
+  appendInlineRow(rows, "middleware removed", delta.removed)
+  if (delta.reordered) {
+    rows.push(`- middleware reordered: ${joinCode(before)} → ${joinCode(after)}`)
   }
 }
 

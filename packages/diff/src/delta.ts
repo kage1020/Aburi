@@ -5,6 +5,7 @@ import type {
   Decorator,
   Effect,
   Symbol as IRSymbol,
+  MiddlewareDelta,
   Rule,
   Signature,
   SignatureDelta,
@@ -32,6 +33,10 @@ export function computeSymbolDelta(
 ): SymbolDelta {
   const fuzz = validateLineFuzz(options.lineFuzz ?? DEFAULT_LINE_FUZZ)
   const origins: Origins = [base.source.startLine, head.source.startLine]
+  const middleware =
+    base.middleware === undefined && head.middleware === undefined
+      ? {}
+      : { middleware: diffMiddleware(base.middleware ?? [], head.middleware ?? []) }
   return {
     apiChanged: base.fingerprint.api !== head.fingerprint.api,
     logicChanged: base.fingerprint.logic !== head.fingerprint.logic,
@@ -44,6 +49,7 @@ export function computeSymbolDelta(
     calls: diffCalls(base.calls, head.calls, origins, fuzz),
     decorators: diffDecorators(base.decorators, head.decorators, origins, fuzz),
     signature: diffSignature(base.signature ?? null, head.signature ?? null),
+    ...middleware,
   }
 }
 
@@ -358,6 +364,40 @@ function oneSidedSignatureDelta(present: Signature, bucket: "added" | "removed")
     generatorChanged: present.generator,
     typeParametersChanged: present.typeParameters.length > 0,
   }
+}
+
+function diffMiddleware(base: readonly string[], head: readonly string[]): MiddlewareDelta {
+  const added = beyondCounts(head, base)
+  const removed = beyondCounts(base, head)
+  const shared = base.length - removed.length
+  return { added, removed, reordered: longestCommonSubsequence(base, head) < shared }
+}
+
+/** The occurrences in `side` that `other` holds no counterpart for, the earlier ones paired first. */
+function beyondCounts(side: readonly string[], other: readonly string[]): string[] {
+  const budget = new Map<string, number>()
+  for (const name of other) budget.set(name, (budget.get(name) ?? 0) + 1)
+  const extra: string[] = []
+  for (const name of side) {
+    const left = budget.get(name) ?? 0
+    if (left > 0) budget.set(name, left - 1)
+    else extra.push(name)
+  }
+  return extra
+}
+
+function longestCommonSubsequence(a: readonly string[], b: readonly string[]): number {
+  let previous = new Array<number>(b.length + 1).fill(0)
+  for (const x of a) {
+    const current = [0]
+    for (const [j, y] of b.entries()) {
+      current.push(
+        x === y ? (previous[j] ?? 0) + 1 : Math.max(previous[j + 1] ?? 0, current[j] ?? 0),
+      )
+    }
+    previous = current
+  }
+  return previous[b.length] ?? 0
 }
 
 function diffStringList(base: readonly string[], head: readonly string[]): ArrayDelta {

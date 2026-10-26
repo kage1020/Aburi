@@ -5,6 +5,7 @@ import { normalizeFingerprintString } from "./string"
 
 interface LogicInput {
   effects: Array<{ target: string }>
+  middleware?: string[]
   rules: Array<{
     condition: string | null
     expr: string | null
@@ -28,6 +29,7 @@ export function logicNamesNothing(symbol: IRSymbol): boolean {
   const input = buildLogicInput(symbol)
   return (
     input.effects.length === 0 &&
+    input.middleware === undefined &&
     input.rules.every((rule) =>
       Object.entries(rule).every(
         ([field, value]) => SHAPE_ONLY_RULE_FIELDS.has(field) || value === null,
@@ -37,10 +39,14 @@ export function logicNamesNothing(symbol: IRSymbol): boolean {
 }
 
 function buildLogicInput(symbol: IRSymbol): LogicInput {
-  return {
+  const input: LogicInput = {
     effects: canonicalizeEffects(symbol.effects),
     rules: canonicalizeRules(symbol.rules),
   }
+  // Left out rather than empty, so a Symbol that names no middleware hashes as it always has.
+  const middleware = symbol.middleware ?? []
+  if (middleware.length > 0) input.middleware = middleware.map(normalizeFingerprintString)
+  return input
 }
 
 function canonicalizeRules(rules: readonly Rule[]): LogicInput["rules"] {

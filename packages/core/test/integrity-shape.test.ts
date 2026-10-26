@@ -153,6 +153,18 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
     ])
   })
 
+  it("checks a Symbol's middleware when it is present", () => {
+    const symbol = makeSymbol("ts:src/a.ts#foo", {
+      middleware: ["requireAdmin"],
+    }) as unknown as Record<string, unknown>
+    expect(shapeViolations(withField("symbols", [symbol]))).toEqual([])
+
+    symbol.middleware = ["requireAdmin", 7]
+    expect(shapeViolations(withField("symbols", [symbol])).map((v) => v.subject)).toEqual([
+      "symbols[0].middleware[1]",
+    ])
+  })
+
   it("reports NaN and Infinity as themselves rather than as numbers", () => {
     const symbol = makeSymbol("ts:src/a.ts#foo") as unknown as Record<string, unknown>
     symbol.calls = [{ target: "t", line: Number.NaN, resolved: null }]

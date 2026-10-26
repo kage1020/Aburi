@@ -163,9 +163,12 @@ Represents the **meaning executed by the symbol's body**. Changes when the meani
     {
       "target": <canonical(Effect.target)>
     }
-  ]                                             // locally detected effects in input order, then propagated targets (below)
+  ],                                            // locally detected effects in input order, then propagated targets (below)
+  "middleware": [<canonical(Symbol.middleware[i])>]  // only when Symbol.middleware is present; input order preserved
 }
 ```
+
+`middleware` is read only when the Symbol carries it ([`ir-schema.md`](./ir-schema.md) §5.7), and the key is left out of the input otherwise rather than written as `[]`, so every Symbol that names no middleware hashes to the value it had before the field existed. Its order is kept for the reason §4.7 keeps the order of effects: a rate limit in front of authentication and one behind it are two different routes.
 
 The rule strings are the ones the IR holds, already in the ir-schema.md §8.2 form: comments removed, whitespace collapsed, and cut to 120 characters plus `...`. Reading what the IR holds keeps `logic` recomputable from a Document alone. The cost is that an edit past the 120th character of a long condition, throw value or return expression moves neither `logic` nor the diff's rule delta; `syntax` still moves, so the change is reported as syntax-only rather than missed.
 
@@ -205,6 +208,7 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 - Reordering **locally detected effects** → changes (side-effect occurrence order carries meaning). The order of propagated effects is not read (§4.1)
 - Changing the expression of `rules[].condition` / `what` / `expr` itself → changes
 - Adding / removing an effect, or changing its `target` → changes, except that a propagated effect on a target another effect of the Symbol already names adds or removes nothing (§4.1)
+- Adding, removing, reordering or renaming a registration's **middleware** → changes. A route that loses `requireAdmin` runs a different request path, and before the field it moved only `syntax`, so the report filed it as a reformat
 
 ### 4.5 Guaranteed invariance conditions (plugin-configuration robustness)
 
@@ -232,7 +236,7 @@ This applies to locally detected effects, each of which sits at a call site in t
 
 ### 4.8 A value that names nothing
 
-Of the input fields, `rules[].type` and `rules[].loopKind` classify a construct without saying anything about it; every other field — `condition`, `what`, `expr`, `effects[].target` — carries text from the body. A Symbol with no effect and no rule carrying any of those hashes to a value it shares with every body of the same shape: one value for every class, enum and body that only calls something (the empty input), another for every body that is a single `for` loop over calls, another for every single `try`. Such a value is not evidence of one meaning, and the diff does not read it as such ([`diff-algorithm.md`](./diff-algorithm.md) §3.3).
+Of the input fields, `rules[].type` and `rules[].loopKind` classify a construct without saying anything about it; every other field — `condition`, `what`, `expr`, `effects[].target`, `middleware[]` — carries text from the body. A Symbol with no effect, no middleware and no rule carrying any of those hashes to a value it shares with every body of the same shape: one value for every class, enum and body that only calls something (the empty input), another for every body that is a single `for` loop over calls, another for every single `try`. Such a value is not evidence of one meaning, and the diff does not read it as such ([`diff-algorithm.md`](./diff-algorithm.md) §3.3).
 
 `logicNamesNothing` (`@aburi/core`) tells such a Symbol apart, reading the same input the hash is. A field added to the input counts as naming something until it is listed as classifying only.
 
@@ -395,6 +399,7 @@ The reference implementation and every language plugin must pass the following t
 | L12a | L11/L12 on a callee's effect that reaches a caller as one of two propagated effects, where the id change flips the two entries' `(id, target)` order; the caller is compared, with or without a locally detected effect of its own | logic unchanged |
 | L12b | L11/L12 unifies the ids under which two callees classify one target, which reached a caller as two propagated effects on that target and now reaches it as one; the caller is compared | logic unchanged |
 | L12c | L11/L12 unifies a callee's id for a target with the id of the caller's own locally detected effect on that target, so propagation now drops the propagated entry it kept before; the caller is compared | logic unchanged |
+| L12d | A Symbol with no `middleware`, compared with the value it hashed to before the field existed | logic unchanged |
 
 ### 7.5 logic change conditions
 
@@ -405,6 +410,7 @@ The reference implementation and every language plugin must pass the following t
 | L8 | Change a rule's condition | logic changes |
 | L9 | Change an effect's target | logic changes |
 | L10 | Add / remove an effect, locally detected or propagated (a propagated one on a target no other effect of the Symbol names) | logic changes |
+| L10a | Add, remove, reorder or rename an entry of `middleware` | logic changes |
 
 ### 7.6 syntax invariance conditions
 

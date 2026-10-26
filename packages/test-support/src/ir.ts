@@ -64,6 +64,7 @@ export function makeSymbol(
     rules: overrides.rules ?? [],
     effects: overrides.effects ?? [],
     calls: overrides.calls ?? [],
+    ...(overrides.middleware === undefined ? {} : { middleware: overrides.middleware }),
     source: overrides.source ?? {
       file: filePartOf(overrides.id),
       startLine: 1,

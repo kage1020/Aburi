@@ -120,6 +120,7 @@ const SYMBOL: RecordSpec = {
   rules: recordArray(RULE),
   effects: recordArray(EFFECT),
   calls: recordArray(CALL),
+  middleware: optional(strs),
   source: record(SOURCE_RANGE),
   fingerprint: record(FINGERPRINT),
   confidence: str,

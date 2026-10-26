@@ -415,3 +415,96 @@ describe("scan — a call's derivedBy", () => {
     ])
   })
 })
+
+describe("scan — the middleware a registration hands its handler to", () => {
+  it.each([
+    [
+      "a route's middleware before an inline handler",
+      `app.get("/users", requireAdmin, async (req, res) => res.json([]))`,
+      ["requireAdmin"],
+    ],
+    [
+      "a route's middleware before a named handler",
+      `app.get("/users", requireAdmin, validate(userQuery), listUsers)`,
+      ["requireAdmin", "validate(userQuery)"],
+    ],
+    [
+      "a factory's literal arguments, and no more of an object than that it is one",
+      `app.delete("/users", requireRole("admin"), rateLimit({ max: 10 }), deleteUsers)`,
+      [`requireRole("admin")`, "rateLimit(…)"],
+    ],
+    [
+      "middleware handed in an array, as Express flattens it",
+      `app.post("/users", [auth.required, [audit]], createUser)`,
+      ["auth.required", "audit"],
+    ],
+    [
+      "a spread whose contents the statement does not show",
+      `app.get("/users", ...guards, listUsers)`,
+      ["...guards"],
+    ],
+    [
+      "a spread of an array it does show",
+      `app.get("/users", ...[requireAdmin, audit], listUsers)`,
+      ["requireAdmin", "audit"],
+    ],
+    [
+      "a property read through brackets",
+      `app.get("/users", handlers["auth"], handlers[kind], handlers.list)`,
+      ["handlers.auth", "handlers.<computed>"],
+    ],
+    [
+      "what no name spells as computed",
+      "app.get(`/users`, isProd ? cached : live, requireRole(`admin`), listUsers)",
+      ["<computed>", "requireRole(…)"],
+    ],
+    [
+      "middleware behind a type assertion",
+      `app.get("/users", (requireAdmin as RequestHandler), listUsers)`,
+      ["requireAdmin"],
+    ],
+    [
+      "each route of a chain, in the order it registers them",
+      `app.route("/users").get(requireUser, listUsers).post(requireAdmin, validate(user), createUser)`,
+      ["requireUser", "requireAdmin", "validate(user)"],
+    ],
+    ["every argument of use", `app.use(logger, audit)`, ["logger", "audit"]],
+    [
+      "what use hands a path, the router it mounts included",
+      `app.use("/admin", requireAdmin, adminRouter)`,
+      ["requireAdmin", "adminRouter"],
+    ],
+    ["each use of a chain", `app.use(cors()).use("/api", apiRouter)`, ["cors()", "apiRouter"]],
+  ])("records %s", async (_label, line, middleware) => {
+    expect((await oneCallIn(inExpressApp(line))).middleware).toEqual(middleware)
+  })
+
+  it.each([
+    ["a route with a handler alone", `app.get("/users", listUsers)`],
+    [
+      "a route whose middleware is an inline function",
+      `app.get("/users", (req, res, next) => next(), listUsers)`,
+    ],
+    ["error middleware written inline", `app.use((err, req, res, next) => res.end())`],
+  ])("leaves the field out for %s", async (_label, line) => {
+    expect(await oneCallIn(inExpressApp(line))).not.toHaveProperty("middleware")
+  })
+
+  it("names middleware the same however the registration is wrapped and commented", async () => {
+    const wrapped = await oneCallIn(
+      inExpressApp(
+        [
+          "app.get(",
+          `  "/users",`,
+          "  requireRole( /* the role */ 'admin' ), // gate",
+          "  auth",
+          "    .required,",
+          "  listUsers,",
+          ")",
+        ].join("\n"),
+      ),
+    )
+
+    expect(wrapped.middleware).toEqual([`requireRole('admin')`, "auth.required"])
+  })
+})

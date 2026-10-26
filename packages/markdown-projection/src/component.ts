@@ -173,6 +173,8 @@ export function renderSymbolBlock(
   rows.push(...decoratorRows(symbol.decorators))
   const sig = signatureLine(symbol.signature)
   if (sig !== null) rows.push(`**Signature**: ${sig}`)
+  const middleware = symbol.middleware ?? []
+  if (middleware.length > 0) rows.push(`**Middleware**: ${joinCode(middleware)}`)
   if (symbol.rules.length > 0) {
     pushList(
       "**Rules**:",

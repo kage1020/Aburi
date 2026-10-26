@@ -497,6 +497,12 @@
           "type": "array",
           "items": { "$ref": "#/$defs/Call" }
         },
+        "middleware": {
+          "description": "The middleware a framework registration hands its handler to, as the framework plugin names them, in the order they run. The logic fingerprint reads it, so adding, removing or reordering one is a logic change. Class B: writers omit the key when the Symbol names no middleware, never emit [].",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
         "source": { "$ref": "#/$defs/SourceRange" },
         "fingerprint": { "$ref": "#/$defs/Fingerprint" },
         "confidence": { "$ref": "#/$defs/Confidence" },

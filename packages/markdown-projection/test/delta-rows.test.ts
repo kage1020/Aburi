@@ -799,6 +799,51 @@ describe("a changed Symbol's delta entries that cannot be read", () => {
   })
 })
 
+describe("a changed Symbol's middleware rows", () => {
+  const route = (middleware: string[]) => (middleware.length === 0 ? {} : { middleware })
+
+  it.each<[string, string[], string[], Partial<SymbolDelta>, string]>([
+    [
+      "a removed middleware by name",
+      ["requireAdmin", "audit"],
+      ["audit"],
+      { middleware: { added: [], removed: ["requireAdmin"], reordered: false } },
+      "- middleware removed: `requireAdmin`\n",
+    ],
+    [
+      "an added middleware by name",
+      [],
+      ["rateLimit(…)"],
+      { middleware: { added: ["rateLimit(…)"], removed: [], reordered: false } },
+      "- middleware added: `rateLimit(…)`\n",
+    ],
+    [
+      "a reorder as the base order → the head order",
+      ["requireAdmin", "audit"],
+      ["audit", "requireAdmin"],
+      { middleware: { added: [], removed: [], reordered: true } },
+      "- middleware reordered: `requireAdmin`, `audit` → `audit`, `requireAdmin`\n",
+    ],
+  ])("names %s", (_, before, after, flags, row) => {
+    const md = renderDelta(
+      { apiChanged: false, logicChanged: true, ...flags },
+      route(before),
+      route(after),
+    )
+    expect(md).toContain(row)
+    expect(md).not.toContain("no field-level detail")
+  })
+
+  it("writes no row for middleware that did not move", () => {
+    const md = renderDelta(
+      { middleware: { added: [], removed: [], reordered: false } },
+      route(["requireAdmin"]),
+      route(["requireAdmin"]),
+    )
+    expect(md).not.toContain("middleware")
+  })
+})
+
 describe("a changed Symbol's component, visibility and confidence rows", () => {
   it("sets each base value before the head one, the confidence row last", () => {
     const md = projectChanges([

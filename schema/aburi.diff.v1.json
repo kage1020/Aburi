@@ -249,6 +249,32 @@
             { "$ref": "#/$defs/SignatureDelta" },
             { "type": "null" }
           ]
+        },
+        "middleware": {
+          "description": "How the Symbol's middleware moved. Present when either side's Symbol carries `middleware`, the lists being equal included, so a reader can tell \"unchanged\" from \"neither side names any\"; absent otherwise. A side without the key compares as an empty list.",
+          "$ref": "#/$defs/MiddlewareDelta"
+        }
+      }
+    },
+
+    "MiddlewareDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "removed", "reordered"],
+      "properties": {
+        "added": {
+          "description": "Entries the head holds more often than the base, once for each extra occurrence, in head order.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "removed": {
+          "description": "Entries the base holds more often than the head, once for each extra occurrence, in base order.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reordered": {
+          "description": "Whether the entries both sides hold run in a different order. The lists themselves are on `before` and `after`.",
+          "type": "boolean"
         }
       }
     },

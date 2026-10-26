@@ -35,6 +35,7 @@ describe("renderSymbolBlock — what a Symbol block holds", () => {
           decorator({ name: "UseGuards", raw: "UseGuards(Auth)" }),
         ],
         signature: sig({ inputs: [{ name: "id", type: "string" }], outputs: ["Promise<User>"] }),
+        middleware: ["requireAdmin", "validate(user)"],
         rules: [
           rule({ type: "throw", what: "new E()", line: 8 }),
           rule({ type: "guard", condition: "x > 0", line: 3 }),
@@ -69,6 +70,7 @@ describe("renderSymbolBlock — what a Symbol block holds", () => {
       "**Boundary**: `@Post('/x')`",
       "**Decorators**: `@UseGuards(Auth)`",
       "**Signature**: `(id: string) → Promise<User>`",
+      "**Middleware**: `requireAdmin`, `validate(user)`",
       "**Rules**:",
       "- guard: `x > 0` (L3)",
       "- throw: `new E()` (L8)",

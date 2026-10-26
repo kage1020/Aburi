@@ -1,4 +1,4 @@
-import { asSyntaxNode, calleeName } from "@aburi/core"
+import { asSyntaxNode, calleeName, type SyntaxNode } from "@aburi/core"
 import type {
   Confidence,
   FrameworkClassifyContext,
@@ -10,6 +10,7 @@ import type { ExpressExtKind } from "./ext-kinds"
 import { EXPRESS_DERIVED_BY_PREFIX } from "./ext-kinds"
 import { hasExpressImport } from "./imports"
 import { analyzeUseArguments, EXPRESS_MIDDLEWARE_METHOD, type UseArgumentShape } from "./middleware"
+import { registrationMiddleware } from "./registration-middleware"
 import { extractRouterCall } from "./router"
 import { hasRouteArguments, isRouteMethod } from "./routes"
 
@@ -18,6 +19,7 @@ interface ExpressClassification {
   extKind: ExpressExtKind
   derivedBy: string
   confidence: Confidence
+  middleware?: readonly string[]
 }
 
 export function classifyExpressSymbol(
@@ -26,10 +28,12 @@ export function classifyExpressSymbol(
 ): SymbolClassification | null {
   const result = classifyBySymbolKind(symbol, ctx)
   if (result === null) return null
+  const middleware = result.middleware ?? []
   return {
     extKind: result.extKind,
     derivedBy: result.derivedBy,
     confidence: result.confidence,
+    ...(middleware.length > 0 ? { middleware } : {}),
   }
 }
 
@@ -63,6 +67,17 @@ function classifyCallSymbol(
 ): ExpressClassification | null {
   const call = asSyntaxNode(symbol.fullNode)
   if (call === null) return null
+  const registration = classifyRegistration(call, symbol, ctx)
+  return registration === null
+    ? null
+    : { ...registration, middleware: registrationMiddleware(call) }
+}
+
+function classifyRegistration(
+  call: SyntaxNode,
+  symbol: SymbolCandidate<OpaqueAstNode>,
+  ctx: FrameworkClassifyContext,
+): ExpressClassification | null {
   const callee = calleeName(call)
   if (callee === null) return null
   const importAnchored = hasExpressImport(ctx)
