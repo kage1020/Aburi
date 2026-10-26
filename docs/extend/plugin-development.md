@@ -186,11 +186,12 @@ function importedNames(imports: readonly ImportEdge[], filePath: string) {
     // Validate every edge before answering, or the throw depends on import order.
     assertImportEdgeSource(edge, origin)
     if (edge.symbols === "*") continue
-    const mine = edge.source.startsWith("@mytool/")
     for (const raw of edge.symbols) {
       const binding = splitAliasedImportName(raw)
       assertImportBinding(binding, raw, edge, origin)
-      names.set(binding.local, { imported: binding.imported, mine })
+      // A workspace barrel's re-export is traced to the module that declares the name.
+      const declaredIn = edge.origins?.get(binding.imported) ?? edge.source
+      names.set(binding.local, { imported: binding.imported, mine: declaredIn.startsWith("@mytool/") })
     }
   }
   return names
@@ -253,13 +254,17 @@ Contracts:
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
   `extKindPrefixes` / `derivedByPrefixes`.
 - Match a decorator on the name it was **imported** under, not the one the source
-  wrote, and read `ImportEdge.source` for provenance. Matching the written name
-  alone loses `import { Widget as W }` and claims a `@Widget` that came from some
-  other library. A default import's imported name is `default`, so match its
-  written name instead. When the edges attribute the name to a module you do not own,
-  classify at `confidence: "medium"` rather than refusing, because a
-  project-local re-export barrel looks like a foreign package. See
-  the [language plugin spec](../design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
+  wrote, and read `ImportEdge.origins` for provenance before `ImportEdge.source`.
+  Matching the written name alone loses `import { Widget as W }` and claims a
+  `@Widget` that came from some other library. A default import's imported name
+  is `default`, so match its written name instead. When a decorator's import
+  reaches a workspace barrel, relative or through a path alias, the scan follows
+  the barrel's re-exports and records on `origins` the module outside the
+  workspace that the name comes from. When neither field names a module you own,
+  classify at `confidence: "medium"` rather than refusing, because a barrel the
+  scan could not follow, such as one that re-exports through `export *`, looks
+  like a foreign package. See the
+  [language plugin spec](../design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
 - `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
   Read it, memoize on its identity if you like, and never mutate it.
 - A `const` Symbol's `fullNode` is its whole declaration statement, which can

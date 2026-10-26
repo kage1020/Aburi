@@ -40,6 +40,11 @@ export interface ImportEdge {
   /** True for `import()` and equivalent dynamic forms. */
   dynamic: boolean
   namespaceBinding?: string
+  /**
+   * Set by the scan, never by the language plugin. Keyed by a name the edge's module exports, the
+   * specifier of the module outside the workspace that the name is re-exported from.
+   */
+  origins?: ReadonlyMap<string, string>
 }
 
 /** An `ImportEdge.symbols` entry split into the name the module exports and the local it binds. */
@@ -119,6 +124,22 @@ export interface PluginContext {
   /** Absolute path used by plugins to set up parsers. */
   workspaceRoot: string
   log: Logger
+}
+
+export interface ImportResolverContext {
+  /** Absolute. */
+  workspaceRoot: string
+  log: Logger
+}
+
+/** One scan's view of the build config a language reads its non-relative specifiers through. */
+export interface ImportResolver {
+  /**
+   * The workspace-relative POSIX paths `specifier`, written in `fromFile`, maps to, in the order
+   * the language tries them. The core probes each as it probes a relative specifier, so a path may
+   * leave out the extension or name a directory.
+   */
+  resolve(specifier: string, fromFile: string): Promise<readonly string[]>
 }
 
 export interface ExtractionContext {
@@ -220,6 +241,9 @@ export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
   /** Language-specific glob list (e.g. `["** /*.d.ts"]`, sans the space). */
   fileDropPatterns?: string[]
   symbolDropHint?(symbol: SymbolCandidate<TNode>, ctx: ExtractionContext): DropHint | null
+
+  /** Called at most once per scan; the resolver may cache what it reads for that scan's length. */
+  createImportResolver?(ctx: ImportResolverContext): ImportResolver
 }
 
 export interface EffectPlugin {
