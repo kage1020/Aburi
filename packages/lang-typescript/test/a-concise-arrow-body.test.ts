@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { walkFirstSymbol, walkOf } from "./fixtures/ctx"
+import { parseErrorsOf, walkFirstSymbol, walkOf } from "./fixtures/ctx"
 
 const rulesOf = async (source: string, path?: string) => (await walkFirstSymbol(source, path)).rules
 
@@ -145,13 +145,13 @@ describe("parentheses around a returned value", () => {
   it.each([
     ["one pair", "(a > b ? a : b)", "a > b ? a : b"],
     ["every pair", "((a + 1))", "a + 1"],
-    ["a pair past a comment inside it", "(/* keep */ { a: 1 })", "{ a: 1 }"],
+    ["a pair holding a comment", "(/* keep */ { a: 1 })", "{ a: 1 }"],
     [
       "a formatter's pair around multi-line JSX",
       '(\n    <div className="a">{b}</div>\n  )',
       '<div className="a">{b}</div>',
     ],
-  ])("are taken off %s, in a concise body and a block alike", async (_label, value, expr) => {
+  ])("%s comes off, in a concise body and a block alike", async (_label, value, expr) => {
     const concise = await rulesOf(`export const f = (a: any, b: any) => ${value}`, "src/a.tsx")
     const block = await rulesOf(
       `export function f(a: any, b: any) { return ${value} }`,
@@ -163,7 +163,6 @@ describe("parentheses around a returned value", () => {
   })
 
   it.each([
-    ["export const f = () => (g())"],
     ["export function f() { return (g()) }"],
     ["export function f() { return ((g())) }"],
     ["export function f() { return (/* c */ g()) }"],
@@ -175,11 +174,43 @@ describe("parentheses around a returned value", () => {
   })
 
   it.each([
-    ["export function f(x: any) { return (x) }"],
-    ["export function f(x: any) { return ((x.y)) }"],
     ["export function f(x: any) { return (/* c */ x) }"],
+    ["export function f(x: any) { return !(/* c */ x) }"],
+    ["export function f(x: any) { return (/* c */ x).y }"],
+    ["export const f = (x: any) => !(/* c */ x)"],
   ])("leave a trivial value trivial: %s", async (source) => {
     expect(await rulesOf(source)).toEqual([])
+  })
+
+  it.each([
+    ["export function f(x: any) { return (x; }", ["(x"]],
+    ["export function f(a: any) { return (a +) }", ["(a +)"]],
+    ["export function f(a: any, b: any) { return (a b) }", ["(a b)"]],
+    ["export const f = (x: any) => (x;", ["(x"]],
+  ])("stay on a value the grammar repaired: %s", async (source, exprs) => {
+    expect((await parseErrorsOf(source)).length).toBeGreaterThan(0)
+    expect((await rulesOf(source)).map((r) => r.expr)).toEqual(exprs)
+  })
+
+  it("stay on a pair that holds more than one expression", async () => {
+    const source = "export function f(x: any) { return (x: number) }"
+
+    expect(await parseErrorsOf(source)).toEqual([])
+    expect((await rulesOf(source)).map((r) => r.expr)).toEqual(["(x: number)"])
+  })
+})
+
+describe("a comment written straight after `return`", () => {
+  it.each([
+    ["export function f() { return /* c */ g() }", [], ["g"]],
+    ["export function f() { return /* c */ 1 }", [], []],
+    ["export function f() { return /* keep */ { a: 1 } }", ["{ a: 1 }"], []],
+    ["export function f(a: number, b: number) { return /* c */ a + b }", ["a + b"], []],
+  ])("is skipped, and the value read: %s", async (source, exprs, targets) => {
+    const { rules, calls } = await walkFirstSymbol(source)
+
+    expect(rules.map((r) => r.expr)).toEqual(exprs)
+    expect(calls.map((c) => c.target)).toEqual(targets)
   })
 })
 

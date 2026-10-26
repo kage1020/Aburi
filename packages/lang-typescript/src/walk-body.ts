@@ -6,7 +6,7 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, throughParentheses, thrownValue } from "./ast-helpers"
+import { bodyNodesOf, firstNonCommentChild, throughParentheses, thrownValue } from "./ast-helpers"
 import { readCall } from "./callee"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
 import { containsEarlyExit } from "./early-exit"
@@ -197,7 +197,7 @@ function visitIfStatement(node: Node, rules: Rule[], calls: CallCandidate[]): vo
 }
 
 function visitReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
-  const written = node.namedChildren[0] ?? null
+  const written = firstNonCommentChild(node)
   if (written === null) return
   const value = throughParentheses(written)
   if (isCall(value)) {

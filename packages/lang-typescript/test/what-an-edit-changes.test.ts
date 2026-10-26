@@ -200,6 +200,12 @@ describe("an edit outside every rule and signature is a syntax-only change", () 
       returning("(\n    ", "\n  )"),
       ["larger", "total"],
     ],
+    [
+      "a concise conditional rewritten as a block that returns it in parentheses",
+      "export const larger = (a: number, b: number): number => (a > b ? a : b)\n",
+      "export const larger = (a: number, b: number): number => {\n  return (a > b ? a : b)\n}\n",
+      ["larger"],
+    ],
   ])("reports %s", async (_label, before, after, names) => {
     const diff = await diffOfEdit(workspace, FILE, before, after)
     const changed = changedSymbols(diff)
