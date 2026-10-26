@@ -1,6 +1,6 @@
 import { type Decorator, UNNAMED_DECORATOR } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { firstNonCommentChild, hasErrorChild } from "./ast-helpers"
+import { firstNonCommentChild, throughParentheses } from "./ast-helpers"
 
 export function readDecorators(declaration: Node): Decorator[] {
   return collectDecoratorNodes(declaration)
@@ -62,13 +62,6 @@ function readDecorator(node: Node): Decorator | null {
     boundary: false,
     line,
   }
-}
-
-function throughParentheses(node: Node): Node {
-  if (node.type !== "parenthesized_expression" || hasErrorChild(node)) return node
-  const enclosed = firstNonCommentChild(node)
-  if (enclosed === null || hasErrorChild(enclosed)) return node
-  return enclosed
 }
 
 function leafIdentifier(node: Node): string {

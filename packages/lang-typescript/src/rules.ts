@@ -1,7 +1,7 @@
 import { normalizeRuleText } from "@aburi/core"
 import type { Rule } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { walkDescendants } from "./ast-helpers"
+import { throughParentheses, walkDescendants } from "./ast-helpers"
 import { TYPE_WRAPPER_TYPES, wrappedExpression } from "./callee"
 
 export const LOOP_KINDS: ReadonlyMap<string, NonNullable<Rule["loopKind"]>> = new Map([
@@ -83,8 +83,8 @@ export function isTrivialExpr(node: Node): boolean {
       return argument !== null && isTrivialExpr(argument)
     }
     case "parenthesized_expression": {
-      const inner = node.namedChild(0)
-      return inner !== null && isTrivialExpr(inner)
+      const inner = throughParentheses(node)
+      return inner !== node && isTrivialExpr(inner)
     }
     default:
       return false
