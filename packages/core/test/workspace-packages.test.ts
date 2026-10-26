@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import { errorFrom } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { CoreError, readWorkspacePackages } from "../src/index"
@@ -46,6 +47,6 @@ describe("readWorkspacePackages", () => {
     )
 
     expect(error.code).toBe("workspace-manifest-malformed")
-    expect(error.message).toContain("packages/web/package.json")
+    expect(error.message).toContain(join(tree.root, "packages", "web", "package.json"))
   })
 })
