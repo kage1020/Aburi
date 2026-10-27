@@ -36,6 +36,11 @@ export function asFunctionValue(node: Node): Node | null {
   return FUNCTION_VALUE_TYPES.has(value.type) ? value : null
 }
 
+export function asClassValue(node: Node): Node | null {
+  const value = unwrapValue(node)
+  return value.type === "class" ? value : null
+}
+
 export function hasErrorChild(node: Node): boolean {
   return node.children.some(
     (child) => child !== null && (child.type === "ERROR" || child.isMissing),
@@ -54,6 +59,18 @@ export function findChild(node: Node, typeName: string): Node | null {
     if (child !== null && child.type === typeName) return child
   }
   return null
+}
+
+export function throughParentheses(node: Node): Node {
+  let cursor = node
+  while (cursor.type === "parenthesized_expression" && !hasErrorChild(cursor)) {
+    const [only, ...rest] = cursor.namedChildren.filter(
+      (child): child is Node => child !== null && child.type !== "comment",
+    )
+    if (only === undefined || rest.length > 0 || hasErrorChild(only)) return cursor
+    cursor = only
+  }
+  return cursor
 }
 
 export function firstNonCommentChild(node: Node): Node | null {
