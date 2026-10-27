@@ -1,5 +1,5 @@
 import { unwrapValue } from "@aburi/core"
-import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import {
   asClassValue,
@@ -8,7 +8,7 @@ import {
   makeSourceRange,
   nameFieldText,
 } from "./ast-helpers"
-import { inlineHandlers, invokedFunction } from "./call-symbols"
+import { invokedFunction, layOutBodies, wrappedFunctions } from "./call-symbols"
 import { classMemberCandidates } from "./class-candidates"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
@@ -111,8 +111,7 @@ function makeVariableCandidate(
       ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
     ]
   }
-  const { bodies, evidence } = initializerFunctions(initializer, statement)
-  const [lead, ...rest] = bodies
+  const { bodies, evidence } = initializerFunctions(initializer)
   return [
     {
       id,
@@ -124,28 +123,26 @@ function makeVariableCandidate(
       signature: null,
       source: makeSourceRange(statement, ctx),
       derivedBy: [...evidence, ...exportEvidence(statement)],
-      bodyNode: lead?.bodyNode ?? null,
-      fullNode: statement,
-      ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
+      ...layOutBodies(bodies, statement),
     },
   ]
 }
 
 interface InitializerFunctions {
-  bodies: MergedDeclaration<Node>[]
+  bodies: Node[]
   evidence: string[]
 }
 
-function initializerFunctions(initializer: Node | null, statement: Node): InitializerFunctions {
+function initializerFunctions(initializer: Node | null): InitializerFunctions {
   const call = initializer === null ? null : unwrapValue(initializer)
   if (call === null || call.type !== "call_expression") return { bodies: [], evidence: [] }
-  const handed = inlineHandlers(call, statement)
+  const handed = wrappedFunctions(call)
   const invoked = invokedFunction(call)?.childForFieldName("body") ?? null
   if (invoked === null || invoked.text.length === 0) {
     return { bodies: handed, evidence: handed.length > 0 ? ["call-argument-function"] : [] }
   }
   return {
-    bodies: [{ bodyNode: invoked, fullNode: statement }, ...handed],
+    bodies: [invoked, ...handed],
     evidence:
       handed.length > 0 ? ["invoked-function", "call-argument-function"] : ["invoked-function"],
   }

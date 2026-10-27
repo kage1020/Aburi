@@ -59,7 +59,7 @@ export function visitCallStatement(
   state.seen.set(stem, ordinal + 1)
   const qname = nestedQname([`${stem}__d${ordinal}`])
 
-  const [lead, ...rest] = inlineHandlers(call, call)
+  const bodies = inlineHandlers(call)
   return {
     id: makeTsSymbolId(ctx.file.path, qname),
     kind: "call",
@@ -69,14 +69,32 @@ export function visitCallStatement(
     decorators: [],
     signature: null,
     source: makeSourceRange(call, ctx),
-    derivedBy: makeDerivedBy(parsed, path, names, lead !== undefined),
-    bodyNode: lead?.bodyNode ?? null,
-    fullNode: call,
-    ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
+    derivedBy: makeDerivedBy(parsed, path, names, bodies.length > 0),
+    ...layOutBodies(bodies, call),
   }
 }
 
-export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration<Node>[] {
+export function wrappedFunctions(value: Node): Node[] {
+  const call = unwrapValue(value)
+  return call.type === "call_expression" ? inlineHandlers(call) : []
+}
+
+export function layOutBodies(
+  bodies: readonly Node[],
+  declaration: Node,
+): Pick<SymbolCandidate<Node>, "bodyNode" | "fullNode" | "mergedDeclarations"> {
+  const [lead, ...rest] = bodies
+  const merged = rest.map(
+    (body): MergedDeclaration<Node> => ({ bodyNode: body, fullNode: declaration }),
+  )
+  return {
+    bodyNode: lead ?? null,
+    fullNode: declaration,
+    ...(merged.length > 0 ? { mergedDeclarations: merged } : {}),
+  }
+}
+
+function inlineHandlers(call: Node): Node[] {
   const bodies: Node[] = []
   for (const step of spineCalls(call)) {
     const args = argumentsOf(step)
@@ -90,9 +108,7 @@ export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration
       bodies.push(body)
     }
   }
-  return bodies
-    .sort((a, b) => a.startIndex - b.startIndex)
-    .map((body) => ({ bodyNode: body, fullNode: declaration }))
+  return bodies.sort((a, b) => a.startIndex - b.startIndex)
 }
 
 export function invokedFunction(call: Node): Node | null {
