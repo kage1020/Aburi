@@ -1,7 +1,6 @@
 import { isQnameSegment } from "@aburi/core"
-import type { MergedDeclaration } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { functionValueOf, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
+import { asFunctionValue, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
 import { wrappedFunctions } from "./call-symbols"
 import { decodeStringLiteral } from "./string-escape"
 
@@ -35,13 +34,13 @@ export function memberSymbolSegment(classNode: Node, member: Node): string | nul
   return functionValuedField(member) === null ? null : segment
 }
 
-/** A function a field holds runs when the member is called, not when the class is constructed. */
+/**
+ * Bodies read as running when the member is called, not on construction or definition: the tree
+ * cannot tell a wrapper from a call that runs its argument at once.
+ */
 export type HeldFunction =
   | { readonly kind: "function"; readonly fn: Node }
-  | {
-      readonly kind: "handed-to-a-call"
-      readonly handlers: readonly [MergedDeclaration<Node>, ...MergedDeclaration<Node>[]]
-    }
+  | { readonly kind: "handed-to-a-call"; readonly bodies: readonly [Node, ...Node[]] }
 
 export function functionValuedField(member: Node): HeldFunction | null {
   if (member.type !== "public_field_definition") return null
@@ -51,15 +50,16 @@ export function functionValuedField(member: Node): HeldFunction | null {
 }
 
 export function functionAFieldHolds(field: Node): HeldFunction | null {
-  const fn = functionValueOf(field)
-  if (fn !== null) return { kind: "function", fn }
   const value = field.childForFieldName("value")
-  const [lead, ...rest] = value === null ? [] : wrappedFunctions(value, field)
-  return lead === undefined ? null : { kind: "handed-to-a-call", handlers: [lead, ...rest] }
+  if (value === null) return null
+  const fn = asFunctionValue(value)
+  if (fn !== null) return { kind: "function", fn }
+  const [lead, ...rest] = wrappedFunctions(value)
+  return lead === undefined ? null : { kind: "handed-to-a-call", bodies: [lead, ...rest] }
 }
 
 export function heldFunctionBodies(held: HeldFunction): Node[] {
-  if (held.kind === "handed-to-a-call") return held.handlers.flatMap((h) => h.bodyNode ?? [])
+  if (held.kind === "handed-to-a-call") return [...held.bodies]
   const body = held.fn.childForFieldName("body")
   return body === null ? [] : [body]
 }

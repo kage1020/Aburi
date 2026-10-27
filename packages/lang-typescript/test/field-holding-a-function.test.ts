@@ -22,11 +22,21 @@ describe("a field holding a function is a member Symbol", () => {
     expect(symbol.derivedBy).toContain("field-assigned-function")
   })
 
-  it("gives a static field the static member qname", async () => {
-    const symbol = await symbolOf(classOf("  static sf = () => { st() }"), "ts:src/a.ts#C::sf")
+  it.each([
+    ["a function", "  static sf = () => { st() }", "field-assigned-function"],
+    [
+      "a function handed to a call",
+      "  static sf = withAuth(() => { st() })",
+      "call-argument-function",
+    ],
+  ])("gives a static field holding %s the static member qname", async (_label, field, spelling) => {
+    const source = classOf(field)
 
-    expect(symbol.derivedBy).toContain("static-method")
-    expect(symbol.derivedBy).not.toContain("class-method")
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C::sf"])
+    expect((await symbolOf(source, "ts:src/a.ts#C::sf")).derivedBy).toEqual([
+      "static-method",
+      spelling,
+    ])
   })
 
   it("reads a hash-private field as private", async () => {
@@ -169,58 +179,131 @@ describe("a field holding a function handed to a call is a member Symbol", () =>
     expect(symbol.derivedBy).toEqual(["class-method", "call-argument-function"])
   })
 
-  it("walks the function on the member and the call that wraps it on the class", async () => {
-    expect(await callsOf(AUTHED, "ts:src/a.ts#C.handle")).toEqual(["inner"])
-    expect(await callsOf(AUTHED, "ts:src/a.ts#C")).toEqual(["withAuth"])
-  })
-
   it.each([
+    [
+      "the function on the member and the call that wraps it on the class",
+      "  handle = withAuth(async (d: unknown) => { inner(d) })",
+      "handle",
+      ["inner"],
+      ["withAuth"],
+    ],
     [
       "every function handed to a call on the value's chain",
       "  q = t.procedure.input((v) => { parse(v) }).query(() => { load() })",
+      "q",
       ["parse", "load"],
       ["t.procedure.input.query", "t.procedure.input"],
     ],
     [
       "a function's parameter defaults with its body",
       "  handle = withAuth((x = fallback()) => { use(x) })",
+      "handle",
       ["fallback", "use"],
       ["withAuth"],
     ],
     [
+      "each function's parameter defaults with its own body",
+      "  piped = pipe(() => { a() }, (x = dflt()) => { b(x) })",
+      "piped",
+      ["a", "dflt", "b"],
+      ["pipe"],
+    ],
+    [
       "a call behind a wrapper",
       "  handle = (withAuth(() => { inner() })) as Handler",
+      "handle",
       ["inner"],
       ["withAuth"],
     ],
-  ])("walks %s on the member", async (_label, field, onMember, onClass) => {
+    [
+      "the function and leaves the call's other arguments on the class",
+      "  debounced = debounce(() => { a() }, delay())",
+      "debounced",
+      ["a"],
+      ["debounce", "delay"],
+    ],
+    [
+      "a callback a call runs at once on the member, a known cost",
+      "  doubled = xs.map((x) => x * 2)",
+      "doubled",
+      [],
+      ["xs.map"],
+    ],
+    [
+      "a callback a call registers on the member, a known cost",
+      "  timer = setInterval(() => { tick() }, 1000)",
+      "timer",
+      ["tick"],
+      ["setInterval"],
+    ],
+  ])("walks %s", async (_label, field, member, onMember, onClass) => {
     const source = classOf(field)
-    const [, member] = await idsOf(source)
 
-    expect(await callsOf(source, member ?? "")).toEqual(onMember)
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", `ts:src/a.ts#C.${member}`])
+    expect(await callsOf(source, `ts:src/a.ts#C.${member}`)).toEqual(onMember)
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(onClass)
   })
 
-  it("gives a static field the static member qname", async () => {
-    const source = classOf("  static handle = withAuth(() => { st() })")
+  it.each([
+    [
+      "an empty handler before one with code",
+      "  ready = p.then(() => {}).catch((e) => report(e))",
+      null,
+      ["report"],
+    ],
+    [
+      "an empty handler after one with code",
+      "  ready = p.then((r) => use(r), () => {})",
+      null,
+      ["use"],
+    ],
+    [
+      "only empty handlers",
+      "  ready = p.then(() => {}, () => {})",
+      { reason: "empty body", category: "B" },
+      [],
+    ],
+  ])("hints a member of %s by every body it has", async (_label, field, hint, onMember) => {
+    const source = classOf(field)
 
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C::handle"])
-    expect((await symbolOf(source, "ts:src/a.ts#C::handle")).derivedBy).toContain("static-method")
-  })
-
-  it("describes the whole field, so changing the call that wraps the function is an edit", async () => {
-    const wrappedBy = (wrapper: string) =>
-      normalizedOf(classOf(`  handle = ${wrapper}(() => { inner() })`), "ts:src/a.ts#C.handle")
-
-    expect(await wrappedBy("withAuth")).not.toBe(await wrappedBy("withRole"))
+    expect(await hintOf(source, "ts:src/a.ts#C.ready")).toEqual(hint)
+    expect(await callsOf(source, "ts:src/a.ts#C.ready")).toEqual(onMember)
   })
 
   it.each([
-    ["a function inside an argument", "  handle = withAuth(withLogging(() => { a() }))"],
-    ["a function handed to `new`", "  ready = new Promise((resolve) => { a(resolve) })"],
-    ["a call handed no function", "  client = makeClient(options)"],
-  ])("leaves %s on the class", async (_label, field) => {
-    expect(await idsOf(classOf(field))).toEqual(["ts:src/a.ts#C"])
+    [
+      "the call that wraps the function",
+      "  handle = withAuth(() => { inner() })",
+      "  handle = withRole(() => { inner() })",
+    ],
+    [
+      "the field's type annotation",
+      "  handle: Auth = withAuth(() => { inner() })",
+      "  handle: Role = withAuth(() => { inner() })",
+    ],
+  ])("describes the whole field, so changing %s is an edit", async (_label, before, after) => {
+    const describe = (field: string) => normalizedOf(classOf(field), "ts:src/a.ts#C.handle")
+
+    expect(await describe(before)).not.toBe(await describe(after))
+  })
+
+  it.each([
+    [
+      "a function inside an argument",
+      "  handle = withAuth(withLogging(() => { a() }))",
+      ["withAuth", "withLogging", "a"],
+    ],
+    [
+      "a function handed to `new`",
+      "  ready = new Promise((resolve) => { a(resolve) })",
+      ["Promise", "a"],
+    ],
+    ["a call handed no function", "  client = makeClient(options)", ["makeClient"]],
+  ])("leaves %s on the class", async (_label, field, onClass) => {
+    const source = classOf(field)
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(onClass)
   })
 })
 
@@ -266,10 +349,21 @@ describe("a class of function-valued fields is not a data model", () => {
   })
 
   it.each([
-    ["a field holding a function handed to a call", "  handle = withAuth(() => { inner() })"],
-    ["the same field under a computed name", "  [key] = withAuth(() => { inner() })"],
-  ])("does not read a class of %s as one", async (_label, field) => {
-    expect(await hintOf(classOf(field), "ts:src/a.ts#C")).toBeNull()
+    [
+      "a field holding a function handed to a call",
+      "  handle = withAuth(() => { inner() })",
+      ["withAuth"],
+    ],
+    [
+      "the same field under a computed name",
+      "  [key] = withAuth(() => { inner() })",
+      ["withAuth", "inner"],
+    ],
+  ])("does not read a class of %s as one", async (_label, field, onClass) => {
+    const source = classOf(field)
+
+    expect(await hintOf(source, "ts:src/a.ts#C")).toBeNull()
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(onClass)
   })
 
   it("hints an empty function-valued field as an empty body", async () => {

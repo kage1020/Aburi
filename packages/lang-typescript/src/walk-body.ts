@@ -104,8 +104,8 @@ function visitExcluding(
       visitNode(part, rules, calls)
       continue
     }
-    // A call on the way to a skipped body runs here: it is what the body is handed to.
-    if (part.type === "call_expression" || part.type === "new_expression") recordCall(part, calls)
+    // Calls a skipped body sits under run on the owner; only the body waits for the member's call.
+    if (part.type === "call_expression") recordCall(part, calls)
     visitExcluding(part, skipped, rules, calls)
   }
 }

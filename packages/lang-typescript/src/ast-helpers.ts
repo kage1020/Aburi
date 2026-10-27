@@ -20,11 +20,6 @@ export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSour
   }
 }
 
-export function functionValueOf(node: Node): Node | null {
-  const value = node.childForFieldName("value")
-  return value === null ? null : asFunctionValue(value)
-}
-
 const FUNCTION_VALUE_TYPES: ReadonlySet<string> = new Set([
   "arrow_function",
   "function_expression",

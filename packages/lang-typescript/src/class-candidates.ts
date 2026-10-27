@@ -1,6 +1,7 @@
 import type { ExtractionContext, SymbolCandidate, SymbolKind } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { hasChildOfType, makeSourceRange } from "./ast-helpers"
+import { layOutBodies } from "./call-symbols"
 import {
   functionValuedField,
   type HeldFunction,
@@ -136,12 +137,5 @@ function makeFieldFunctionCandidate(
       fullNode: held.fn,
     }
   }
-  const [lead, ...rest] = held.handlers
-  return {
-    ...member,
-    signature: null,
-    bodyNode: lead.bodyNode,
-    fullNode: lead.fullNode,
-    ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
-  }
+  return { ...member, signature: null, ...layOutBodies(held.bodies, field) }
 }

@@ -1,7 +1,7 @@
 import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { asFunctionValue, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
-import { wrappedFunctions } from "./call-symbols"
+import { layOutBodies, wrappedFunctions } from "./call-symbols"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
 import { exportEvidence, topLevelVisibility } from "./export-evidence"
@@ -83,7 +83,7 @@ function makeVariableCandidate(
       ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
     ]
   }
-  const [lead, ...rest] = initializer === null ? [] : wrappedFunctions(initializer, statement)
+  const bodies = initializer === null ? [] : wrappedFunctions(initializer)
   return [
     {
       id,
@@ -95,12 +95,10 @@ function makeVariableCandidate(
       signature: null,
       source: makeSourceRange(statement, ctx),
       derivedBy:
-        lead === undefined
+        bodies.length === 0
           ? exportEvidence(statement)
           : ["call-argument-function", ...exportEvidence(statement)],
-      bodyNode: lead?.bodyNode ?? null,
-      fullNode: statement,
-      ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
+      ...layOutBodies(bodies, statement),
     },
   ]
 }
