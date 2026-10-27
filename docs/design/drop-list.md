@@ -125,15 +125,17 @@ A class is a `pure DTO` when all of the following hold:
 - It has no boundary decorator (one that a framework plugin judged `boundary: true`)
 - The body declares at least one field, and every other member is an index signature or a comment
 
+A class a binding holds (`export const Point = class { x = 0; y = 0 }`) is a class here, as the same class declared is ([`lang-plugin.md`](./lang-plugin.md) LP7h).
+
 A static block is behaviour, more plainly than a method: it runs, unconditionally, when the class is defined. Its calls are walked on the class (`lang-plugin.md` LP20a), the only Symbol that carries them, so dropping a class of fields and a static block as a DTO would take the block's calls and effects with it. Getters, setters and constructors are methods here, and so are a method signature and an abstract method, which declare behaviour without a body.
 
 An index signature (`[key: string]: unknown`) is part of the shape, so it leaves a class of fields a DTO. A `//` or `/* */` comment is not a member at all and changes neither hint: a class of `static readonly` literals with a doc comment on each is still `pure constants`. An index signature is not a constant, so beside one that class is a `pure DTO`.
 
-A field whose value is a function *the plugin recognises as one* is a method for this rule (`create = (d) => { … }`, `create = function (d) { … }`, `pages = function* () { … }`). It declares behaviour, not a shape, and a class written entirely that way is not a data model. The question is the field's value, not whether the member became a Symbol: a member the plugin could not name — a computed name, say — is still not data.
+A field that holds a function *the plugin recognises as one*, as its value or handed directly to the call that is its value, is a method for this rule (`create = (d) => { … }`, `create = function (d) { … }`, `pages = function* () { … }`, `handle = withAuth(() => { … })`). It declares behaviour, not a shape, and a class written entirely that way is not a data model. The question is the field's value, not whether the member became a Symbol: a member the plugin could not name — a computed name, say — is still not data.
 
-The recognised set is the language plugin's, and it is narrower than "holds a function": a function behind a wrapper (`handle = withAuth(() => …)`) reads as data here. A class of nothing else is dropped, and the calls the owner was carrying for it go with it, which is a loss rather than a filter. Widening the set is one decision for the plugin and not three, since the same predicate decides whether the member gets a Symbol at all.
+The recognised set is the language plugin's, and it is narrower than "holds a function": a function handed directly to a call the field holds is in it ([`lang-plugin.md`](./lang-plugin.md) LP20f1), and a function deeper in the value (`handle = withAuth(withLogging(() => …))`) reads as data here. A class of nothing else is dropped, and the calls the owner was carrying for it go with it, which is a loss rather than a filter. Widening the set is one decision for the plugin and not three, since the same predicate decides whether the member gets a Symbol at all. The set asks nothing about the call either, so it is also wider than the wrappers: a class of nothing but `doubled = xs.map((x) => …)` fields is not a DTO, although that callback runs on construction (LP20f1's known cost).
 
-Being such a function is the only way a field's value keeps the class. Any other initializer, a call included (`seed = makeSeed()`, `static rows = db.load()`), leaves the member a field declaration, although it runs on construction or definition and is walked on the class: a class of such fields is a DTO, and those calls go with it, the same loss as the wrapper's.
+Holding such a function, as the value or handed directly to the call that is the value, is the only way a field's value keeps the class. Any other initializer, a call handed no function included (`seed = makeSeed()`, `static rows = db.load()`), leaves the member a field declaration, although it runs on construction or definition and is walked on the class: a class of such fields is a DTO, and those calls go with it, the same loss as the nested wrapper's.
 
 The core performs this determination, but each language plugin may add auxiliary rules for pure-DTO detection (e.g. `class-validator` decorators such as `@IsString` count as decoration; anything else is an ordinary determinant).
 
@@ -358,8 +360,10 @@ Properties the extraction pipeline must satisfy.
 | B1 | pure DTO (`class Foo { x: number; y: string }`) | `dropped: true, dropReason: "pure DTO"` |
 | B1b | a class of a field and a static block (`class Registry { static items: string[] = []; static { prisma.user.deleteMany() } }`), and the same class without the field | `dropped: false` with `prisma.user.deleteMany` in the class's `calls`, either way; without the block, `dropped: true, dropReason: "pure DTO"` |
 | B1c | a class of a field and a getter, a setter or a constructor | `dropped: false` |
-| B1d | a class of a field and an index signature, a `declare` field, an `accessor` field, a field holding a call (`seed = compute()`) or a comment | `dropped: true, dropReason: "pure DTO"` |
+| B1c1 | a class of a field holding a function handed to a call (`handle = withAuth(() => { inner() })`), and the same field under a computed name | `dropped: false` either way; the named field's `inner` is in the member's `calls` and `withAuth` in the class's |
+| B1d | a class of a field and an index signature, a `declare` field, an `accessor` field, a field holding a call handed no function (`seed = compute()`) or a comment | `dropped: true, dropReason: "pure DTO"` |
 | B1e | a class of `static readonly` literals with a doc comment, a line comment or a stray `;` among them; the same class beside an index signature | `dropped: true, dropReason: "pure constants"`; beside the index signature, `"pure DTO"` |
+| B1f | B1 and B1e's classes held by a binding (`export const Foo = class { x = 0; y = 0 }`) | the hint the declared class gets: `"pure DTO"`, `"pure constants"` |
 | B2 | `interface Foo { x: number }` | `dropped: true, dropReason: "interface (data model)"` |
 | B3 | `type Bar = string` | `dropped: true, dropReason: "type alias"` |
 | B4 | `export { x } from './y'` | `dropped: true, dropReason: "re-export"` |

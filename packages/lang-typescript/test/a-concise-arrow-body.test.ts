@@ -246,6 +246,12 @@ describe("every walk root reads its concise arrow this way", () => {
       "ts:src/a.ts#d",
       "x * 2",
     ],
+    [
+      "a function a class field hands to a call",
+      "export class C {\n  doubled = xs.map((x: number) => x * 2)\n}",
+      "ts:src/a.ts#C.doubled",
+      "x * 2",
+    ],
   ])("%s", async (_label, source, id, expr) => {
     expect((await walkOf(source, id)).rules.map((r) => [r.type, r.expr])).toEqual([
       ["return", expr],
