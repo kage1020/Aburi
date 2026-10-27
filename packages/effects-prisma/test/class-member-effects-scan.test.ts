@@ -40,6 +40,14 @@ describe.each([
     "a field holding an arrow",
     ["create = async (data: unknown) => {", "  return this.prisma.user.create({ data })", "}"],
   ],
+  [
+    "a field holding a generator",
+    [
+      "create = async function* (data: unknown) {",
+      "  yield this.prisma.user.create({ data })",
+      "}",
+    ],
+  ],
 ])("scan — a class whose member writes to a database through %s", (_form, member) => {
   it("puts the write on the member, and nothing on the class that declares it", async () => {
     await workspace.writeSource("src/user.service.ts", userService(member))

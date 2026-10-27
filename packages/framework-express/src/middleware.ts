@@ -60,6 +60,7 @@ function findArguments(callExpression: SyntaxNode): SyntaxNode | null {
   return null
 }
 
+// Express calls a handler and never iterates what it returns, so a generator is not one here.
 function isFunctionLike(node: SyntaxNode): boolean {
   return node.type === "arrow_function" || node.type === "function_expression"
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { walkFirstSymbol, walkOf } from "./fixtures/ctx"
+import { parseErrorsOf, walkFirstSymbol, walkOf } from "./fixtures/ctx"
 
 const rulesOf = async (source: string, path?: string) => (await walkFirstSymbol(source, path)).rules
 
@@ -141,27 +141,76 @@ describe("a concise arrow body is read as the block spelling's `return`", () => 
   })
 })
 
-describe("the parentheses around a concise body", () => {
-  it("are taken off where a block `return` keeps them in `expr`", async () => {
-    const concise = await rulesOf("export const f = (a: any, b: any) => (a > b ? a : b)")
-    const block = await rulesOf("export function f(a: any, b: any) { return (a > b ? a : b) }")
+describe("parentheses around a returned value", () => {
+  it.each([
+    ["one pair", "(a > b ? a : b)", "a > b ? a : b"],
+    ["every pair", "((a + 1))", "a + 1"],
+    ["a pair holding a comment", "(/* keep */ { a: 1 })", "{ a: 1 }"],
+    [
+      "a formatter's pair around multi-line JSX",
+      '(\n    <div className="a">{b}</div>\n  )',
+      '<div className="a">{b}</div>',
+    ],
+  ])("%s comes off, in a concise body and a block alike", async (_label, value, expr) => {
+    const concise = await rulesOf(`export const f = (a: any, b: any) => ${value}`, "src/a.tsx")
+    const block = await rulesOf(
+      `export function f(a: any, b: any) { return ${value} }`,
+      "src/a.tsx",
+    )
 
-    expect(concise.map((r) => r.expr)).toEqual(["a > b ? a : b"])
-    expect(block.map((r) => r.expr)).toEqual(["(a > b ? a : b)"])
+    expect(concise.map((r) => r.expr)).toEqual([expr])
+    expect(block.map((r) => r.expr)).toEqual([expr])
   })
 
   it.each([
-    ["one pair only", "export const f = (a: number) => ((a + 1))", "(a + 1)"],
-    ["past a comment inside them", "export const f = () => (/* keep */ { a: 1 })", "{ a: 1 }"],
-  ])("are taken off %s", async (_label, source, expr) => {
-    expect((await rulesOf(source)).map((r) => r.expr)).toEqual([expr])
+    ["export function f() { return (g()) }"],
+    ["export function f() { return ((g())) }"],
+    ["export function f() { return (/* c */ g()) }"],
+  ])("leave a call call-only: %s", async (source) => {
+    const { rules, calls } = await walkFirstSymbol(source)
+
+    expect(rules).toEqual([])
+    expect(calls.map((c) => c.target)).toEqual(["g"])
   })
 
-  it("leave a parenthesized call call-only, where the block spelling takes a rule", async () => {
-    const block = await walkFirstSymbol("export function f() { return (g()) }")
+  it.each([
+    ["export function f(x: any) { return (/* c */ x) }"],
+    ["export function f(x: any) { return !(/* c */ x) }"],
+    ["export function f(x: any) { return (/* c */ x).y }"],
+    ["export const f = (x: any) => !(/* c */ x)"],
+  ])("leave a trivial value trivial: %s", async (source) => {
+    expect(await rulesOf(source)).toEqual([])
+  })
 
-    expect(block.rules.map((r) => r.expr)).toEqual(["(g())"])
-    expect(block.calls.map((c) => c.target)).toEqual(["g"])
+  it.each([
+    ["export function f(x: any) { return (x; }", ["(x"]],
+    ["export function f(a: any) { return (a +) }", ["(a +)"]],
+    ["export function f(a: any, b: any) { return (a b) }", ["(a b)"]],
+    ["export const f = (x: any) => (x;", ["(x"]],
+  ])("stay on a value the grammar repaired: %s", async (source, exprs) => {
+    expect((await parseErrorsOf(source)).length).toBeGreaterThan(0)
+    expect((await rulesOf(source)).map((r) => r.expr)).toEqual(exprs)
+  })
+
+  it("stay on a pair that holds more than one expression", async () => {
+    const source = "export function f(x: any) { return (x: number) }"
+
+    expect(await parseErrorsOf(source)).toEqual([])
+    expect((await rulesOf(source)).map((r) => r.expr)).toEqual(["(x: number)"])
+  })
+})
+
+describe("a comment written straight after `return`", () => {
+  it.each([
+    ["export function f() { return /* c */ g() }", [], ["g"]],
+    ["export function f() { return /* c */ 1 }", [], []],
+    ["export function f() { return /* keep */ { a: 1 } }", ["{ a: 1 }"], []],
+    ["export function f(a: number, b: number) { return /* c */ a + b }", ["a + b"], []],
+  ])("is skipped, and the value read: %s", async (source, exprs, targets) => {
+    const { rules, calls } = await walkFirstSymbol(source)
+
+    expect(rules.map((r) => r.expr)).toEqual(exprs)
+    expect(calls.map((c) => c.target)).toEqual(targets)
   })
 })
 
