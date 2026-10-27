@@ -123,6 +123,7 @@ Examples:
 - Changing local variable names, the function body, or rules/effects does not change `api`
 - Reordering the **occurrence order** of decorators does not change `api` (because of the sort convention)
 - **Changing only the class-scope portion of `Symbol.name` (`InvoiceService.createInvoice` → `BillingService.createInvoice`) does not change `api`** (the last segment is the same)
+- Breaking a type over lines, or joining it back onto one line, does not change `api`: `| A | B` ↔ `A | B`, `Array<` … `| A` … `| B` … `>` ↔ `Array<A | B>`, `(` … `a: A,` … `) => void` ↔ `(a: A) => void`, `{` … `a: A` … `b: B` … `}` ↔ `{ a: A; b: B }`. A formatter that breaks a type adds the line breaks, a trailing comma before a closing bracket and a union's leading `|`, drops an object type's `;` between members, and undoes each of these when it joins the type, so the language plugin records each type as it reads on one line ([lang-plugin.md](./lang-plugin.md) LP11e). It is the plugin's to do rather than the fingerprint's: the canonical string sees only text, where telling a union's operator from a `|` inside a string literal type takes the grammar, and the recorded text is also what the diff's delta rows and its rename pairing compare
 - Exporting a declaration under its own name by an export clause instead of the `export` keyword (`export function f` → `function f` with `export { f }`), or reordering the names a clause exports it under, does not change `api` (§3.8)
 
 ### 3.5 Guaranteed change conditions
@@ -373,7 +374,8 @@ The reference implementation and every language plugin must pass the following t
 | A13 | Change `language` (never happens in practice; defensive) | api unchanged (`language` is not part of the input) |
 | A22 | Change `signature.inputs[].name` from `ids` to `...ids` | api unchanged (A1's case: rest-ness is `rest`, and a marker spelled into `name` reaches no axis) |
 | A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value) |
-| A24 | Export a declaration under its own name by a clause instead of the keyword, or reorder the names a clause exports it under | api unchanged (§3.8) |
+| A24 | Join a parameter type broken over lines onto one line: `\| ClassProvider \| FactoryProvider` → `ClassProvider \| FactoryProvider`, `Array<` … `\| A` … `\| B` … `>` → `Array<A \| B>`, `(` … `request: Request,` … `) => void` → `(request: Request) => void` | api unchanged (LP11e records each spelling as the one-line text) |
+| A25 | Export a declaration under its own name by a clause instead of the keyword, or reorder the names a clause exports it under | api unchanged (§3.8) |
 
 ### 7.3 api change conditions
 
@@ -390,7 +392,7 @@ The reference implementation and every language plugin must pass the following t
 | A14 | Change `shortName` (last segment) | api changes |
 | A20 | Toggle `signature.inputs[].optional` (absent ↔ `true`) | api changes |
 | A21 | Toggle `signature.inputs[].rest` (absent ↔ `true`) | api changes |
-| A25 | Change the names a module exports a declaration under (`export { handler as GET }` → `export { handler as DELETE }`, `export default function Page` → `export function Page`) | api changes (§3.8) |
+| A26 | Change the names a module exports a declaration under (`export { handler as GET }` → `export { handler as DELETE }`, `export default function Page` → `export function Page`) | api changes (§3.8) |
 
 ### 7.4 logic invariance conditions
 

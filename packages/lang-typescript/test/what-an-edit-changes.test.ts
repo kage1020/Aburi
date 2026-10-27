@@ -250,6 +250,12 @@ describe("an edit outside every rule and signature is a syntax-only change", () 
       ["larger", "total"],
     ],
     [
+      "a union joined onto one line in a method's parameter, on the class alone",
+      "export class Module {\n  add(\n    provider:\n      | ClassProvider\n      | ValueProvider,\n  ): void {\n    use(provider)\n  }\n}\n",
+      "export class Module {\n  add(provider: ClassProvider | ValueProvider): void {\n    use(provider)\n  }\n}\n",
+      ["Module"],
+    ],
+    [
       "a concise conditional rewritten as a block that returns it in parentheses",
       "export const larger = (a: number, b: number): number => (a > b ? a : b)\n",
       "export const larger = (a: number, b: number): number => {\n  return (a > b ? a : b)\n}\n",
@@ -271,6 +277,26 @@ describe("a formatting edit is no change", () => {
       "comments written into a guard and a return",
       price("", ""),
       price("/* nothing to charge */ ", "/* member discount */ "),
+    ],
+    [
+      "a union parameter joined onto one line",
+      "export function add(\n  provider:\n    | ClassProvider\n    | ValueProvider,\n): void {\n  use(provider)\n}\n",
+      "export function add(provider: ClassProvider | ValueProvider): void {\n  use(provider)\n}\n",
+    ],
+    [
+      "a union inside a generic argument joined onto one line",
+      "export function add(\n  parts: Array<\n    | ClassProvider\n    | ValueProvider\n  >,\n): void {\n  use(parts)\n}\n",
+      "export function add(parts: Array<ClassProvider | ValueProvider>): void {\n  use(parts)\n}\n",
+    ],
+    [
+      "an object type parameter joined onto one line",
+      "export function load(\n  options: {\n    path: string\n    strict?: boolean\n  },\n): void {\n  use(options)\n}\n",
+      "export function load(options: { path: string; strict?: boolean }): void {\n  use(options)\n}\n",
+    ],
+    [
+      "a function type's parameters joined onto one line",
+      "export function on(\n  handler: (\n    request: Request,\n    response: Response,\n  ) => void,\n): void {\n  use(handler)\n}\n",
+      "export function on(handler: (request: Request, response: Response) => void): void {\n  use(handler)\n}\n",
     ],
     [
       "a guard re-wrapped over several lines",
