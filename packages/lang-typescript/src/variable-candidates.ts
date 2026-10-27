@@ -1,10 +1,18 @@
 import { unwrapValue } from "@aburi/core"
 import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { asFunctionValue, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
+import {
+  asClassValue,
+  asFunctionValue,
+  hasChildOfType,
+  makeSourceRange,
+  nameFieldText,
+} from "./ast-helpers"
 import { inlineHandlers, invokedFunction } from "./call-symbols"
+import { classMemberCandidates } from "./class-candidates"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
+import { readDecorators } from "./decorators"
 import { exportEvidence, topLevelVisibility } from "./export-evidence"
 import { readLeadingJsDoc } from "./leading-jsdoc"
 import { objectEntryOf, objectLiteralOf } from "./object-members"
@@ -63,6 +71,25 @@ function makeVariableCandidate(
         bodyNode: value.childForFieldName("body"),
         fullNode: value,
       },
+    ]
+  }
+  const classNode = initializer === null ? null : asClassValue(initializer)
+  if (classNode !== null) {
+    return [
+      {
+        id,
+        kind: "class",
+        extKind: null,
+        name: qname,
+        visibility: topLevelVisibility(statement),
+        decorators: readDecorators(classNode),
+        signature: null,
+        source: makeSourceRange(statement, ctx),
+        derivedBy: ["variable-assigned-class", ...exportEvidence(statement)],
+        bodyNode: classNode.childForFieldName("body"),
+        fullNode: classNode,
+      },
+      ...classMemberCandidates(classNode, ctx, [...namespacePath, name]),
     ]
   }
   const object = initializer === null ? null : objectLiteralOf(initializer)
