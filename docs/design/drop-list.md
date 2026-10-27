@@ -362,7 +362,7 @@ Properties the extraction pipeline must satisfy.
 | B1c | a class of a field and a getter, a setter or a constructor | `dropped: false` |
 | B1d | a class of a field and an index signature, a `declare` field, an `accessor` field, a field holding a call (`seed = compute()`) or a comment | `dropped: true, dropReason: "pure DTO"` |
 | B1e | a class of `static readonly` literals with a doc comment, a line comment or a stray `;` among them; the same class beside an index signature | `dropped: true, dropReason: "pure constants"`; beside the index signature, `"pure DTO"` |
-| B1f | B1 and B1e's classes held by a binding (`export const Foo = class { x: number; y: string }`) | the hint the declared class gets: `"pure DTO"`, `"pure constants"` |
+| B1f | B1 and B1e's classes held by a binding (`export const Foo = class { x = 0; y = 0 }`) | the hint the declared class gets: `"pure DTO"`, `"pure constants"` |
 | B2 | `interface Foo { x: number }` | `dropped: true, dropReason: "interface (data model)"` |
 | B3 | `type Bar = string` | `dropped: true, dropReason: "type alias"` |
 | B4 | `export { x } from './y'` | `dropped: true, dropReason: "re-export"` |

@@ -209,6 +209,9 @@ describe("scan — a class a binding holds", () => {
     "  reset() {",
     "    prisma.user.create({ data: {} })",
     "  }",
+    "  static list() {",
+    "    return prisma.user.findMany()",
+    "  }",
     "}",
   ]
 
@@ -231,7 +234,10 @@ describe("scan — a class a binding holds", () => {
     const result = await scanWorkspace()
     const shapeOf = (owner: string) =>
       result.ir.symbols
-        .filter((s) => s.name === owner || s.name.startsWith(`${owner}.`))
+        .filter(
+          (s) =>
+            s.name === owner || s.name.startsWith(`${owner}.`) || s.name.startsWith(`${owner}::`),
+        )
         .map((s) => ({
           member: s.name.slice(owner.length),
           kind: s.kind,
@@ -245,6 +251,7 @@ describe("scan — a class a binding holds", () => {
         effects: ["db.read prisma.user.count", "db.write prisma.user.deleteMany"],
       },
       { member: ".reset", kind: "method", effects: ["db.write prisma.user.create"] },
+      { member: "::list", kind: "method", effects: ["db.read prisma.user.findMany"] },
     ])
     expect(shapeOf("Registry")).toEqual(shapeOf("Named"))
   })

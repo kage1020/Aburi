@@ -2,6 +2,7 @@ import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import {
   AMBIENT_DECLARATION_TYPE,
+  asClassValue,
   findChild,
   firstNonCommentChild,
   inAmbientContext,
@@ -258,11 +259,26 @@ function classNamesIn(scope: Node): ReadonlySet<string> {
   const names = new Set<string>()
   for (const sibling of scope.namedChildren) {
     const declaration = sibling === null ? null : unwrappedDeclaration(sibling)
-    if (declaration === null || !CLASS_DECLARATION_TYPES.has(declaration.type)) continue
-    const declared = nameFieldText(declaration)
-    if (declared !== null) names.add(declared)
+    if (declaration !== null) for (const name of classNamesDeclaredBy(declaration)) names.add(name)
   }
   byScope.set(scope.id, names)
+  return names
+}
+
+function classNamesDeclaredBy(declaration: Node): string[] {
+  if (CLASS_DECLARATION_TYPES.has(declaration.type)) {
+    const declared = nameFieldText(declaration)
+    return declared === null ? [] : [declared]
+  }
+  if (!BINDING_DECLARATION_TYPES.has(declaration.type)) return []
+  const names: string[] = []
+  for (const declarator of declaration.namedChildren) {
+    if (declarator?.type !== "variable_declarator") continue
+    const value = declarator.childForFieldName("value")
+    const declared = declarator.childForFieldName("name")
+    if (value === null || declared?.type !== "identifier" || asClassValue(value) === null) continue
+    names.push(declared.text)
+  }
   return names
 }
 
@@ -271,6 +287,11 @@ export const STATEMENT_LISTS: ReadonlySet<string> = new Set(["program", "stateme
 const CLASS_DECLARATION_TYPES: ReadonlySet<string> = new Set([
   "class_declaration",
   "abstract_class_declaration",
+])
+
+const BINDING_DECLARATION_TYPES: ReadonlySet<string> = new Set([
+  "lexical_declaration",
+  "variable_declaration",
 ])
 
 function unwrappedDeclaration(statement: Node): Node | null {
