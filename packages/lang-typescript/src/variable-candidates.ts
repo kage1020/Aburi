@@ -1,5 +1,4 @@
-import { unwrapValue } from "@aburi/core"
-import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import {
   asClassValue,
@@ -8,7 +7,7 @@ import {
   makeSourceRange,
   nameFieldText,
 } from "./ast-helpers"
-import { inlineHandlers } from "./call-symbols"
+import { layOutBodies, wrappedFunctions } from "./call-symbols"
 import { classMemberCandidates } from "./class-candidates"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
@@ -111,7 +110,7 @@ function makeVariableCandidate(
       ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
     ]
   }
-  const [lead, ...rest] = initializer === null ? [] : wrappedFunctions(initializer, statement)
+  const bodies = initializer === null ? [] : wrappedFunctions(initializer)
   return [
     {
       id,
@@ -123,19 +122,12 @@ function makeVariableCandidate(
       signature: null,
       source: makeSourceRange(statement, ctx),
       derivedBy:
-        lead === undefined
+        bodies.length === 0
           ? exportEvidence(statement)
           : ["call-argument-function", ...exportEvidence(statement)],
-      bodyNode: lead?.bodyNode ?? null,
-      fullNode: statement,
-      ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
+      ...layOutBodies(bodies, statement),
     },
   ]
-}
-
-function wrappedFunctions(initializer: Node, statement: Node): MergedDeclaration<Node>[] {
-  const call = unwrapValue(initializer)
-  return call.type === "call_expression" ? inlineHandlers(call, statement) : []
 }
 
 function objectMemberCandidates(

@@ -81,6 +81,15 @@ describe("a class a binding holds is the class it declares", () => {
     ])
   })
 
+  it("reads a field handing a function to a call as its member, with the call left on the class", async () => {
+    const source = "export const K = class {\n  handle = withAuth(() => { check() })\n}"
+
+    expect(await shapeOf(source)).toEqual([
+      ["K", "class", "public", ["withAuth"]],
+      ["K.handle", "method", "public", ["check"]],
+    ])
+  })
+
   it("names it by the binding and records why", async () => {
     const symbol = await symbolOf(
       "export const Registry = class Inner { m() {} }",
