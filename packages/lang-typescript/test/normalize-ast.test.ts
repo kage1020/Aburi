@@ -38,6 +38,8 @@ describe("normalizeAst — what a formatter or a reviewer's eye would not call a
       "export function f() { go() }",
       "export function f(/* none */) { go() }",
     ],
+    ["a union's leading `|`", "export type U = A | B | C", "export type U =\n  | A\n  | B\n  | C"],
+    ["an intersection's leading `&`", "export type I = A & B", "export type I =\n  & A\n  & B"],
     [
       "interface member separators",
       "export interface I { a: string; b: number }",
@@ -73,6 +75,11 @@ describe("normalizeAst — what changes the string", () => {
     ["`let` against `const`", fn("let i = 0; use(i)"), fn("const i = 0; use(i)")],
     ["`for…in` against `for…of`", fn("for (const k in x) use(k)"), fn("for (const k of x) use(k)")],
     ["a primitive type in an assertion", fn("save(x as string)"), fn("save(x as number)")],
+    [
+      "a union against an intersection, each with a leading operator",
+      "export type U =\n  | A\n  | B",
+      "export type U =\n  & A\n  & B",
+    ],
     [
       "a concise arrow's operator",
       "export const add = (a: number, b: number) => a + b",

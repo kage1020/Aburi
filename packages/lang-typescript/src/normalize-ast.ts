@@ -1,5 +1,6 @@
 import type { MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+import { leadingOperatorOperand } from "./ast-helpers"
 
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
   if (symbol.kind === "call") return serialize(symbol.fullNode)
@@ -60,6 +61,8 @@ function describedNode(declaration: Pick<MergedDeclaration<Node>, "bodyNode" | "
 function serialize(node: Node): string {
   if (node.isExtra) return ""
   if (SKIPPED_NODE_TYPES.has(node.type)) return ""
+  const operand = leadingOperatorOperand(node)
+  if (operand !== null) return serialize(operand)
 
   const children: string[] = []
   let previous: Node | null = null

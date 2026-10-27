@@ -250,7 +250,7 @@ The language plugin generates a **normalized AST string** per Symbol and compute
 1. Contains no comment nodes
 2. Contains no position information (line, column, byte offset)
 3. Contains no whitespace tokens
-4. Is an S-expression representing node kinds and child-node structure, plus every unnamed token except the punctuation a formatter adds, drops or swaps without changing the program: string delimiters, an optional `;`, a trailing `,`, and brackets the structure already implies. Punctuation that is the only record of something is not a formatter's, and stays in: the commas that make a hole in a JavaScript array (`[, x]` against `[x]`)
+4. Is an S-expression representing node kinds and child-node structure, plus every unnamed token except the punctuation a formatter adds, drops or swaps without changing the program: string delimiters, an optional `;`, a trailing `,`, a union's or an intersection's leading `|` or `&` (`| A | B` reads as `A | B`, without the extra level the parser gives the leading form), and brackets the structure already implies. Punctuation that is the only record of something is not a formatter's, and stays in: the commas that make a hole in a JavaScript array (`[, x]` against `[x]`)
 5. Includes identifier and literal values (concrete values, not structure alone)
 6. Contains nothing the parser inserted: a MISSING node, the parser's repair of a broken file, is treated as unwritten
 
@@ -281,7 +281,7 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 - Whitespace / newline / indentation changes → unchanged
 - Line terminators (LF, CRLF, a lone CR) → unchanged
 - Adding / removing comments → unchanged
-- The quotes around a string that needs no escape either way, a trailing comma, optional semicolons → unchanged
+- The quotes around a string that needs no escape either way, a trailing comma, optional semicolons, a union's leading `|` → unchanged
 
 These are the punctuation item 4 leaves out, not formatter output in general. A formatter that quotes an object key (`{ a: 1 }` → `{ "a": 1 }`), picks the quote that needs fewer escapes (`'it\'s'` → `"it's"`), wraps a multi-line expression in parentheses, or rewrites JSX (`<Foo></Foo>` → `<Foo />`) changes the structure, and `syntax` changes with it.
 
@@ -419,6 +419,7 @@ The reference implementation and every language plugin must pass the following t
 | S2b | Add a trailing comma | syntax unchanged |
 | S2c | Drop optional semicolons | syntax unchanged |
 | S2d | Save the file with CRLF or a lone CR | syntax unchanged — guaranteed by the core's scan, not by `normalizeAst` (§5.3) |
+| S2e | Join a union broken over lines onto one line, dropping its leading `\|` (`\| A` … `\| B` → `A \| B`), in a type alias, a parameter, a method's parameter or an overload | syntax unchanged |
 
 ### 7.7 syntax change conditions
 

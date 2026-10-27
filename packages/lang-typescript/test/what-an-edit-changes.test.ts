@@ -228,12 +228,6 @@ describe("an edit outside every rule and signature is a syntax-only change", () 
       ["larger", "total"],
     ],
     [
-      "a union joined onto one line in a method's parameter, on the class alone",
-      "export class Module {\n  add(\n    provider:\n      | ClassProvider\n      | ValueProvider,\n  ): void {\n    use(provider)\n  }\n}\n",
-      "export class Module {\n  add(provider: ClassProvider | ValueProvider): void {\n    use(provider)\n  }\n}\n",
-      ["Module"],
-    ],
-    [
       "a concise conditional rewritten as a block that returns it in parentheses",
       "export const larger = (a: number, b: number): number => (a > b ? a : b)\n",
       "export const larger = (a: number, b: number): number => {\n  return (a > b ? a : b)\n}\n",
@@ -272,6 +266,16 @@ describe("a formatting edit is no change", () => {
       "export function add(provider: ClassProvider | ValueProvider): void {\n  use(provider)\n}\n",
     ],
     [
+      "a union parameter of an overload joined onto one line",
+      "export function parse(\n  input:\n    | Buffer\n    | string,\n): Config\nexport function parse(input: any): any {\n  return read(input)\n}\n",
+      "export function parse(input: Buffer | string): Config\nexport function parse(input: any): any {\n  return read(input)\n}\n",
+    ],
+    [
+      "an intersection written with a leading `&` joined onto one line",
+      "export function add(\n  provider:\n    & Named\n    & Scoped,\n): void {\n  use(provider)\n}\n",
+      "export function add(provider: Named & Scoped): void {\n  use(provider)\n}\n",
+    ],
+    [
       "a union inside a generic argument joined onto one line",
       "export function add(\n  parts: Array<\n    | ClassProvider\n    | ValueProvider\n  >,\n): void {\n  use(parts)\n}\n",
       "export function add(parts: Array<ClassProvider | ValueProvider>): void {\n  use(parts)\n}\n",
@@ -296,5 +300,17 @@ describe("a formatting edit is no change", () => {
 
     expect(diff.symbols).toEqual([])
     expect(diff.summary).toMatchObject({ changed: 0, unchanged: 1 })
+  })
+
+  it("leaves a class and its method unchanged when the method's union parameter is joined onto one line", async () => {
+    const diff = await diffOfEdit(
+      workspace,
+      FILE,
+      "export class Module {\n  add(\n    provider:\n      | ClassProvider\n      | ValueProvider,\n  ): void {\n    use(provider)\n  }\n}\n",
+      "export class Module {\n  add(provider: ClassProvider | ValueProvider): void {\n    use(provider)\n  }\n}\n",
+    )
+
+    expect(diff.symbols).toEqual([])
+    expect(diff.summary).toMatchObject({ changed: 0, unchanged: 2 })
   })
 })

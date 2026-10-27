@@ -68,6 +68,21 @@ export function throughParentheses(node: Node): Node {
   return cursor
 }
 
+// A formatter writes `|` before a union's first member when it breaks the union over lines and
+// drops it when it joins it, and the parser gives the leading form a level of its own.
+export function leadingOperatorOperand(node: Node): Node | null {
+  const operator = LEADING_OPERATORS.get(node.type)
+  if (operator === undefined) return null
+  const [first, operand] = node.children.filter((child) => !child.isExtra)
+  if (first?.type !== operator || operand === undefined || operand.isMissing) return null
+  return operand
+}
+
+const LEADING_OPERATORS: ReadonlyMap<string, string> = new Map([
+  ["union_type", "|"],
+  ["intersection_type", "&"],
+])
+
 export function firstNonCommentChild(node: Node): Node | null {
   for (const child of node.namedChildren) {
     if (child === null || child.type === "comment") continue
