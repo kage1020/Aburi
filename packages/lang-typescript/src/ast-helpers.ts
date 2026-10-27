@@ -36,6 +36,11 @@ export function asFunctionValue(node: Node): Node | null {
   return FUNCTION_VALUE_TYPES.has(value.type) ? value : null
 }
 
+export function asClassValue(node: Node): Node | null {
+  const value = unwrapValue(node)
+  return value.type === "class" ? value : null
+}
+
 export function hasErrorChild(node: Node): boolean {
   return node.children.some(
     (child) => child !== null && (child.type === "ERROR" || child.isMissing),
