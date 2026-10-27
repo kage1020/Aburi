@@ -223,3 +223,60 @@ describe("scan — a member beside a namespace export of the same name", () => {
     expect(result.ir.symbols.flatMap((s) => s.effects.map((e) => e.id))).toEqual(["db.write"])
   })
 })
+
+describe("scan — a class a binding holds", () => {
+  const members = [
+    "  seed = prisma.user.count()",
+    "  static {",
+    "    prisma.user.deleteMany()",
+    "  }",
+    "  reset() {",
+    "    prisma.user.create({ data: {} })",
+    "  }",
+    "  static list() {",
+    "    return prisma.user.findMany()",
+    "  }",
+    "}",
+  ]
+
+  it("records the Symbols and effects the same class declared gets", async () => {
+    await workspace.writeSource(
+      "src/a.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "const prisma = new PrismaClient()",
+        "",
+        "export const Registry = class {",
+        ...members,
+        "",
+        "export class Named {",
+        ...members,
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const shapeOf = (owner: string) =>
+      result.ir.symbols
+        .filter(
+          (s) =>
+            s.name === owner || s.name.startsWith(`${owner}.`) || s.name.startsWith(`${owner}::`),
+        )
+        .map((s) => ({
+          member: s.name.slice(owner.length),
+          kind: s.kind,
+          effects: s.effects.map((e) => `${e.id} ${e.target}`),
+        }))
+
+    expect(shapeOf("Registry")).toEqual([
+      {
+        member: "",
+        kind: "class",
+        effects: ["db.read prisma.user.count", "db.write prisma.user.deleteMany"],
+      },
+      { member: ".reset", kind: "method", effects: ["db.write prisma.user.create"] },
+      { member: "::list", kind: "method", effects: ["db.read prisma.user.findMany"] },
+    ])
+    expect(shapeOf("Registry")).toEqual(shapeOf("Named"))
+  })
+})

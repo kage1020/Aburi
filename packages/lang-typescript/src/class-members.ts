@@ -1,4 +1,4 @@
-import { isQnameSegment } from "@aburi/core"
+import { isQnameSegment, unwrapValue } from "@aburi/core"
 import type { Node } from "web-tree-sitter"
 import { asFunctionValue, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
 import { wrappedFunctions } from "./call-symbols"
@@ -24,8 +24,21 @@ function admitSegment(candidate: string, privateName = false): string | null {
   return isQnameSegment(candidate, { privateName }) ? candidate : null
 }
 
+function isHeldByBinding(classNode: Node): boolean {
+  let value = classNode
+  while (value.parent !== null && unwrapValue(value.parent).id === classNode.id)
+    value = value.parent
+  const declarator = value.parent
+  return (
+    declarator?.type === "variable_declarator" &&
+    declarator.childForFieldName("value")?.id === value.id &&
+    declarator.childForFieldName("name")?.type === "identifier" &&
+    nameFieldText(declarator) !== null
+  )
+}
+
 export function memberSymbolSegment(classNode: Node, member: Node): string | null {
-  if (nameFieldText(classNode) === null) return null
+  if (nameFieldText(classNode) === null && !isHeldByBinding(classNode)) return null
   const segment = memberNameSegment(member)
   if (segment === null) return null
   if (member.type === "method_definition") return segment

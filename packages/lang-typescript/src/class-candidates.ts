@@ -42,18 +42,19 @@ export function addClassAndMembers(
     fullNode: node,
   })
 
-  const body = node.childForFieldName("body")
-  if (body === null || className === null) return
-  addClassMembers(node, body, ctx, [...namespacePath, className], out)
+  if (className === null) return
+  for (const member of classMemberCandidates(node, ctx, [...namespacePath, className])) {
+    out.add(member)
+  }
 }
 
-function addClassMembers(
+export function classMemberCandidates(
   classNode: Node,
-  body: Node,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
-  out: CandidateSink,
-): void {
+): SymbolCandidate<Node>[] {
+  const body = classNode.childForFieldName("body")
+  if (body === null) return []
   const byId = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
     if (member === null) continue
@@ -66,10 +67,9 @@ function addClassMembers(
         : makeFieldFunctionCandidate(member, held, segment, ctx, ownerChain)
     groupMemberDeclaration(byId, candidate, hasChildOfType(member, "get"))
   }
-  for (const group of byId.values()) {
-    const folded = foldMemberGroup(group)
-    if (folded !== null) out.add(folded)
-  }
+  return [...byId.values()]
+    .map(foldMemberGroup)
+    .filter((candidate): candidate is SymbolCandidate<Node> => candidate !== null)
 }
 
 const ABSTRACT_DECLARATION = "abstract-declaration"

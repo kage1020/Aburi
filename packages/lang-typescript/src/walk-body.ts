@@ -6,7 +6,7 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, thrownValue } from "./ast-helpers"
+import { bodyNodesOf, firstNonCommentChild, throughParentheses, thrownValue } from "./ast-helpers"
 import { readCall } from "./callee"
 import {
   functionValuedField,
@@ -208,8 +208,9 @@ function visitIfStatement(node: Node, rules: Rule[], calls: CallCandidate[]): vo
 }
 
 function visitReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
-  const value = node.namedChildren[0] ?? null
-  if (value === null) return
+  const written = firstNonCommentChild(node)
+  if (written === null) return
+  const value = throughParentheses(written)
   if (isCall(value)) {
     recordCall(value, calls)
     visitChildren(value, rules, calls)
@@ -221,7 +222,7 @@ function visitReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[])
 }
 
 function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): void {
-  const value = unparenthesized(body)
+  const value = throughParentheses(body)
   if (!isCall(value) && !isTrivialExpr(value)) {
     rules.push(makeRule("return", body, { expr: ruleText(value) }))
   }
@@ -230,14 +231,6 @@ function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): vo
 
 function isConciseBody(body: Node): boolean {
   return body.parent?.type === "arrow_function" && body.type !== "statement_block"
-}
-
-function unparenthesized(node: Node): Node {
-  if (node.type !== "parenthesized_expression") return node
-  const [only, ...rest] = node.namedChildren.filter(
-    (child): child is Node => child !== null && child.type !== "comment",
-  )
-  return only !== undefined && rest.length === 0 ? only : node
 }
 
 function isCall(node: Node): boolean {
