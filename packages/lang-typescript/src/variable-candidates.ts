@@ -11,7 +11,7 @@ import {
   makeSourceRange,
   nameFieldText,
 } from "./ast-helpers"
-import { wrappedFunctions } from "./call-symbols"
+import { layOutBodies, wrappedFunctions } from "./call-symbols"
 import { classMemberCandidates } from "./class-candidates"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
@@ -114,7 +114,7 @@ function makeVariableCandidate(
       ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
     ]
   }
-  const [lead, ...rest] = initializer === null ? [] : wrappedFunctions(initializer, statement)
+  const bodies = initializer === null ? [] : wrappedFunctions(initializer)
   return [
     {
       id,
@@ -126,12 +126,10 @@ function makeVariableCandidate(
       signature: null,
       source: makeSourceRange(statement, ctx),
       derivedBy:
-        lead === undefined
+        bodies.length === 0
           ? exportEvidence(statement)
           : [CALL_ARGUMENT_FUNCTION_DERIVED_BY, ...exportEvidence(statement)],
-      bodyNode: lead?.bodyNode ?? null,
-      fullNode: statement,
-      ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
+      ...layOutBodies(bodies, statement),
     },
   ]
 }

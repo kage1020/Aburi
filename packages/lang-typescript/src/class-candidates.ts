@@ -1,7 +1,18 @@
-import type { ExtractionContext, SymbolCandidate, SymbolKind } from "@aburi/types"
+import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
+  type ExtractionContext,
+  type SymbolCandidate,
+  type SymbolKind,
+} from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { hasChildOfType, makeSourceRange } from "./ast-helpers"
-import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
+import { layOutBodies } from "./call-symbols"
+import {
+  functionValuedField,
+  type HeldFunction,
+  isConstructorMember,
+  memberSymbolSegment,
+} from "./class-members"
 import {
   type CandidateSink,
   foldMemberGroup,
@@ -54,11 +65,11 @@ export function classMemberCandidates(
     if (member === null) continue
     const segment = memberSymbolSegment(classNode, member)
     if (segment === null) continue
-    const fieldFunction = functionValuedField(member)
+    const held = functionValuedField(member)
     const candidate =
-      fieldFunction === null
+      held === null
         ? makeMethodCandidate(member, segment, ctx, ownerChain)
-        : makeFieldFunctionCandidate(member, fieldFunction, segment, ctx, ownerChain)
+        : makeFieldFunctionCandidate(member, held, segment, ctx, ownerChain)
     groupMemberDeclaration(byId, candidate, hasChildOfType(member, "get"))
   }
   return [...byId.values()]
@@ -103,26 +114,34 @@ function makeMethodCandidate(
 
 function makeFieldFunctionCandidate(
   field: Node,
-  value: Node,
+  held: HeldFunction,
   segment: string,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
   const isStatic = hasChildOfType(field, "static")
   const qname = classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
-  const derivedBy = [isStatic ? "static-method" : "class-method", "field-assigned-function"]
+  const spelling =
+    held.kind === "function" ? "field-assigned-function" : CALL_ARGUMENT_FUNCTION_DERIVED_BY
+  const derivedBy = [isStatic ? "static-method" : "class-method", spelling]
   if (hasChildOfType(field, "accessor")) derivedBy.push("accessor-declaration")
-  return {
+  const member: Omit<SymbolCandidate<Node>, "signature" | "bodyNode" | "fullNode"> = {
     id: makeTsSymbolId(ctx.file.path, qname),
     kind: "method",
     extKind: null,
     name: qname,
     visibility: memberVisibility(field),
     decorators: readDecorators(field),
-    signature: buildSignature(value, readLeadingJsDoc(field)),
     source: makeSourceRange(field, ctx),
     derivedBy,
-    bodyNode: value.childForFieldName("body"),
-    fullNode: value,
   }
+  if (held.kind === "function") {
+    return {
+      ...member,
+      signature: buildSignature(held.fn, readLeadingJsDoc(field)),
+      bodyNode: held.fn.childForFieldName("body"),
+      fullNode: held.fn,
+    }
+  }
+  return { ...member, signature: null, ...layOutBodies(held.bodies, field) }
 }

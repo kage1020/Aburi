@@ -15,6 +15,7 @@ import {
 } from "./ast-helpers"
 import {
   type CallExtractionState,
+  layOutBodies,
   makeCallExtractionState,
   visitCallStatement,
   wrappedFunctions,
@@ -204,8 +205,8 @@ function makeDefaultCallCandidate(
 ): SymbolCandidate<Node> | null {
   const statement = value.parent
   if (statement === null) return null
-  const [lead, ...rest] = wrappedFunctions(value, statement)
-  if (lead === undefined) return null
+  const bodies = wrappedFunctions(value)
+  if (bodies.length === 0) return null
   const qname = defaultExportQname()
   return {
     id: makeTsSymbolId(ctx.file.path, qname),
@@ -217,9 +218,7 @@ function makeDefaultCallCandidate(
     signature: null,
     source: makeSourceRange(statement, ctx),
     derivedBy: [CALL_ARGUMENT_FUNCTION_DERIVED_BY, ...exportEvidence(value)],
-    bodyNode: lead.bodyNode,
-    fullNode: statement,
-    ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
+    ...layOutBodies(bodies, statement),
   }
 }
 

@@ -1,6 +1,7 @@
 import { isQnameSegment, unwrapValue } from "@aburi/core"
 import type { Node } from "web-tree-sitter"
-import { functionValueOf, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
+import { asFunctionValue, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
+import { wrappedFunctions } from "./call-symbols"
 import { decodeStringLiteral } from "./string-escape"
 
 const CONSTRUCTION_SEGMENT = "constructor"
@@ -46,11 +47,34 @@ export function memberSymbolSegment(classNode: Node, member: Node): string | nul
   return functionValuedField(member) === null ? null : segment
 }
 
-export function functionValuedField(member: Node): Node | null {
+/**
+ * Bodies read as running when the member is called, not on construction or definition: the tree
+ * cannot tell a wrapper from a call that runs its argument at once.
+ */
+export type HeldFunction =
+  | { readonly kind: "function"; readonly fn: Node }
+  | { readonly kind: "handed-to-a-call"; readonly bodies: readonly [Node, ...Node[]] }
+
+export function functionValuedField(member: Node): HeldFunction | null {
   if (member.type !== "public_field_definition") return null
   const segment = memberNameSegment(member)
   if (segment === null || segment === CONSTRUCTION_SEGMENT) return null
-  return functionValueOf(member)
+  return functionAFieldHolds(member)
+}
+
+export function functionAFieldHolds(field: Node): HeldFunction | null {
+  const value = field.childForFieldName("value")
+  if (value === null) return null
+  const fn = asFunctionValue(value)
+  if (fn !== null) return { kind: "function", fn }
+  const [lead, ...rest] = wrappedFunctions(value)
+  return lead === undefined ? null : { kind: "handed-to-a-call", bodies: [lead, ...rest] }
+}
+
+export function heldFunctionBodies(held: HeldFunction): Node[] {
+  if (held.kind === "handed-to-a-call") return [...held.bodies]
+  const body = held.fn.childForFieldName("body")
+  return body === null ? [] : [body]
 }
 
 export function isConstructorMember(member: Node): boolean {
