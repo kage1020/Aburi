@@ -64,13 +64,13 @@ export function containsPath(root, candidate, platform = process.platform) {
   return rel === "" || (!rel.startsWith("..") && !api.isAbsolute(rel))
 }
 
-function requireValue(argv, index, flag) {
+export function requireValue(argv, index, flag) {
   const value = argv[index]
   if (value === undefined) throw new Error(`${flag} needs a value.`)
   return value
 }
 
-function requireCount(argv, index, flag, minimum) {
+export function requireCount(argv, index, flag, minimum) {
   const raw = requireValue(argv, index, flag)
   const value = Number(raw)
   if (!Number.isInteger(value) || value < minimum) {
