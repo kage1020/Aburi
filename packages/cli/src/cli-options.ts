@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events"
 import { type Command, InvalidArgumentError } from "commander"
 import { isLogLevel, type LogLevel } from "./env"
 import { CliError } from "./errors"
+import type { FailOnScope } from "./fail-on"
 
 export type OutputFormat = "json" | "md" | "both"
 
@@ -18,6 +19,11 @@ export function definedOnly<T extends object>(
 export function parseFormat(value: string): OutputFormat {
   if (value === "json" || value === "md" || value === "both") return value
   throw new InvalidArgumentError(`--format must be one of: json | md | both`)
+}
+
+export function parseFailOnScope(value: string): FailOnScope {
+  if (value === "all" || value === "non-test") return value
+  throw new InvalidArgumentError(`--fail-on-scope must be one of: all | non-test`)
 }
 
 export function parseLogLevel(value: string): LogLevel {

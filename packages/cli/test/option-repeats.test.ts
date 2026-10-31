@@ -55,6 +55,10 @@ describe("an option that takes one value, given twice", () => {
       repeated("--config", "a.json", "b.json"),
     ],
     [
+      ["diff", "main..HEAD", "--fail-on-scope", "all", "--fail-on-scope", "non-test"],
+      repeated("--fail-on-scope", "all", "non-test"),
+    ],
+    [
       ["explain", "alpha", "--ir", "a.json", "--ir", "b.json"],
       repeated("--ir", "a.json", "b.json"),
     ],

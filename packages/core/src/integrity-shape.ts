@@ -126,6 +126,7 @@ const SYMBOL: RecordSpec = {
   derivedBy: strs,
   dropped: bool,
   dropReason: nullable(str),
+  inTestFile: optional(bool),
 }
 
 const DEPENDENCY: RecordSpec = {

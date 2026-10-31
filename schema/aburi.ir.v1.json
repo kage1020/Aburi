@@ -505,7 +505,12 @@
           "items": { "type": "string", "minLength": 1 }
         },
         "dropped": { "type": "boolean" },
-        "dropReason": { "type": ["string", "null"], "minLength": 1 }
+        "dropReason": { "type": ["string", "null"], "minLength": 1 },
+        "inTestFile": {
+          "type": "boolean",
+          "const": true,
+          "description": "The Symbol's file matched the config's testFiles patterns: it is test code, analysed like any other but not what a diff report or a gate scoped to non-test Symbols is about. No fingerprint reads it. Class B: writers MUST omit the key for a Symbol of any other file, never emit false."
+        }
       },
       "allOf": [
         {

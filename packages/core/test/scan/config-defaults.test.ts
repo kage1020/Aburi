@@ -6,6 +6,7 @@ import {
   DEFAULT_CLASSIFY_TIMEOUT_MS,
   DEFAULT_MAX_FILE_SIZE_BYTES,
   DEFAULT_PARSE_TIMEOUT_MS,
+  DEFAULT_TEST_FILES,
   isStrict,
   PARSE_TIMEOUT_MIN_MS,
 } from "../../src"
@@ -25,7 +26,8 @@ describe("the scan assumes what the config schema states", () => {
     ["parseTimeoutMs minimum", PARSE_TIMEOUT_MIN_MS, properties.parseTimeoutMs.minimum],
     ["maxFileSizeBytes default", DEFAULT_MAX_FILE_SIZE_BYTES, properties.maxFileSizeBytes.default],
     ["strict default", isStrict({}), properties.strict.default],
+    ["testFiles default", DEFAULT_TEST_FILES, properties.testFiles.default],
   ])("for the %s", (_setting, assumed, stated) => {
-    expect(assumed).toBe(stated)
+    expect(assumed).toEqual(stated)
   })
 })

@@ -35,6 +35,7 @@ describe("aburi diff — a file the head scan never read", () => {
         clause: { token: "unknown", threshold: null },
         observed: 2,
         symbols: [ALSO_GONE.id, GONE.id],
+        scope: "all",
       },
     ],
     ["unknown:>2", null],

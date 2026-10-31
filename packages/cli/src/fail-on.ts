@@ -1,4 +1,9 @@
-import type { DiffResult, SymbolChange, SymbolId } from "@aburi/types"
+import {
+  type DiffResult,
+  representativeSymbol,
+  type SymbolChange,
+  type SymbolId,
+} from "@aburi/types"
 import { assertNever } from "./errors"
 import { MAX_LISTED } from "./listing"
 
@@ -21,6 +26,8 @@ export type FailOnDeltaAxis =
   | "confidence-changed"
 
 export type FailOnToken = FailOnStatusToken | FailOnDeltaAxis
+
+export type FailOnScope = "all" | "non-test"
 
 export interface FailOnClause {
   token: FailOnToken
@@ -129,8 +136,12 @@ export interface ClauseOutcome {
   symbols: readonly SymbolId[]
 }
 
-export function evaluateClause(clause: FailOnClause, diff: DiffResult): ClauseOutcome {
-  const symbols = diff.symbols.filter((change) => counts(clause.token, change)).map(entryId)
+export function evaluateClause(
+  clause: FailOnClause,
+  diff: DiffResult,
+  scope: FailOnScope = "all",
+): ClauseOutcome {
+  const symbols = countedIds(clause.token, diff, scope)
   const observed = symbols.length
   const triggered = clause.threshold === null ? observed > 0 : observed > clause.threshold
   return { triggered, observed, symbols }
@@ -140,22 +151,24 @@ export interface TrippedClause {
   clause: FailOnClause
   observed: number
   symbols: readonly SymbolId[]
+  scope: FailOnScope
 }
 
 export function evaluateFailOn(
   clauses: readonly FailOnClause[],
   diff: DiffResult,
+  scope: FailOnScope = "all",
 ): {
   firstTriggered: TrippedClause | null
   evaluations: ({ clause: FailOnClause } & ClauseOutcome)[]
 } {
-  const evaluations = clauses.map((clause) => ({ clause, ...evaluateClause(clause, diff) }))
+  const evaluations = clauses.map((clause) => ({ clause, ...evaluateClause(clause, diff, scope) }))
   const first = evaluations.find((e) => e.triggered)
   return {
     firstTriggered:
       first === undefined
         ? null
-        : { clause: first.clause, observed: first.observed, symbols: first.symbols },
+        : { clause: first.clause, observed: first.observed, symbols: first.symbols, scope },
     evaluations,
   }
 }
@@ -203,22 +216,31 @@ function deltaMoved(
 export function uncountedDuplicates(
   clauses: readonly FailOnClause[],
   diff: DiffResult,
+  scope: FailOnScope = "all",
 ): SymbolId[] {
   const tokens = new Set(clauses.map((clause) => clause.token))
   if (!tokens.has("removed") || tokens.has("removed:duplicate")) return []
-  return diff.symbols.filter((change) => counts("removed:duplicate", change)).map(entryId)
+  return countedIds("removed:duplicate", diff, scope)
 }
 
-function entryId(change: SymbolChange): SymbolId {
-  return "symbol" in change ? change.symbol.id : change.after.id
+function countedIds(token: FailOnToken, diff: DiffResult, scope: FailOnScope): SymbolId[] {
+  return diff.symbols
+    .filter((change) => inScope(scope, change) && counts(token, change))
+    .map((change) => representativeSymbol(change).id)
 }
 
-export function formatTriggered({ clause, observed, symbols }: TrippedClause): string {
+/** The head decides for a pair, as it does where the report lists the entry. */
+function inScope(scope: FailOnScope, change: SymbolChange): boolean {
+  return scope === "all" || representativeSymbol(change).inTestFile !== true
+}
+
+export function formatTriggered({ clause, observed, symbols, scope }: TrippedClause): string {
   const rendered = clause.threshold === null ? clause.token : `${clause.token}:>${clause.threshold}`
   const named = symbols.slice(0, MAX_LISTED).map((id) => `  ${id}`)
   const unnamed = symbols.length - named.length
+  const where = scope === "all" ? "" : " outside test files"
   return [
-    `--fail-on ${rendered} tripped (observed: ${observed} ${clause.token})`,
+    `--fail-on ${rendered} tripped (observed: ${observed} ${clause.token}${where})`,
     ...named,
     ...(unnamed > 0 ? [`  … and ${unnamed} more`] : []),
   ].join("\n")

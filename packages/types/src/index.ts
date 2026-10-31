@@ -114,6 +114,7 @@ export type {
   WalkContext,
   WrittenSourceRange,
 } from "./plugins"
+export { representativeSymbol } from "./symbol-change"
 export {
   CALL_ARGUMENT_FUNCTION_DERIVED_BY,
   COMPUTED_TARGET_SEGMENT,

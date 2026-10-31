@@ -42,6 +42,7 @@ describe("projectDiff — section order", () => {
           },
           { status: "removed", symbol: namedSymbol("removed") },
           { status: "added", symbol: namedSymbol("added") },
+          { status: "added", symbol: namedSymbol("fixture", { inTestFile: true }) },
           changed(namedSymbol("logic"), { logicChanged: true }),
           changed(namedSymbol("api"), { apiChanged: true }),
         ],
@@ -72,6 +73,7 @@ describe("projectDiff — section order", () => {
       "## 💧 Dropped changes",
       "## 🎚 Confidence changes",
       "## 🎨 Syntax-only changes",
+      "## 🧪 Test files",
     ])
   })
 

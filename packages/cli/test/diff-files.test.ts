@@ -44,6 +44,7 @@ describe("aburi diff --base/--head", () => {
       clause: { token: "added", threshold: null },
       observed: 1,
       symbols: ["ts:src/a.ts#Foo"],
+      scope: "all",
     })
   })
 

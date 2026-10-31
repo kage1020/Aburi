@@ -1,5 +1,7 @@
 import type {
   Symbol as IRSymbol,
+  SymbolDroppedToggled,
+  SymbolMoved,
   SymbolMovedChanged,
   SymbolRemoved,
   SymbolUnknown,
@@ -38,8 +40,12 @@ export function indexUnknown(items: readonly SymbolUnknown[]): string[] {
   )
 }
 
-export function indexMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
+export function indexMoved(items: readonly (SymbolMoved | SymbolMovedChanged)[]): string[] {
   return items.map((item) => indexRow(item.after, movedFrom(item)))
+}
+
+export function indexDroppedToggled(items: readonly SymbolDroppedToggled[]): string[] {
+  return items.map((item) => indexRow(item.after, ` (${item.direction})`))
 }
 
 function indexRow(symbol: IRSymbol, suffix = ""): string {
@@ -52,7 +58,7 @@ function oldName(item: ChangedEntry): string {
 }
 
 /** The row already carries the head's `file:line`, so only the base side is named. */
-function movedFrom({ before, after }: ChangedEntry): string {
+function movedFrom({ before, after }: { before: IRSymbol; after: IRSymbol }): string {
   if (before.source.file !== after.source.file) {
     if (before.name === after.name) return ` (from ${inlineCode(before.source.file)})`
     return ` (from ${inlineCode(before.name)} in ${inlineCode(before.source.file)})`

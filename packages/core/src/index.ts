@@ -132,6 +132,7 @@ export {
   scan,
   writeCanonicalIR,
 } from "./scan/scan"
+export { DEFAULT_TEST_FILES } from "./scan/test-files"
 export {
   CLASSIFY_TIMEOUT_MAX_MS,
   CLASSIFY_TIMEOUT_MIN_MS,

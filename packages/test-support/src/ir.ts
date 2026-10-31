@@ -76,6 +76,7 @@ export function makeSymbol(
     derivedBy: overrides.derivedBy ?? [],
     dropped: overrides.dropped ?? false,
     dropReason: overrides.dropReason ?? null,
+    ...(overrides.inTestFile === undefined ? {} : { inTestFile: overrides.inTestFile }),
   }
 }
 

@@ -56,6 +56,7 @@ const addedOne = (id: string) => ({
   clause: { token: "added", threshold: null },
   observed: 1,
   symbols: [id],
+  scope: "all",
 })
 
 describe("aburi diff — where the base revision is checked out", () => {

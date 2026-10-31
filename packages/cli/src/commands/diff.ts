@@ -19,6 +19,7 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import {
   evaluateFailOn,
   type FailOnClause,
+  type FailOnScope,
   parseFailOn,
   type TrippedClause,
   uncountedDuplicates,
@@ -60,6 +61,7 @@ export interface DiffOptions {
   outputDir?: string
   format?: "json" | "md" | "both"
   failOn?: string | readonly string[]
+  failOnScope?: FailOnScope
   configPath?: string
   compact?: boolean
   maxBytes?: number
@@ -134,7 +136,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   }
 
   const written = await writeReport(diff, outputDir, options, warn)
-  const { firstTriggered } = evaluateFailOn(failOn, diff)
+  const { firstTriggered } = evaluateFailOn(failOn, diff, options.failOnScope)
   const faultedScans = faultedSides(compared.scans)
   const exitCode: ExitCode =
     firstTriggered === null && (faultedScans === null || faultedScans.length === 0)
@@ -142,7 +144,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       : EXIT.GATE
 
   warnAboutComparison({ ...compared, notCompared: diff.notCompared }, warn)
-  warnOnUncountedDuplicates(uncountedDuplicates(failOn, diff), warn)
+  warnOnUncountedDuplicates(uncountedDuplicates(failOn, diff, options.failOnScope), warn)
   const callResolution = compared.headIR.stats.callResolution
   return {
     ...written,
