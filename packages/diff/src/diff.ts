@@ -37,7 +37,7 @@ import {
   type SymbolPair,
 } from "./match"
 import { computeSlices } from "./slice"
-import { classifyStatus, dropDirection, representativeSymbol } from "./status"
+import { classifyStatus, dropDirection, headIdsByBaseId, representativeSymbol } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
@@ -189,7 +189,12 @@ export function buildDiff(
   summary.componentsRemoved = components.removed.length
   summary.componentsChanged = components.changed.length
 
-  const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, sides)
+  const dependencies = diffDependencies(
+    input.baseIR.dependencies,
+    input.headIR.dependencies,
+    sides,
+    headIdsByBaseId(symbols),
+  )
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
   summary.depsUnknown = dependencies.unknown.length
