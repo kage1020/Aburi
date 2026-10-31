@@ -251,15 +251,18 @@ describe("projectDiff — Summary lines", () => {
     )
   })
 
-  it("says how many of the removals were folded, in the document's Summary line alone", () => {
-    const diff = makeDiff({ summary: { ...summary, removedFolded: 2 } })
-    expect(projectDiff(diff)).toContain("· -3 removed (2 folded) ·")
+  it.each([
+    [1, "· -3 removed (1 duplicate) ·"],
+    [2, "· -3 removed (2 duplicates) ·"],
+  ])("says how many of the removals were duplicates, in the document's Summary line alone: %i", (removedDuplicates, written) => {
+    const diff = makeDiff({ summary: { ...summary, removedDuplicates } })
+    expect(projectDiff(diff)).toContain(written)
     expect(projectDiffSummaryLine(diff)).toBe("+5 -3 ~12 ↔2 ⤴1")
   })
 
-  it.each([0, undefined])("names no folds when the count is %s", (removedFolded) => {
+  it.each([0, undefined])("names no duplicates when the count is %s", (removedDuplicates) => {
     const diff = makeDiff({
-      summary: { ...summary, ...(removedFolded === undefined ? {} : { removedFolded }) },
+      summary: { ...summary, ...(removedDuplicates === undefined ? {} : { removedDuplicates }) },
     })
     expect(projectDiff(diff)).toContain("· -3 removed · ")
   })
@@ -278,26 +281,26 @@ describe("projectDiff — Summary lines", () => {
   })
 })
 
-describe("projectDiff — a removal folded into a head Symbol", () => {
-  const removedSection = (foldedInto: SymbolId | null) =>
+describe("projectDiff — a removed duplicate of a head Symbol", () => {
+  const removedSection = (duplicateOf: SymbolId | null) =>
     sectionOf(
       projectDiff(
         makeDiff({
-          symbols: [{ status: "removed", symbol: namedSymbol("makeEmptyIR"), foldedInto }],
+          symbols: [{ status: "removed", symbol: namedSymbol("makeEmptyIR"), duplicateOf }],
         }),
       ),
       "## ➖ Removed",
     )
 
-  it("names the Symbol it was folded into, under its file", () => {
+  it("names the head Symbol it duplicated, under its file", () => {
     const lines = removedSection(symbolId("ts:src/fixtures.ts#emptyIR"))
     const file = lines.indexOf("**File**: `src/makeEmptyIR.ts:1`")
     expect(lines[file + 1]).toBe(
-      "**Folded into**: `ts:src/fixtures.ts#emptyIR`, which holds the same body",
+      "**Duplicate of**: `ts:src/fixtures.ts#emptyIR`, which holds the same body",
     )
   })
 
-  it("says nothing of a fold for a removal no head Symbol carries", () => {
-    expect(removedSection(null).join("\n")).not.toContain("Folded into")
+  it("says nothing of a duplicate for a removal no head Symbol carries", () => {
+    expect(removedSection(null).join("\n")).not.toContain("Duplicate of")
   })
 })

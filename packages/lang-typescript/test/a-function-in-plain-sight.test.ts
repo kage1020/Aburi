@@ -150,7 +150,6 @@ describe("what the reading leaves alone", () => {
       "p",
     ],
     ["an initializer behind `await`", "export const r = await withRetry(() => { q() })", "r"],
-    ["a generator argument", "export const w = wrap(function* () { yield q() })", "w"],
     [
       "a function in an object property",
       "export const o = useQuery({ queryFn: () => { q() } })",
@@ -180,9 +179,5 @@ describe("what the reading leaves alone", () => {
       ["ts:src/a.ts#GET", null],
       ["ts:src/a.ts#POST", null],
     ])
-  })
-
-  it("produces no Symbol for a wrapped default export", async () => {
-    expect(await symbolsOf("export default withAuth(() => { q() })")).toEqual([])
   })
 })

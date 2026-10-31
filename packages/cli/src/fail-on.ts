@@ -1,10 +1,11 @@
 import type { DiffResult, Symbol as IRSymbol, SymbolChange, SymbolId } from "@aburi/types"
 import { assertNever } from "./errors"
+import { MAX_LISTED } from "./listing"
 
 export type FailOnStatusToken =
   | "added"
   | "removed"
-  | "removed:folded"
+  | "removed:duplicate"
   | "changed"
   | "moved"
   | "moved+changed"
@@ -31,7 +32,7 @@ export interface FailOnClause {
 const STATUS_TOKENS: ReadonlySet<FailOnStatusToken> = new Set([
   "added",
   "removed",
-  "removed:folded",
+  "removed:duplicate",
   "changed",
   "moved",
   "moved+changed",
@@ -127,7 +128,7 @@ function parseToken(raw: string): FailOnToken {
 export interface ClauseOutcome {
   triggered: boolean
   observed: number
-  symbols: SymbolId[]
+  symbols: readonly SymbolId[]
 }
 
 export function evaluateClause(
@@ -135,9 +136,7 @@ export function evaluateClause(
   diff: DiffResult,
   scope: FailOnScope = "all",
 ): ClauseOutcome {
-  const symbols = diff.symbols
-    .filter((change) => inScope(scope, change) && counts(clause.token, change))
-    .map((change) => entrySymbol(change).id)
+  const symbols = countedIds(clause.token, diff, scope)
   const observed = symbols.length
   const triggered = clause.threshold === null ? observed > 0 : observed > clause.threshold
   return { triggered, observed, symbols }
@@ -146,7 +145,7 @@ export function evaluateClause(
 export interface TrippedClause {
   clause: FailOnClause
   observed: number
-  symbols: SymbolId[]
+  symbols: readonly SymbolId[]
   scope: FailOnScope
 }
 
@@ -179,9 +178,9 @@ function counts(token: FailOnToken, change: SymbolChange): boolean {
     case "unknown":
       return change.status === token
     case "removed":
-      return change.status === "removed" && (change.foldedInto ?? null) === null
-    case "removed:folded":
-      return change.status === "removed" && (change.foldedInto ?? null) !== null
+      return change.status === "removed" && (change.duplicateOf ?? null) === null
+    case "removed:duplicate":
+      return change.status === "removed" && (change.duplicateOf ?? null) !== null
     case "dropped-toggled:to-dropped":
       return change.status === "dropped-toggled" && change.direction === "to-dropped"
     case "dropped-toggled:to-kept":
@@ -209,6 +208,22 @@ function deltaMoved(
   )
 }
 
+export function uncountedDuplicates(
+  clauses: readonly FailOnClause[],
+  diff: DiffResult,
+  scope: FailOnScope = "all",
+): SymbolId[] {
+  const tokens = new Set(clauses.map((clause) => clause.token))
+  if (!tokens.has("removed") || tokens.has("removed:duplicate")) return []
+  return countedIds("removed:duplicate", diff, scope)
+}
+
+function countedIds(token: FailOnToken, diff: DiffResult, scope: FailOnScope): SymbolId[] {
+  return diff.symbols
+    .filter((change) => inScope(scope, change) && counts(token, change))
+    .map((change) => entrySymbol(change).id)
+}
+
 /** The head decides for a pair, as it does where the report lists the entry. */
 function inScope(scope: FailOnScope, change: SymbolChange): boolean {
   return scope === "all" || entrySymbol(change).inTestFile !== true
@@ -218,17 +233,9 @@ function entrySymbol(change: SymbolChange): IRSymbol {
   return "symbol" in change ? change.symbol : change.after
 }
 
-// Enough to find each in the report; a threshold clause can trip on thousands.
-const NAMED_AT_MOST = 10
-
-export function formatTriggered(
-  clause: FailOnClause,
-  observed: number,
-  symbols: readonly SymbolId[] = [],
-  scope: FailOnScope = "all",
-): string {
+export function formatTriggered({ clause, observed, symbols, scope }: TrippedClause): string {
   const rendered = clause.threshold === null ? clause.token : `${clause.token}:>${clause.threshold}`
-  const named = symbols.slice(0, NAMED_AT_MOST).map((id) => `  ${id}`)
+  const named = symbols.slice(0, MAX_LISTED).map((id) => `  ${id}`)
   const unnamed = symbols.length - named.length
   const where = scope === "all" ? "" : " outside test files"
   return [

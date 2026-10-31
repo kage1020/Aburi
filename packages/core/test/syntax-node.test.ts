@@ -243,6 +243,19 @@ describe("declaratorValue", () => {
     expect(declaratorValue(statement(declarator(identifier("Row"), asCast)), "Row")).toBe(second)
   })
 
+  it("reads a default export's value, through its wrappers, under the default export's name", () => {
+    const exported = (value: SyntaxNode | null) =>
+      node({
+        type: "export_statement",
+        childForFieldName: (field) => (field === "value" ? value : null),
+      })
+    const wrapped = node({ type: "parenthesized_expression", namedChildren: [second] })
+
+    expect(declaratorValue(exported(wrapped), "<default>")).toBe(second)
+    expect(declaratorValue(exported(second), "Row")).toBeNull()
+    expect(declaratorValue(exported(null), "<default>")).toBeNull()
+  })
+
   it.each([
     ["no declarator binds it", statement(declarator(identifier("Row"), second))],
     ["its declarator has no initializer", statement(declarator(identifier("Ctx"), null))],

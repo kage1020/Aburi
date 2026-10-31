@@ -1,7 +1,12 @@
-import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
+import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
+  type ExtractionContext,
+  type SymbolCandidate,
+} from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import {
   AMBIENT_DECLARATION_TYPE,
+  asClassValue,
   findChild,
   firstNonCommentChild,
   inAmbientContext,
@@ -10,8 +15,10 @@ import {
 } from "./ast-helpers"
 import {
   type CallExtractionState,
+  layOutBodies,
   makeCallExtractionState,
   visitCallStatement,
+  wrappedFunctions,
 } from "./call-symbols"
 import { addClassAndMembers } from "./class-candidates"
 import { type CandidateSink, makeCandidateSink } from "./declaration-merge"
@@ -24,7 +31,7 @@ import {
   topLevelVisibility,
 } from "./export-evidence"
 import { readLeadingJsDoc } from "./leading-jsdoc"
-import { makeTsSymbolId, nestedQname } from "./qname"
+import { defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
 import {
   ENUM_SHAPE,
@@ -72,6 +79,7 @@ function visitStatement(
       out.add(makeFunctionCandidate(node, ctx, namespacePath))
       return
     case "function_expression":
+    case "generator_function":
     case "arrow_function":
       if (isDefaultExport(node)) {
         out.add(makeFunctionCandidate(node, ctx, namespacePath))
@@ -122,6 +130,10 @@ function visitStatement(
       return
     }
     default:
+      if (isDefaultExport(node)) {
+        const candidate = makeDefaultCallCandidate(node, ctx)
+        if (candidate !== null) out.add(candidate)
+      }
       return
   }
 }
@@ -184,6 +196,29 @@ function makeFunctionCandidate(
     derivedBy: exportEvidence(node),
     bodyNode: node.childForFieldName("body"),
     fullNode: node,
+  }
+}
+
+function makeDefaultCallCandidate(
+  value: Node,
+  ctx: ExtractionContext,
+): SymbolCandidate<Node> | null {
+  const statement = value.parent
+  if (statement === null) return null
+  const bodies = wrappedFunctions(value)
+  if (bodies.length === 0) return null
+  const qname = defaultExportQname()
+  return {
+    id: makeTsSymbolId(ctx.file.path, qname),
+    kind: "const",
+    extKind: null,
+    name: qname,
+    visibility: topLevelVisibility(value),
+    decorators: [],
+    signature: null,
+    source: makeSourceRange(statement, ctx),
+    derivedBy: [CALL_ARGUMENT_FUNCTION_DERIVED_BY, ...exportEvidence(value)],
+    ...layOutBodies(bodies, statement),
   }
 }
 
@@ -257,11 +292,26 @@ function classNamesIn(scope: Node): ReadonlySet<string> {
   const names = new Set<string>()
   for (const sibling of scope.namedChildren) {
     const declaration = sibling === null ? null : unwrappedDeclaration(sibling)
-    if (declaration === null || !CLASS_DECLARATION_TYPES.has(declaration.type)) continue
-    const declared = nameFieldText(declaration)
-    if (declared !== null) names.add(declared)
+    if (declaration !== null) for (const name of classNamesDeclaredBy(declaration)) names.add(name)
   }
   byScope.set(scope.id, names)
+  return names
+}
+
+function classNamesDeclaredBy(declaration: Node): string[] {
+  if (CLASS_DECLARATION_TYPES.has(declaration.type)) {
+    const declared = nameFieldText(declaration)
+    return declared === null ? [] : [declared]
+  }
+  if (!BINDING_DECLARATION_TYPES.has(declaration.type)) return []
+  const names: string[] = []
+  for (const declarator of declaration.namedChildren) {
+    if (declarator?.type !== "variable_declarator") continue
+    const value = declarator.childForFieldName("value")
+    const declared = declarator.childForFieldName("name")
+    if (value === null || declared?.type !== "identifier" || asClassValue(value) === null) continue
+    names.push(declared.text)
+  }
   return names
 }
 
@@ -270,6 +320,11 @@ export const STATEMENT_LISTS: ReadonlySet<string> = new Set(["program", "stateme
 const CLASS_DECLARATION_TYPES: ReadonlySet<string> = new Set([
   "class_declaration",
   "abstract_class_declaration",
+])
+
+const BINDING_DECLARATION_TYPES: ReadonlySet<string> = new Set([
+  "lexical_declaration",
+  "variable_declaration",
 ])
 
 function unwrappedDeclaration(statement: Node): Node | null {

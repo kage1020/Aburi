@@ -56,9 +56,11 @@ threshold. Empty `--fail-on ""` is rejected (silent gate = green pipeline = bug)
 an empty clause (`added,`, `added,,removed`).
 
 - Status tokens: `added`, `removed`, `changed`, `moved`, `moved+changed`, `dropped-toggled`, `unknown`.
-  `removed` leaves out a removal folded into a head Symbol that holds its body.
-- Subtypes: `dropped-toggled:to-dropped`, `dropped-toggled:to-kept`, and `removed:folded` for the
-  folded removals `removed` leaves out.
+  `removed` leaves out a removed duplicate: a removal whose head revision holds a Symbol of its
+  kind with the same body, when that body names something and no framework plugin classified it.
+- Subtypes: `dropped-toggled:to-dropped`, `dropped-toggled:to-kept`, and `removed:duplicate` for the
+  removed duplicates `removed` leaves out. A `removed` clause with no `removed:duplicate` beside it
+  names those it left out on stderr.
 - Delta axes: `api-changed`, `logic-changed`, `syntax-changed`, `confidence-changed`.
 
 Examples: `--fail-on removed`, `--fail-on changed:>5`, `--fail-on dropped-toggled:to-dropped:>10`.
