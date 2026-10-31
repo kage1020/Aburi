@@ -14,6 +14,7 @@ const COMPONENTS = [
 const PACKAGES = [
   { name: "@acme/web", root: "packages/web" },
   { name: "@acme/shared", root: "packages/shared" },
+  { name: "shared-kit", root: "packages/shared/kit" },
   { name: "@acme/api", root: "packages/api" },
 ]
 
@@ -51,20 +52,40 @@ describe("scan — a Component edge per import that crosses a Component boundary
     ],
     ["a type-only import", 'import type { Format } from "@acme/shared"', [WEB_TO_SHARED]],
     ["a re-export", 'export { format } from "@acme/shared"', [WEB_TO_SHARED]],
+    ["a namespace re-export", 'export * from "@acme/shared"', [WEB_TO_SHARED]],
+    ["a side-effect import", 'import "@acme/shared"', [WEB_TO_SHARED]],
+    ["an import-equals declaration", 'import shared = require("@acme/shared")', [WEB_TO_SHARED]],
     [
       "a dynamic import",
       'export async function load() {\n  return import("@acme/shared")\n}',
       [WEB_TO_SHARED],
     ],
     [
-      "a module the scan does not read",
+      "a relative path to no file the scan read, such as a JSON module",
       'import tokens from "../../shared/tokens.json"',
+      [WEB_TO_SHARED],
+    ],
+    [
+      "a workspace package asked for with a query",
+      'import raw from "@acme/shared?raw"',
+      [WEB_TO_SHARED],
+    ],
+    [
+      "a relative path asked for with a query",
+      'import css from "../../shared?inline"',
+      [WEB_TO_SHARED],
+    ],
+    [
+      "a subpath of an unscoped workspace package",
+      'import { format } from "shared-kit/format"',
       [WEB_TO_SHARED],
     ],
     ["the importing Component's own package", 'import { page } from "@acme/web"', []],
     ["a path inside the importing Component", 'import { page } from "./page"', []],
     ["a package from outside the workspace", 'import { debounce } from "lodash"', []],
     ["a scoped name no workspace package has", 'import { x } from "@acme/unknown"', []],
+    ["a name a workspace package's name begins", 'import { x } from "@acme/shared-extra"', []],
+    ["an unscoped name no workspace package has", 'import { x } from "shared"', []],
     ["a Node built-in", 'import { readFile } from "node:fs/promises"', []],
     ["a path that climbs out of the workspace", 'import { x } from "../../../../outside"', []],
   ])("%s", async (_, source, expected) => {
@@ -89,15 +110,29 @@ describe("scan — a Component edge per import that crosses a Component boundary
     expect(edges).toEqual([])
   })
 
-  it("reads a package name two Components both claim as naming neither", async () => {
-    const { edges } = await componentEdges(
-      { "packages/web/src/app.ts": 'import { format } from "@acme/common"\n' },
+  it.each<[string, { name: string; root: string }[], Dependency[]]>([
+    [
+      "names neither of two Components that both claim it",
       [
         { name: "@acme/common", root: "packages/shared" },
         { name: "@acme/common", root: "packages/api" },
       ],
+      [],
+    ],
+    [
+      "names the one Component that claims it at two roots",
+      [
+        { name: "@acme/common", root: "packages/shared" },
+        { name: "@acme/common", root: "packages/shared/legacy" },
+      ],
+      [WEB_TO_SHARED],
+    ],
+  ])("reads a package name that %s", async (_, packages, expected) => {
+    const { edges } = await componentEdges(
+      { "packages/web/src/app.ts": 'import { format } from "@acme/common"\n' },
+      packages,
     )
-    expect(edges).toEqual([])
+    expect(edges).toEqual(expected)
   })
 
   it("adds nothing for a resolved call into another Component beside the import it went through", async () => {

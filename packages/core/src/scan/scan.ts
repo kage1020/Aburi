@@ -131,6 +131,11 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     components: input.components ?? [],
     packages: input.workspacePackages ?? [],
   })
+  for (const { name, components } of componentEdges.contested) {
+    logger.warn(
+      `${name} names a package in each of the Components ${components.join(", ")}, so an import of it draws no Component edge.`,
+    )
+  }
 
   const propagation = propagateEffects({
     symbols: callGraph.symbols,
@@ -176,7 +181,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     workspace,
     components: sortComponents(input.components ?? []),
     symbols: propagatedSymbols,
-    dependencies: [...symbolEdges, ...componentEdges].sort(compareDependencies),
+    dependencies: [...symbolEdges, ...componentEdges.dependencies].sort(compareDependencies),
     stats,
   }
 

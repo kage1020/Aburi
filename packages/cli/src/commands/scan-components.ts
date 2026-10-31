@@ -1,4 +1,5 @@
 import {
+  buildComponentAttribution,
   CoreError,
   type CoreErrorCode,
   type DetectManagersResult,
@@ -8,6 +9,7 @@ import {
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
+  NPM_MANIFEST,
   posixSpellingViolation,
   posixWorkspaceRelativeViolation,
   readWorkspacePackages,
@@ -64,10 +66,12 @@ export async function resolveWorkspacePackages(
   managers: DetectManagersResult,
   components: readonly Component[],
 ): Promise<WorkspacePackage[]> {
+  // A package no Component holds can be the end of no edge, so its manifest is not read.
+  const attribute = buildComponentAttribution(components)
   const roots = [
     ...managers.workspaces.map((candidate) => candidate.relativeRoot),
     ...components.flatMap((component) => component.roots),
-  ]
+  ].filter((root) => attribute(`${root}/${NPM_MANIFEST}`) !== null)
   try {
     return await readWorkspacePackages(workspaceRoot, roots)
   } catch (error) {

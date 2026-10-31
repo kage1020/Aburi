@@ -73,13 +73,16 @@ export async function readWorkspacePackages(
   roots: readonly string[],
 ): Promise<WorkspacePackage[]> {
   const unique = [...new Set(roots)].sort(compareCodeUnit)
-  const read = await Promise.all(
+  // Which read fails first is timing, so the failure reported is the first root's.
+  const settled = await Promise.allSettled(
     unique.map(async (root) => ({
       root,
       manifest: await readJsonManifest(join(workspaceRoot, root, NPM_MANIFEST)),
     })),
   )
-  return read.flatMap(({ root, manifest }) => {
+  return settled.flatMap((outcome) => {
+    if (outcome.status === "rejected") throw outcome.reason
+    const { root, manifest } = outcome.value
     const name: unknown = manifest?.name
     return typeof name === "string" && name.length > 0 ? [{ name, root }] : []
   })

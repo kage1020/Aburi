@@ -14,7 +14,7 @@ export {
   type DetectComponentsOptions,
   detectComponents,
 } from "./component"
-export { readWorkspacePackages, type WorkspacePackage } from "./component-manifest"
+export { NPM_MANIFEST, readWorkspacePackages, type WorkspacePackage } from "./component-manifest"
 export {
   CoreError,
   type CoreErrorCode,

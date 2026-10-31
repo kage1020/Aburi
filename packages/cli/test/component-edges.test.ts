@@ -76,4 +76,14 @@ describe("aburi scan — Component edges from imports between workspace packages
       /^Failed to resolve components: .*libs[/\\]core[/\\]package\.json/,
     )
   })
+
+  it("does not read a workspace package.json that no Component holds", async () => {
+    await writeFileAt(workspace.root, "pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n")
+    await writeFileAt(workspace.root, "packages/legacy/package.json", "{ name: ")
+    await writeFileAt(workspace.root, "apps/web/src/index.ts", "export const page = 1\n")
+
+    const { edges } = await scan({ components: [{ id: "web", roots: ["apps/web"] }] })
+
+    expect(edges).toEqual([])
+  })
 })

@@ -110,7 +110,7 @@ Sub-cases:
 | `import { X as Alias } from './y'` | `name = Alias` → resolve to `<lang>:<resolved-file>#X` (original name) |
 | `import * as ns from './y'` | `name = ns` and `target = ns.foo` → resolve to `<lang>:<resolved-file>#foo` |
 | `import Default from './y'`, `import { default as Default } from './y'` | `name = Default` → resolve to the module's default export: `<lang>:<resolved-file>#<default>` when it is anonymous, `<lang>:<resolved-file>#makeApp` when it is `export default function makeApp`; a named export called `Default` is not taken |
-| `import type { X } from './y'` | ignored (type-only imports produce no runtime edge) |
+| `import type { X } from './y'` | no call edge (type-only imports produce no runtime edge). Like every import, a `via: import` Component edge when it crosses a Component boundary ([`ir-schema.md`](./ir-schema.md) §11.3) |
 | `import('./y')` (dynamic) | ignored at the target site. Like every import, it is a `via: import` Component edge when it crosses a Component boundary ([`ir-schema.md`](./ir-schema.md) §11.3) |
 | bare specifier `'lodash'` | out-of-workspace — `resolved` stays `null`, confidence `high` (this is a definite external, not a failure); a qualified target through a named import that keeps the exported name goes on to Step 4 |
 

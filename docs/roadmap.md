@@ -16,7 +16,8 @@ NestJS events as effects.
 
 **Dependencies.** Aburi resolves calls to the symbols they reach within a file,
 an import, a component, or the workspace, and builds a symbol-level dependency
-graph from them. It counts and buckets the calls it could not resolve, so you
+graph from them. It draws an edge between two components wherever a file of one
+imports a module of the other. It counts and buckets the calls it could not resolve, so you
 can see what the graph is missing. Effects propagate along that graph, so a
 controller that reaches `prisma.invoice.create` through a service carries the
 `db.write` too.
@@ -43,7 +44,6 @@ consecutive scans of an unchanged tree produce byte-identical IR.
 | Limitation | Status |
 |---|---|
 | TypeScript and JavaScript only | Other languages planned below |
-| No edges between components: the workspace overview's component graph shows the components alone | Planned. Symbol-level call edges are recorded today |
 | Call resolution is syntactic unless a language server is configured — 2–19% of call sites resolve on public repositories | Opt-in [LSP enrichment](./design/lsp-enrichment.md) (`lsp.enabled` with `lsp.servers.ts`) resolves `this.` / `super.` calls; interface-typed receivers are not resolved yet |
 | No graph visualisation beyond the workspace overview and Slice View | No design yet |
 | No LLM integration | Deliberate. Aburi produces the facts, and interpreting them belongs to a separate tool. |

@@ -753,7 +753,7 @@ id: the id repeats the language on every end, and an edge between two Symbols of
 common case for a call, wrote the same path twice. Such an edge names the file once, after both
 names. A Component end is written by its id.
 
-The Unknown group is not split by level the way the added and removed groups are. Only a Symbol endpoint has a file to lose ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1), so every entry in it is a symbol-level edge by construction. Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
+The Unknown group is not split by level the way the added and removed groups are: what a reviewer acts on is the file each line names, not the level. A symbol-level edge names the file of an endpoint, and a Component-level one every file of the Component it leaves that the other revision skipped ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1). Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
 
 #### 💧 Dropped changes (folded)
 

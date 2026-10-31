@@ -2,6 +2,7 @@ import type { Component, ComponentId, Dependency, ImportEdge } from "@aburi/type
 import { dependencyKey } from "../call-site"
 import { dirname, isRelativeSpecifier, joinPosix } from "../callgraph-specifier"
 import { NPM_MANIFEST, type WorkspacePackage } from "../component-manifest"
+import { compareCodeUnit } from "../order"
 import { buildComponentAttribution, type ComponentAttribution } from "./attribute"
 
 export interface ComponentImportEdgesInput {
@@ -12,18 +13,33 @@ export interface ComponentImportEdgesInput {
   packages: readonly WorkspacePackage[]
 }
 
-export function componentImportEdges(input: ComponentImportEdgesInput): Dependency[] {
+/** A package name an import used that the manifests of more than one Component declare. */
+export interface ContestedPackageName {
+  name: string
+  components: ComponentId[]
+}
+
+export interface ComponentImportEdges {
+  dependencies: Dependency[]
+  contested: ContestedPackageName[]
+}
+
+type PackageClaims = ReadonlyMap<string, ReadonlySet<ComponentId>>
+
+export function componentImportEdges(input: ComponentImportEdgesInput): ComponentImportEdges {
   const attribute = buildComponentAttribution(input.components)
-  const packages = packageOwners(input.packages, attribute)
+  const claims = packageClaims(input.packages, attribute)
   const edges = new Map<string, Dependency>()
+  const contested = new Set<string>()
   for (const [file, imports] of input.importsByFile) {
     if (input.withdrawn.has(file)) continue
     const from = attribute(file)
     if (from === null) continue
     for (const { source } of imports) {
-      const to = isRelativeSpecifier(source)
-        ? relativeOwner(file, source, attribute)
-        : packageOwner(source, packages)
+      const specifier = withoutQuery(source)
+      const to = isRelativeSpecifier(specifier)
+        ? relativeOwner(file, specifier, attribute)
+        : packageOwner(packageName(specifier), claims, contested)
       if (to === null || to === from) continue
       edges.set(dependencyKey(from, to, "import"), {
         from,
@@ -34,7 +50,19 @@ export function componentImportEdges(input: ComponentImportEdgesInput): Dependen
       })
     }
   }
-  return [...edges.values()]
+  return {
+    dependencies: [...edges.values()],
+    contested: [...contested].sort(compareCodeUnit).map((name) => ({
+      name,
+      components: [...(claims.get(name) ?? [])].sort(compareCodeUnit),
+    })),
+  }
+}
+
+/** A bundler's `?raw` or `?inline` asks for the module in another form; the module is the same one. */
+function withoutQuery(specifier: string): string {
+  const query = specifier.indexOf("?")
+  return query === -1 ? specifier : specifier.slice(0, query)
 }
 
 // The joined path need not be a file the scan read: a JSON module or a directory's index sits in
@@ -45,33 +73,47 @@ function relativeOwner(
   attribute: ComponentAttribution,
 ): ComponentId | null {
   const target = joinPosix(dirname(file), specifier)
-  return target === null ? null : attribute(target)
+  if (target === null) return null
+  // The workspace root directory names no file, but its index is one at the top level.
+  return attribute(target === "" ? "index" : target)
 }
 
-function packageOwners(
+function packageClaims(
   packages: readonly WorkspacePackage[],
   attribute: ComponentAttribution,
-): Map<string, ComponentId> {
-  const owners = new Map<string, ComponentId | null>()
+): PackageClaims {
+  const claims = new Map<string, Set<ComponentId>>()
   for (const { name, root } of packages) {
     const owner = attribute(`${root}/${NPM_MANIFEST}`)
     if (owner === null) continue
-    const claimed = owners.get(name)
-    // A name two Components' manifests claim decides neither, so no arrow is drawn for it.
-    owners.set(name, claimed === undefined || claimed === owner ? owner : null)
+    const claimants = claims.get(name)
+    if (claimants === undefined) claims.set(name, new Set([owner]))
+    else claimants.add(owner)
   }
-  const resolved = new Map<string, ComponentId>()
-  for (const [name, owner] of owners) if (owner !== null) resolved.set(name, owner)
-  return resolved
+  return claims
 }
 
-function packageOwner(
-  specifier: string,
-  packages: ReadonlyMap<string, ComponentId>,
-): ComponentId | null {
+function packageName(specifier: string): string | null {
   const [first, second] = specifier.split("/")
   if (first === undefined || first.length === 0) return null
-  if (!first.startsWith("@")) return packages.get(first) ?? null
+  if (!first.startsWith("@")) return first
   if (second === undefined || second.length === 0) return null
-  return packages.get(`${first}/${second}`) ?? null
+  return `${first}/${second}`
+}
+
+// A name two Components' manifests claim decides neither, so no arrow is drawn for it.
+function packageOwner(
+  name: string | null,
+  claims: PackageClaims,
+  contested: Set<string>,
+): ComponentId | null {
+  if (name === null) return null
+  const claimants = claims.get(name)
+  if (claimants === undefined) return null
+  if (claimants.size > 1) {
+    contested.add(name)
+    return null
+  }
+  const [owner] = claimants
+  return owner ?? null
 }

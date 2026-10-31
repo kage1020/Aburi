@@ -193,7 +193,8 @@ plugin installed, and it will keep showing up until you change the cause.
 roots, the most common effects, and any files the scan could not read. Hand this
 one to a new joiner. Its Component dependencies graph draws an arrow from one
 component to another wherever a file in the first imports the second, by a
-relative path or by its package name.
+relative path or by its package name. A CommonJS `require()` call is not an
+import, so it draws no arrow.
 
 **`out/components/<id>.md`** covers one component in full. Every kept symbol,
 grouped by file, with its boundaries, signature, rules, effects, and calls.

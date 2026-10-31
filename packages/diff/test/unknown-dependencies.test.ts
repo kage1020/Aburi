@@ -1,7 +1,7 @@
-import { dependency, makeIR, makeSymbol } from "@aburi/test-support"
-import type { Dependency, SkippedFile } from "@aburi/types"
+import { component, dependency, makeIR, makeSymbol } from "@aburi/test-support"
+import type { Dependency, IR, SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { type DependencySideView, diffDependencies, renameDirections } from "../src"
+import { dependencySideView, diffDependencies, renameDirections } from "../src"
 import { diffOf, withSkipped } from "./helpers"
 
 const call = (from: string, to: string, overrides: Partial<Dependency> = {}) =>
@@ -112,6 +112,73 @@ describe("an edge into a file the other side never analysed", () => {
   })
 })
 
+describe("a Component edge, where the other side skipped a file", () => {
+  const COMPONENTS = [
+    component({ id: "billing", name: "billing" }),
+    component({ id: "pricing", name: "pricing" }),
+  ]
+  const BILLING_TO_PRICING = imports("billing", "pricing")
+  const withEdge = makeIR({ components: COMPONENTS, dependencies: [BILLING_TO_PRICING] })
+  const skipping = (...files: SkippedFile[]): IR =>
+    withSkipped(makeIR({ components: COMPONENTS }), files)
+
+  it.each<[string, SkippedFile[], SkippedFile[]]>([
+    [
+      "is unknown when the file is one of the Component it leaves, as any of them could hold the import",
+      [lost("apps/pricing/src/rates.ts"), lost("apps/billing/src/cart.ts", "parse-timeout")],
+      [lost("apps/billing/src/cart.ts", "parse-timeout")],
+    ],
+    [
+      "lists every skipped file of that Component",
+      [lost("apps/billing/src/z.ts"), lost("apps/billing/src/a.ts", "over-size")],
+      [lost("apps/billing/src/a.ts", "over-size"), lost("apps/billing/src/z.ts")],
+    ],
+    [
+      "is removed when only a file of the Component it enters was lost",
+      [lost("apps/pricing/src/rates.ts")],
+      [],
+    ],
+    ["is removed when the file lies in no Component", [lost("scripts/build.ts")], []],
+  ])("%s", (_, skipped, lostFiles) => {
+    const diff = diffOf(withEdge, skipping(...skipped))
+    expect({
+      removed: diff.dependencies.removed,
+      unknown: diff.dependencies.unknown,
+    }).toEqual(
+      lostFiles.length === 0
+        ? { removed: [BILLING_TO_PRICING], unknown: [] }
+        : {
+            removed: [],
+            unknown: [{ dependency: BILLING_TO_PRICING, absentFrom: "head", lostFiles }],
+          },
+    )
+  })
+
+  it("is unknown, not added, when base skipped a file of the Component it leaves", () => {
+    const diff = diffOf(skipping(lost("apps/billing/src/cart.ts")), withEdge)
+    expect(diff.summary).toMatchObject({ depsAdded: 0, depsUnknown: 1 })
+    expect(diff.dependencies.unknown).toEqual([
+      {
+        dependency: BILLING_TO_PRICING,
+        absentFrom: "base",
+        lostFiles: [lost("apps/billing/src/cart.ts")],
+      },
+    ])
+  })
+
+  it("reads the Components of the side that skipped the file", () => {
+    const moved = withSkipped(
+      makeIR({
+        components: [component({ id: "billing", name: "billing", roots: ["services/billing"] })],
+      }),
+      [lost("services/billing/src/cart.ts")],
+    )
+    expect(diffOf(withEdge, moved).dependencies.unknown?.[0]?.lostFiles).toEqual([
+      lost("services/billing/src/cart.ts"),
+    ])
+  })
+})
+
 describe("an edge that is not unknown although a file was lost", () => {
   it("is removed when only the path inside its endpoint's id was skipped", () => {
     const diff = diffOf(
@@ -119,21 +186,6 @@ describe("an edge that is not unknown although a file was lost", () => {
       withSkipped(makeIR({ symbols: [kept] }), [lost("src/old.ts")]),
     )
     expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 0 })
-  })
-
-  it("is removed when it runs between Components, which have no file to lose", () => {
-    const diff = diffOf(
-      makeIR({
-        symbols: [gone, kept],
-        dependencies: [imports("billing", "pricing"), GONE_TO_KEPT],
-      }),
-      withSkipped(makeIR({ symbols: [kept] }), [
-        lost("billing", "unroutable"),
-        lost("src/gone.ts"),
-      ]),
-    )
-    expect(diff.dependencies.removed).toEqual([imports("billing", "pricing")])
-    expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 1 })
   })
 
   it("is removed when nobody lost its file", () => {
@@ -204,7 +256,7 @@ describe("the three edge outcomes", () => {
 
 describe("diffDependencies given side views with nothing to say", () => {
   it("classifies every one-sided edge plainly, and still writes the unknown array", () => {
-    const blind: DependencySideView = { symbolFiles: new Map(), lostFiles: new Map() }
+    const blind = dependencySideView(makeIR())
     const result = diffDependencies([GONE_TO_KEPT], [imports("billing", "pricing")], {
       base: blind,
       head: blind,
