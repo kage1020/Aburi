@@ -166,7 +166,7 @@ An owner and its members are paired independently. `class Invoice { render() }` 
 
 The kind is part of the group key for the reason it is part of stage 4's bucket key (§3.4.0): a function and a class are never one Symbol, whatever their bodies hash to. It also stops a Symbol whose kind changes while it moves file, on any logic fingerprint, non-empty included: a method extracted into a top-level function, or an `enum` rewritten as an `as const` object in another file, is added + removed, because stage 4's bucket carries the kind as well. Within one file the id survives the kind change and stage 1 pairs the two.
 
-Every Symbol stage 3 does not pair is handed to stage 4, a group that missed the bar included. What stage 4 can do with it is stage 4's rule: it skips a head with a null signature, and a Symbol on either side whose name says one word (§3.4.3), so for those Symbols stage 3 was the last stage to read them.
+Every Symbol stage 3 does not pair is handed to stage 4, a group that missed the bar included. What stage 4 can do with it is stage 4's rule: it skips a Symbol on either side whose name says one word or that has a null signature (§3.4.3), so for those Symbols stage 3 was the last stage to read them.
 
 Dropped symbols all share the fingerprint `"000000000000"`, so they would collide massively under the same hash. Dropped-to-dropped matching is excluded from stages 3/4 and handled by a dedicated weak matcher (§3.4.5).
 
@@ -174,15 +174,16 @@ Dropped symbols all share the fingerprint `"000000000000"`, so they would collid
 
 ```
 # Bucket pre-filter (O(N) hash bucketing) suppresses K^2
-buckets = group remainingBase by (kind, signatureNullness)
-        → { (kind, sigNull): [base symbols] }
+buckets = group remainingBase by kind
+        → { kind: [base symbols] }
         skipping any base with nameEvidence(b.name) <= 1        # §3.4.3, inadmissible
+        and then any base with b.signature === null             # §3.4.3, inadmissible
 
 candidates = []
 for h in remainingHead:
-  if h.signature === null: continue                       # §3.4.3, inadmissible
   if nameEvidence(h.name) <= 1: continue                  # §3.4.3, inadmissible
-  bucket = buckets.get((h.kind, 'has-sig'))
+  if h.signature === null: continue                       # §3.4.3, inadmissible
+  bucket = buckets.get(h.kind)
   if !bucket: continue
   threshold = thresholdFor(h.name)                        # §3.4.3
   for b in bucket:
@@ -200,7 +201,7 @@ for (b, h, score) in acceptInScoreOrder(candidates):      # §3.8
 #### 3.4.0 Bucket pre-filter (mandatory)
 
 Stage 4 implemented as O(K^2) drops below practical speed at K=500 (heavy use of the Repository pattern / Zod schemas).
-As a bucket pre-filter, hash-partition by the combination `(kind, signature === null ? 'no-sig' : 'has-sig')` and evaluate each head only within its corresponding bucket.
+As a bucket pre-filter, hash-partition by `kind` and evaluate each head only within its kind's bucket. A Symbol with no signature never reaches a bucket (§3.4.3).
 
 **That key alone is not a partition of anything.** A directory rename with no git rename information — the §9.4 plugin-difference and §11.5 shallow-clone situations — leaves every method of the codebase in one bucket, so "a few dozen per bucket" describes the easy case rather than the hard one. Measured at 4000 symbols in one bucket, stage 4 took 64 s against §8.3's 2 s target when that was reported. Two later changes to the per-comparison cost — a per-pass token memo, and settling candidates in one sweep rather than per head — brought it to 14 s, which is what the table below measures against.
 
@@ -266,11 +267,13 @@ The integers are products of at most four counts — the member names' token uni
 Two kinds of Symbol are skipped before any threshold applies, because for them a high score means the evidence is missing rather than that the two names resemble each other. Neither is expressible as a threshold, and one of them wants a bar above the top of the scale:
 
 ```
-if h.signature === null:            skip the head entirely, leave for added/removed
 if nameEvidence(s.name) <= 1:       skip the Symbol, either side, leave for added/removed
+if s.signature === null:            skip the Symbol, either side, leave for added/removed
 ```
 
-**A null signature** makes `signatureSimilarity(null, null)` return 1.0 against every candidate. The bucket key partitions by signature nullness, so a signature-less head only ever sees signature-less candidates — there is nothing in its bucket it could legitimately pair with, and the rule needs no condition on them.
+The name is read first, so a Symbol that fails both is skipped for its name, which is what §3.4.7 traces.
+
+**A null signature** makes `signatureSimilarity(null, null)` return 1.0, so two signature-less Symbols would pair on their names alone. A head with no signature is the case the rule exists for. A base with none could only meet a head with a signature, where the axis is 0 and the composite at most 0.7, under every row of the table — so the rule reads both sides at no cost to recall, and a signature-less base stays out of the buckets.
 
 **A one-token qualified name** is the whole of what §3.4 has to read about that Symbol's identity. `main` supplies one word and an empty owner, so a top-level `main(x: string): void` scores 1.0 against any other top-level `main(x: string): void` and two unrelated CLI entry points are reported as one `moved+changed` — which `--fail-on moved` gates on. The first threshold row was written to prevent exactly this and could not, because 1.0 is the top of the scale.
 
@@ -376,7 +379,7 @@ Six is the longest word the measure assumes, not the longest there is: `アプ�
 
 Two things must hold at once. A method whose class was renamed (`UserRepo.getUser` → `UsersRepository.getUser`) must pair, and a same-named method of a *different* class (`AdminRepo.getUser`) must not.
 
-The owner is therefore a **gate**, not a term in the score: a pair whose owners are incompatible is never scored.
+The owner is therefore a **gate**, not a term in the score: a pair whose owners are incompatible is never scored for pairing. §3.4.7's trace scores one only to decide whether to name it.
 
 ```
 ownerOf(qname):
@@ -462,6 +465,23 @@ Both non-null →
 - match ratio of output types
 - set match ratio of throws (order-insensitive)
 averaged.
+
+#### 3.4.7 What stage 4 says about a refusal
+
+Three of the rules stage 4 refuses on are traced: a Symbol whose name says too little and a Symbol with no signature (both §3.4.3), and a pair whose owners do not correspond (§3.4.6). The report says nothing about why a Symbol was left unpaired — the gate refuses `UserRepo` → `UsersRepository` deliberately, but a reviewer looking at the churn has nothing pointing them here. So each refusal is written to the run's `Logger` at `debug`, when `DiffInput.logger` is given, as one line naming the Symbol, or both Symbols of the refused pair, and the rule:
+
+```
+diff/stage4: ts:src/a.ts#render is not compared by name: its name says too little to pair on
+diff/stage4: ts:src/a.ts#buildConfig is not compared by name: it has no signature, and a name alone does not pair
+diff/stage4: ts:src/a.ts#UserRepo.findUser and ts:src/b.ts#UsersRepository.findUser are not paired: their owners do not correspond
+```
+
+- **A Symbol line** is written for every non-dropped Symbol either rule turns away, including one with nothing to pair with, and stands for one entry of the report: `added` or `removed`, or `unknown` where the other side skipped its file (§3.5.1). A Symbol that fails both rules is traced once, for its name, which §3.4.3 reads first.
+- **A gate line** is written after the pairings are chosen (§3.8), for a pair whose base and head both reach stage 5 unpaired and which cleared its row's threshold. So each line names two Symbols the report lists separately, which only the gate kept from being a candidate. A pair either of whose Symbols paired elsewhere is not traced, nor one that scored below its row, which is a judgement on the evidence rather than a rule. The line is per pair, so N such bases and M such heads write up to N × M lines.
+
+The kind in §3.4.0's bucket key is a rule too and is not traced: a function and a class are never one Symbol (§3.3), so there is no near miss for a line to explain.
+
+The channel is a diagnostic one: nothing it writes reaches the diff result or `aburi.diff.v1.json`, and `buildDiff`'s answer is the same with and without a logger. Tracing the gate walks the buckets again for the Symbols left unpaired, so it runs only when a logger is given, and `aburi diff` gives the matcher one only at `--log-level debug` or `ABURI_LOG_LEVEL=debug`, where the lines show on stderr.
 
 ### 3.5 Stage 5: the remainder is added / removed / unknown
 
@@ -1120,6 +1140,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19l | A rename map handed to `buildDiff` sends two base paths onto one head path, or onto a path the base also skipped — git writes neither | the same `symbols[]` and `notCompared[]`, byte for byte, whatever order the map and the skip lists are in; a `notCompared[]` entry for each base record that reaches a head one (§3.5.1, §6.3) |
 | DF20 | A pair whose stage-4 composite equals its row exactly: member 3/4 with signature 11/12, and member 7/10 with an identical signature, at 0.85; an identical member with signature 5/6 at 0.95; an identical member and signature at 1.0. End to end, `AccountService.createUserAccount(a: string, b: number, c: Date, d: boolean)` moved file and renamed `createUserAccountRecord` with `d: Options` | paired, rationale: "name-signature" — the composite is a fraction compared exactly (§3.4.3); one step below (two of four inputs retyped, a member of 7/11, its only input retyped at 0.95 or 1.0) added: 1, removed: 1 |
 | DF20a | Two bases score the same composite for one head, made of different axes — one renamed its member (3/4, signature 11/12), the other kept it (1, signature 1/2) | the lower base id pairs, whichever of the two it is (§3.8) |
+| DF20b | A Symbol whose name says too little, a Symbol with no signature, and a pair the owner gate refuses after clearing its row, each with a logger | the same result as without one, byte for byte, and one `debug` line per Symbol or refused pair naming the rule (§3.4.7); none for a pair stage 4 made, one that scored below its row, or one whose Symbols pair elsewhere |
 
 ## 10.1 Diff schema compatibility policy
 
