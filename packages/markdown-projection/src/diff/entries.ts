@@ -42,10 +42,12 @@ export function renderAdded(symbols: readonly IRSymbol[]): string[] {
 
 export function renderRemoved(items: readonly SymbolRemoved[]): string[] {
   return items.flatMap((item) => {
-    const into = item.foldedInto ?? null
-    const folded =
-      into === null ? [] : [`**Folded into**: ${inlineCode(into)}, which holds the same body`]
-    return symbolEntry(item.symbol, folded)
+    const survivor = item.duplicateOf ?? null
+    const duplicate =
+      survivor === null
+        ? []
+        : [`**Duplicate of**: ${inlineCode(survivor)}, which holds the same body`]
+    return symbolEntry(item.symbol, duplicate)
   })
 }
 

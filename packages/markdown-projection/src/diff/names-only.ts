@@ -14,8 +14,8 @@ export function indexSymbols(symbols: readonly IRSymbol[]): string[] {
 
 export function indexRemoved(items: readonly SymbolRemoved[]): string[] {
   return items.map((item) => {
-    const into = item.foldedInto ?? null
-    return indexRow(item.symbol, into === null ? "" : ` (folded into ${inlineCode(into)})`)
+    const survivor = item.duplicateOf ?? null
+    return indexRow(item.symbol, survivor === null ? "" : ` (duplicate of ${inlineCode(survivor)})`)
   })
 }
 

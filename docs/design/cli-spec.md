@@ -808,7 +808,7 @@ Used in CI for gates such as "PRs containing changes of a specific status requir
 
 ```bash
 aburi diff main..HEAD --fail-on changed,removed
-# exit 3 if even one symbol has status "changed" or "removed"
+# exit 3 if even one symbol is "changed", or "removed" without duplicating a head symbol
 ```
 
 `unknown` counts Symbols only — it reads `symbols[]`, not `dependencies[]`, and not `notCompared[]`. A gate written meaning "fail if this diff is incomplete" therefore catches neither the dependency side ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1) nor a file both scans skipped (§6.3), and no token exists for either. A bare token for the second would be the wrong default in any case: a workspace with a permanent over-size bundle would trip it on every pull request, which is an argument for a threshold rather than a flag. Whether the gate vocabulary should grow either family is an open decision.
@@ -819,16 +819,26 @@ aburi diff main..HEAD --fail-on changed,removed
 |---|---|
 | Status granularity | `added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` / `unknown` |
 | Delta granularity | `api-changed` / `logic-changed` / `syntax-changed` / `confidence-changed` |
-| Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` / `removed:folded` |
+| Subtype granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` / `removed:duplicate` |
 | Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |
 
 Multiple values may be given, comma-separated. Every segment must be a clause: an empty one (`added,`, `added,,removed`) exits 2, as a value with no clause at all does.
 
 `--fail-on` may also be repeated, so a script can write one clause per `--fail-on`: each occurrence adds its clauses after those of the occurrences before it, and `--fail-on changed --fail-on removed` gates exactly as `--fail-on changed,removed` does — the order included, which decides the clause a tripped gate names. Keeping only the last occurrence would leave the earlier clauses unchecked, and the run would pass on the change they were written to block. Each occurrence is read as a value of its own: an error quotes the one at fault and counts clauses within it (`--fail-on removed, --fail-on changed` exits 2 with `--fail-on value "removed," is invalid: clause 2 of 2 is empty; …`), and an empty occurrence exits 2 beside a valid one as it does alone. `runDiff`, which also takes the values as a list, refuses an empty one as it refuses an empty value, since either leaves the gate checking nothing.
 
-#### Removals folded into a survivor
+#### Removed duplicates
 
-`removed` counts the removals whose body no head Symbol holds, and `removed:folded` the ones folded into a head Symbol that does ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2). Deduplicating N identical helpers into one leaves N−1 `removed` entries whatever the author does, so a gate that counted them would fail every such refactor until it was taken out of the workflow. `--fail-on removed,removed:folded` gates on every removal, as `removed` did before folds were read; a diff written before then carries no `foldedInto`, and `removed` counts all of its removals.
+`removed` counts the removals that duplicate no head Symbol, and `removed:duplicate` the ones whose `duplicateOf` names a head Symbol holding their body ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2). That is narrower than every removal whose body survives: a removed Symbol with an `extKind`, or one whose logic names nothing (a body that only calls something, or returns a literal), is never a duplicate, and counts under `removed` even when a head Symbol holds it byte for byte. Deduplicating N identical helpers into one leaves N−1 `removed` entries whatever the author does, so a gate that counted them would fail every such refactor until it was taken out of the workflow.
+
+`--fail-on removed,removed:duplicate` trips on every removal, as a bare `removed` did before duplicates were told apart. A threshold does not carry over that way: `removed:>N` counted every removal and now counts the ones that duplicate nothing, and no combination of clauses holds the two kinds together to one threshold. A diff written before `duplicateOf` existed carries none, and `removed` counts all of its removals.
+
+When the clauses hold `removed`, with or without a threshold, and no `removed:duplicate`, a diff with removed duplicates in it adds a line on stderr, whether the gate trips or not: a count and a capped list of ids, as the line for a file both scans skipped (§6.6) has.
+
+```
+⚠ --fail-on removed did not count 2 removal(s) of a duplicate whose body a head Symbol holds (removed:duplicate counts them): ts:src/a.test.ts#makeEmptyIR, ts:src/b.test.ts#blankIR.
+```
+
+A workflow that kept `--fail-on removed` across the release that narrowed it would otherwise pass a pull request it used to fail, with nothing in its log to say why.
 
 #### Uses of Direction-Specific fail-on
 
@@ -841,7 +851,7 @@ In cases where a drop-rule change legitimately fires `dropped-toggled` in bulk (
 
 #### Evaluation Rules
 
-- Status granularity (`changed`, etc.): fires if even one Symbol has the given status; `removed` leaves out a removal folded into a head Symbol, which `removed:folded` counts
+- Status granularity (`changed`, etc.): fires if even one Symbol has the given status; `removed` leaves out a removed duplicate of a head Symbol, which `removed:duplicate` counts
 - Every clause counts `symbols[]` entries, never the `summary` counters, so the count and the Symbols it names are one list
 - Delta granularity (`api-changed`, etc.): fires if even one Symbol has status `changed` or `moved+changed` with the corresponding `delta.<axis>Changed: true`. A diff written before `delta.confidenceChanged` existed carries no key, and `confidence-changed` counts nothing in it
 
@@ -853,12 +863,12 @@ aburi diff main..HEAD --fail-on api-changed
 # changed symbols where only logic changed, and moved (status only), have no effect
 
 aburi diff main..HEAD --fail-on api-changed,removed,dropped-toggled
-# fires on API change OR removal OR drop-rule fluctuation
+# fires on API change OR a removal that duplicates nothing OR drop-rule fluctuation
 ```
 
 This allows fine-grained CI gates, making operational policies such as "only API changes require approval, logic changes are warnings" possible today.
 
-A tripped clause names the Symbols it counted on stderr, under its line and indented, by the id the head gives each (the base's for a removal), ten at most and then how many more:
+A tripped clause names the Symbols it counted on stderr, under its line and indented, by the id its entry carries (the head's, or the base's for a removal and for an `unknown` whose file the head never analysed), ten at most and then how many more:
 
 ```
 --fail-on removed tripped (observed: 2 removed)
@@ -1298,7 +1308,7 @@ a command's option, not a global one (§3).
 | CL53 | `aburi scan` where `package.json` and `aburi.json` both open with one byte order mark | exit 0, the Component named after the `package.json` |
 | CL54 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3` or `2`), never `1`; the other stream byte for byte, the same artefacts, and no base worktree or temporary directory left behind. stdout on a descriptor that refuses writes (one opened read-only) still exits 1, with the errno on stderr |
 | CL55 | `aburi diff main..HEAD` with a `pluginOptions` key that names no loaded plugin (`config.md` C10) | The warning once, with no side label, while the base scan's own lines keep theirs; the exit code is the one the run has without the key |
-| CL56 | `aburi diff … --fail-on removed` over a removal folded into a head Symbol, over one no head Symbol carries, and over twelve of the second kind | exit 0 for the folded one, which `--fail-on removed:folded` trips; exit 3 for the other, stderr naming it on an indented line under `--fail-on removed tripped (observed: 1 removed)`; for twelve, ten ids and `… and 2 more` (§6.7) |
+| CL56 | `aburi diff … --fail-on removed` over a removed duplicate of a head Symbol, over a removal that duplicates nothing, and over eleven of the second kind | exit 0 for the duplicate, with the stderr line naming it as uncounted, and exit 3 under `--fail-on removed:duplicate`, which names it under its tripped line and adds no such line; exit 3 for the other, stderr naming it on an indented line under `--fail-on removed tripped (observed: 1 removed)`; for eleven, ten ids and `… and 1 more` (§6.7) |
 
 ## 18. Design Decisions
 

@@ -37,26 +37,28 @@ interface LogicGroup {
 /**
  * Deduplicating N identical helpers into one pairs one of them, so the other N−1 are removed while a
  * head Symbol still holds their body. Unrelated bodies share a logic fingerprint often enough (one
- * `if (x === null) throw new Error(…)` guard is one), so the syntax must agree as well.
+ * `if (x === null) throw new Error(…)` guard is one), so the syntax must agree as well. An `extKind`
+ * says a plugin read the Symbol's role from outside its body (a route's path, a decorator, the route
+ * file), which a survivor with the same body does not carry.
  */
-export function foldTargets(
+export function survivorsOf(
   removed: readonly IRSymbol[],
   head: readonly IRSymbol[],
-): Map<SymbolId, SymbolId> {
+): ReadonlyMap<SymbolId, SymbolId> {
   const heads = groupByLogic(head)
   const scorer = createNameScorer()
-  const targets = new Map<SymbolId, SymbolId>()
+  const survivors = new Map<SymbolId, SymbolId>()
   for (const symbol of removed) {
-    if (!carriesLogic(symbol) || logicNamesNothing(symbol)) continue
+    if (symbol.extKind !== null || !carriesLogic(symbol) || logicNamesNothing(symbol)) continue
     const group = heads.get(logicKey(symbol, false))
     if (group === undefined) continue
     const sameBody = group.symbols.filter(
       (head) => head.fingerprint.syntax === symbol.fingerprint.syntax,
     )
     const survivor = closestNameTo(symbol, sameBody, scorer)
-    if (survivor !== undefined) targets.set(symbol.id, survivor.id)
+    if (survivor !== undefined) survivors.set(symbol.id, survivor.id)
   }
-  return targets
+  return survivors
 }
 
 function carriesLogic(symbol: IRSymbol): boolean {

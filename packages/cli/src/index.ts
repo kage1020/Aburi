@@ -12,7 +12,6 @@ export {
   classifyDiffError,
   type DiffOptions,
   type DiffReport,
-  formatFailOnMessage,
   runDiff,
 } from "./commands/diff"
 export type { DiffSide } from "./commands/diff-revisions"
@@ -49,6 +48,7 @@ export {
   FailOnParseError,
   type FailOnStatusToken,
   type FailOnToken,
+  formatTriggered as formatFailOnMessage,
   formatTriggered,
   parseFailOn,
   type TrippedClause,

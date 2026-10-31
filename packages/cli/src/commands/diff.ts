@@ -19,9 +19,9 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import {
   evaluateFailOn,
   type FailOnClause,
-  formatTriggered,
   parseFailOn,
   type TrippedClause,
+  uncountedDuplicates,
 } from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
 import type { GitRunner } from "../git/runner"
@@ -36,7 +36,7 @@ import {
   type ScanPair,
   scanRevisions,
 } from "./diff-revisions"
-import { faultedSides, warnAboutComparison } from "./diff-warnings"
+import { faultedSides, warnAboutComparison, warnOnUncountedDuplicates } from "./diff-warnings"
 
 export function classifyDiffError(error: DiffError): CliError {
   switch (error.code) {
@@ -142,6 +142,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       : EXIT.GATE
 
   warnAboutComparison({ ...compared, notCompared: diff.notCompared }, warn)
+  warnOnUncountedDuplicates(uncountedDuplicates(failOn, diff), warn)
   const callResolution = compared.headIR.stats.callResolution
   return {
     ...written,
@@ -158,10 +159,6 @@ function parseFailOnValues(failOn: string | readonly string[]): FailOnClause[] {
   const values = [failOn].flat()
   // No value at all is refused as an empty one is: either would leave the gate checking nothing.
   return (values.length === 0 ? [""] : values).flatMap((value) => parseFailOn(value))
-}
-
-export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {
-  return formatTriggered(triggered.clause, triggered.observed, triggered.symbols)
 }
 
 async function removeEarlierReport(outputDir: string): Promise<void> {

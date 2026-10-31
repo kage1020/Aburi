@@ -14,6 +14,8 @@ import type {
   NotComparedFile,
   Summary,
   SymbolChange,
+  SymbolId,
+  SymbolRemoved,
   SymbolUnknown,
 } from "@aburi/types"
 import {
@@ -29,7 +31,6 @@ import {
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
 import { assertDiffable, ensureSchemasAgree } from "./input-gate"
 import {
-  foldTargets,
   type GitRenameMap,
   matchStageDroppedWeak,
   matchStageGitRename,
@@ -37,6 +38,7 @@ import {
   matchStageLogicFingerprint,
   matchStageNameSignature,
   type SymbolPair,
+  survivorsOf,
 } from "./match"
 import { computeSlices } from "./slice"
 import { classifyStatus, dropDirection, headIdsByBaseId, representativeSymbol } from "./status"
@@ -46,7 +48,7 @@ const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 interface AlwaysEmittedCounters {
   unknown: number
   depsUnknown: number
-  removedFolded: number
+  removedDuplicates: number
 }
 
 export interface DiffInput {
@@ -89,7 +91,7 @@ export function buildDiff(
   const summary: Summary & AlwaysEmittedCounters = {
     unknown: 0,
     depsUnknown: 0,
-    removedFolded: 0,
+    removedDuplicates: 0,
     added: 0,
     removed: 0,
     moved: 0,
@@ -188,12 +190,12 @@ export function buildDiff(
     }
     removed.push(baseSymbol)
   }
-  const folds = foldTargets(removed, input.headIR.symbols)
+  const survivors = survivorsOf(removed, input.headIR.symbols)
   for (const baseSymbol of removed) {
-    const foldedInto = folds.get(baseSymbol.id) ?? null
+    const duplicateOf = survivors.get(baseSymbol.id) ?? null
     summary.removed++
-    if (foldedInto !== null) summary.removedFolded++
-    symbols.push({ status: "removed", symbol: baseSymbol, foldedInto })
+    if (duplicateOf !== null) summary.removedDuplicates++
+    symbols.push(removedSymbol(baseSymbol, duplicateOf))
   }
 
   const components = diffComponents(input.baseIR.components, input.headIR.components)
@@ -232,6 +234,10 @@ export function buildDiff(
     slices,
     notCompared: filesNeitherSideRead(sides),
   }
+}
+
+function removedSymbol(symbol: IRSymbol, duplicateOf: SymbolId | null): SymbolRemoved {
+  return { status: "removed", symbol, duplicateOf }
 }
 
 function unknownSymbol(

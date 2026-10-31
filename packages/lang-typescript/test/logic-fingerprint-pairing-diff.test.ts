@@ -52,7 +52,7 @@ describe("diff — pairing a Symbol that moved file on its logic fingerprint", (
   })
 })
 
-describe("diff — two identical helpers folded into one", () => {
+describe("diff — two identical helpers deduplicated into one", () => {
   const emptyIR = (name: string) =>
     `export function ${name}(): Document {\n  return { symbols: [], components: [] }\n}\n`
 
@@ -68,8 +68,26 @@ describe("diff — two identical helpers folded into one", () => {
       "removed makeEmptyIR",
     ])
     expect(diff.symbols.find((change) => change.status === "removed")).toMatchObject({
-      foldedInto: "ts:src/fixtures.ts#emptyIR",
+      duplicateOf: "ts:src/fixtures.ts#emptyIR",
     })
-    expect(diff.summary).toMatchObject({ removed: 1, removedFolded: 1 })
+    expect(diff.summary).toMatchObject({ removed: 1, removedDuplicates: 1 })
+  })
+
+  const guarded = (name: string, then: string) =>
+    `export function ${name}(tree: Tree | null): void {\n  if (tree === null) throw new Error("no tree")\n  ${then}\n}\n`
+
+  it.each([
+    ["the same body", "visit(tree)", "ts:src/a.ts#requireTree"],
+    ["the same guard and another call after it", "print(tree)", null],
+  ])("reads a helper deleted beside one with %s", async (_label, then, duplicateOf) => {
+    const kept = guarded("requireTree", "visit(tree)")
+    const diff = await diffOfMove(
+      workspace,
+      { "src/a.ts": kept, "src/b.ts": guarded("checkTree", then) },
+      { "src/a.ts": kept },
+    )
+
+    expect(pairingOutcome(diff)).toEqual(["removed checkTree"])
+    expect(diff.symbols[0]).toMatchObject({ duplicateOf })
   })
 })

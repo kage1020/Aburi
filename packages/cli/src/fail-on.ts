@@ -1,10 +1,11 @@
 import type { DiffResult, SymbolChange, SymbolId } from "@aburi/types"
 import { assertNever } from "./errors"
+import { MAX_LISTED } from "./listing"
 
 export type FailOnStatusToken =
   | "added"
   | "removed"
-  | "removed:folded"
+  | "removed:duplicate"
   | "changed"
   | "moved"
   | "moved+changed"
@@ -29,7 +30,7 @@ export interface FailOnClause {
 const STATUS_TOKENS: ReadonlySet<FailOnStatusToken> = new Set([
   "added",
   "removed",
-  "removed:folded",
+  "removed:duplicate",
   "changed",
   "moved",
   "moved+changed",
@@ -125,7 +126,7 @@ function parseToken(raw: string): FailOnToken {
 export interface ClauseOutcome {
   triggered: boolean
   observed: number
-  symbols: SymbolId[]
+  symbols: readonly SymbolId[]
 }
 
 export function evaluateClause(clause: FailOnClause, diff: DiffResult): ClauseOutcome {
@@ -138,7 +139,7 @@ export function evaluateClause(clause: FailOnClause, diff: DiffResult): ClauseOu
 export interface TrippedClause {
   clause: FailOnClause
   observed: number
-  symbols: SymbolId[]
+  symbols: readonly SymbolId[]
 }
 
 export function evaluateFailOn(
@@ -169,9 +170,9 @@ function counts(token: FailOnToken, change: SymbolChange): boolean {
     case "unknown":
       return change.status === token
     case "removed":
-      return change.status === "removed" && (change.foldedInto ?? null) === null
-    case "removed:folded":
-      return change.status === "removed" && (change.foldedInto ?? null) !== null
+      return change.status === "removed" && (change.duplicateOf ?? null) === null
+    case "removed:duplicate":
+      return change.status === "removed" && (change.duplicateOf ?? null) !== null
     case "dropped-toggled:to-dropped":
       return change.status === "dropped-toggled" && change.direction === "to-dropped"
     case "dropped-toggled:to-kept":
@@ -199,20 +200,22 @@ function deltaMoved(
   )
 }
 
+export function uncountedDuplicates(
+  clauses: readonly FailOnClause[],
+  diff: DiffResult,
+): SymbolId[] {
+  const tokens = new Set(clauses.map((clause) => clause.token))
+  if (!tokens.has("removed") || tokens.has("removed:duplicate")) return []
+  return diff.symbols.filter((change) => counts("removed:duplicate", change)).map(entryId)
+}
+
 function entryId(change: SymbolChange): SymbolId {
   return "symbol" in change ? change.symbol.id : change.after.id
 }
 
-// Enough to find each in the report; a threshold clause can trip on thousands.
-const NAMED_AT_MOST = 10
-
-export function formatTriggered(
-  clause: FailOnClause,
-  observed: number,
-  symbols: readonly SymbolId[] = [],
-): string {
+export function formatTriggered({ clause, observed, symbols }: TrippedClause): string {
   const rendered = clause.threshold === null ? clause.token : `${clause.token}:>${clause.threshold}`
-  const named = symbols.slice(0, NAMED_AT_MOST).map((id) => `  ${id}`)
+  const named = symbols.slice(0, MAX_LISTED).map((id) => `  ${id}`)
   const unnamed = symbols.length - named.length
   return [
     `--fail-on ${rendered} tripped (observed: ${observed} ${clause.token})`,

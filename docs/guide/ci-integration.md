@@ -209,7 +209,7 @@ Start narrow. A gate that fires on every pull request gets ignored within a week
 
 | Gate | Fires when |
 |---|---|
-| `removed` | Somebody deleted a symbol. Cheap, and rarely noisy: folding two identical helpers into one does not trip it, and the report names the one that survived. |
+| `removed` | Somebody deleted a symbol. Cheap, and rarely noisy: a helper deleted while an identical one survives does not trip it when its body has something to compare (a guard, a branch, a return value), and the report names the survivor. A route handler or other symbol a framework plugin classified always trips it. |
 | `api-changed` | A public signature or decorator changed. |
 | `changed:>20` | The semantic change set is unusually large. |
 | `dropped-toggled:to-dropped:>10` | Somebody emptied many method bodies at once, the signature of a half-finished refactor. |

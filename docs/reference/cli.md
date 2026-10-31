@@ -282,14 +282,15 @@ Repeating `--fail-on` adds its clauses after the earlier ones, so
 
 | Clause | Matches |
 |---|---|
-| `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` `unknown` | Symbols with that status. `removed` leaves out a removal folded into a surviving Symbol. |
-| `removed:folded` | Removals whose body a head Symbol still holds, as deduplicating two identical helpers into one leaves the other removed. `removed,removed:folded` gates on every removal. |
+| `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` `unknown` | Symbols with that status. `removed` leaves out a removed duplicate. |
+| `removed:duplicate` | Removed duplicates: removals whose head revision holds a symbol of the same kind with the same body, as deduplicating two identical helpers into one leaves the other removed. A body with nothing to compare (only calls, or a literal returned) and a symbol a framework plugin classified (a route handler, a React component) are never duplicates. `removed,removed:duplicate` trips on every removal; a threshold on `removed` counts only the removals that are not duplicates. |
 | `dropped-toggled:to-dropped` `dropped-toggled:to-kept` | One direction of a boilerplate toggle. |
 | `api-changed` `logic-changed` `syntax-changed` `confidence-changed` | Symbols whose change touched that axis. |
 
 Evaluation stops at the first clause that fires, which keeps CI logs short. The
 line it prints names the Symbols that tripped it, ten at most, one per indented
-line below it.
+line below it. A `removed` clause with no `removed:duplicate` beside it adds a
+line naming the removed duplicates it did not count, whether it fired or not.
 
 ::: warning Quote the value
 `>` is a shell redirect. Write `--fail-on 'changed:>5'`, not
