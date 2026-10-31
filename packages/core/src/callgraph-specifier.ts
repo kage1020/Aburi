@@ -73,7 +73,7 @@ export function dirname(posixPath: string): string {
   return posixPath.slice(0, idx)
 }
 
-function joinPosix(base: string, specifier: string): string | null {
+export function joinPosix(base: string, specifier: string): string | null {
   const baseSegments = base === "" ? [] : base.split("/")
   const relSegments = specifier.split("/")
   const stack: string[] = [...baseSegments]

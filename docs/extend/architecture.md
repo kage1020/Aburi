@@ -26,7 +26,7 @@ wrong, look at the IR.
 | 4. Classify | *framework plugin*, *effects plugin* | `classifySymbol` assigns framework kinds and boundaries. `classify` turns calls into effects. |
 | 5. Drop | `@aburi/core` | Remove boilerplate: interfaces, DTOs, re-exports, empty bodies, plus whatever `suppress` names. |
 | 6. Enrich | `@aburi/core` | Only with `lsp.enabled`: ask a language server for column ranges and receiver types. |
-| 7. Resolve | `@aburi/core` | Match calls to the symbols they reach, filling in the dependency graph. |
+| 7. Resolve | `@aburi/core` | Match calls to the symbols they reach, and draw one edge from each component to every other component its files import. |
 | 8. Propagate | `@aburi/core` | Carry each effect up the resolved calls to every caller, marked as propagated. |
 | 9. Fingerprint | `@aburi/core` | Hash each symbol three times, as `api`, `logic`, and `syntax`, then check the IR's invariants. |
 

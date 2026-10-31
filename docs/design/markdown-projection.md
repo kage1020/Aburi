@@ -202,9 +202,6 @@ The monorepo overview.
 
 ### 4.1 Structure
 
-The example draws Component edges, which the IR can carry and `aburi scan` does not write yet
-(§4.2): against a scanned workspace the graph holds the nodes alone.
-
 ````md
 # Workspace
 
@@ -299,8 +296,10 @@ edge, ``- `<from>` → `<to>` (via `<via>`)`` in edge order, or
 with no edge too, because a reader looking at a block that failed to render
 cannot otherwise tell whether it held any edge; every node is a Components
 table row or an endpoint named in the list. The sentence says what the IR
-records, not that the components are independent: `aburi scan` writes Symbol
-edges only. A workspace with no component and no Component edge has no
+records, not that the components are independent: `aburi scan` draws a
+Component edge from an import alone ([`ir-schema.md`](./ir-schema.md) §11.3),
+so two components that reach each other only through a call matched by name
+have no edge. A workspace with no component and no Component edge has no
 diagram, and the section is that sentence alone.
 
 ### 4.3 generation metadata
@@ -768,7 +767,7 @@ id: the id repeats the language on every end, and an edge between two Symbols of
 common case for a call, wrote the same path twice. Such an edge names the file once, after both
 names. A Component end is written by its id.
 
-The Unknown group is not split by level the way the added and removed groups are. Only a Symbol endpoint has a file to lose ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1), so every entry in it is a symbol-level edge by construction. Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
+The Unknown group is not split by level the way the added and removed groups are: what a reviewer acts on is the file each line names, not the level. A symbol-level edge names the file of an endpoint, and a Component-level one every file of the Component it leaves that the other revision skipped ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1). Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
 
 #### 💧 Dropped changes (folded)
 

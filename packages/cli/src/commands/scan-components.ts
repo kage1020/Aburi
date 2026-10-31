@@ -1,4 +1,5 @@
 import {
+  buildComponentAttribution,
   CoreError,
   type CoreErrorCode,
   type DetectManagersResult,
@@ -8,8 +9,11 @@ import {
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
+  NPM_MANIFEST,
   posixSpellingViolation,
   posixWorkspaceRelativeViolation,
+  readWorkspacePackages,
+  type WorkspacePackage,
 } from "@aburi/core"
 import type { Component, Config, LanguagePlugin } from "@aburi/types"
 import { CliError, errorMessage } from "../errors"
@@ -52,6 +56,24 @@ export async function resolveComponents(
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
       respectGitignore: config.respectGitignore,
     })
+  } catch (error) {
+    throw componentResolutionFailure(error)
+  }
+}
+
+export async function resolveWorkspacePackages(
+  workspaceRoot: string,
+  managers: DetectManagersResult,
+  components: readonly Component[],
+): Promise<WorkspacePackage[]> {
+  // A package no Component holds can be the end of no edge, so its manifest is not read.
+  const attribute = buildComponentAttribution(components)
+  const roots = [
+    ...managers.workspaces.map((candidate) => candidate.relativeRoot),
+    ...components.flatMap((component) => component.roots),
+  ].filter((root) => attribute(`${root}/${NPM_MANIFEST}`) !== null)
+  try {
+    return await readWorkspacePackages(workspaceRoot, roots)
   } catch (error) {
     throw componentResolutionFailure(error)
   }

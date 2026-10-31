@@ -1,4 +1,10 @@
-import { compareBy, compareCodeUnit, serializeCanonical, stringArraysEqual } from "@aburi/core"
+import {
+  buildComponentAttribution,
+  compareBy,
+  compareCodeUnit,
+  serializeCanonical,
+  stringArraysEqual,
+} from "@aburi/core"
 import type {
   Component,
   ComponentDiff,
@@ -62,6 +68,8 @@ export function diffComponents(
 export interface DependencySideView {
   symbolFiles: ReadonlyMap<DependencyEndpoint, RelativePath>
   lostFiles: ReadonlyMap<RelativePath, SkipReason>
+  /** The skipped files each Component holds, by the document's own `components[]`. */
+  componentLostFiles: ReadonlyMap<DependencyEndpoint, readonly DiffSkippedFile[]>
 }
 
 export interface RenameDirections {
@@ -130,8 +138,17 @@ export function dependencySideView(ir: IR): DependencySideView {
   const symbolFiles = new Map<DependencyEndpoint, RelativePath>()
   for (const symbol of ir.symbols) symbolFiles.set(symbol.id, symbol.source.file)
   const lostFiles = new Map<RelativePath, SkipReason>()
-  for (const file of ir.stats.skippedFiles ?? []) lostFiles.set(file.path, file.reason)
-  return { symbolFiles, lostFiles }
+  const componentLostFiles = new Map<DependencyEndpoint, DiffSkippedFile[]>()
+  const attribute = buildComponentAttribution(ir.components)
+  for (const { path, reason } of ir.stats.skippedFiles ?? []) {
+    lostFiles.set(path, reason)
+    const owner = attribute(path)
+    if (owner === null) continue
+    const held = componentLostFiles.get(owner)
+    if (held === undefined) componentLostFiles.set(owner, [{ path, reason }])
+    else held.push({ path, reason })
+  }
+  return { symbolFiles, lostFiles, componentLostFiles }
 }
 
 export function diffDependencies(
@@ -195,6 +212,10 @@ function endpointsLostBy(
     if (file === undefined) continue
     const lost = lostCounterpart(file, absentFrom, sides)
     if (lost === undefined) continue
+    byPath.set(lost.path, lost.reason)
+  }
+  // A Component edge stands for the imports of the files of `from`, so any of them could have held it.
+  for (const lost of sides[absentFrom].componentLostFiles.get(dep.from) ?? []) {
     byPath.set(lost.path, lost.reason)
   }
   return [...byPath.entries()]

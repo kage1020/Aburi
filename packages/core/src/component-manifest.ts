@@ -62,6 +62,32 @@ export async function readCandidateManifests(entry: {
   )
 }
 
+/** A `package.json#name` and the workspace-relative root whose manifest declares it. */
+export interface WorkspacePackage {
+  name: string
+  root: string
+}
+
+export async function readWorkspacePackages(
+  workspaceRoot: string,
+  roots: readonly string[],
+): Promise<WorkspacePackage[]> {
+  const unique = [...new Set(roots)].sort(compareCodeUnit)
+  // Which read fails first is timing, so the failure reported is the first root's.
+  const settled = await Promise.allSettled(
+    unique.map(async (root) => ({
+      root,
+      manifest: await readJsonManifest(join(workspaceRoot, root, NPM_MANIFEST)),
+    })),
+  )
+  return settled.flatMap((outcome) => {
+    if (outcome.status === "rejected") throw outcome.reason
+    const { root, manifest } = outcome.value
+    const name: unknown = manifest?.name
+    return typeof name === "string" && name.length > 0 ? [{ name, root }] : []
+  })
+}
+
 export interface ManifestIdentity {
   name?: string
 }

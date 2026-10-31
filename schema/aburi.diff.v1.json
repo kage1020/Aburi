@@ -356,7 +356,7 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/SkippedFile" },
-          "description": "The endpoint files that document skipped, as its own `stats.skippedFiles[]` names them, sorted by path with no repeats. For an endpoint file git renamed between the revisions that is the name on the absent side, not the holder's `symbols[].source.file`. A list rather than the single `reason` SymbolUnknown carries, because an edge has two endpoints: they can live in two different files with two different reasons, and an intra-file edge collapses to one entry. Component-level endpoints never appear — a Component is an aggregate over roots and has no file to lose."
+          "description": "The endpoint files that document skipped, as its own `stats.skippedFiles[]` names them, sorted by path with no repeats. For an endpoint file git renamed between the revisions that is the name on the absent side, not the holder's `symbols[].source.file`. A list rather than the single `reason` SymbolUnknown carries, because an edge has two endpoints: they can live in two different files with two different reasons, and an intra-file edge collapses to one entry. For a Component-level edge, the files that document skipped and attributes to the edge's `from` Component: the edge stands for the imports of every one of them."
         }
       }
     },

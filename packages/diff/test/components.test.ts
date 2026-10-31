@@ -1,8 +1,14 @@
 import { makeLanguageId } from "@aburi/core"
-import { component, componentId, dependency, errorFrom } from "@aburi/test-support"
+import { component, componentId, dependency, errorFrom, makeIR } from "@aburi/test-support"
 import type { Component, ComponentDiff, Dependency } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { DiffError, diffComponents, diffDependencies, renameDirections } from "../src"
+import {
+  DiffError,
+  dependencySideView,
+  diffComponents,
+  diffDependencies,
+  renameDirections,
+} from "../src"
 
 type ComponentDelta = ComponentDiff["changed"][number]["delta"]
 
@@ -132,8 +138,8 @@ describe("diffComponents", () => {
 
 describe("diffDependencies", () => {
   const NO_LOSSES = {
-    base: { symbolFiles: new Map(), lostFiles: new Map() },
-    head: { symbolFiles: new Map(), lostFiles: new Map() },
+    base: dependencySideView(makeIR()),
+    head: dependencySideView(makeIR()),
     renames: renameDirections(null),
   }
   const billingToPayments = (overrides: Partial<Dependency> = {}) =>
