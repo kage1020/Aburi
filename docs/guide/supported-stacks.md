@@ -44,7 +44,7 @@ to it.
 | `@aburi/effects-prisma` | `prisma.<model>.<verb>`, `$transaction` | `db.read`, `db.write`, `db.transaction` |
 | `@aburi/effects-drizzle` | `db.select` / `insert` / `update` / `delete`, `query.<table>.findMany`, `transaction`, `batch` | `db.read`, `db.write`, `db.transaction` |
 | `@aburi/effects-trpc` | tRPC client calls and the React Query hook surface | `network.rpc` |
-| `@aburi/effects-nest` | `EventEmitter2` / `eventBus` `.emit(...)` | `event.publish` |
+| `@aburi/effects-nest` | `EventEmitter2` / `eventBus` `.emit(...)`, and `.emit(...)` on a field declared as `EventEmitter2` | `event.publish` |
 
 Aburi detects an effect at the call site, then carries it up the calls it
 resolved: a method that calls a repository method that writes to the database

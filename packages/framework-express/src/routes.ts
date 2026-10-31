@@ -29,6 +29,7 @@ export function hasRouteArguments(callExpression: unknown): boolean {
 function isHandlerShaped(node: SyntaxNode): boolean {
   const value = unwrapValue(node)
   switch (value.type) {
+    // Express calls a handler and never iterates what it returns, so a generator is not one here.
     case "arrow_function":
     case "function_expression":
     case "identifier":

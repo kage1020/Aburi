@@ -14,12 +14,14 @@ aburi <command> [flags]
 `-v` / `--version` and `-h` / `--help` work anywhere and exit `0`.
 
 `--log-level debug|info|warn|error` works on every command too, before it or after it. It
-sets how much of the per-file log
+sets how much of the run's log
 (`warn: Skipped src/legacy.ts: parse reported a non-recoverable error at 12:4 — …`) reaches
 stderr, from `aburi scan` and from the scans `aburi diff` and `aburi explain` run. The default,
 `warn`, shows the `warn:` lines; `info` adds a line for each file `aburi scan` removes, `debug`
 a line for every file extracted as well, and `error` shows none of it. Its lines
-name no scan; `aburi diff` writes the base's before the head's. The `⚠` warnings are printed
+name no scan; `aburi diff` writes the base's before the head's. At `debug`, `aburi diff` also
+writes a `diff/stage4:` line for each Symbol, or pair of Symbols, it would not pair by name,
+naming the rule that stopped it. The `⚠` warnings are printed
 whatever the level. Any other value exits `2`.
 
 An option that takes a value takes one. Given twice (`--config a.json --config b.json`), the

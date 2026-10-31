@@ -46,7 +46,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .version(version, "-v, --version")
     .option(
       "--log-level <level>",
-      "per-file log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info adds the files scan removes, and error shows none of it",
+      "the run's log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info adds the files scan removes, debug each file extracted and why diff left a Symbol unpaired, and error shows none of it",
       parseLogLevel,
     )
     .exitOverride()

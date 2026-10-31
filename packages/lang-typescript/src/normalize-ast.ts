@@ -1,5 +1,6 @@
 import type { MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+import { firstNonCommentChild, leadingOperatorOperand } from "./ast-helpers"
 
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
   if (symbol.kind === "call") return serialize(symbol.fullNode)
@@ -10,9 +11,29 @@ export function normalizeAst(symbol: SymbolCandidate<Node>): string {
     described.push({ node, fullNode: declaration.fullNode })
   }
   return described
-    .flatMap(({ node, fullNode }) => [serialize(node), classHead(fullNode)])
+    .flatMap(({ node, fullNode }) => [
+      serialize(node),
+      classHead(fullNode),
+      // A declaration described whole already carries its list.
+      node.id === fullNode.id ? "" : parameterList(fullNode),
+    ])
     .filter((part) => part.length > 0)
     .join(" ")
+}
+
+// The api axis hashes a parameter's type and form, not its name, its pattern or its default's value,
+// so a function described by its body alone saw none of those edits.
+function parameterList(fullNode: Node): string {
+  const list = fullNode.childForFieldName("parameters")
+  if (list !== null) return firstNonCommentChild(list) === null ? "" : serialize(list)
+  const lone = fullNode.childForFieldName("parameter")
+  return lone === null ? "" : loneParameter(lone)
+}
+
+// A formatter adds the parentheses a lone arrow parameter may go without (`x => …` → `(x) => …`),
+// so it is described as the parenthesised spelling parses.
+function loneParameter(parameter: Node): string {
+  return `(formal_parameters (required_parameter ${serialize(parameter)}))`
 }
 
 function classHead(fullNode: Node): string {
@@ -42,12 +63,16 @@ function describedNode(declaration: Pick<MergedDeclaration<Node>, "bodyNode" | "
 function serialize(node: Node): string {
   if (node.isExtra) return ""
   if (SKIPPED_NODE_TYPES.has(node.type)) return ""
+  const operand = leadingOperatorOperand(node)
+  if (operand !== null) return serialize(operand)
 
   const children: string[] = []
   let previous: Node | null = null
   for (const child of node.children) {
     if (child.isMissing) continue
-    const rendered = child.isNamed ? serialize(child) : tokenPayload(child, previous, node)
+    const rendered = child.isNamed
+      ? serializeNamed(child, node)
+      : tokenPayload(child, previous, node)
     if (rendered.length > 0) children.push(rendered)
     if (!child.isExtra) previous = child
   }
@@ -56,6 +81,13 @@ function serialize(node: Node): string {
   if (children.length === 0 && leafText === null) return `(${node.type})`
   if (children.length === 0 && leafText !== null) return `(${node.type} ${leafText})`
   return `(${node.type} ${children.join(" ")})`
+}
+
+function serializeNamed(child: Node, parent: Node): string {
+  if (parent.type === "arrow_function" && child.id === parent.childForFieldName("parameter")?.id) {
+    return loneParameter(child)
+  }
+  return serialize(child)
 }
 
 function tokenPayload(token: Node, previous: Node | null, parent: Node): string {
