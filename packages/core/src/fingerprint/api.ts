@@ -48,8 +48,9 @@ function buildApiInput(symbol: IRSymbol): ApiInput {
   }
 }
 
-// Exported under its own name alone, or not at all, a Symbol is what `visibility` already says, and
-// leaving the input out for it lets the keyword and a clause exporting under that name agree.
+// Left out for a Symbol exported under its own name alone, or not at all: `visibility` already tells
+// those apart, and they hash as they would without the names. An anonymous default export's own
+// name is `default`.
 function canonicalizeExportNames(symbol: IRSymbol): string[] | null {
   const names = exportNames(symbol).sort(compareCodeUnit)
   const ownName = symbol.name === DEFAULT_EXPORT_QNAME ? DEFAULT_EXPORT_NAME : symbol.name

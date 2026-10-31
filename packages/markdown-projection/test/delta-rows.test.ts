@@ -203,6 +203,38 @@ describe("a changed Symbol's export name rows", () => {
   it("writes no row when the names did not move", () => {
     expect(renderDelta({ exportedAs: none() })).not.toContain("export name")
   })
+
+  const renamedExport = (added: string[], removed: string[]) =>
+    projectChanges([
+      renamedPair("isAdminUser", "src/a.ts", "canAdministerSite", "src/b.ts", {
+        apiChanged: true,
+        syntaxChanged: true,
+        exportedAs: { added, removed, modified: [] },
+      }),
+    ])
+
+  it("leaves a rename of the one name a declaration is exported under to the name row", () => {
+    const md = renamedExport(["canAdministerSite"], ["isAdminUser"])
+    expect(md).toContain("- name: `isAdminUser` → `canAdministerSite`")
+    expect(md).not.toContain("export name")
+  })
+
+  it.each([
+    [
+      "lost",
+      ["canAdministerSite"],
+      ["isAdminUser", "isUser"],
+      "- export name added: `canAdministerSite`\n- export name removed: `isAdminUser`, `isUser`\n",
+    ],
+    [
+      "gained",
+      ["canAdministerSite", "isAdmin"],
+      ["isAdminUser"],
+      "- export name added: `canAdministerSite`, `isAdmin`\n- export name removed: `isAdminUser`\n",
+    ],
+  ])("names every name gained and lost when a rename also %s another", (_, added, removed, rows) => {
+    expect(renamedExport(added, removed)).toContain(rows)
+  })
 })
 
 describe("a changed Symbol's rule, effect and call rows", () => {

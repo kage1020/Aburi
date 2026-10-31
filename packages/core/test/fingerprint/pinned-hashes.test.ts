@@ -30,10 +30,25 @@ describe("fingerprints are pinned across releases", () => {
   })
 
   it.each([
-    [["export-keyword"]],
-    [["export-clause:foo"]],
-  ])("apiFingerprint of a declaration exported under its own name alone, by %j", (derivedBy) => {
-    expect(apiFingerprint(makeSymbol("ts:src/a.ts#foo", { derivedBy }))).toBe("abf3a0597098")
+    ["ts:src/a.ts#foo", ["export-keyword"]],
+    ["ts:src/a.ts#foo", ["export-clause:foo"]],
+    ["ts:src/a.ts#N.foo", ["export-keyword"]],
+  ])("apiFingerprint of %s exported under its own name alone, by %j", (id, derivedBy) => {
+    expect(apiFingerprint(makeSymbol(id, { derivedBy }))).toBe("abf3a0597098")
+  })
+
+  it.each([
+    ["through a renaming clause", "ts:src/a.ts#foo", ["export-clause:GET"], "8da58aea218a"],
+    ["as the module's default", "ts:src/a.ts#foo", ["export-default"], "3af36cb9096a"],
+    [
+      "under names that sort by code unit, `GET` before `default`",
+      "ts:src/a.ts#foo",
+      ["export-default", "export-clause:GET"],
+      "07ab8f88c6b9",
+    ],
+    ["as an anonymous default export", "ts:src/a.ts#<default>", ["export-default"], "5b92cd2c2540"],
+  ])("apiFingerprint of a declaration exported %s", (_, id, derivedBy, hash) => {
+    expect(apiFingerprint(makeSymbol(id, { derivedBy }))).toBe(hash)
   })
 
   it("apiFingerprint of a parameter with neither marker, whether absent or written false", () => {

@@ -210,7 +210,7 @@ Start narrow. A gate that fires on every pull request gets ignored within a week
 | Gate | Fires when |
 |---|---|
 | `removed` | Somebody deleted a symbol. Cheap, and rarely noisy. |
-| `api-changed` | A public signature or decorator changed. |
+| `api-changed` | A public signature or decorator changed, or the names a declaration is exported under, such as a new `DELETE` route handler. |
 | `changed:>20` | The semantic change set is unusually large. |
 | `dropped-toggled:to-dropped:>10` | Somebody emptied many method bodies at once, the signature of a half-finished refactor. |
 

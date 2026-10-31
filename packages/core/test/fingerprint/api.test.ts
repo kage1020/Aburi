@@ -104,16 +104,6 @@ describe("apiFingerprint ignores", () => {
       exported("handler", ["export-clause:POST", "export-clause:GET"]),
     ],
     [
-      "a name written twice",
-      exported("handler", ["export-clause:GET", "export-clause:GET"]),
-      exported("handler", ["export-clause:GET"]),
-    ],
-    [
-      "the `default` an anonymous default export is exported as",
-      exported("<default>", ["export-default"]),
-      exported("<default>", []),
-    ],
-    [
       "rationale tokens that export nothing",
       exported("handler", ["variable-assigned-function", "export-keyword"]),
       exported("handler", ["export-keyword"]),

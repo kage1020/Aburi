@@ -10,8 +10,9 @@ export interface ExportEvidence {
   readonly derivedBy: readonly string[]
 }
 
-// `export-keyword` gives the whole qname: on a namespace member it exports from the namespace, and the
-// qname keeps `N.GET` from reading as the module's `GET`.
+// `export-keyword` gives the whole qname: a namespace member is exported from its namespace, not the
+// module, so `N.GET` neither reads as the module's `GET` nor stops being the Symbol's own name for the
+// api fingerprint.
 export function exportNames(symbol: ExportEvidence): string[] {
   const names = new Set<string>()
   for (const token of symbol.derivedBy) {
