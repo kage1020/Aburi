@@ -49,18 +49,22 @@ describe("scan — App Router special files", () => {
   })
 
   it.each([
-    ["written as the call", ["export default withAuth(function Page() {", "  return null", "})"]],
+    [
+      "written as the call",
+      ["export default withAuth(function Page() {", "  return null", "})"],
+      "<default>",
+    ],
     [
       "bound and exported apart",
       ["const Page = withAuth(() => {", "  return null", "})", "export default Page"],
+      "Page",
     ],
-  ])("classifies a page wrapped in a call that is handed it, %s", async (_label, lines) => {
+  ])("classifies a page wrapped in a call that is handed it, %s", async (_label, lines, name) => {
     await workspace.writeSource("app/dashboard/page.tsx", [...lines, ""].join("\n"))
 
-    const result = await scanWorkspace()
-    const page = result.ir.symbols.find((s) => s.derivedBy.includes("export-default"))
+    const page = symbolById(await scanWorkspace(), `ts:app/dashboard/page.tsx#${name}`)
 
-    expect([page?.kind, page?.extKind]).toEqual(["const", "framework:next:page"])
+    expect([page.kind, page.extKind]).toEqual(["const", "framework:next:page"])
   })
 
   it.each<[string, string[], Record<string, string[]>]>([

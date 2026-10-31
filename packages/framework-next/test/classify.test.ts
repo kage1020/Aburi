@@ -22,7 +22,7 @@ describe("classifyNextSymbol — App Router special files", () => {
     })
   })
 
-  it("gives a default export the role when it is a const handed the function it wraps", () => {
+  it("gives the role to a default-exported const whose call is handed a function", () => {
     const file = "app/dashboard/page.tsx"
     const wrapped: SymbolShape = {
       kind: "const",

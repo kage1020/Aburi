@@ -12,18 +12,29 @@ describe("a default export written as a call handed a function", () => {
   })
 
   it.each([
-    ["an arrow", "export default withAuth(() => { q() })", ["q"]],
-    ["a named function expression", "export default memo(function Row() { r() })", ["r"]],
-    ["a call behind parentheses", "export default (withAuth(() => { q() }))", ["q"]],
-    ["a call behind `as`", "export default withAuth(() => { q() }) as Handler", ["q"]],
+    ["a call handed an arrow", "export default withAuth(() => { q() })", ["q"]],
     [
-      "every function handed to a call on its chain",
-      "export default compose(log)(() => { a() }, () => { b() })",
-      ["a", "b"],
+      "a call handed a named function expression",
+      "export default memo(function Row() { r() })",
+      ["r"],
     ],
-  ])("walks %s, and not the call that wraps it", async (_label, source, calls) => {
+    ["a call in parentheses", "export default (withAuth(() => { q() }))", ["q"]],
+    ["a call behind `as`", "export default withAuth(() => { q() }) as Handler", ["q"]],
+    ["a chain of calls", "export default compose(log)(() => { a() }, () => { b() })", ["a", "b"]],
+  ])("walks the functions in %s, and not the call that wraps them", async (_label, source, calls) => {
     expect(await idsOf(source)).toEqual([DEFAULT])
     expect(await callsOf(source, DEFAULT)).toEqual(calls)
+  })
+
+  it("lays the first function out as its body and the rest beside it, over the whole statement", async () => {
+    const symbol = await symbolOf(
+      "export default compose(log)(() => { a() }, () => {\n  b()\n})",
+      DEFAULT,
+    )
+
+    expect(symbol.bodyNode?.text).toBe("{ a() }")
+    expect(symbol.mergedDeclarations?.map((d) => d.bodyNode?.text)).toEqual(["{\n  b()\n}"])
+    expect(symbol.source).toMatchObject({ startLine: 1, endLine: 3 })
   })
 
   it("describes the whole statement, so changing the call that wraps the function is an edit", async () => {
