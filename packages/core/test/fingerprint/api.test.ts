@@ -40,6 +40,10 @@ function withSignature(overrides: Partial<Signature>): IRSymbol {
   return method({ signature: { ...SIGNATURE, ...overrides } })
 }
 
+function exported(name: string, derivedBy: string[]): IRSymbol {
+  return makeSymbol(`ts:src/route.ts#${name}`, { kind: "const", derivedBy })
+}
+
 describe("apiFingerprint ignores", () => {
   it.each<[string, IRSymbol, IRSymbol]>([
     [
@@ -89,6 +93,21 @@ describe("apiFingerprint ignores", () => {
       method({ name: "New.createInvoice" }),
     ],
     ["the language", method({ language: makeLanguageId("tsx") }), method()],
+    [
+      "which spelling exports a declaration under its own name",
+      exported("handler", ["export-clause:handler"]),
+      exported("handler", ["export-keyword"]),
+    ],
+    [
+      "the order of the names a declaration is exported under",
+      exported("handler", ["export-clause:GET", "export-clause:POST"]),
+      exported("handler", ["export-clause:POST", "export-clause:GET"]),
+    ],
+    [
+      "rationale tokens that export nothing",
+      exported("handler", ["variable-assigned-function", "export-keyword"]),
+      exported("handler", ["export-keyword"]),
+    ],
   ])("%s", (_what, a, b) => {
     expect(apiFingerprint(a)).toBe(apiFingerprint(b))
   })
@@ -171,6 +190,31 @@ describe("apiFingerprint moves with", () => {
           { ...OK, line: 11 },
         ],
       }),
+    ],
+    [
+      "an added export name",
+      exported("handler", ["export-clause:GET", "export-clause:DELETE"]),
+      exported("handler", ["export-clause:GET"]),
+    ],
+    [
+      "a renamed export",
+      exported("handler", ["export-clause:DELETE"]),
+      exported("handler", ["export-clause:GET"]),
+    ],
+    [
+      "a renamed export of a declaration also exported under its own name",
+      exported("connect", ["export-keyword", "export-clause:start"]),
+      exported("connect", ["export-keyword", "export-clause:open"]),
+    ],
+    [
+      "dropping the export under a declaration's own name beside an alias",
+      exported("connect", ["export-keyword", "export-clause:open"]),
+      exported("connect", ["export-clause:open"]),
+    ],
+    [
+      "a named declaration becoming the default export",
+      exported("Page", ["export-default"]),
+      exported("Page", ["export-keyword"]),
     ],
   ])("%s", (_what, a, b) => {
     expect(apiFingerprint(a)).not.toBe(apiFingerprint(b))
