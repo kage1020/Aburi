@@ -180,8 +180,4 @@ describe("what the reading leaves alone", () => {
       ["ts:src/a.ts#POST", null],
     ])
   })
-
-  it("produces no Symbol for a wrapped default export", async () => {
-    expect(await symbolsOf("export default withAuth(() => { q() })")).toEqual([])
-  })
 })

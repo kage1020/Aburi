@@ -48,6 +48,25 @@ describe("scan — App Router special files", () => {
     expect(symbolById(result, "ts:app/dashboard/page.tsx#Page").extKind).toBe("framework:next:page")
   })
 
+  it.each([
+    [
+      "written as the call",
+      ["export default withAuth(function Page() {", "  return null", "})"],
+      "<default>",
+    ],
+    [
+      "bound and exported apart",
+      ["const Page = withAuth(() => {", "  return null", "})", "export default Page"],
+      "Page",
+    ],
+  ])("classifies a page wrapped in a call that is handed it, %s", async (_label, lines, name) => {
+    await workspace.writeSource("app/dashboard/page.tsx", [...lines, ""].join("\n"))
+
+    const page = symbolById(await scanWorkspace(), `ts:app/dashboard/page.tsx#${name}`)
+
+    expect([page.kind, page.extKind]).toEqual(["const", "framework:next:page"])
+  })
+
   it.each<[string, string[], Record<string, string[]>]>([
     [
       "functions declared with the export keyword",

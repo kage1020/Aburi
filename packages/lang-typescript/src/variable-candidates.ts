@@ -1,5 +1,9 @@
 import { unwrapValue } from "@aburi/core"
-import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
+import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
+  type ExtractionContext,
+  type SymbolCandidate,
+} from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import {
   asClassValue,
@@ -139,12 +143,17 @@ function initializerFunctions(initializer: Node | null): InitializerFunctions {
   const handed = wrappedFunctions(call)
   const invoked = invokedFunction(call)?.childForFieldName("body") ?? null
   if (invoked === null || invoked.text.length === 0) {
-    return { bodies: handed, evidence: handed.length > 0 ? ["call-argument-function"] : [] }
+    return {
+      bodies: handed,
+      evidence: handed.length > 0 ? [CALL_ARGUMENT_FUNCTION_DERIVED_BY] : [],
+    }
   }
   return {
     bodies: [invoked, ...handed],
     evidence:
-      handed.length > 0 ? ["invoked-function", "call-argument-function"] : ["invoked-function"],
+      handed.length > 0
+        ? ["invoked-function", CALL_ARGUMENT_FUNCTION_DERIVED_BY]
+        : ["invoked-function"],
   }
 }
 

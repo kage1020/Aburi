@@ -1,4 +1,9 @@
-import type { ExtractionContext, SymbolCandidate, SymbolKind } from "@aburi/types"
+import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
+  type ExtractionContext,
+  type SymbolCandidate,
+  type SymbolKind,
+} from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { hasChildOfType, makeSourceRange } from "./ast-helpers"
 import { layOutBodies } from "./call-symbols"
@@ -116,7 +121,8 @@ function makeFieldFunctionCandidate(
 ): SymbolCandidate<Node> {
   const isStatic = hasChildOfType(field, "static")
   const qname = classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
-  const spelling = held.kind === "function" ? "field-assigned-function" : "call-argument-function"
+  const spelling =
+    held.kind === "function" ? "field-assigned-function" : CALL_ARGUMENT_FUNCTION_DERIVED_BY
   const derivedBy = [isStatic ? "static-method" : "class-method", spelling]
   if (hasChildOfType(field, "accessor")) derivedBy.push("accessor-declaration")
   const member: Omit<SymbolCandidate<Node>, "signature" | "bodyNode" | "fullNode"> = {
