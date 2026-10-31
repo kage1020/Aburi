@@ -19,6 +19,10 @@ Recognised files under `app/**/`:
 
 A component role (`page` through `not-found`) is the file's default export, written
 `export default function Page()`, `export default Page` or `export { Page as default }`.
+A default export written as a call handed a function (`export default withAuth(function Page() { … })`)
+is one too, and so is a default-exported `const` initialised by such a call
+(`const Page = withAuth(() => { … })` with `export default Page`). A `const` whose call is
+handed no function (`const Page = withAuth(Inner)`) gets no role.
 
 A route is what `route.{ts,js}` exports under an HTTP verb name (`GET`, `POST`, `PUT`,
 `DELETE`, `PATCH`, `OPTIONS`, `HEAD`). Next.js dispatches to the module's exports by name, so
