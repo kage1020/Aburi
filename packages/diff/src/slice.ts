@@ -1,7 +1,7 @@
 import { type CallEdge, computeWeaklyConnectedComponents, RESERVED_LANGUAGE_IDS } from "@aburi/core"
 import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
-import { representativeSymbol } from "./status"
+import { headIdsByBaseId, representativeSymbol } from "./status"
 
 export interface SliceInput {
   changes: readonly SymbolChange[]
@@ -18,7 +18,7 @@ export function computeSlices(input: SliceInput): SliceRecord[] {
     input.baseCallEdges,
     input.headCallEdges,
     nodeIdSet,
-    nodeIdsByBaseId(input.changes),
+    headIdsByBaseId(input.changes),
   )
 
   const components = computeWeaklyConnectedComponents<SymbolId>(nodeIds, edges, (id) => id)
@@ -185,22 +185,14 @@ function assertNeverChange(change: never): never {
   )
 }
 
-function nodeIdsByBaseId(changes: readonly SymbolChange[]): ReadonlyMap<SymbolId, SymbolId> {
-  const out = new Map<SymbolId, SymbolId>()
-  for (const change of changes) {
-    if ("before" in change) out.set(change.before.id, representativeSymbol(change).id)
-  }
-  return out
-}
-
 function collectEdges(
   baseEdges: readonly CallEdge[],
   headEdges: readonly CallEdge[],
   nodeIds: ReadonlySet<SymbolId>,
-  nodeIdsByBase: ReadonlyMap<SymbolId, SymbolId>,
+  pairedHeadIds: ReadonlyMap<SymbolId, SymbolId>,
 ): [SymbolId, SymbolId][] {
   const pairs: [SymbolId, SymbolId][] = []
-  const asNodeId = (id: SymbolId) => nodeIdsByBase.get(id) ?? id
+  const asNodeId = (id: SymbolId) => pairedHeadIds.get(id) ?? id
   for (const edge of baseEdges) {
     appendEdgeIfBothNodes(asNodeId(edge.from), asNodeId(edge.to), nodeIds, pairs)
   }

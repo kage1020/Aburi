@@ -228,13 +228,13 @@ describe("the LSP pass against recorded typescript-language-server answers", () 
       Pool: [null],
       "Search.onInput": [null, null, null],
     })
-    expect(result.ir.stats.lspEnrichment?.hintsProduced).toBe(8)
+    expect(result.ir.stats.lspEnrichment?.hintsProduced).toBe(9)
     expect(result.ir.stats.lspEnrichment?.hintsRejected).toEqual({
       unparseableHover: 0,
       ownerClassNotFound: 0,
-      memberNotFound: 4,
+      memberNotFound: 3,
       kindMismatch: 0,
-      targetDropped: 0,
+      targetDropped: 1,
     })
   })
 

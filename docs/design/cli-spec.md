@@ -342,14 +342,16 @@ supplies, so all three commands that scan report them, rather than one command's
 printing them while the other two discard the report. A caller that supplies no sink gets no
 incident report.
 
-That is not the same as silence. The run's `Logger` is a separate channel — per file rather
-than per run, governed by `--log-level` (§3) and `ABURI_LOG_LEVEL` (§11), and still writing to
-`process.stderr` whatever streams the caller injected. The level is the command's rather than
-one scan's: `diff` hands it to both of its scans and `explain` to the one it rescans with, so no
-scan logs at a level the reader did not choose. An embedder passes it as `logLevel` to
-`runScan`, `runDiff` or `runExplain`, and gets `warn` without one. An embedded scan with no sink
-is quiet, not mute, and routing that channel to the caller is a known gap rather than something
-this contract covers.
+That is not the same as silence. The run's `Logger` is a separate channel — per file, or per
+Symbol or pair from the matcher, rather than per run, governed by `--log-level` (§3) and
+`ABURI_LOG_LEVEL` (§11), and still writing to `process.stderr` whatever streams the caller
+injected. The level is the command's rather than one scan's: `diff` hands it to both of its
+scans, and to the matcher when it is `debug`, the only level at which the matcher traces what
+stage 4 refuses on a rule ([`diff-algorithm.md`](./diff-algorithm.md) §3.4.7); `explain` hands
+it to the one scan it rescans with. So nothing logs at a level the reader did not choose. An
+embedder passes it as `logLevel` to `runScan`, `runDiff` or `runExplain`, and gets `warn`
+without one. An embedded scan with no sink is quiet, not mute, and routing that channel to the
+caller is a known gap rather than something this contract covers.
 It is also why the files above are listed by the CLI itself rather than left to that channel:
 at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `unroutable` and an
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
@@ -1110,7 +1112,7 @@ and left at the code the answer itself earned.
 | Stream | Use |
 |---|---|
 | stdout | Results (summary lines, JSON, Markdown body). Pipeable; the target of CI parsing |
-| stderr | Warnings, error messages, the per-file log; progress and colored UI once they exist (planned) |
+| stderr | Warnings, error messages, the run's log; progress and colored UI once they exist (planned) |
 
 Example: `aburi diff main..HEAD > result.txt 2> log.txt`
 
@@ -1211,10 +1213,12 @@ Render meaningful code structure as IR for review
 
 Options:
   -v, --version                      output the version number
-  --log-level <level>                per-file log on stderr: debug | info | warn
-                                     | error (default: ABURI_LOG_LEVEL, or
+  --log-level <level>                the run's log on stderr: debug | info |
+                                     warn | error (default: ABURI_LOG_LEVEL, or
                                      warn); info adds the files scan removes,
-                                     and error shows none of it
+                                     debug each file extracted and why diff left
+                                     a Symbol unpaired, and error shows none of
+                                     it
   -h, --help                         display help for command
 
 Commands:

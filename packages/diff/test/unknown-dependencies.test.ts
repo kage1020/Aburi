@@ -1,11 +1,9 @@
 import { dependency, makeIR, makeSymbol } from "@aburi/test-support"
-import type { Dependency, SkippedFile } from "@aburi/types"
+import type { SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { type DependencySideView, diffDependencies, renameDirections } from "../src"
-import { diffOf, withSkipped } from "./helpers"
+import { callEdge, diffOf, withSkipped } from "./helpers"
 
-const call = (from: string, to: string, overrides: Partial<Dependency> = {}) =>
-  dependency({ from, to, via: "call", ...overrides })
 const imports = (from: string, to: string) => dependency({ from, to, via: "import" })
 const lost = (path: string, reason: SkippedFile["reason"] = "parse-failed"): SkippedFile => ({
   path,
@@ -22,7 +20,7 @@ const relocated = makeSymbol({
   source: { file: "src/actual.ts", startLine: 1, endLine: 10, startColumn: null, endColumn: null },
 })
 
-const GONE_TO_KEPT = call(gone.id, kept.id)
+const GONE_TO_KEPT = callEdge(gone.id, kept.id)
 
 describe("an edge into a file the other side never analysed", () => {
   it("is unknown, not removed, when head lost its source's file", () => {
@@ -39,7 +37,7 @@ describe("an edge into a file the other side never analysed", () => {
 
   it("is unknown when only its target's file was lost", () => {
     const diff = diffOf(
-      makeIR({ symbols: [gone, kept], dependencies: [call(kept.id, gone.id)] }),
+      makeIR({ symbols: [gone, kept], dependencies: [callEdge(kept.id, gone.id)] }),
       withSkipped(makeIR({ symbols: [kept] }), [lost("src/gone.ts", "over-size")]),
     )
     expect(diff.summary.depsRemoved).toBe(0)
@@ -63,7 +61,7 @@ describe("an edge into a file the other side never analysed", () => {
 
   it("names the one file an intra-file edge lost", () => {
     const diff = diffOf(
-      makeIR({ symbols: [gone, goneToo, kept], dependencies: [call(gone.id, goneToo.id)] }),
+      makeIR({ symbols: [gone, goneToo, kept], dependencies: [callEdge(gone.id, goneToo.id)] }),
       withSkipped(makeIR({ symbols: [kept] }), [lost("src/gone.ts")]),
     )
     expect(diff.dependencies.unknown?.[0]?.lostFiles).toEqual([lost("src/gone.ts")])
@@ -74,7 +72,7 @@ describe("an edge into a file the other side never analysed", () => {
     ["the same reason", "parse-failed", "parse-failed"],
   ] as const)("names both files, path-sorted, when its two ends went for %s", (_, alsoReason, goneReason) => {
     const diff = diffOf(
-      makeIR({ symbols: [gone, alsoGone, kept], dependencies: [call(gone.id, alsoGone.id)] }),
+      makeIR({ symbols: [gone, alsoGone, kept], dependencies: [callEdge(gone.id, alsoGone.id)] }),
       withSkipped(makeIR({ symbols: [kept] }), [
         lost("src/also.ts", alsoReason),
         lost("src/gone.ts", goneReason),
@@ -87,7 +85,7 @@ describe("an edge into a file the other side never analysed", () => {
   })
 
   it("asks the document where the Symbol says it is, not where its id says", () => {
-    const edge = call(relocated.id, kept.id)
+    const edge = callEdge(relocated.id, kept.id)
     const diff = diffOf(
       makeIR({ symbols: [relocated, kept], dependencies: [edge] }),
       withSkipped(makeIR({ symbols: [kept] }), [lost("src/actual.ts")]),
@@ -99,7 +97,11 @@ describe("an edge into a file the other side never analysed", () => {
   })
 
   it("is sorted with the others by the same key as added and removed", () => {
-    const edges = [call(kept.id, goneToo.id), call(gone.id, kept.id), call(alsoGone.id, kept.id)]
+    const edges = [
+      callEdge(kept.id, goneToo.id),
+      callEdge(gone.id, kept.id),
+      callEdge(alsoGone.id, kept.id),
+    ]
     const diff = diffOf(
       makeIR({ symbols: [gone, goneToo, alsoGone, kept], dependencies: edges }),
       withSkipped(makeIR({ symbols: [kept] }), [lost("src/also.ts"), lost("src/gone.ts")]),
@@ -115,7 +117,7 @@ describe("an edge into a file the other side never analysed", () => {
 describe("an edge that is not unknown although a file was lost", () => {
   it("is removed when only the path inside its endpoint's id was skipped", () => {
     const diff = diffOf(
-      makeIR({ symbols: [relocated, kept], dependencies: [call(relocated.id, kept.id)] }),
+      makeIR({ symbols: [relocated, kept], dependencies: [callEdge(relocated.id, kept.id)] }),
       withSkipped(makeIR({ symbols: [kept] }), [lost("src/old.ts")]),
     )
     expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 0 })
@@ -138,7 +140,7 @@ describe("an edge that is not unknown although a file was lost", () => {
 
   it("is removed when nobody lost its file", () => {
     const diff = diffOf(
-      makeIR({ symbols: [gone, kept], dependencies: [call(kept.id, gone.id)] }),
+      makeIR({ symbols: [gone, kept], dependencies: [callEdge(kept.id, gone.id)] }),
       makeIR({ symbols: [gone, kept] }),
     )
     expect(diff.summary).toMatchObject({ depsRemoved: 1, depsUnknown: 0 })
@@ -160,7 +162,7 @@ describe("an edge that is not unknown although a file was lost", () => {
       withSkipped(
         makeIR({
           symbols: [gone, kept],
-          dependencies: [call(gone.id, kept.id, { direction: "inbound" })],
+          dependencies: [callEdge(gone.id, kept.id, { direction: "inbound" })],
         }),
         [lost("src/gone.ts")],
       ),
@@ -205,11 +207,12 @@ describe("the three edge outcomes", () => {
 describe("diffDependencies given side views with nothing to say", () => {
   it("classifies every one-sided edge plainly, and still writes the unknown array", () => {
     const blind: DependencySideView = { symbolFiles: new Map(), lostFiles: new Map() }
-    const result = diffDependencies([GONE_TO_KEPT], [imports("billing", "pricing")], {
-      base: blind,
-      head: blind,
-      renames: renameDirections(null),
-    })
+    const result = diffDependencies(
+      [GONE_TO_KEPT],
+      [imports("billing", "pricing")],
+      { base: blind, head: blind, renames: renameDirections(null) },
+      new Map(),
+    )
     expect(result).toEqual({
       added: [imports("billing", "pricing")],
       removed: [GONE_TO_KEPT],

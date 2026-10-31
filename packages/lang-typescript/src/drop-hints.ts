@@ -1,6 +1,7 @@
 import type { DropHint, ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, functionValueOf } from "./ast-helpers"
+import { bodyNodesOf } from "./ast-helpers"
+import { functionAFieldHolds } from "./class-members"
 
 export const TYPESCRIPT_FILE_DROP_PATTERNS: readonly string[] = [
   "**/*.d.ts",
@@ -43,7 +44,7 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
       case "class_static_block":
         return null
       case "public_field_definition":
-        if (functionValueOf(member) !== null) return null
+        if (functionAFieldHolds(member) !== null) return null
         hasAnyField = true
         if (!isConstantLikeField(member)) allStaticLiteral = false
         break
@@ -90,15 +91,14 @@ function isLiteralNode(node: Node): boolean {
 }
 
 function classifyFunctionBody(symbol: SymbolCandidate<Node>): DropHint | null {
-  const bodies = bodyNodesOf(symbol).filter(
-    (body) => body.type === "statement_block" || body.type === "class_body",
+  const bodies = bodyNodesOf(symbol)
+  if (bodies.length === 0 || !bodies.every(isEmptyBlock)) return null
+  return { reason: "empty body", category: "B" }
+}
+
+function isEmptyBlock(body: Node): boolean {
+  if (body.type !== "statement_block" && body.type !== "class_body") return false
+  return !body.namedChildren.some(
+    (c) => c !== null && c.type !== "comment" && c.type !== "hash_bang_line",
   )
-  if (bodies.length === 0) return null
-  const hasStatement = bodies.some((body) =>
-    body.namedChildren.some(
-      (c) => c !== null && c.type !== "comment" && c.type !== "hash_bang_line",
-    ),
-  )
-  if (!hasStatement) return { reason: "empty body", category: "B" }
-  return null
 }

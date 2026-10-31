@@ -24,6 +24,28 @@ describe("normalizeAst — what a formatter or a reviewer's eye would not call a
     ["optional semicolons", fn("save(a); save(b);"), fn("save(a)\n save(b)")],
     ["a comment where an array hole is", fn("save([/* skip */, x])"), fn("save([, x])")],
     [
+      "a trailing comma after the last parameter",
+      fn("return 1"),
+      fn("return 1").replace("v: any)", "v: any,)"),
+    ],
+    [
+      "parentheses around the lone parameter of an arrow in the body",
+      fn("return a.map(x => x.id)"),
+      fn("return a.map((x) => x.id)"),
+    ],
+    [
+      "a comment in an empty parameter list",
+      "export function f() { go() }",
+      "export function f(/* none */) { go() }",
+    ],
+    ["a union's leading `|`", "export type U = A | B | C", "export type U =\n  | A\n  | B\n  | C"],
+    [
+      "a comment after a union's leading `|`",
+      "export type U = A | B",
+      "export type U =\n  | /* c */ A\n  | B",
+    ],
+    ["an intersection's leading `&`", "export type I = A & B", "export type I =\n  & A\n  & B"],
+    [
       "interface member separators",
       "export interface I { a: string; b: number }",
       "export interface I { a: string, b: number }",
@@ -58,6 +80,11 @@ describe("normalizeAst — what changes the string", () => {
     ["`let` against `const`", fn("let i = 0; use(i)"), fn("const i = 0; use(i)")],
     ["`for…in` against `for…of`", fn("for (const k in x) use(k)"), fn("for (const k of x) use(k)")],
     ["a primitive type in an assertion", fn("save(x as string)"), fn("save(x as number)")],
+    [
+      "a union against an intersection, each with a leading operator",
+      "export type U =\n  | A\n  | B",
+      "export type U =\n  & A\n  & B",
+    ],
     [
       "a concise arrow's operator",
       "export const add = (a: number, b: number) => a + b",
@@ -96,6 +123,26 @@ describe("normalizeAst — what changes the string", () => {
       fn("const [, token] = a.split(' '); use(token)"),
       fn("const [token] = a.split(' '); use(token)"),
     ],
+    [
+      "the key a destructured parameter reads",
+      "export function pick({ a: b }: any) { return b }",
+      "export function pick({ c: b }: any) { return b }",
+    ],
+    [
+      "a leading hole in an array parameter",
+      "export function second([, b]: any[]) { return b }",
+      "export function second([b]: any[]) { return b }",
+    ],
+    [
+      "a parameter's default value",
+      "export function f(limit = 20) { use(limit) }",
+      "export function f(limit = 10) { use(limit) }",
+    ],
+    [
+      "a lone arrow parameter's name",
+      "export const pick = x => use",
+      "export const pick = y => use",
+    ],
     ["a hole between elements", fn("save([1, , 3])"), fn("save([1, 3])")],
     ["a hole before a trailing comma", fn("save([x, ,])"), fn("save([x,])")],
   ])("tells %s", async (_label, before, after) => {
@@ -108,6 +155,21 @@ describe("normalizeAst — the shape of the string", () => {
     expect(await normalizeFirstSymbol(fn("save(a + )"))).toContain(
       '(binary_expression (identifier "a") "+")',
     )
+  })
+
+  it("describes a function with no parameters by its body alone", async () => {
+    const [symbol] = await symbolsOf("export function f() { go() }")
+    if (symbol?.bodyNode == null) throw new Error("function body missing")
+
+    expect(normalizeAst(symbol)).toBe(normalizeAst({ ...symbol, fullNode: symbol.bodyNode }))
+  })
+
+  it("reads each parameter list of an overload set once, an overload's within its signature", async () => {
+    const normalized = await normalizeFirstSymbol(
+      "export function parse(a: string): C\nexport function parse(a: any): any { return a }",
+    )
+
+    expect(normalized.match(/\(formal_parameters /g)).toHaveLength(2)
   })
 
   it("keeps the tokens a formatter owns out, and every other token in", async () => {
@@ -124,6 +186,9 @@ describe("normalizeAst — the shape of the string", () => {
         ' (arrow_function (formal_parameters (required_parameter (identifier "x")',
         ' (type_annotation ":" (predefined_type "number"))))',
         ' "=>" (binary_expression (identifier "x") "<" (number "1")))))))',
+        " (formal_parameters",
+        ' (required_parameter (identifier "a") (type_annotation ":" (predefined_type "any")))',
+        ' (required_parameter (identifier "b") (type_annotation ":" (predefined_type "any"))))',
       ].join(""),
     )
   })

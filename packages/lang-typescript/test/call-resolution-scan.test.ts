@@ -67,6 +67,18 @@ describe("scan — calls through a default import", () => {
     })
   })
 
+  it("reaches a default export written as a call handed a function", async () => {
+    const result = await callsFromMain(
+      { "src/handler.ts": "export default withAuth(async (req: unknown) => {\n  save(req)\n})\n" },
+      ['import handler from "./handler"'],
+      ["handler({})"],
+    )
+    expect(result).toEqual({
+      resolved: [["handler", "ts:src/handler.ts#<default>"]],
+      unresolved: [],
+    })
+  })
+
   it("reaches a static member through a default-imported class", async () => {
     const result = await callsFromMain(
       { "src/svc.ts": "export default class Svc {\n  static run() { return 5 }\n}\n" },

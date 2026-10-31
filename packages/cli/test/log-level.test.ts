@@ -1,9 +1,11 @@
 import { resolve } from "node:path"
-import { useScratchWorkspace } from "@aburi/test-support"
+import { fp, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { COMPONENTS_DIRNAME, EXIT, VOCAB_DISCOVERED_FILENAME, WORKSPACE_MD_FILENAME } from "../src"
+import { documentWith } from "./ir-documents"
 import { runCliIn } from "./run-cli"
 import { writeStubRepository, writeStubWorkspace } from "./stub-language"
+import { writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("log-level")
 
@@ -139,6 +141,32 @@ describe("aburi scan — the log of the files it removes", () => {
     expect(await loggedBy(["scan", "--format", "json", ...flags], {})).toEqual({
       code: EXIT.SUCCESS,
       lines: shown ? removed : [],
+    })
+  })
+})
+
+describe("aburi diff — the matcher's refusals", () => {
+  it.each<[string, readonly string[], NodeJS.ProcessEnv, boolean]>([
+    ["writes one debug: line for each at --log-level debug", ["--log-level", "debug"], {}, true],
+    ["writes them at ABURI_LOG_LEVEL=debug", [], { ABURI_LOG_LEVEL: "debug" }, true],
+    ["writes none of them at --log-level info", ["--log-level", "info"], {}, false],
+    ["writes none of them at the default level", [], {}, false],
+  ])("%s", async (_, flags, env, shown) => {
+    const paths = await writeIRs(
+      workspace.root,
+      documentWith({ symbols: [makeSymbol({ id: "ts:src/a.ts#render", name: "render" })] }),
+      documentWith({
+        symbols: [makeSymbol({ id: "ts:src/b.ts#render", name: "render", fingerprint: fp("b") })],
+      }),
+    )
+    const refused = (id: string) =>
+      `debug: diff/stage4: ${id} is not compared by name: its name says too little to pair on\n`
+
+    expect(
+      await loggedBy(["diff", "--base", paths.base, "--head", paths.head, ...flags], env),
+    ).toEqual({
+      code: EXIT.SUCCESS,
+      lines: shown ? [refused("ts:src/a.ts#render"), refused("ts:src/b.ts#render")] : [],
     })
   })
 })
