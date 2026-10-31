@@ -43,7 +43,7 @@ export function reportScanIncidents(
   for (const line of describeWorkspaceDetection(report)) sayIncident(line)
   reportCoverageFault(report.coverageFault, sayIncident)
   reportPluginNamedFrameworks(report.pluginNamedFrameworks, sayIncident)
-  reportUnreadPluginOptions(report, warn, said)
+  reportStrayPluginOptions(report, warn, said)
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
   reportUndeclaredVocab(report.undeclaredVocab, report.vocabDiscoveredPath, sayIncident, warn)
@@ -192,9 +192,9 @@ function reportPluginNamedFrameworks(
 }
 
 /** Not labelled: a pluginOptions key reaches no artifact, and every scan of one command reads the same config. */
-function reportUnreadPluginOptions(report: ScanReport, warn: WarnFn, said: Set<string>): void {
+function reportStrayPluginOptions(report: ScanReport, warn: WarnFn, said: Set<string>): void {
   const loaded = report.loadedPlugins.join(", ")
-  for (const { key, hintEntry } of report.unreadPluginOptions) {
+  for (const { key, hintEntry } of report.strayPluginOptions) {
     const line =
       hintEntry === null
         ? `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}).`

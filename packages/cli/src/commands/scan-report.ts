@@ -25,7 +25,7 @@ export interface PluginNamedFramework {
   frameworkIds: readonly string[]
 }
 
-export interface UnreadPluginOptions {
+export interface StrayPluginOptions {
   key: string
   /** The `frameworkHints` entry whose plugin the key names; null when it names no loaded plugin. */
   hintEntry: string | null
@@ -62,6 +62,6 @@ export interface ScanReport {
   fellBackToSingleComponent: boolean
   pluginNamedFrameworks: readonly PluginNamedFramework[]
   loadedPlugins: readonly string[]
-  unreadPluginOptions: readonly UnreadPluginOptions[]
+  strayPluginOptions: readonly StrayPluginOptions[]
   exitCode: ExitCode
 }

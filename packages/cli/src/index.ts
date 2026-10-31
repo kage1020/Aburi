@@ -33,7 +33,7 @@ export type {
   CoverageFault,
   PluginNamedFramework,
   ScanReport,
-  UnreadPluginOptions,
+  StrayPluginOptions,
 } from "./commands/scan-report"
 export {
   classifyConfigError,

@@ -87,7 +87,7 @@ put your project-specific plugins first.
 
 Options for an individual plugin go under `pluginOptions`, keyed by the
 plugin's manifest name. None of the plugins that ship with Aburi takes options;
-a third-party plugin that does documents them:
+a third-party plugin that takes options documents them:
 
 ```jsonc
 {
@@ -100,8 +100,9 @@ a third-party plugin that does documents them:
 
 A key that is not the manifest name of a plugin the scan loaded (a misspelling,
 or a plugin none of the three lists enables) gets a warning on stderr naming the
-plugins that did load. So does a key for the `hint-<name>` plugin of a
-`frameworkHints` entry, which takes no options: its rules go in the entry.
+plugins that did load. A key for `hint-<name>`, the plugin Aburi builds from each
+[`frameworkHints`](#teach-it-your-in-house-framework) entry, gets a warning too:
+that plugin takes no options, so its rules go in the entry.
 
 ## Define components
 

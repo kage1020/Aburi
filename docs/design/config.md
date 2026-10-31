@@ -191,10 +191,11 @@ Opaque per-plugin configuration. No plugin that ships with Aburi reads options, 
 ```
 
 - Keys are plugin manifest names
-- Values are arbitrary objects interpreted by the plugin (the Aburi core does not inspect their contents). The core hands every plugin the whole config (`config` on the extraction and classification contexts), and a plugin reads the value under its own manifest name
+- Values are arbitrary JSON values interpreted by the plugin (the Aburi core does not inspect their contents). The core hands every plugin the whole config (`config` on the extraction and classification contexts), and a plugin reads the value under its own manifest name
 - Each plugin is responsible for validating its options and documenting their schema
-- A key that is not the manifest name of a plugin the scan loaded — a misspelling, or a plugin none of `languages` / `frameworks` / `effects` enables — is a warning, one per key in config order, naming the key and the plugins that did load. The exit code is the one the run would have had without the key. The loaded plugins are the manifest names the registry holds once the plugins are loaded, so the `hint-<name>` plugin of each `frameworkHints` entry (§8.3) counts as loaded, and a plugin loaded by package id or path matches only under its manifest name. `aburi diff` says each such line once, without a side label, because both of its scans load the head's config and plugin set ([`cli-spec.md`](./cli-spec.md) §5.6)
+- A key that is not the manifest name of a plugin the scan loaded — a misspelling, or a plugin none of `languages` / `frameworks` / `effects` enables — is a warning, one per key in config order, naming the key and the plugins that did load. The exit code is the one the run would have had without the key. The loaded plugins are the manifest names the registry holds once the plugins are loaded, so the `hint-<name>` plugin of each `frameworkHints` entry (§8.3) counts as loaded (it is listed under `loaded:`; its key is the next bullet's case), and a plugin loaded by package id or path matches only under its manifest name
 - A key that names the `hint-<name>` plugin of a `frameworkHints` entry is a warning too, in the same config order: Aburi builds that plugin from the entry and it reads no options, so the line names the entry its rules belong in
+- `aburi diff` says each line of either kind once, without a side label, because both of its scans load the head's config and plugin set ([`cli-spec.md`](./cli-spec.md) §5.6)
 
 ## 6. `components`
 

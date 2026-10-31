@@ -143,8 +143,9 @@ Contracts to know:
   `tree: null`. The file is withdrawn and recorded as skipped, and the run still
   exits `0`. An unusable source file tells you about your repository, not about
   a failure.
-- **Throw only when your plugin has a bug.** A throw withdraws the file *and*
-  exits the scan `3`.
+- **Throw only when your plugin has a bug or cannot run with the options it was
+  given ([Options](#options)).** A throw withdraws the file *and* exits the scan
+  `3`.
 
 ::: details The exact contract for refusing and throwing
 `recoverable: false` must be the literal `false`; omitting the key means
@@ -443,13 +444,15 @@ Users configure your plugin under `pluginOptions`, keyed by your manifest
 }
 ```
 
-Aburi does not look inside the value: the config schema accepts any object
-there. Every hook that takes a `ctx` gets the whole config, so read your key as
-`ctx.config.pluginOptions?.["effects-myorg"]`, check its shape before you rely
-on it, and document the options in your README. A value you cannot use is a
-fault in the plugin set rather than in a file: throw an error whose `code` is
-`scan-plugin-misconfigured`, and the run ends with exit `3` instead of
-recording the same failure against every file.
+Aburi does not look inside the value: the config schema accepts any JSON value
+there. The whole config is on the `ctx` of each per-file hook (`extractSymbols`,
+`walkBody` and `symbolDropHint` of a language plugin, `classifySymbol` and
+`symbolDropHint` of a framework plugin, `classify` of an effects plugin), so
+read your key as `ctx.config.pluginOptions?.["effects-myorg"]`, check its shape
+before you rely on it, and document the options in your README. A value you
+cannot use is a fault in the plugin set rather than in a file: throw an error
+whose `code` is `scan-plugin-misconfigured`, and the run ends with exit `3`
+instead of recording the same failure against every file.
 
 ## Testing
 

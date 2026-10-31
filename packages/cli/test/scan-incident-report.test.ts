@@ -401,7 +401,7 @@ describe("reportScanIncidents — the other incidents", () => {
         unrepresentableFiles: [unspellable("odd\\name.ts", "odd\\name.ts")],
         pluginNamedFrameworks: [{ component: "web", value: "lang-typescript", frameworkIds: [] }],
         loadedPlugins: ["lang-typescript", "effects-prisma"],
-        unreadPluginOptions: [{ key: "effects-prsima", hintEntry: null }],
+        strayPluginOptions: [{ key: "effects-prsima", hintEntry: null }],
       },
       "head",
     )

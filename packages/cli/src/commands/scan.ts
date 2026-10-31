@@ -61,7 +61,7 @@ import {
 } from "./scan-components"
 import { findCoverageFault } from "./scan-coverage"
 import { reportScanIncidents } from "./scan-incidents"
-import type { ScanReport, UnreadPluginOptions } from "./scan-report"
+import type { ScanReport, StrayPluginOptions } from "./scan-report"
 
 export interface ScanOptions {
   cwd?: string
@@ -188,7 +188,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     fellBackToSingleComponent,
     pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
     loadedPlugins,
-    unreadPluginOptions: unreadPluginOptions(config, loadedPlugins, loaded.syntheticPlugins),
+    strayPluginOptions: strayPluginOptions(config, loadedPlugins, loaded.syntheticPlugins),
     exitCode:
       scanResult.extractionFailures.length > 0 ||
       coverageFault !== null ||
@@ -237,18 +237,18 @@ function describeParseErrors(errors: readonly ParseError[]): string {
   return errors.length === 1 ? where : `${errors.length} errors, first at ${where}`
 }
 
-function unreadPluginOptions(
+function strayPluginOptions(
   config: Config,
   loadedPlugins: readonly string[],
   hintPlugins: readonly FrameworkPlugin[],
-): UnreadPluginOptions[] {
+): StrayPluginOptions[] {
   // A hint plugin provides one framework, the id its frameworkHints entry is named by.
   const hintEntries = new Map(
     hintPlugins.flatMap(({ manifest }) =>
       manifest.provides.frameworks.map((entry) => [manifest.name, entry] as const),
     ),
   )
-  return Object.keys(config.pluginOptions ?? {}).flatMap((key): UnreadPluginOptions[] => {
+  return Object.keys(config.pluginOptions ?? {}).flatMap((key): StrayPluginOptions[] => {
     const hintEntry = hintEntries.get(key)
     if (hintEntry !== undefined) return [{ key, hintEntry }]
     return loadedPlugins.includes(key) ? [] : [{ key, hintEntry: null }]

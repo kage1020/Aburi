@@ -153,16 +153,23 @@ describe("aburi scan — pluginOptions keys and the plugins it loaded", () => {
       [],
     ],
     [
-      "lists the plugins in load order, a frameworkHints entry's last, and sends options for that entry's plugin to the entry, in config order",
+      "lists the plugins in load order, the frameworkHints entries' last, and sends options for each entry's plugin to that entry, in config order",
       {
         ...PRISMA,
         frameworks: ["framework-nestjs"],
-        frameworkHints: [{ name: "acme", decorators: {} }],
-        pluginOptions: { "hint-acme": {}, "effects-prsima": {} },
+        frameworkHints: [
+          { name: "acme", decorators: {} },
+          { name: "beta", decorators: {} },
+        ],
+        pluginOptions: { "hint-beta": {}, "effects-prsima": {}, "hint-acme": {} },
       },
       [
+        hint("hint-beta", "beta"),
+        unmatched(
+          "effects-prsima",
+          "lang-typescript, framework-nestjs, effects-prisma, hint-acme, hint-beta",
+        ),
         hint("hint-acme", "acme"),
-        unmatched("effects-prsima", "lang-typescript, framework-nestjs, effects-prisma, hint-acme"),
       ],
     ],
     [

@@ -220,20 +220,21 @@ describe("a fault in the plugin set is not a per-file fault", () => {
 
   it("re-throws a plugin's refusal of its own pluginOptions, which it reads from the config its hook is given", async () => {
     const effects = stubEffectsPlugin("effects-stub", (_call, ctx) => {
-      const options = ctx.config.pluginOptions?.["effects-stub"]
-      if (typeof options !== "object" || options === null || !("queues" in options)) {
+      const given = ctx.config.pluginOptions?.["effects-stub"]
+      if (typeof given !== "object" || given === null || !("queues" in given)) {
         throw Object.assign(new Error("effects-stub needs pluginOptions.queues"), {
           code: "scan-plugin-misconfigured",
         })
       }
       return null
     })
-    const options = (value: object) => ({ config: { pluginOptions: { "effects-stub": value } } })
+    const withOptions = (value: object) => ({
+      config: { pluginOptions: { "effects-stub": value } },
+    })
 
-    await expect(
-      run({ ...options({ queues: ["billing"] }), effects: [effects] }),
-    ).resolves.toBeDefined()
-    await expect(run({ ...options({ queue: "billing" }), effects: [effects] })).rejects.toThrow(
+    const { result } = await run({ ...withOptions({ queues: ["billing"] }), effects: [effects] })
+    expect(result.extractionFailures).toEqual([])
+    await expect(run({ ...withOptions({ queue: "billing" }), effects: [effects] })).rejects.toThrow(
       /needs pluginOptions.queues/,
     )
   })
