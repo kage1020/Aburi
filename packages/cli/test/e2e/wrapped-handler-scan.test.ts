@@ -13,14 +13,14 @@ const lineup = {
   effects: [prismaEffectsPlugin],
 }
 
-const users = (body: string[]) =>
+const users = (head: string, body: string[]) =>
   [
     'import { PrismaClient } from "@prisma/client"',
     'import { withAuth } from "./auth"',
     "",
     "const prisma = new PrismaClient()",
     "",
-    "export const POST = withAuth(async (id: number) => {",
+    `${head} withAuth(async (id: number) => {`,
     ...body.map((line) => `  ${line}`),
     "})",
     "",
@@ -32,30 +32,40 @@ const DELETE = [
   "return prisma.user.delete({ where: { id } })",
 ]
 
-describe("scan — a function a const hands to a wrapping call", () => {
-  it("puts the handler's rules and effects on the const", async () => {
-    await workspace.writeSource("src/users.ts", users(DELETE))
-    const post = symbolById(await scanWith(workspace.root, lineup), "ts:src/users.ts#POST")
+const SPELLINGS = [
+  ["a const", "export const POST =", "POST"],
+  ["a default export", "export default", "<default>"],
+] as const
 
-    expect(post.kind).toBe("const")
-    expect(post.rules.map((r) => r.type)).toEqual(["guard", "throw"])
-    expect(post.effects.map((e) => [e.id, e.target])).toEqual([["db.write", "prisma.user.delete"]])
+describe("scan — a function a const or a default export hands to a wrapping call", () => {
+  it.each(SPELLINGS)("puts the handler's rules and effects on %s", async (_label, head, name) => {
+    await workspace.writeSource("src/users.ts", users(head, DELETE))
+    const result = await scanWith(workspace.root, lineup)
+    const handler = symbolById(result, `ts:src/users.ts#${name}`)
+
+    expect(handler.kind).toBe("const")
+    expect(handler.rules.map((r) => r.type)).toEqual(["guard", "throw"])
+    expect(handler.effects.map((e) => [e.id, e.target])).toEqual([
+      ["db.write", "prisma.user.delete"],
+    ])
   })
 
-  it("reports an edit to the handler as a logic change", async () => {
+  it.each(
+    SPELLINGS,
+  )("reports an edit to the handler in %s as a logic change", async (_label, head, name) => {
     const { diff } = await diffOfEditWith(
       workspace,
       lineup,
       "src/users.ts",
-      users(READ),
-      users(DELETE),
+      users(head, READ),
+      users(head, DELETE),
     )
 
     expect(diff.symbols).toHaveLength(1)
     const [change] = diff.symbols
     expect(change?.status).toBe("changed")
     if (change?.status !== "changed") return
-    expect(change.after.name).toBe("POST")
+    expect(change.after.name).toBe(name)
     expect(change.delta.logicChanged).toBe(true)
   })
 

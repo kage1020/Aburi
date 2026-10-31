@@ -10,6 +10,10 @@ describe("an `if` whose consequence leaves early is a guard", () => {
     ["break", "export function f(items: number[]) { for (const x of items) { if (x < 0) break } }"],
     ["process.exit()", "export function f(x: unknown) { if (x) process.exit(1) }"],
     [
+      "process.exit() behind a type assertion",
+      "export function f(x: unknown) { if (x) (process as NodeJS.Process).exit(1) }",
+    ],
+    [
       "a labeled break of an outer loop",
       "export function f(rows: number[][]) { outer: for (const r of rows) { for (const x of r) { if (x < 0) { for (;;) break outer } } } }",
     ],
