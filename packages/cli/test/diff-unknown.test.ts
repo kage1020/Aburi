@@ -29,7 +29,14 @@ describe("aburi diff — a file the head scan never read", () => {
   })
 
   it.each([
-    ["unknown", { clause: { token: "unknown", threshold: null }, observed: 2 }],
+    [
+      "unknown",
+      {
+        clause: { token: "unknown", threshold: null },
+        observed: 2,
+        symbols: [ALSO_GONE.id, GONE.id],
+      },
+    ],
     ["unknown:>2", null],
   ])("counts its Symbols under --fail-on %s", async (failOn, triggered) => {
     const { report } = await diffDocuments(

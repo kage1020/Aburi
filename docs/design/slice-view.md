@@ -322,7 +322,7 @@ Adding an optional top-level array is a non-breaking schema change under [`ir-sc
 
 ### 11.4 CI gate (`--fail-on`) interaction
 
-`aburi diff --fail-on` gates on the existing status/summary values. **No new `--fail-on` selector** is introduced for Slice View — no `cluster-count>N`, no `slice-size>N`, no `giant-slice`. See §14.7 for the rejection.
+`aburi diff --fail-on` gates on the per-Symbol statuses, subtypes and delta axes [`cli-spec.md`](./cli-spec.md) §6.7 lists. **No new `--fail-on` selector** is introduced for Slice View — no `cluster-count>N`, no `slice-size>N`, no `giant-slice`. See §14.7 for the rejection.
 
 ## 12. Markdown Projection
 
@@ -584,7 +584,7 @@ The private-helper-anchor cost is real (the id reads less nicely) but bounded (t
 
 [`overview.md`](./overview.md) §2 lists "Highly configurable" as an explicitly rejected design axis. Introducing per-cluster-count or per-slice-size CI gates would put reviewers in the position of tuning the gate on every large PR, and re-tuning on every mid-PR clustering shift caused by a rename. The existing gates (`changed`, `removed`, `dropped-toggled`, ...) already operate on stable per-Symbol counts and cover the "did this PR touch too much" question at a lower level.
 
-The `--fail-on` surface stays exactly as [`diff-algorithm.md`](./diff-algorithm.md) §10.1 declares it.
+The `--fail-on` surface stays exactly as [`cli-spec.md`](./cli-spec.md) §6.7 lists it.
 
 ### 14.7.1 No gate on the unresolved-call count either
 

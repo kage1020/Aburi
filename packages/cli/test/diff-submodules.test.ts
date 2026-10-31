@@ -90,7 +90,11 @@ describe("aburi diff in a repository with a submodule", () => {
 
     expect(report.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
     expect(await addedNames(report.diffJsonPath)).toEqual(["main2"])
-    expect(report.triggered).toEqual({ clause: { token: "added", threshold: null }, observed: 1 })
+    expect(report.triggered).toEqual({
+      clause: { token: "added", threshold: null },
+      observed: 1,
+      symbols: ["ts:src/main.ts#main2"],
+    })
     expect(report.exitCode).toBe(EXIT.GATE)
     expect(warnings).toEqual([WARNING("libs/sub")])
   })

@@ -12,7 +12,6 @@ export {
   classifyDiffError,
   type DiffOptions,
   type DiffReport,
-  formatFailOnMessage,
   runDiff,
 } from "./commands/diff"
 export type { DiffSide } from "./commands/diff-revisions"
@@ -41,6 +40,7 @@ export { type AburiEnv, type LogLevel, readEnv } from "./env"
 export { CliError, type CliErrorCode } from "./errors"
 export { EXIT, type ExitCode } from "./exit-codes"
 export {
+  type ClauseOutcome,
   evaluateClause,
   evaluateFailOn,
   type FailOnClause,
@@ -48,8 +48,10 @@ export {
   FailOnParseError,
   type FailOnStatusToken,
   type FailOnToken,
+  formatTriggered as formatFailOnMessage,
   formatTriggered,
   parseFailOn,
+  type TrippedClause,
 } from "./fail-on"
 export type { GitRunner } from "./git/runner"
 export { readIR } from "./ir-io"

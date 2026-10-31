@@ -1,5 +1,5 @@
 import irSchema from "@aburi/schema/aburi.ir.v1.json" with { type: "json" }
-import { component, dependency, fp, makeIR, makeSymbol } from "@aburi/test-support"
+import { component, dependency, fp, guardedBody, makeIR, makeSymbol } from "@aburi/test-support"
 import type { DiffResult, SkipReason } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { diffSchemaViolations } from "./diff-schema"
@@ -8,6 +8,14 @@ import { diffOf, diffSymbols, soleChange, withSkipped } from "./helpers"
 const changing = makeSymbol({ id: "ts:src/a.ts#A", name: "A" })
 const gone = makeSymbol({ id: "ts:src/gone.ts#foo", name: "foo" })
 const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
+const TWIN = { fingerprint: fp("twin"), rules: guardedBody("tree === null") }
+
+/** A removed duplicate of a Symbol the head keeps, beside a removal that duplicates nothing. */
+function duplicateDiff(): DiffResult {
+  const twin = { ...makeSymbol({ id: "ts:src/a.ts#requireTree", name: "requireTree" }), ...TWIN }
+  const copy = { ...makeSymbol({ id: "ts:src/b.ts#assertTree", name: "assertTree" }), ...TWIN }
+  return diffSymbols([twin, copy, gone], [twin])
+}
 
 /** A changed Symbol, a Symbol and an edge into a file head lost, and a file neither side read. */
 function lossyDiff(reason: SkipReason = "parse-failed"): DiffResult {
@@ -78,6 +86,15 @@ describe("a diff buildDiff writes validates against aburi.diff.v1", () => {
     expect(diffSchemaViolations(diff)).toEqual([])
   })
 
+  it("with a removed duplicate naming its survivor, and a removal that names none", () => {
+    const diff = duplicateDiff()
+    expect(diff.symbols.map((change) => change.status === "removed" && change.duplicateOf)).toEqual(
+      ["ts:src/a.ts#requireTree", null],
+    )
+    expect(diff.summary).toMatchObject({ removed: 2, removedDuplicates: 1 })
+    expect(diffSchemaViolations(diff)).toEqual([])
+  })
+
   it("with a file neither side read under its renamed path, carrying the base's path", () => {
     const diff = diffOf(
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "vendor/old.ts", reason: "over-size" }]),
@@ -109,6 +126,17 @@ describe("a diff written before a field existed still validates", () => {
     const { unknown: _unknown, ...dependencies } = diff.dependencies
     const { depsUnknown: _depsUnknown, ...summary } = diff.summary
     expect(diffSchemaViolations({ ...diff, dependencies, summary })).toEqual([])
+  })
+
+  it("without duplicateOf or summary.removedDuplicates", () => {
+    const diff = duplicateDiff()
+    const symbols = diff.symbols.map((change) => {
+      if (change.status !== "removed") return change
+      const { duplicateOf: _, ...older } = change
+      return older
+    })
+    const { removedDuplicates: _removedDuplicates, ...summary } = diff.summary
+    expect(diffSchemaViolations({ ...diff, symbols, summary })).toEqual([])
   })
 
   it("without notCompared", () => {

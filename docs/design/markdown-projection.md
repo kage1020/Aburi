@@ -539,6 +539,8 @@ change worth reading.
 
 The `· ?N unknown` suffix on the Summary line appears only when `summary.unknown` is non-zero, so the line a reviewer skims on every PR does not carry a permanent `?0`. It qualifies the counts beside it: added and removed are both smaller than the truth by that much.
 
+`-N removed` reads `-N removed (M duplicates)` when `summary.removedDuplicates` is non-zero, `(1 duplicate)` for one: M of the N removals duplicated a head Symbol that holds their body ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2), and `--fail-on removed` counts only the other N−M. The CLI's glyph line (`+A -R ~C ↔M ⤴MC`) is left as it is: it is read by scripts, and `-R` stays the count of `removed` entries.
+
 ### 6.2 Display form of each section
 
 #### ⚠ API changes
@@ -624,6 +626,16 @@ Full symbol rendering (same as §5.2), less the fingerprint line (§12.7):
 **Effects**:
 - db.write: `prisma.invoice.update` (L120) [effects-prisma]
 ```
+
+A removed duplicate of a head Symbol (`duplicateOf`, [`diff-algorithm.md`](./diff-algorithm.md) §3.5.2) names the survivor under its **File** line, so the entry does not read as deleted behaviour:
+
+```md
+### `makeEmptyIR` *(function)*
+**File**: `packages/cli/test/diff-fs.test.ts:14`
+**Duplicate of**: `ts:packages/cli/test/fixtures.ts#emptyIR`, which holds the same body
+```
+
+The survivor is named by its id, which carries its file: the diff records only the id, and a survivor nothing else changed has no entry of its own to take a line from.
 
 #### ❔ Unknown
 
@@ -831,7 +843,8 @@ heading, a line saying the entries are short, and one row per Symbol,
 - `handleInvoice` *(function)* — `src/billing/invoice.ts:42`
 ```
 
-(the confidence badge follows the kind as on the heading; Unknown adds the side and the skip reason,
+(the confidence badge follows the kind as on the heading; Removed adds `` (duplicate of `<id>`) `` to
+a removed duplicate; Unknown adds the side and the skip reason,
 Moved + Changed where it moved from, Confidence changes the two values, `` (`high` → `medium`) ``;
 a pair whose name changed carries its Moved + Changed row's ``(from …)`` in API changes, Logic
 changes and Confidence changes too, ahead of the two values, so its old name stays in whichever of
@@ -1060,6 +1073,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP17b | `modified` element with several candidate bases: several `modified` elements under one key, or base elements equal but for their line | A field the candidates disagree on, or one of them shares with the head element, shows the head value alone; a field they agree on and differ from the head element on still gets their value |
 | MP17c | diff entry whose delta flags `asyncChanged`, `generatorChanged`, `typeParametersChanged`, `componentChanged` or `visibilityChanged` | One row per flag with the base value before the head one: `- signature.async: false → true`, ``- signature.typeParameters: none → `<T>` ``, ``- component: `billing` → none``, ``- visibility: `internal` → `public` `` |
 | MP17d | diff entry whose `delta.exportedAs` holds an added or a removed name | ``- export name added: `<name>`, …`` and ``- export name removed: `<name>`, …``, one row per bucket after the decorator rows; either row explains the API flag, so no `fingerprint changed` note follows. An empty bucket writes no row. A renamed pair whose `removed` is exactly the base's name and whose `added` is exactly the head's writes neither row, and keeps the note MP11b gives a new owner alone; one that also gained or lost another name writes both rows, the two own names included |
+| MP17e | diff with a `removed` entry whose `duplicateOf` names a head Symbol, and `summary.removedDuplicates` 1 | The entry carries ``**Duplicate of**: `<id>`, which holds the same body`` under its **File** line, and its names-only row ends `` (duplicate of `<id>`) ``; the Summary line reads `-1 removed (1 duplicate)`, `(2 duplicates)` for two, and the glyph line `-1`. A `duplicateOf` of `null`, an absent one, and a `removedDuplicates` of 0 or absent add nothing |
 | MP18 | diff whose `dependencies.added` holds a call edge between two Symbols of one file, one between two files, and one from a Component to a Symbol | The first reads `` `a` → `b` in `<file>` (via `call`) ``, the second `` `a` in `<file>` → `b` in `<file>` (via `call`) ``, the third `` `billing` → `b` in `<file>` (via `import`) ``; no Symbol id appears |
 | MP19 | diff with an added, a removed and an unknown Symbol, each with a non-zero fingerprint | No entry carries a `<sub>` fingerprint line; the same Symbol on its component page does |
 | MP20 | Symbol block whose calls are `log` (L3), `svc.save` (L5), `log` (L9) and `log` (L9) | **Calls** reads ``- `log` (L3, L9)`` then ``- `svc.save` (L5)`` |

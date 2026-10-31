@@ -138,11 +138,12 @@ calls 1043 · resolved 917 · unresolved 126 (external 108 · dynamic 14 · no-m
 ```
 
 `out/diff.md` is the report you hand to a reviewer, and `out/diff.json` sits
-beside it. A tripped `--fail-on` clause prints the reason on stderr and exits
-`3`, which is what CI gates on:
+beside it. A tripped `--fail-on` clause prints the reason on stderr, with the Symbols
+that tripped it, and exits `3`, which is what CI gates on:
 
 ```
 --fail-on removed tripped (observed: 1 removed)
+  ts:src/billing/legacy.ts#refundInvoice
 ```
 
 See [CI integration](./ci-integration.md).
