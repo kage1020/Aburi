@@ -68,8 +68,8 @@ export function throughParentheses(node: Node): Node {
   return cursor
 }
 
-// A formatter writes `|` before a union's first member when it breaks the union over lines and
-// drops it when it joins it, and the parser gives the leading form a level of its own.
+// A formatter writes `|` before a union's first member when it breaks it over lines; the grammar
+// admits a leading `&` alike, and gives either form a level of its own.
 export function leadingOperatorOperand(node: Node): Node | null {
   const operator = LEADING_OPERATORS.get(node.type)
   if (operator === undefined) return null
