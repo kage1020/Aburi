@@ -68,9 +68,11 @@ describe("a diff buildDiff writes validates against aburi.diff.v1", () => {
     expect(diffSchemaViolations(diff)).toEqual([])
   })
 
-  it("with a Symbol whose only change is its confidence", () => {
+  it("with a Symbol whose only change is its confidence, its export names written empty", () => {
     const diff = diffSymbols([kept], [{ ...kept, confidence: "low" }])
-    expect(soleChange(diff.symbols, "changed").delta.confidenceChanged).toBe(true)
+    const { delta } = soleChange(diff.symbols, "changed")
+    expect(delta.confidenceChanged).toBe(true)
+    expect(delta.exportedAs).toEqual({ added: [], removed: [], modified: [] })
     expect(diffSchemaViolations(diff)).toEqual([])
   })
 
@@ -112,10 +114,10 @@ describe("a diff buildDiff writes validates against aburi.diff.v1", () => {
 })
 
 describe("a diff written before a field existed still validates", () => {
-  it("without confidenceChanged on a delta", () => {
+  it.each(["confidenceChanged", "exportedAs"] as const)("without %s on a delta", (field) => {
     const diff = diffSymbols([kept], [{ ...kept, confidence: "low" }])
     const change = soleChange(diff.symbols, "changed")
-    const { confidenceChanged: _, ...delta } = change.delta
+    const { [field]: _, ...delta } = change.delta
     expect(diffSchemaViolations({ ...diff, symbols: [{ ...change, delta }] })).toEqual([])
   })
 
