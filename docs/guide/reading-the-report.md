@@ -53,7 +53,7 @@ ones and folds Moved, Dropped changes, Syntax-only changes and Test files behind
 | 💧 Dropped changes | Boilerplate that came or went. | Usually nothing. |
 | 🎚 Confidence changes | Aburi is more or less sure of a symbol, and nothing it fingerprints changed. | Check the new badge (see [Confidence](#confidence)). |
 | 🎨 Syntax-only changes | Bodies reformatted, behaviour identical. | Nothing. |
-| 🧪 Test files | Every change to a symbol of test code, by name. It appears in no section above, and the Summary line ends with how many there are. | Open it when the tests are the point of the change. |
+| 🧪 Test files | Every change to a symbol of test code, by name, and the call edges those symbols gained or lost. A change listed here is not listed in the sections above, though a Slice that reaches from test code into the code under test still draws its test members. The Summary line ends with how many changes there are. | Open it when the tests are the point of the change. |
 
 Learn the split between **API changes** and **Logic changes** first. An API
 change breaks other people's code. A logic change alters what your own code

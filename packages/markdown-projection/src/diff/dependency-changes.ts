@@ -1,8 +1,8 @@
 import type { Dependency, DependencyUnknown, DiffResult } from "@aburi/types"
 import { inlineCode, isSymbolEdge, symbolIdParts } from "../format"
 
-export function renderDependencyChanges(diff: DiffResult): string[] {
-  const { added, removed } = diff.dependencies
+export function renderDependencyChanges(dependencies: DiffResult["dependencies"]): string[] {
+  const { added, removed } = dependencies
   const rows: string[] = []
   appendDependencyGroup(
     rows,
@@ -16,15 +16,13 @@ export function renderDependencyChanges(diff: DiffResult): string[] {
   )
   appendDependencyGroup(rows, "Symbol-level added", added.filter(isSymbolEdge))
   appendDependencyGroup(rows, "Symbol-level removed", removed.filter(isSymbolEdge))
-  appendUnknownDependencies(rows, diff.dependencies.unknown ?? [])
+  appendUnknownDependencies(rows, dependencies.unknown ?? [])
   return rows
 }
 
 function appendDependencyGroup(rows: string[], heading: string, deps: readonly Dependency[]): void {
   if (deps.length === 0) return
-  rows.push(`### ${heading}`)
-  for (const d of deps) rows.push(`- ${edge(d)}`)
-  rows.push("")
+  rows.push(`### ${heading}`, ...deps.map(dependencyRow), "")
 }
 
 function appendUnknownDependencies(rows: string[], unknown: readonly DependencyUnknown[]): void {
@@ -35,6 +33,10 @@ function appendUnknownDependencies(rows: string[], unknown: readonly DependencyU
     rows.push(`- ${edge(entry.dependency)} — the ${entry.absentFrom} scan skipped ${lost}`)
   }
   rows.push("")
+}
+
+export function dependencyRow(d: Dependency): string {
+  return `- ${edge(d)}`
 }
 
 /** A Symbol id repeats its language on every end, and an edge inside one file writes the path twice. */

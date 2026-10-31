@@ -1,7 +1,13 @@
 import { type CallEdge, computeWeaklyConnectedComponents, RESERVED_LANGUAGE_IDS } from "@aburi/core"
-import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
+import {
+  representativeSymbol,
+  type SliceId,
+  type SliceRecord,
+  type SymbolChange,
+  type SymbolId,
+} from "@aburi/types"
 import { DiffError } from "./errors"
-import { headIdsByBaseId, representativeSymbol } from "./status"
+import { headIdsByBaseId } from "./status"
 
 export interface SliceInput {
   changes: readonly SymbolChange[]

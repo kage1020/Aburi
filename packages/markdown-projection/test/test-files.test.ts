@@ -1,11 +1,13 @@
 import {
   changed,
+  dependency,
   makeDiff,
   makeSymbol,
   moved,
   movedChanged,
   sliceOf,
   symbolAt,
+  symbolId,
   withCallsTo,
 } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
@@ -75,6 +77,53 @@ describe("projectDiff — the changes of test files", () => {
     ])
   })
 
+  const toggled = fixture("toggled")
+  const pair = (name: string) =>
+    [fixture(name), movedTo(fixture(name), `test/${name}.ts`, true)] as const
+  it.each<[string, SymbolChange, string, string]>([
+    [
+      "an unknown entry",
+      { status: "unknown", symbol: fixture("lost"), absentFrom: "head", reason: "over-size" },
+      "**1 unknown**",
+      "- `lost` *(function)* — `src/lost.test.ts:1` (skipped at head: over-size)",
+    ],
+    [
+      "a dropped-toggled entry",
+      {
+        status: "dropped-toggled",
+        before: toggled,
+        after: { ...toggled, dropped: true, dropReason: "pure DTO" },
+        direction: "to-dropped",
+      },
+      "**1 dropped change**",
+      "- `toggled` *(function)* — `src/toggled.test.ts:1` (to-dropped)",
+    ],
+    [
+      "a confidence-only change",
+      changed(fixture("unsure"), { confidenceChanged: true }, { confidence: "low" }),
+      "**1 confidence change**",
+      "- `unsure` *(function)* ⚠ low — `src/unsure.test.ts:1` (`high` → `low`)",
+    ],
+    ...(["apiChanged", "confidenceChanged", "syntaxChanged"] as const).map(
+      (flag): [string, SymbolChange, string, string] => [
+        `a moved pair whose delta is ${flag} alone`,
+        movedChanged(...pair(flag), { [flag]: true }),
+        "**1 moved + changed**",
+        `- \`${flag}\` *(function)* — \`test/${flag}.ts:1\` (from \`src/${flag}.test.ts\`)`,
+      ],
+    ),
+  ])("are listed once, under their group: %s", (_, change, group, row) => {
+    const fold = sectionOf(projectChanges([change]), HEADING)
+    expect(fold.slice(fold.indexOf("<summary>1 symbol in a test file</summary>") + 1)).toEqual([
+      "",
+      group,
+      row,
+      "",
+      "</details>",
+      "",
+    ])
+  })
+
   it("are in no other section", () => {
     expect(sectionOf(md, "## ➕ Added").filter((line) => line.startsWith("###"))).toEqual([
       "### `order` *(function)*",
@@ -118,6 +167,73 @@ describe("projectDiff — the changes of test files", () => {
     expect(sectionOf(capped, "## ➕ Added")).toContain("### `order` *(function)*")
     expect(noteOf(capped)).toContain("**1 section was omitted**")
     expect(noteOf(capped)).toContain(": 🧪 Test files.")
+  })
+})
+
+describe("projectDiff — the Dependency edges of test code", () => {
+  const scratch = fixture("scratch")
+  const renamed = {
+    ...movedTo(scratch, "test/scratch.ts", true),
+    id: symbolId("ts:test/scratch.ts#scratch"),
+  }
+  const total = "ts:src/order.ts#total"
+  const testEdges = {
+    added: [
+      dependency({ from: fixture("makeOrder").id, to: total, via: "call" }),
+      dependency({ from: renamed.id, to: total, via: "call" }),
+    ],
+    removed: [dependency({ from: scratch.id, to: total, via: "call" })],
+  }
+  const testChanges: SymbolChange[] = [
+    { status: "added", symbol: fixture("makeOrder") },
+    moved(scratch, renamed),
+  ]
+
+  it("go to the fold with the test changes that call through them, from either id of a pair", () => {
+    const report = projectDiff(makeDiff({ symbols: testChanges, dependencies: testEdges }))
+    expect(headings(report)).toEqual([HEADING])
+    expect(sectionOf(report, HEADING)).toEqual([
+      HEADING,
+      "",
+      "<details>",
+      "<summary>2 symbols in test files</summary>",
+      "",
+      "**1 added**",
+      "- `makeOrder` *(function)* — `src/makeOrder.test.ts:1`",
+      "",
+      "**1 moved**",
+      "- `scratch` *(function)* — `test/scratch.ts:1` (from `src/scratch.test.ts`)",
+      "",
+      "**2 dependencies added**",
+      "- `makeOrder` in `src/makeOrder.test.ts` → `total` in `src/order.ts` (via `call`)",
+      "- `scratch` in `test/scratch.ts` → `total` in `src/order.ts` (via `call`)",
+      "",
+      "**1 dependency removed**",
+      "- `scratch` in `src/scratch.test.ts` → `total` in `src/order.ts` (via `call`)",
+      "",
+      "</details>",
+      "",
+    ])
+  })
+
+  it("stay in the Dependency section when the caller is production code", () => {
+    const checkout = namedSymbol("checkout")
+    const report = projectDiff(
+      makeDiff({
+        symbols: [...testChanges, changed(checkout, { logicChanged: true })],
+        dependencies: {
+          added: [...testEdges.added, dependency({ from: checkout.id, to: total, via: "call" })],
+          removed: testEdges.removed,
+        },
+      }),
+    )
+    expect(sectionOf(report, "## 🔗 Dependency changes")).toEqual([
+      "## 🔗 Dependency changes",
+      "",
+      "### Symbol-level added",
+      "- `checkout` in `src/checkout.ts` → `total` in `src/order.ts` (via `call`)",
+      "",
+    ])
   })
 })
 

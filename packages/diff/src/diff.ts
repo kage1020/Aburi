@@ -4,19 +4,20 @@ import {
   type SerializeOptions,
   serializeCanonical,
 } from "@aburi/core"
-import type {
-  DiffResult,
-  DiffSkippedFile,
-  IR,
-  IRRef,
-  IRSymbol,
-  Logger,
-  NotComparedFile,
-  Summary,
-  SymbolChange,
-  SymbolId,
-  SymbolRemoved,
-  SymbolUnknown,
+import {
+  type DiffResult,
+  type DiffSkippedFile,
+  type IR,
+  type IRRef,
+  type IRSymbol,
+  type Logger,
+  type NotComparedFile,
+  representativeSymbol,
+  type Summary,
+  type SymbolChange,
+  type SymbolId,
+  type SymbolRemoved,
+  type SymbolUnknown,
 } from "@aburi/types"
 import {
   type AbsentSide,
@@ -41,7 +42,7 @@ import {
   survivorsOf,
 } from "./match"
 import { computeSlices } from "./slice"
-import { classifyStatus, dropDirection, headIdsByBaseId, representativeSymbol } from "./status"
+import { classifyStatus, dropDirection, headIdsByBaseId } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 

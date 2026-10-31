@@ -354,9 +354,12 @@ describe("aburi diff --fail-on", () => {
       paths.head,
       ...gate,
     ])
+    const lines = stderr.split("\n")
     return {
       code,
-      tripped: stderr.split("\n").filter((line) => line.startsWith("--fail-on")),
+      tripped: lines.filter((line) => line.startsWith("--fail-on")),
+      named: lines.filter((line) => line.startsWith("  ")),
+      noted: lines.filter((line) => line.startsWith("⚠ --fail-on")),
       stderr,
     }
   }
@@ -402,42 +405,44 @@ describe("aburi diff --fail-on", () => {
 
     const FIXTURE_GONE = documentWith({ symbols: [ALPHA, BETA] })
     const BOTH_GONE = documentWith({ symbols: [ALPHA] })
+    const FIXTURE_GONE_ALPHA_EDITED = documentWith({ symbols: [ALPHA_EDITED, BETA] })
 
-    it.each<[string, string, IR, ExitCode, string[]]>([
-      ["non-test", "a removed fixture", FIXTURE_GONE, EXIT.SUCCESS, []],
+    it.each<[string, string, string, IR, ExitCode, string[], string[]]>([
+      ["non-test", "removed", "a removed fixture", FIXTURE_GONE, EXIT.SUCCESS, [], []],
       [
         "all",
+        "removed",
         "a removed fixture",
         FIXTURE_GONE,
         EXIT.GATE,
         ["--fail-on removed tripped (observed: 1 removed)"],
+        ["  ts:src/a.test.ts#fixture"],
       ],
       [
         "non-test",
+        "removed",
         "a removed fixture and a removed Symbol beside it",
         BOTH_GONE,
         EXIT.GATE,
         ["--fail-on removed tripped (observed: 1 removed outside test files)"],
+        ["  ts:src/b.ts#beta"],
       ],
-    ])("%s, over %s, exits %i and prints %j", async (scope, _over, head, code, tripped) => {
-      const run = await diffTo(
-        head,
-        ["--fail-on", "removed", "--fail-on-scope", scope],
-        WITH_FIXTURE,
-      )
-      expect({ code: run.code, tripped: run.tripped }).toEqual({ code, tripped })
-    })
-
-    it("names only the Symbols it counted", async () => {
-      const run = await diffTo(
-        BOTH_GONE,
-        ["--fail-on", "removed", "--fail-on-scope", "non-test"],
-        WITH_FIXTURE,
-      )
-      expect(run.stderr).toContain(
-        "--fail-on removed tripped (observed: 1 removed outside test files)\n  ts:src/b.ts#beta\n",
-      )
-      expect(run.stderr).not.toContain("fixture")
+      [
+        "non-test",
+        "removed,changed",
+        "a removed fixture and a changed Symbol beside it",
+        FIXTURE_GONE_ALPHA_EDITED,
+        EXIT.GATE,
+        ["--fail-on changed tripped (observed: 1 changed outside test files)"],
+        ["  ts:src/a.ts#alpha"],
+      ],
+    ])("%s, --fail-on %s over %s, exits %i, prints %j and names %j", async (scope, spec, _over, head, code, tripped, named) => {
+      const run = await diffTo(head, ["--fail-on", spec, "--fail-on-scope", scope], WITH_FIXTURE)
+      expect({ code: run.code, tripped: run.tripped, named: run.named }).toEqual({
+        code,
+        tripped,
+        named,
+      })
     })
 
     it("refuses a scope it does not know at exit 2", async () => {
@@ -460,33 +465,37 @@ describe("aburi diff --fail-on", () => {
     rules: [rule({ type: "return", expr: "{ symbols: [] }", line: 2 })],
   }
   const KEPT = { ...symbolFor("ts:src/a.ts#emptyIR"), ...TWIN }
-  const DUPLICATE_OF_KEPT = { ...symbolFor("ts:src/b.ts#makeEmptyIR"), ...TWIN }
-  const UNCOUNTED =
-    "⚠ --fail-on removed did not count 1 removal(s) of a duplicate whose body a head Symbol holds (removed:duplicate counts them): ts:src/b.ts#makeEmptyIR."
+  const DUPLICATES = {
+    production: { ...symbolFor("ts:src/b.ts#makeEmptyIR"), ...TWIN },
+    test: { ...symbolFor("ts:src/b.test.ts#makeEmptyIR"), ...TWIN, inTestFile: true as const },
+  }
+  const uncounted = (id: string) =>
+    `⚠ --fail-on removed did not count 1 removal(s) of a duplicate whose body a head Symbol holds (removed:duplicate counts them): ${id}.`
 
-  it.each<[string, ExitCode, string[], boolean]>([
-    ["removed", EXIT.SUCCESS, [], true],
+  it.each<[keyof typeof DUPLICATES, string[], ExitCode, string[], string[]]>([
+    ["production", ["removed"], EXIT.SUCCESS, [], [uncounted("ts:src/b.ts#makeEmptyIR")]],
     [
-      "removed:duplicate",
+      "production",
+      ["removed:duplicate"],
       EXIT.GATE,
       [
         "--fail-on removed:duplicate tripped (observed: 1 removed:duplicate)",
         "  ts:src/b.ts#makeEmptyIR",
       ],
-      false,
+      [],
     ],
-  ])("reads a removed duplicate of a head Symbol under --fail-on %s: exit %i", async (gate, code, tripped, noted) => {
+    ["test", ["removed"], EXIT.SUCCESS, [], [uncounted("ts:src/b.test.ts#makeEmptyIR")]],
+    ["test", ["removed", "--fail-on-scope", "non-test"], EXIT.SUCCESS, [], []],
+  ])("reads a removed duplicate of a head Symbol in %s code under --fail-on %j: exit %i", async (where, gate, code, tripped, noted) => {
     const run = await diffTo(
       documentWith({ symbols: [KEPT] }),
-      ["--fail-on", gate],
-      documentWith({ symbols: [KEPT, DUPLICATE_OF_KEPT] }),
+      ["--fail-on", ...gate],
+      documentWith({ symbols: [KEPT, DUPLICATES[where]] }),
     )
-    const lines = run.stderr.split("\n")
-    const trippedAt = lines.findIndex((line) => line.startsWith("--fail-on"))
     expect({
       code: run.code,
-      tripped: trippedAt === -1 ? [] : lines.slice(trippedAt, trippedAt + 2),
-      noted: lines.includes(UNCOUNTED),
+      tripped: [...run.tripped, ...run.named],
+      noted: run.noted,
     }).toEqual({ code, tripped, noted })
   })
 
