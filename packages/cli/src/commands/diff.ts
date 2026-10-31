@@ -16,10 +16,17 @@ import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-loa
 import type { LogLevel } from "../env"
 import { CliError, errorMessage, internalFault, unplacedErrorCode } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
-import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
+import {
+  evaluateFailOn,
+  type FailOnClause,
+  parseFailOn,
+  type TrippedClause,
+  uncountedDuplicates,
+} from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
 import type { GitRunner } from "../git/runner"
 import { readIR } from "../ir-io"
+import { createLogger } from "../logger"
 import { createOutputDir, removeOutputFile, writeOutputFile } from "../output-file"
 import type { WarnFn } from "../warn"
 import { chooseInputs, type DiffInputs } from "./diff-inputs"
@@ -29,7 +36,7 @@ import {
   type ScanPair,
   scanRevisions,
 } from "./diff-revisions"
-import { faultedSides, warnAboutComparison } from "./diff-warnings"
+import { faultedSides, warnAboutComparison, warnOnUncountedDuplicates } from "./diff-warnings"
 
 export function classifyDiffError(error: DiffError): CliError {
   switch (error.code) {
@@ -67,7 +74,7 @@ export interface DiffReport {
   diffFullMdPath: string | null
   summaryLine: string
   callResolutionLine: string | null
-  triggered: { clause: FailOnClause; observed: number } | null
+  triggered: TrippedClause | null
   faultedScans: readonly DiffSide[] | null
   exitCode: ExitCode
 }
@@ -117,6 +124,9 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       head: irRef(compared.headRef, compared.headIR),
       generator,
       ...(compared.gitRenames === null ? {} : { gitRenames: compared.gitRenames }),
+      // The matcher writes only debug lines, and tracing them walks what it left unpaired, so a run
+      // at any other level is spared the walk.
+      ...(options.logLevel === "debug" ? { logger: createLogger({ minimum: "debug" }) } : {}),
     })
   } catch (error) {
     if (error instanceof DiffError) throw classifyDiffError(error)
@@ -132,6 +142,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       : EXIT.GATE
 
   warnAboutComparison({ ...compared, notCompared: diff.notCompared }, warn)
+  warnOnUncountedDuplicates(uncountedDuplicates(failOn, diff), warn)
   const callResolution = compared.headIR.stats.callResolution
   return {
     ...written,
@@ -148,10 +159,6 @@ function parseFailOnValues(failOn: string | readonly string[]): FailOnClause[] {
   const values = [failOn].flat()
   // No value at all is refused as an empty one is: either would leave the gate checking nothing.
   return (values.length === 0 ? [""] : values).flatMap((value) => parseFailOn(value))
-}
-
-export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {
-  return formatTriggered(triggered.clause, triggered.observed)
 }
 
 async function removeEarlierReport(outputDir: string): Promise<void> {

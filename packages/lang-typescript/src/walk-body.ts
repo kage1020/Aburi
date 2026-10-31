@@ -6,9 +6,14 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, thrownValue } from "./ast-helpers"
+import { bodyNodesOf, firstNonCommentChild, throughParentheses, thrownValue } from "./ast-helpers"
 import { readCall } from "./callee"
-import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
+import {
+  functionValuedField,
+  heldFunctionBodies,
+  isConstructorMember,
+  memberSymbolSegment,
+} from "./class-members"
 import { containsEarlyExit } from "./early-exit"
 import { objectEntryOf } from "./object-members"
 import { conditionText, isTrivialExpr, LOOP_KINDS, makeRule, ruleText } from "./rules"
@@ -53,18 +58,16 @@ function visitOwnClassBody(
 ): void {
   for (const member of body.namedChildren) {
     if (member === null) continue
-    const memberBody = memberBodySkippedHere(classNode, member)
-    if (memberBody === null) {
+    const memberBodies = memberBodiesSkippedHere(classNode, member)
+    if (memberBodies.length === 0) {
       visitNode(member, rules, calls)
       continue
     }
-    const parameters = memberBody.parent?.childForFieldName("parameters") ?? null
-    if (parameters === null) {
-      visitExcluding(member, [memberBody], rules, calls)
-      continue
-    }
-    visitExcluding(member, [memberBody, parameters], rules, calls)
-    visitParameterDecorators(parameters, rules, calls)
+    const parameterLists = memberBodies.flatMap(
+      (memberBody) => memberBody.parent?.childForFieldName("parameters") ?? [],
+    )
+    visitExcluding(member, [...memberBodies, ...parameterLists], rules, calls)
+    for (const parameters of parameterLists) visitParameterDecorators(parameters, rules, calls)
   }
 }
 
@@ -97,8 +100,13 @@ function visitExcluding(
 ): void {
   for (const part of node.namedChildren) {
     if (part === null || skipped.some((s) => s.id === part.id)) continue
-    if (skipped.some((s) => isAncestorOf(part, s))) visitExcluding(part, skipped, rules, calls)
-    else visitNode(part, rules, calls)
+    if (!skipped.some((s) => isAncestorOf(part, s))) {
+      visitNode(part, rules, calls)
+      continue
+    }
+    // Calls a skipped body sits under run on the owner; only the body waits for the member's call.
+    if (part.type === "call_expression") recordCall(part, calls)
+    visitExcluding(part, skipped, rules, calls)
   }
 }
 
@@ -118,10 +126,13 @@ function isAncestorOf(node: Node, descendant: Node): boolean {
   return false
 }
 
-function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
-  if (memberSymbolSegment(classNode, member) === null) return null
-  if (isConstructorMember(member)) return null
-  return (functionValuedField(member) ?? member).childForFieldName("body")
+function memberBodiesSkippedHere(classNode: Node, member: Node): Node[] {
+  if (memberSymbolSegment(classNode, member) === null) return []
+  if (isConstructorMember(member)) return []
+  const held = functionValuedField(member)
+  if (held !== null) return heldFunctionBodies(held)
+  const body = member.childForFieldName("body")
+  return body === null ? [] : [body]
 }
 
 function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
@@ -197,8 +208,9 @@ function visitIfStatement(node: Node, rules: Rule[], calls: CallCandidate[]): vo
 }
 
 function visitReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
-  const value = node.namedChildren[0] ?? null
-  if (value === null) return
+  const written = firstNonCommentChild(node)
+  if (written === null) return
+  const value = throughParentheses(written)
   if (isCall(value)) {
     recordCall(value, calls)
     visitChildren(value, rules, calls)
@@ -210,7 +222,7 @@ function visitReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[])
 }
 
 function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): void {
-  const value = unparenthesized(body)
+  const value = throughParentheses(body)
   if (!isCall(value) && !isTrivialExpr(value)) {
     rules.push(makeRule("return", body, { expr: ruleText(value) }))
   }
@@ -219,14 +231,6 @@ function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): vo
 
 function isConciseBody(body: Node): boolean {
   return body.parent?.type === "arrow_function" && body.type !== "statement_block"
-}
-
-function unparenthesized(node: Node): Node {
-  if (node.type !== "parenthesized_expression") return node
-  const [only, ...rest] = node.namedChildren.filter(
-    (child): child is Node => child !== null && child.type !== "comment",
-  )
-  return only !== undefined && rest.length === 0 ? only : node
 }
 
 function isCall(node: Node): boolean {

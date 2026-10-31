@@ -1,4 +1,4 @@
-import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
+import type { Symbol as IRSymbol, SymbolChange, SymbolId } from "@aburi/types"
 
 export type SymbolStatus = "unchanged" | "moved" | "changed" | "moved+changed" | "dropped-toggled"
 
@@ -26,4 +26,12 @@ export function representativeSymbol(change: SymbolChange): IRSymbol {
   return change.status === "added" || change.status === "removed" || change.status === "unknown"
     ? change.symbol
     : change.after
+}
+
+export function headIdsByBaseId(changes: readonly SymbolChange[]): ReadonlyMap<SymbolId, SymbolId> {
+  const out = new Map<SymbolId, SymbolId>()
+  for (const change of changes) {
+    if ("before" in change) out.set(change.before.id, change.after.id)
+  }
+  return out
 }

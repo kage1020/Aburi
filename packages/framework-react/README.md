@@ -16,6 +16,8 @@ Recognised shapes:
 | `const Ctx = createContext(…)` | `framework:react:context` | that const's own initializer is a `createContext(...)` / `React.createContext(...)` call |
 | `const B = forwardRef((p,r) => …)` | `framework:react:forward-ref` | that const's own initializer is a `forwardRef(...)` / `React.forwardRef(...)` call |
 | `const M = memo(Inner)` | `framework:react:memo` | that const's own initializer is a `memo(...)` / `React.memo(...)` call |
+| `export default forwardRef((p,r) => …)` | `framework:react:forward-ref` | the default export is a `forwardRef(...)` call handed a function |
+| `export default memo(function Row() { … })` | `framework:react:memo` | the default export is a `memo(...)` call handed a function |
 | `function P() { return <Ctx.Provider>…</Ctx.Provider> }` | `framework:react:provider` | PascalCase + a returned `<X.Provider>` |
 | `function withAuth(C) { … }` | `framework:react:hoc` | `/^with[A-Z]/` name |
 
@@ -32,7 +34,9 @@ so `memo(forwardRef(…))` is a memo. A const whose initializer only contains a
 wrapper call (in an array or object literal, handed to another call or to
 `new`, in one branch of a conditional), or that a destructuring pattern pulls
 out of one, has no wrapper role: it holds that expression's value, not
-necessarily the wrapped component.
+necessarily the wrapped component. A default export written as a wrapper call
+handed a function is a `const` named `<default>` to `@aburi/lang-typescript`,
+and its value is read the same way.
 
 That call is named in `derivedBy` by the name read off the syntax tree: the
 name the callee's receiver chain starts from, read through the same wrappers,
@@ -76,6 +80,10 @@ Not classified today (documented for completeness):
   type resolves to `ReactNode`, whether an HOC parameter is typed as a
   component). The JSX-body heuristic used here is the most reliable pre-LSP
   signal.
+- A default export written as a call handed no function
+  (`export default memo(Row)`, `export default createContext(…)`). The
+  language plugin gives it no Symbol, so there is nothing to classify; `Row`
+  is classified where it is declared.
 - A wrapper behind an old-style type assertion (`<Context<T>>createContext(…)`,
   `<any>memo(Inner)`, written in a `.ts` file) — the initializer is read
   through `as`, `satisfies`, `!` and parentheses only, as

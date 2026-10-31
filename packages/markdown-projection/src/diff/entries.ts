@@ -4,6 +4,7 @@ import type {
   SymbolDroppedToggled,
   SymbolMoved,
   SymbolMovedChanged,
+  SymbolRemoved,
   SymbolUnknown,
 } from "@aburi/types"
 import { renderSymbolBlock } from "../component"
@@ -35,8 +36,19 @@ export function renderMovedChanged(items: readonly SymbolMovedChanged[]): string
   ])
 }
 
-export function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
+export function renderAdded(symbols: readonly IRSymbol[]): string[] {
   return symbols.flatMap((symbol) => symbolEntry(symbol, []))
+}
+
+export function renderRemoved(items: readonly SymbolRemoved[]): string[] {
+  return items.flatMap((item) => {
+    const survivor = item.duplicateOf ?? null
+    const duplicate =
+      survivor === null
+        ? []
+        : [`**Duplicate of**: ${inlineCode(survivor)}, which holds the same body`]
+    return symbolEntry(item.symbol, duplicate)
+  })
 }
 
 export function renderUnknown(items: readonly SymbolUnknown[]): string[] {

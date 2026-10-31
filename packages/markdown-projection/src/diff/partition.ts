@@ -5,6 +5,7 @@ import type {
   SymbolDroppedToggled,
   SymbolMoved,
   SymbolMovedChanged,
+  SymbolRemoved,
   SymbolUnknown,
 } from "@aburi/types"
 import { compareStrings } from "../format"
@@ -15,7 +16,7 @@ export interface Buckets {
   apiChanged: ChangedEntry[]
   logicOnly: ChangedEntry[]
   added: IRSymbol[]
-  removed: IRSymbol[]
+  removed: SymbolRemoved[]
   movedChanged: SymbolMovedChanged[]
   moved: SymbolMoved[]
   droppedToggled: SymbolDroppedToggled[]
@@ -44,7 +45,7 @@ export function partition(changes: readonly SymbolChange[]): Buckets {
         out.added.push(c.symbol)
         break
       case "removed":
-        out.removed.push(c.symbol)
+        out.removed.push(c)
         break
       case "moved":
         out.moved.push(c)
@@ -69,7 +70,7 @@ export function partition(changes: readonly SymbolChange[]): Buckets {
   out.apiChanged.sort(byAfterId)
   out.logicOnly.sort(byAfterId)
   out.added.sort(byId)
-  out.removed.sort(byId)
+  out.removed.sort((a, b) => byId(a.symbol, b.symbol))
   out.movedChanged.sort(byAfterId)
   out.moved.sort(byAfterId)
   out.droppedToggled.sort(byAfterId)

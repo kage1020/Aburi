@@ -10,9 +10,12 @@ import type {
   IR,
   IRRef,
   IRSymbol,
+  Logger,
   NotComparedFile,
   Summary,
   SymbolChange,
+  SymbolId,
+  SymbolRemoved,
   SymbolUnknown,
 } from "@aburi/types"
 import {
@@ -35,15 +38,17 @@ import {
   matchStageLogicFingerprint,
   matchStageNameSignature,
   type SymbolPair,
+  survivorsOf,
 } from "./match"
 import { computeSlices } from "./slice"
-import { classifyStatus, dropDirection, representativeSymbol } from "./status"
+import { classifyStatus, dropDirection, headIdsByBaseId, representativeSymbol } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
-interface UnknownCounters {
+interface AlwaysEmittedCounters {
   unknown: number
   depsUnknown: number
+  removedDuplicates: number
 }
 
 export interface DiffInput {
@@ -54,13 +59,14 @@ export interface DiffInput {
   generator?: { name: string; version: string }
   gitRenames?: GitRenameMap | null
   delta?: DeltaOptions
+  logger?: Logger
 }
 
 const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
 
 export function buildDiff(
   input: DiffInput,
-): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & UnknownCounters } {
+): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & AlwaysEmittedCounters } {
   assertDiffable(input.baseIR, "baseIR")
   assertDiffable(input.headIR, "headIR")
   ensureSchemasAgree(input.baseIR, input.headIR)
@@ -71,7 +77,7 @@ export function buildDiff(
     input.gitRenames ?? null,
   )
   const stage3 = matchStageLogicFingerprint(stage2.remainingBase, stage2.remainingHead)
-  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead)
+  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead, input.logger)
   const stageDroppedWeak = matchStageDroppedWeak(stage4.remainingBase, stage4.remainingHead)
 
   const pairs: SymbolPair[] = [
@@ -82,9 +88,10 @@ export function buildDiff(
     ...stageDroppedWeak.matched,
   ]
 
-  const summary: Summary & UnknownCounters = {
+  const summary: Summary & AlwaysEmittedCounters = {
     unknown: 0,
     depsUnknown: 0,
+    removedDuplicates: 0,
     added: 0,
     removed: 0,
     moved: 0,
@@ -169,6 +176,7 @@ export function buildDiff(
     summary.added++
     symbols.push({ status: "added", symbol: headSymbol })
   }
+  const removed: IRSymbol[] = []
   for (const baseSymbol of stageDroppedWeak.remainingBase) {
     if (baseSymbol.dropped) {
       summary.droppedRemoved++
@@ -180,8 +188,14 @@ export function buildDiff(
       symbols.push(unknownSymbol(baseSymbol, "head", lost))
       continue
     }
+    removed.push(baseSymbol)
+  }
+  const survivors = survivorsOf(removed, input.headIR.symbols)
+  for (const baseSymbol of removed) {
+    const duplicateOf = survivors.get(baseSymbol.id) ?? null
     summary.removed++
-    symbols.push({ status: "removed", symbol: baseSymbol })
+    if (duplicateOf !== null) summary.removedDuplicates++
+    symbols.push(removedSymbol(baseSymbol, duplicateOf))
   }
 
   const components = diffComponents(input.baseIR.components, input.headIR.components)
@@ -189,7 +203,12 @@ export function buildDiff(
   summary.componentsRemoved = components.removed.length
   summary.componentsChanged = components.changed.length
 
-  const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, sides)
+  const dependencies = diffDependencies(
+    input.baseIR.dependencies,
+    input.headIR.dependencies,
+    sides,
+    headIdsByBaseId(symbols),
+  )
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
   summary.depsUnknown = dependencies.unknown.length
@@ -215,6 +234,10 @@ export function buildDiff(
     slices,
     notCompared: filesNeitherSideRead(sides),
   }
+}
+
+function removedSymbol(symbol: IRSymbol, duplicateOf: SymbolId | null): SymbolRemoved {
+  return { status: "removed", symbol, duplicateOf }
 }
 
 function unknownSymbol(

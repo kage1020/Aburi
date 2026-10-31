@@ -74,5 +74,10 @@ export function normalizeImportEdge(edge: ImportEdge): ImportEdge {
 
 export function normalizeCallStrings(call: CallCandidate): CallCandidate {
   const target = toNfc(call.target)
-  return target === call.target ? call : { ...call, target }
+  const written = call.receiverType
+  const receiverType = typeof written === "string" ? toNfc(written) : written
+  if (target === call.target && receiverType === written) return call
+  const next: CallCandidate = { ...call, target }
+  if (receiverType !== undefined) next.receiverType = receiverType
+  return next
 }

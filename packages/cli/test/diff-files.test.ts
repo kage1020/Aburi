@@ -40,7 +40,11 @@ describe("aburi diff --base/--head", () => {
     const { report } = await diffDocuments(workspace.root, EMPTY, ADDED_FOO, { failOn: "added" })
 
     expect(report.exitCode).toBe(EXIT.GATE)
-    expect(report.triggered).toEqual({ clause: { token: "added", threshold: null }, observed: 1 })
+    expect(report.triggered).toEqual({
+      clause: { token: "added", threshold: null },
+      observed: 1,
+      symbols: ["ts:src/a.ts#Foo"],
+    })
   })
 
   it.each([

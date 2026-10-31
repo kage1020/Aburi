@@ -76,7 +76,7 @@ interface EffectPlugin {
 ### 4.2 `CallCandidate` (from the language plugin)
 
 Normatively defined in [`lang-plugin.md`](./lang-plugin.md) §4.4. This document only references the same type.
-Summary: the 6 fields `{ target, line, argumentCount, inAwait, inNew, literalArgs }`. `literalArgs` covers cases such as wanting to inspect the contents of an SQL string (non-literals are `null`).
+Summary: the 6 fields `{ target, line, argumentCount, inAwait, inNew, literalArgs }`, and two optional ones, `dynamicReceiver` and `receiverType`. `literalArgs` covers cases such as wanting to inspect the contents of an SQL string (non-literals are `null`). `receiverType` is the named type the receiver is declared with, when the language plugin can read one (§5.4).
 
 `target` is contract-guaranteed non-empty with no empty segments (lang-plugin.md §4.4, "Normalized-callee contract"). Effect plugins enforce that contract instead of coding around it: `assertNonEmptySegments` from `@aburi/plugin-registry/plugin-input` splits the target and throws on a violation, and `hasMatchingImport` does the same for `ImportEdge.source`. Both live in the registry rather than in each plugin so the next effect plugin inherits identical messages and identical fail-fast ordering. The guards ship as a dedicated subpath so importing them does not pull the registry's manifest validator (and its schema compilation) into a classifier's startup path.
 
@@ -201,9 +201,11 @@ The last two set the **tier**, they do not gate the classification:
 | `dynamicReceiver` (a collapsed expression) | `confidence: "medium"`, whatever it is spelled |
 | more arguments than the method takes | `confidence: "medium"` |
 
-`medium` rather than `null` because the two cases behind an unrecognized name — a client under a house naming convention, and an unrelated object of the same shape — are not separable from the callee string, and effect plugins never see the AST (§11.1) where the binding that would separate them lives. Dropping the first is as wrong as claiming the second at the tier a hand-annotated effect gets, so the uncertainty is recorded instead of resolved by guessing. This is the same tier `@aburi/framework-express` assigns a route that matches the shape without an import anchor.
+`medium` rather than `null` because the two cases behind an unrecognized name — a client under a house naming convention, and an unrelated object of the same shape — are not separable from the callee string, and effect plugins never see the AST (§6.1): the binding that would separate them reaches a plugin only where `CallCandidate.receiverType` carries it. Dropping the first is as wrong as claiming the second at the tier a hand-annotated effect gets, so the uncertainty is recorded instead of resolved by guessing. This is the same tier `@aburi/framework-express` assigns a route that matches the shape without an import anchor.
 
 A plugin whose vocabulary is its own — a `@Controller` decorator resolved back to the framework's package — has nothing to disambiguate and stays at `high` on shape alone. A `$`-prefixed name the library owns outright is close to that, but not the same thing: the receiver still decides whose `$transaction` it is.
+
+**Receiver type.** Where the language plugin reads the type a receiver is declared with (`CallCandidate.receiverType`, lang-plugin.md §4.4), a match identifies the receiver as a recognised name does: `this.events.emit(…)` beside `constructor(private events: EventEmitter2)` is `EventEmitter2`'s `emit` whatever the field is called. A plugin that compares it does so against what the file's imports bind — the class's own name, the local an aliased import gives it, `<namespace>.<class>`, or the local of a default import where the module exports the class as its default — never against a spelling it expects, so a homegrown class of the same name, or one from another module, is not taken for the library's. A match is `high` on its own. The name check still comes first, so a type that binds something else does not veto a recognised name, and a receiver both checks place keeps the name's tag; the field's absence is no evidence either way.
 
 ## 6. Cooperation with Language Plugins
 
@@ -239,7 +241,7 @@ Writing a drop-only plugin is also possible (`provides.effects: []` but declarin
 
 | plugin | example recognized callees | main effect ids |
 |---|---|---|
-| `@aburi/effects-nest` | `EventEmitter2` / `eventBus` `.emit(...)` | `event.publish` |
+| `@aburi/effects-nest` | `EventEmitter2` / `eventBus` `.emit(...)`, and `.emit(...)` on a field declared as `EventEmitter2` | `event.publish` |
 | `@aburi/effects-prisma` | `prisma.*.{find*,create,update,upsert,delete}` | `db.read` / `db.write` |
 | `@aburi/effects-drizzle` | `db.select().from(...)` / `db.insert(...)` | `db.read` / `db.write` |
 | `@aburi/effects-trpc` | `trpc.*.{query,mutation}` and the React Query hooks | `network.rpc` |

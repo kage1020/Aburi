@@ -1,9 +1,11 @@
-import type { DiffResult, SymbolChange, SymbolChanged, SymbolMovedChanged } from "@aburi/types"
+import type { DiffResult, SymbolChange, SymbolId } from "@aburi/types"
 import { assertNever } from "./errors"
+import { MAX_LISTED } from "./listing"
 
 export type FailOnStatusToken =
   | "added"
   | "removed"
+  | "removed:duplicate"
   | "changed"
   | "moved"
   | "moved+changed"
@@ -28,6 +30,7 @@ export interface FailOnClause {
 const STATUS_TOKENS: ReadonlySet<FailOnStatusToken> = new Set([
   "added",
   "removed",
+  "removed:duplicate",
   "changed",
   "moved",
   "moved+changed",
@@ -120,81 +123,103 @@ function parseToken(raw: string): FailOnToken {
   throw new ClauseError(`unknown token "${raw}"`)
 }
 
-export function evaluateClause(
-  clause: FailOnClause,
-  diff: DiffResult,
-): { triggered: boolean; observed: number } {
-  const observed = countMatches(clause.token, diff)
+export interface ClauseOutcome {
+  triggered: boolean
+  observed: number
+  symbols: readonly SymbolId[]
+}
+
+export function evaluateClause(clause: FailOnClause, diff: DiffResult): ClauseOutcome {
+  const symbols = diff.symbols.filter((change) => counts(clause.token, change)).map(entryId)
+  const observed = symbols.length
   const triggered = clause.threshold === null ? observed > 0 : observed > clause.threshold
-  return { triggered, observed }
+  return { triggered, observed, symbols }
+}
+
+export interface TrippedClause {
+  clause: FailOnClause
+  observed: number
+  symbols: readonly SymbolId[]
 }
 
 export function evaluateFailOn(
   clauses: readonly FailOnClause[],
   diff: DiffResult,
 ): {
-  firstTriggered: { clause: FailOnClause; observed: number } | null
-  evaluations: { clause: FailOnClause; observed: number; triggered: boolean }[]
+  firstTriggered: TrippedClause | null
+  evaluations: ({ clause: FailOnClause } & ClauseOutcome)[]
 } {
   const evaluations = clauses.map((clause) => ({ clause, ...evaluateClause(clause, diff) }))
   const first = evaluations.find((e) => e.triggered)
   return {
-    firstTriggered: first === undefined ? null : { clause: first.clause, observed: first.observed },
+    firstTriggered:
+      first === undefined
+        ? null
+        : { clause: first.clause, observed: first.observed, symbols: first.symbols },
     evaluations,
   }
 }
 
-function countMatches(token: FailOnToken, diff: DiffResult): number {
-  const summary = diff.summary
+function counts(token: FailOnToken, change: SymbolChange): boolean {
   switch (token) {
     case "added":
-      return summary.added
-    case "removed":
-      return summary.removed
     case "changed":
-      return summary.changed
     case "moved":
-      return summary.moved
     case "moved+changed":
-      return summary.movedChanged
     case "dropped-toggled":
-      return summary.droppedToggled
-    case "dropped-toggled:to-dropped":
-      return diff.symbols.filter(
-        (s) => s.status === "dropped-toggled" && s.direction === "to-dropped",
-      ).length
-    case "dropped-toggled:to-kept":
-      return diff.symbols.filter((s) => s.status === "dropped-toggled" && s.direction === "to-kept")
-        .length
     case "unknown":
-      return diff.symbols.filter((s) => s.status === "unknown").length
+      return change.status === token
+    case "removed":
+      return change.status === "removed" && (change.duplicateOf ?? null) === null
+    case "removed:duplicate":
+      return change.status === "removed" && (change.duplicateOf ?? null) !== null
+    case "dropped-toggled:to-dropped":
+      return change.status === "dropped-toggled" && change.direction === "to-dropped"
+    case "dropped-toggled:to-kept":
+      return change.status === "dropped-toggled" && change.direction === "to-kept"
     case "api-changed":
-      return countDeltaAxis(diff.symbols, "apiChanged")
+      return deltaMoved(change, "apiChanged")
     case "logic-changed":
-      return countDeltaAxis(diff.symbols, "logicChanged")
+      return deltaMoved(change, "logicChanged")
     case "syntax-changed":
-      return countDeltaAxis(diff.symbols, "syntaxChanged")
+      return deltaMoved(change, "syntaxChanged")
     case "confidence-changed":
-      return countDeltaAxis(diff.symbols, "confidenceChanged")
+      return deltaMoved(change, "confidenceChanged")
     default:
       return assertNever(token, "FailOnToken")
   }
 }
 
-function countDeltaAxis(
-  changes: readonly SymbolChange[],
+function deltaMoved(
+  change: SymbolChange,
   axis: "apiChanged" | "logicChanged" | "syntaxChanged" | "confidenceChanged",
-): number {
-  let count = 0
-  for (const c of changes) {
-    if (c.status !== "changed" && c.status !== "moved+changed") continue
-    const delta = (c as SymbolChanged | SymbolMovedChanged).delta
-    if (delta[axis]) count++
-  }
-  return count
+): boolean {
+  return (
+    (change.status === "changed" || change.status === "moved+changed") &&
+    change.delta[axis] === true
+  )
 }
 
-export function formatTriggered(clause: FailOnClause, observed: number): string {
+export function uncountedDuplicates(
+  clauses: readonly FailOnClause[],
+  diff: DiffResult,
+): SymbolId[] {
+  const tokens = new Set(clauses.map((clause) => clause.token))
+  if (!tokens.has("removed") || tokens.has("removed:duplicate")) return []
+  return diff.symbols.filter((change) => counts("removed:duplicate", change)).map(entryId)
+}
+
+function entryId(change: SymbolChange): SymbolId {
+  return "symbol" in change ? change.symbol.id : change.after.id
+}
+
+export function formatTriggered({ clause, observed, symbols }: TrippedClause): string {
   const rendered = clause.threshold === null ? clause.token : `${clause.token}:>${clause.threshold}`
-  return `--fail-on ${rendered} tripped (observed: ${observed} ${clause.token})`
+  const named = symbols.slice(0, MAX_LISTED).map((id) => `  ${id}`)
+  const unnamed = symbols.length - named.length
+  return [
+    `--fail-on ${rendered} tripped (observed: ${observed} ${clause.token})`,
+    ...named,
+    ...(unnamed > 0 ? [`  … and ${unnamed} more`] : []),
+  ].join("\n")
 }

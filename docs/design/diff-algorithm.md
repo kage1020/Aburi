@@ -166,7 +166,7 @@ An owner and its members are paired independently. `class Invoice { render() }` 
 
 The kind is part of the group key for the reason it is part of stage 4's bucket key (§3.4.0): a function and a class are never one Symbol, whatever their bodies hash to. It also stops a Symbol whose kind changes while it moves file, on any logic fingerprint, non-empty included: a method extracted into a top-level function, or an `enum` rewritten as an `as const` object in another file, is added + removed, because stage 4's bucket carries the kind as well. Within one file the id survives the kind change and stage 1 pairs the two.
 
-Every Symbol stage 3 does not pair is handed to stage 4, a group that missed the bar included. What stage 4 can do with it is stage 4's rule: it skips a head with a null signature, and a Symbol on either side whose name says one word (§3.4.3), so for those Symbols stage 3 was the last stage to read them.
+Every Symbol stage 3 does not pair is handed to stage 4, a group that missed the bar included. What stage 4 can do with it is stage 4's rule: it skips a Symbol on either side whose name says one word or that has a null signature (§3.4.3), so for those Symbols stage 3 was the last stage to read them.
 
 Dropped symbols all share the fingerprint `"000000000000"`, so they would collide massively under the same hash. Dropped-to-dropped matching is excluded from stages 3/4 and handled by a dedicated weak matcher (§3.4.5).
 
@@ -174,15 +174,16 @@ Dropped symbols all share the fingerprint `"000000000000"`, so they would collid
 
 ```
 # Bucket pre-filter (O(N) hash bucketing) suppresses K^2
-buckets = group remainingBase by (kind, signatureNullness)
-        → { (kind, sigNull): [base symbols] }
+buckets = group remainingBase by kind
+        → { kind: [base symbols] }
         skipping any base with nameEvidence(b.name) <= 1        # §3.4.3, inadmissible
+        and then any base with b.signature === null             # §3.4.3, inadmissible
 
 candidates = []
 for h in remainingHead:
-  if h.signature === null: continue                       # §3.4.3, inadmissible
   if nameEvidence(h.name) <= 1: continue                  # §3.4.3, inadmissible
-  bucket = buckets.get((h.kind, 'has-sig'))
+  if h.signature === null: continue                       # §3.4.3, inadmissible
+  bucket = buckets.get(h.kind)
   if !bucket: continue
   threshold = thresholdFor(h.name)                        # §3.4.3
   for b in bucket:
@@ -200,7 +201,7 @@ for (b, h, score) in acceptInScoreOrder(candidates):      # §3.8
 #### 3.4.0 Bucket pre-filter (mandatory)
 
 Stage 4 implemented as O(K^2) drops below practical speed at K=500 (heavy use of the Repository pattern / Zod schemas).
-As a bucket pre-filter, hash-partition by the combination `(kind, signature === null ? 'no-sig' : 'has-sig')` and evaluate each head only within its corresponding bucket.
+As a bucket pre-filter, hash-partition by `kind` and evaluate each head only within its kind's bucket. A Symbol with no signature never reaches a bucket (§3.4.3).
 
 **That key alone is not a partition of anything.** A directory rename with no git rename information — the §9.4 plugin-difference and §11.5 shallow-clone situations — leaves every method of the codebase in one bucket, so "a few dozen per bucket" describes the easy case rather than the hard one. Measured at 4000 symbols in one bucket, stage 4 took 64 s against §8.3's 2 s target when that was reported. Two later changes to the per-comparison cost — a per-pass token memo, and settling candidates in one sweep rather than per head — brought it to 14 s, which is what the table below measures against.
 
@@ -266,11 +267,13 @@ The integers are products of at most four counts — the member names' token uni
 Two kinds of Symbol are skipped before any threshold applies, because for them a high score means the evidence is missing rather than that the two names resemble each other. Neither is expressible as a threshold, and one of them wants a bar above the top of the scale:
 
 ```
-if h.signature === null:            skip the head entirely, leave for added/removed
 if nameEvidence(s.name) <= 1:       skip the Symbol, either side, leave for added/removed
+if s.signature === null:            skip the Symbol, either side, leave for added/removed
 ```
 
-**A null signature** makes `signatureSimilarity(null, null)` return 1.0 against every candidate. The bucket key partitions by signature nullness, so a signature-less head only ever sees signature-less candidates — there is nothing in its bucket it could legitimately pair with, and the rule needs no condition on them.
+The name is read first, so a Symbol that fails both is skipped for its name, which is what §3.4.7 traces.
+
+**A null signature** makes `signatureSimilarity(null, null)` return 1.0, so two signature-less Symbols would pair on their names alone. A head with no signature is the case the rule exists for. A base with none could only meet a head with a signature, where the axis is 0 and the composite at most 0.7, under every row of the table — so the rule reads both sides at no cost to recall, and a signature-less base stays out of the buckets.
 
 **A one-token qualified name** is the whole of what §3.4 has to read about that Symbol's identity. `main` supplies one word and an empty owner, so a top-level `main(x: string): void` scores 1.0 against any other top-level `main(x: string): void` and two unrelated CLI entry points are reported as one `moved+changed` — which `--fail-on moved` gates on. The first threshold row was written to prevent exactly this and could not, because 1.0 is the top of the scale.
 
@@ -376,7 +379,7 @@ Six is the longest word the measure assumes, not the longest there is: `アプ�
 
 Two things must hold at once. A method whose class was renamed (`UserRepo.getUser` → `UsersRepository.getUser`) must pair, and a same-named method of a *different* class (`AdminRepo.getUser`) must not.
 
-The owner is therefore a **gate**, not a term in the score: a pair whose owners are incompatible is never scored.
+The owner is therefore a **gate**, not a term in the score: a pair whose owners are incompatible is never scored for pairing. §3.4.7's trace scores one only to decide whether to name it.
 
 ```
 ownerOf(qname):
@@ -463,6 +466,23 @@ Both non-null →
 - set match ratio of throws (order-insensitive)
 averaged.
 
+#### 3.4.7 What stage 4 says about a refusal
+
+Three of the rules stage 4 refuses on are traced: a Symbol whose name says too little and a Symbol with no signature (both §3.4.3), and a pair whose owners do not correspond (§3.4.6). The report says nothing about why a Symbol was left unpaired — the gate refuses `UserRepo` → `UsersRepository` deliberately, but a reviewer looking at the churn has nothing pointing them here. So each refusal is written to the run's `Logger` at `debug`, when `DiffInput.logger` is given, as one line naming the Symbol, or both Symbols of the refused pair, and the rule:
+
+```
+diff/stage4: ts:src/a.ts#render is not compared by name: its name says too little to pair on
+diff/stage4: ts:src/a.ts#buildConfig is not compared by name: it has no signature, and a name alone does not pair
+diff/stage4: ts:src/a.ts#UserRepo.findUser and ts:src/b.ts#UsersRepository.findUser are not paired: their owners do not correspond
+```
+
+- **A Symbol line** is written for every non-dropped Symbol either rule turns away, including one with nothing to pair with, and stands for one entry of the report: `added` or `removed`, or `unknown` where the other side skipped its file (§3.5.1). A Symbol that fails both rules is traced once, for its name, which §3.4.3 reads first.
+- **A gate line** is written after the pairings are chosen (§3.8), for a pair whose base and head both reach stage 5 unpaired and which cleared its row's threshold. So each line names two Symbols the report lists separately, which only the gate kept from being a candidate. A pair either of whose Symbols paired elsewhere is not traced, nor one that scored below its row, which is a judgement on the evidence rather than a rule. The line is per pair, so N such bases and M such heads write up to N × M lines.
+
+The kind in §3.4.0's bucket key is a rule too and is not traced: a function and a class are never one Symbol (§3.3), so there is no near miss for a line to explain.
+
+The channel is a diagnostic one: nothing it writes reaches the diff result or `aburi.diff.v1.json`, and `buildDiff`'s answer is the same with and without a logger. Tracing the gate walks the buckets again for the Symbols left unpaired, so it runs only when a logger is given, and `aburi diff` gives the matcher one only at `--log-level debug` or `ABURI_LOG_LEVEL=debug`, where the lines show on stderr.
+
 ### 3.5 Stage 5: the remainder is added / removed / unknown
 
 Symbols not paired by this point are finalized:
@@ -470,6 +490,8 @@ Symbols not paired by this point are finalized:
 - `remainingHead` → status: `added`
 - `remainingBase` → status: `removed`
 - …unless the *other* document never analysed the file the Symbol lives in, in which case the status is `unknown` (§3.5.1)
+
+A `removed` entry also names the head Symbol it duplicated, when one holds its body (§3.5.2).
 
 #### 3.5.1 `unknown`: the other document could not look
 
@@ -485,6 +507,33 @@ Four properties this rests on:
 When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.6).
 
 `dependencies[]` gets the same treatment on its own terms — see §6.2.1. What stays outside both is a file **both** revisions skipped: neither document holds a Symbol or an edge from it, so there is no leftover to classify and the diff is silent about a file it never compared. That is a statement about the run rather than about any entry, and `aburi diff` makes it on stderr (cli-spec.md §6.6) and in the artifact, in `notCompared[]` (§6.3).
+
+#### 3.5.2 `duplicateOf`: a removal whose body a head Symbol holds
+
+Matching is one-to-one, so deduplicating N identical helpers into one — two byte-identical `emptyIR` builders in two test files becoming one in a shared fixture — pairs one of them with the survivor (§3.3) and leaves N−1 `removed`. No care on the author's side changes that, and a bare removal reads like deleted behaviour, so `--fail-on removed` blocked a deduplication every reviewer would approve. The evidence that the behaviour survived is already in the documents: the survivor holds the removed Symbol's body.
+
+It is still a removal, so `removed` stays its status and `duplicateOf` names the survivor beside it. The Symbol is gone, and what the same body proves stops at its behaviour (below), so a reader that does not know the field reads the entry as a deletion, which is true, and errs toward caution. That is the shape §4.2 turns down for a Symbol whose file one side never read, and for the opposite reason: there `removed` would claim a deletion nothing showed. `--fail-on removed` reads the field and counts the removals that duplicate nothing, and `removed:duplicate` counts the others ([cli-spec.md](./cli-spec.md) §6.7).
+
+```
+for each removed Symbol r with no extKind whose logic names something (fingerprint.md §4.8):
+  candidates = head Symbols, paired or not, not dropped, with r's kind, r's logic fingerprint
+               and r's syntax fingerprint
+  r.duplicateOf = the candidate of highest nameSimilarity to r, ties to the lower id   # as §3.3's lone branch
+                | null when there is none
+every other removed Symbol: r.duplicateOf = null
+```
+
+The kind and the refusal of logic that names nothing are stage 3's, read from the removed side. A function is never the duplicate of a class, and a body whose logic names nothing — one that only calls something, one that returns a literal — is never a duplicate, even of a head Symbol that holds it byte for byte, because its logic fingerprint is one every body of that shape shares.
+
+The syntax fingerprint is what stage 3 does not ask for. A shared logic fingerprint is enough for stage 3 to pair a lone base, because a wrong pairing there is still reported, as a change. Here it would take a deletion out of the gate, and unrelated bodies share a logic fingerprint often: one `if (tree === null) throw new Error(…)` guard is the whole logic of many helpers. On a change of this repository that moved its test helpers into a shared package, logic alone named a survivor for 22 removals, seven of them a function that only shares its guard with the removed one; with the syntax as well it names nine, each a helper that moved unchanged. The other six were deduplicated into a survivor generalized on the way, whose body differs, and those removals stay bare: a gate that passes on less evidence than an unchanged body would pass on a coincidence.
+
+The `extKind` is the other thing stage 3 need not ask about. A plugin gives a Symbol one when it reads the Symbol's role from outside its body: a Next.js route handler serves a route because of the file it is in, and a NestJS route method because of the path in its decorator. Two `GET` handlers in `app/api/v1/users/route.ts` and `app/api/v2/users/route.ts` can share a body byte for byte, and deleting the first retires an endpoint whatever the second holds. The syntax fingerprint covers the body alone (fingerprint.md §5), so nothing the comparison reads tells the two routes apart, and such a removal is reported bare. The rule is read off the `extKind` rather than asked of each plugin, so a React hook or component deleted beside an identical one is bare too. The helper this section exists for has no `extKind`.
+
+The candidates are every head Symbol, not only the unpaired ones. The survivor is usually paired, with the duplicate it kept (`moved`) or with itself when a twin beside it was deleted (unchanged), and it can be `added` when it took a name none of the duplicates had and stage 3 could not choose among them.
+
+`summary.removed` still counts every `removed` entry, and `summary.removedDuplicates` counts the ones with a `duplicateOf` within it. A current writer emits both on the terms §10.1 gives an optional field whose absence an older writer could have meant differently: `duplicateOf: null` on every other entry, and `removedDuplicates: 0`. `duplicateOf` is a property of the entry rather than a status of its own because adding a status is breaking (§10.1).
+
+**What this does not prove.** The same body says the survivor computes what the removed Symbol computed. It does not say every caller moved to the survivor: a removed exported helper still breaks an importer the change did not update, as a `moved` one does. The entry stays in `removed` and in the report's Removed section, naming the survivor, so a reviewer sees both.
 
 ### 3.6 Handling dropped symbols
 
@@ -517,7 +566,7 @@ The error message is `Symbol ID collision at <file>: <id>`, prompting the user t
 
 The identity pass runs behind a shape gate, and both exist for the same reason. `buildDiff` calls `checkDocumentShape` — invariant #20, and only #20 — on each side first, raising `ir-shape-invalid` named by the record the breach sits in and the field inside it. Without it, every field the diff dereferences crashed with a `TypeError` naming neither: `fingerprint` and `source` during classification (§4), `calls`, `decorators`, `effects` and `rules` during the delta (§5), `components[].roots` in §6.1, and `stats` in the side view §6.2 builds, which reads `stats.skippedFiles` unconditionally. That enumeration is the shape of the class rather than the whole of it, and it is one change to the matcher away from being out of date — which is the argument for a gate that is not scoped to the fields the matcher happens to read. What the gate establishes is what the `IR` brand asserts, so a scope that moved with the matcher would leave a caller's Document conditionally valid. With it in place, the identity pass's own type guards have no live path, and `DiffError` carries the full violation array beside the message so a caller repairing a Document is not made to run the diff once per field.
 
-The entry-point check stops at shape and identity rather than delegating to the whole integrity checker. Most of the remaining rules would make `buildDiff` refuse a Document over something that does not change its answer — #3 (a `component` reference that resolves), #7 (the effect vocabulary) and #15 (the `callResolution` census) are all read by no part of the diff. Note that this argument does *not* extend to every rule. #19 (Unicode normalisation) changes the answer, because matching compares raw strings and an NFD id on one side misses the NFC spelling of the same name on the other. #11 (array ordering) changes it too, through §5.2: an array delta pairs elements in array order, so when a body moves twenty lines, two same-typed rules written in the other order on one side report one of them as added and removed, where the canonical order reports nothing. Neither is enforced here because the diff has no standing to rewrite its inputs, not because they are harmless — and note that #11 no longer reaches *matching*, which §3.8 makes independent of array order.
+The entry-point check stops at shape and identity rather than delegating to the whole integrity checker. Most of the remaining rules would make `buildDiff` refuse a Document over something that does not change its answer — #3 (a `component` reference that resolves), #7 (the effect vocabulary) and #15 (the `callResolution` census) are all read by no part of the diff. Note that this argument does *not* extend to every rule. #4 and #12 (a Symbol-shaped dependency endpoint names a declared Symbol) reach the answer through §6.2, which keys a base edge under the head ids of its paired endpoints: a stray endpoint can spell the id another base edge is translated to. The translation refuses that collision itself, with `ir-identity-collision`, so the gate does not need the rule. #19 (Unicode normalisation) changes the answer, because matching compares raw strings and an NFD id on one side misses the NFC spelling of the same name on the other. #11 (array ordering) changes it too, through §5.2: an array delta pairs elements in array order, so when a body moves twenty lines, two same-typed rules written in the other order on one side report one of them as added and removed, where the canonical order reports nothing. Neither is enforced here because the diff has no standing to rewrite its inputs, not because they are harmless — and note that #11 no longer reaches *matching*, which §3.8 makes independent of array order.
 
 ### 3.8 Choosing among candidate pairings
 
@@ -592,6 +641,8 @@ Treating `dropped-toggled` as an independent status means:
 ### 4.2 Why the `unknown` status exists
 
 The alternatives were both silence of a kind. Suppressing the entry hides a Symbol that may genuinely have been deleted; keeping `removed` and adding a flag beside it shows an API deletion to every reader that does not know to look for the flag — including `--fail-on removed`, which is the reason the phantom mattered. A status of its own makes `--fail-on removed` mean what it says and gives a strict pipeline `--fail-on unknown` to catch the case where the answer is missing on **one** side.
+
+A removed duplicate (§3.5.2) does keep `removed` and add a field beside it. There the status is true: the Symbol is gone, and a reader that misses the field reads a deletion that happened. Here the status would be false, and a reader that missed the flag would read a deletion nobody saw.
 
 It does not catch the case where both sides lost the same file, and no status could. `unknown` is derived from the matcher's leftovers, and a file skipped in both revisions contributes Symbols to neither document, so there is no leftover to carry a status at all. That loss is reported at document level instead — see §6.3.
 
@@ -805,6 +856,14 @@ delta.confidenceChanged = base.confidence != head.confidence
 
 A Component change means "responsibility relocation", so the diff report emphasizes it.
 
+### 5.5 export name delta
+
+```
+delta.exportedAs = { added: [...], removed: [...], modified: [] }
+```
+
+The names the module exports each side under ([fingerprint.md](./fingerprint.md) §3.8), compared as a set: `export { handler as GET }` becoming `export { handler as GET, handler as DELETE }` gives `added: ["DELETE"]`, and `export default function Page` becoming `export function Page` gives `added: ["Page"], removed: ["default"]`. A name is a string with nothing else to differ in, so `modified` stays empty. The api fingerprint leaves the names out when they are the declaration's own name alone; the delta compares them whole, the own name included, so it says which name an export gained or lost wherever the fingerprint moved for it, and a declaration that stops being exported names the export it lost beside its visibility change. A renamed declaration exported under its own name records both, `removed: ["isAdminUser"], added: ["canAdministerSite"]`; the Markdown leaves that pair to its name row ([`markdown-projection.md`](./markdown-projection.md) MP17d). The key is emitted unconditionally, empty included (§10.1).
+
 ## 6. Component / Dependency diff
 
 Not only Symbols but also Components / Dependencies are diffed, in separate arrays.
@@ -861,6 +920,10 @@ dependencyDiff = {
 
 Dependency identity is judged by (from, to, via). Changes to direction / effect are treated as an added+removed pair (no modified needed).
 
+A base edge is keyed under the ids the Symbol pairing gave its endpoints: an endpoint the base wrote as the `before` of a `moved`, `moved+changed`, `changed` or `dropped-toggled` entry is read as that entry's `after` id — the translation `φ` that [`slice-view.md`](./slice-view.md) §5.1 applies to base call edges. A Symbol's id carries its file and its name, so without it a call whose caller or callee was paired under a new id — moved, renamed, or either with its body changed — reads as the old edge removed and a new one added, though it is the same call between the same two Symbols. A removed edge is still reported as the base wrote it, and a Component endpoint is never in the mapping.
+
+No two base edges of a valid Document fold onto one key. That takes three things: the pairing is one-to-one; stage 1 pairs every id both documents hold, so no later pair's `after` id is an endpoint some other base edge wrote untranslated; and every Symbol-shaped endpoint names a declared Symbol (ir-schema §14 #4, #12). `buildDiff` does not check the last (§3.7), so an in-memory base whose stray endpoint spells a translated id would lose one of the two edges without a trace. The translation refuses that instead: two base edges that read as one key raise `DiffError` with code `ir-identity-collision`, naming both edges and the key.
+
 #### 6.2.1 `unknown`: the other document could not have held this edge
 
 `dependencies[]` is projected from the resolved call graph, so a Symbol that never reached a document takes every edge it participated in with it. Comparing the two arrays by identity alone therefore reports those edges as deletions — the same confident-but-wrong report §3.5.1 exists to prevent, one array over, and the half that is easiest to miss is an edge whose *other* end survived: both revisions hold that Symbol, so the edge reads as a call the author removed.
@@ -876,7 +939,7 @@ Four properties, two of them differing from the Symbol side:
 
 A direction or effect flip stays an added + removed pair, and no loss check runs on it. The reason is not that neither document lost an endpoint file — nothing forbids a path from being both a `symbols[].source.file` and a skipped one, so that inference has no invariant behind it. It is that both documents *hold* the edge, so neither is silent about it, and `unknown` exists only to explain a silence.
 
-An edge touching a Symbol that **moved** can be `unknown` while the Symbol itself is confidently `moved`. If `S` goes `src/a.ts` → `src/b.ts` and head skipped `src/a.ts`, stage 2/3/4 pairs the Symbol from real evidence on both sides, while the base-only edge naming `ts:src/a.ts#S` has an endpoint in a file head never read. Erring toward `unknown` there is correct — the head has no edge to compare against — and it is the one case where the Symbol and dependency sides report different confidence about the same entity. "Cannot disagree about which file went missing" is a claim about file identity, not about the two classifications matching.
+An edge touching a Symbol that **moved** can be `unknown` while the Symbol itself is confidently `moved`. If `S` goes `src/a.ts` → `src/b.ts` and head skipped `src/a.ts`, stage 2/3/4 pairs the Symbol from real evidence on both sides. A base edge naming `ts:src/a.ts#S` is compared against the head under `ts:src/b.ts#S` (§6.2), and when the head holds no such edge, the loss check reads the endpoint's file from the base side, where it is `src/a.ts`. Erring toward `unknown` there is correct — head skipped `src/a.ts`, which may still hold the original `S` and its call — and it is the one case where the Symbol and dependency sides report different confidence about the same entity. "Cannot disagree about which file went missing" is a claim about file identity, not about the two classifications matching.
 
 `dependencies.unknown[]` and `summary.depsUnknown` are optional in the schema only so a diff written before they existed stays valid. A current writer always emits both, empty array and zero included — unlike the IR's `stats.skippedFiles`, there is no arithmetic elsewhere in the document that would let a reader tell "nothing was unknown" from "this writer could not say".
 
@@ -953,11 +1016,12 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
     "depsAdded":     3,
     "depsRemoved":   1,
     "unknown":       2,
-    "depsUnknown":   1
+    "depsUnknown":   1,
+    "removedDuplicates": 1
   },
   "symbols": [
     { "status": "added",   "symbol": { /* Symbol */ } },
-    { "status": "removed", "symbol": { /* Symbol */ } },
+    { "status": "removed", "symbol": { /* Symbol */ }, "duplicateOf": "ts:src/fixtures.ts#emptyIR" | null /* §3.5.2 */ },
     { "status": "moved",   "before": {...}, "after": {...}, "rationale": "git-rename" },
     { "status": "changed", "before": {...}, "after": {...}, "delta": { /* see §5 */ } },
     { "status": "moved+changed", "before": {...}, "after": {...}, "rationale": "...", "delta": {...} },
@@ -1084,6 +1148,10 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF10 | Multiple Symbols in base/head share the same logic fp | Disambiguated by name similarity, paired correctly |
 | DF11 | Component added | 1 entry in components.added |
 | DF12 | Dependency added | 1 entry in dependencies.added |
+| DF12a | A call edge whose caller, callee or both are `moved` or `moved+changed`, renamed in their file included, the head holding the same call (same `via`, `direction` and `effect`) under the new ids | no dependency change (§6.2); a `direction` or `effect` flip is still a removed + added pair |
+| DF12b | DF12a without the call on the head side, neither endpoint's file skipped | the base edge, under the ids the base wrote, in dependencies.removed |
+| DF12c | DF12a and DF12b with the moved endpoint's old file skipped by the head | no dependency change when the head holds the call; otherwise the base edge, as the base wrote it, in dependencies.unknown (§6.2.1) |
+| DF12d | Two base edges that read as one key under the head ids (a stray endpoint spelling a translated id) | `DiffError` `ir-identity-collision` |
 | DF13 | Dropped Symbol paired (same ID) | Treated as unchanged |
 | DF14 | Dropped Symbol disappeared (basename also changed) | Counted in droppedRemoved |
 | DF14b | Dropped Symbol moved to another directory (same basename) | moved: 1, rationale: "dropped-weak-match" |
@@ -1097,6 +1165,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF18a | Only `confidence` changed (`high` → `medium`), fingerprints equal | changed: 1, only delta.confidenceChanged true → in Markdown: the Confidence changes section |
 | DF18b | DF18a on a Symbol that also moved file | moved+changed: 1 |
 | DF18c | DF18a on a pair dropped on both sides | unchanged, as DF13 |
+| DF18d | Only the names a declaration is exported under changed: `export { handler as GET }` → `export { handler as GET, handler as DELETE }` | changed: 1, delta.apiChanged true, `delta.exportedAs.added: ["DELETE"]` (§5.5). Writing `export function f` as `function f` with `export { f }` is unchanged ([`fingerprint.md`](./fingerprint.md) A25) |
 | DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word, and §3.3 applies the same rule where the logic names nothing |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
 | DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` floors an unsegmentable run to the words it must hold (§3.4.1) |
@@ -1110,9 +1179,11 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19j | git renames `src/big.ts` → `src/billing.ts`; the head skips `src/billing.ts` (or the base skips `src/big.ts`, or both do) | the base Symbols are `unknown` with `absentFrom: "head"` and `lostPath: "src/billing.ts"` (or the head Symbols `unknown` with `absentFrom: "base"` and `lostPath: "src/big.ts"`), never `removed` / `added`; skipped on both sides, one `notCompared[]` entry with `path: "src/billing.ts"` and `basePath: "src/big.ts"` (§3.5.1, §6.3) |
 | DF19k | DF19j with the head skipping `src/billing.ts`, and the base holding an edge `ts:src/big.ts#Billing` → `ts:src/kept.ts#kept` | the edge is in `dependencies.unknown` with `absentFrom: "head"` and `lostFiles: [{ path: "src/billing.ts", … }]` — the head's name for the file, not the holder's `src/big.ts` — never in `removed` (§6.2.1) |
 | DF19l | A rename map handed to `buildDiff` sends two base paths onto one head path, or onto a path the base also skipped — git writes neither | the same `symbols[]` and `notCompared[]`, byte for byte, whatever order the map and the skip lists are in; a `notCompared[]` entry for each base record that reaches a head one (§3.5.1, §6.3) |
+| DF19m | Two Symbols of one kind with no `extKind`, one logic fingerprint that names something and one syntax fingerprint, in two files, become one in a third file | the one the survivor pairs with is `moved` (§3.3); the other is `removed` with `duplicateOf` naming the survivor, and `summary.removedDuplicates` is 1. With the logic naming nothing, the survivor of another kind, its body written otherwise (same logic, other syntax), or an `extKind` on the removed Symbol (a Next.js `GET` in `app/api/v1/users/route.ts` deleted beside an identical one in `app/api/v2/users/route.ts`), the removal carries `duplicateOf: null`. A deleted twin of an unchanged Symbol names that Symbol; of several head Symbols with its body, the closest name, and the lower id of two equally close, whatever order the head lists them in (§3.5.2) |
 | DF19n | The base holds a Component edge `billing` → `pricing`; the head skips a file under `billing`'s root, or only one under `pricing`'s (or the base skips one under `billing`'s and the head holds the edge) | `dependencies.unknown` with `absentFrom: "head"` and every skipped file of `billing` in `lostFiles[]`, never `removed`; a file of `pricing` alone leaves the edge `removed`; the base skipping is `unknown` with `absentFrom: "base"` (§6.2.1) |
 | DF20 | A pair whose stage-4 composite equals its row exactly: member 3/4 with signature 11/12, and member 7/10 with an identical signature, at 0.85; an identical member with signature 5/6 at 0.95; an identical member and signature at 1.0. End to end, `AccountService.createUserAccount(a: string, b: number, c: Date, d: boolean)` moved file and renamed `createUserAccountRecord` with `d: Options` | paired, rationale: "name-signature" — the composite is a fraction compared exactly (§3.4.3); one step below (two of four inputs retyped, a member of 7/11, its only input retyped at 0.95 or 1.0) added: 1, removed: 1 |
 | DF20a | Two bases score the same composite for one head, made of different axes — one renamed its member (3/4, signature 11/12), the other kept it (1, signature 1/2) | the lower base id pairs, whichever of the two it is (§3.8) |
+| DF20b | A Symbol whose name says too little, a Symbol with no signature, and a pair the owner gate refuses after clearing its row, each with a logger | the same result as without one, byte for byte, and one `debug` line per Symbol or refused pair naming the rule (§3.4.7); none for a pair stage 4 made, one that scored below its row, or one whose Symbols pair elsewhere |
 
 ## 10.1 Diff schema compatibility policy
 
@@ -1120,11 +1191,11 @@ The compatibility policy of `aburi.diff.v1.json` matches the IR schema (ir-schem
 In particular, because the CI gate (`aburi diff --fail-on`) depends on it:
 
 - Adding a `MatchRationale` enum value is **breaking** (consumers' `--fail-on` settings depend on fixed values)
-- Adding a status enum value (`added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled`) is **breaking**
+- Adding a status enum value (`added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` / `unknown`) is **breaking**
 - Adding a `summary` field is non-breaking
 - Adding an optional `SymbolDelta` boolean is non-breaking, and the producer emits it unconditionally, `false` included, for the reason the next row gives
 - Adding an optional array is non-breaking on the same terms — to `componentDiff` / `dependencyDiff` or to the document itself — and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed. This is where the diff parts company with the IR, whose Class B fields (ir-schema.md §1.1) are omitted when empty: an IR reader can fall back on `totalFiles - parsedFiles`, and a diff reader has nothing to fall back on.
-- Adding an optional scalar to an entry is non-breaking, and unlike an array it may be left out when it has nothing to say, provided its absence is unambiguous by construction. `NotComparedFile.basePath` and `SymbolUnknown.lostPath` are the cases: each is written only when git renamed the file between the revisions, and a writer that predates them did not look across a rename at all, so it never produced an entry that needed one. In a document of either age, absence means "the other name is the same", and nothing has to be emitted to say so. A scalar whose absence an older writer could have meant differently is emitted unconditionally, as the `SymbolDelta` booleans are.
+- Adding an optional scalar to an entry is non-breaking, and unlike an array it may be left out when it has nothing to say, provided its absence is unambiguous by construction. `NotComparedFile.basePath` and `SymbolUnknown.lostPath` are the cases: each is written only when git renamed the file between the revisions, and a writer that predates them did not look across a rename at all, so it never produced an entry that needed one. In a document of either age, absence means "the other name is the same", and nothing has to be emitted to say so. A scalar whose absence an older writer could have meant differently is emitted unconditionally, as the `SymbolDelta` booleans are, and as `SymbolRemoved.duplicateOf` is, `null` included: a writer that predates it reported every removal bare, duplicate or not (§3.5.2).
 
 ## 11. Design decisions
 

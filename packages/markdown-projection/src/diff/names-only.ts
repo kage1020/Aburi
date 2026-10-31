@@ -1,10 +1,22 @@
-import type { Symbol as IRSymbol, SymbolMovedChanged, SymbolUnknown } from "@aburi/types"
+import type {
+  Symbol as IRSymbol,
+  SymbolMovedChanged,
+  SymbolRemoved,
+  SymbolUnknown,
+} from "@aburi/types"
 import { inlineCode, symbolTitle } from "../format"
 import { fileLine } from "./entries"
 import type { ChangedEntry } from "./partition"
 
 export function indexSymbols(symbols: readonly IRSymbol[]): string[] {
   return symbols.map((symbol) => indexRow(symbol))
+}
+
+export function indexRemoved(items: readonly SymbolRemoved[]): string[] {
+  return items.map((item) => {
+    const survivor = item.duplicateOf ?? null
+    return indexRow(item.symbol, survivor === null ? "" : ` (duplicate of ${inlineCode(survivor)})`)
+  })
 }
 
 export function indexChanged(items: readonly ChangedEntry[]): string[] {
