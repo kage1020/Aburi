@@ -20,15 +20,20 @@ export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSour
   }
 }
 
-export function functionValueOf(node: Node): Node | null {
-  const value = node.childForFieldName("value")
-  return value === null ? null : asFunctionValue(value)
-}
+const FUNCTION_VALUE_TYPES: ReadonlySet<string> = new Set([
+  "arrow_function",
+  "function_expression",
+  "generator_function",
+])
 
 export function asFunctionValue(node: Node): Node | null {
   const value = unwrapValue(node)
-  const isFunction = value.type === "arrow_function" || value.type === "function_expression"
-  return isFunction ? value : null
+  return FUNCTION_VALUE_TYPES.has(value.type) ? value : null
+}
+
+export function asClassValue(node: Node): Node | null {
+  const value = unwrapValue(node)
+  return value.type === "class" ? value : null
 }
 
 export function hasErrorChild(node: Node): boolean {
@@ -49,6 +54,18 @@ export function findChild(node: Node, typeName: string): Node | null {
     if (child !== null && child.type === typeName) return child
   }
   return null
+}
+
+export function throughParentheses(node: Node): Node {
+  let cursor = node
+  while (cursor.type === "parenthesized_expression" && !hasErrorChild(cursor)) {
+    const [only, ...rest] = cursor.namedChildren.filter(
+      (child): child is Node => child !== null && child.type !== "comment",
+    )
+    if (only === undefined || rest.length > 0 || hasErrorChild(only)) return cursor
+    cursor = only
+  }
+  return cursor
 }
 
 export function firstNonCommentChild(node: Node): Node | null {
