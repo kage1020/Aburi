@@ -155,7 +155,7 @@ its row under `effects modified` ends with the old one, `(was high)`.
 | Marker | Meaning |
 |---|---|
 | *(no badge)* | Confident. |
-| `⚠ medium` | The signal matched through an indirection, such as a re-exported decorator or an aliased import. |
+| `⚠ medium` | The signal matched through an indirection, such as a decorator re-exported through a barrel Aburi could not trace, or an aliased import. |
 | `⚠ low` | A weak match. Verify before you rely on it. |
 
 ## Gaps in the report

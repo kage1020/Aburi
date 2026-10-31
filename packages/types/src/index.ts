@@ -95,6 +95,8 @@ export type {
   FrameworkVocab,
   ImportBinding,
   ImportEdge,
+  ImportResolver,
+  ImportResolverContext,
   LangManifest,
   LanguageCapabilities,
   LanguagePlugin,

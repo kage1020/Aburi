@@ -1,6 +1,12 @@
 import { decorator } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { classifyDecorated, makeImport, makeNamespaceImport, NEST } from "./fixtures/symbol"
+import {
+  classifyDecorated,
+  makeImport,
+  makeNamespaceImport,
+  NEST,
+  reexported,
+} from "./fixtures/symbol"
 
 const nestController = decorator({ name: "Controller", qualifier: "nest" })
 
@@ -59,6 +65,34 @@ describe("classifyNestjsSymbol — a decorator written through a receiver", () =
       "ns",
       [makeNamespaceImport("routing-controllers", "ns", 1), makeNamespaceImport(NEST, "ns", 2)],
       "high",
+    ],
+    [
+      "a namespace import of a barrel that re-exports the leaf from @nestjs/common",
+      "nest",
+      [reexported(makeNamespaceImport("@app/common", "nest"), { Controller: NEST })],
+      "high",
+    ],
+    [
+      "a namespace import of a barrel that re-exports the leaf from a competing library",
+      "rc",
+      [
+        reexported(makeNamespaceImport("@app/common", "rc"), {
+          Controller: "routing-controllers",
+        }),
+      ],
+      "medium",
+    ],
+    [
+      "a nested receiver whose second segment a barrel re-exports from @nestjs/common",
+      "ns.common",
+      [reexported(makeNamespaceImport("@app/all", "ns"), { common: NEST })],
+      "high",
+    ],
+    [
+      "a nested receiver, though the barrel re-exports only its leaf from @nestjs/common",
+      "ns.common",
+      [reexported(makeNamespaceImport("@app/all", "ns"), { Controller: NEST })],
+      "medium",
     ],
     ["nothing the edges mention", "local", [makeNamespaceImport(NEST, "nest")], "high"],
     ["a namespace edge that binds no name", "nest", [makeImport(NEST, "*")], "high"],

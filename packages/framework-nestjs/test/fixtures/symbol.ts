@@ -18,6 +18,14 @@ export function makeNamespaceImport(source: string, binding: string, line = 1): 
   return { ...makeImport(source, "*", line), namespaceBinding: binding }
 }
 
+/** `edge` as the scan hands it over once it has followed the barrel `edge.source` names. */
+export function reexported(
+  edge: ImportEdge,
+  origins: Readonly<Record<string, string>>,
+): ImportEdge {
+  return { ...edge, origins: new Map(Object.entries(origins)) }
+}
+
 export function makeCtx({
   path = "src/a.ts",
   imports = [],

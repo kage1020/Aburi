@@ -20,6 +20,7 @@ import { buildComponentAttribution } from "./attribute"
 import type { DiscoveredFile, SkippedFile } from "./discover"
 import { buildDropCFilter } from "./drop-c"
 import { describeThrown, errorCode, isPluginSetFault, isVanishedFile } from "./faults"
+import { ImportOrigins } from "./import-origins"
 import { runFilePipeline, type TreeReleaseFailure } from "./pipeline"
 import type { LanguageRouter } from "./route"
 import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
@@ -88,6 +89,14 @@ export async function extractFiles(input: ExtractFilesInput): Promise<ExtractedF
   }
   const strictVocab = isStrict(input.config)
   const warnedReleaseFailure = new Set<string>()
+  const origins = new ImportOrigins({
+    workspaceRoot: input.workspaceRoot,
+    files: input.files,
+    router,
+    logger,
+    loadSource: (file) => loadSourceFile(input.workspaceRoot, file),
+    treeReleaseFailures: out.treeReleaseFailures,
+  })
   for (const discoveredFile of input.files) {
     const language = router.route(discoveredFile.path)
     if (language === null) {
@@ -128,6 +137,7 @@ export async function extractFiles(input: ExtractFilesInput): Promise<ExtractedF
         log: logger,
         treeReleaseFailures: out.treeReleaseFailures,
         vocab: fileVocab,
+        origins,
       })
     } catch (error) {
       if (isPluginSetFault(error)) throw error
@@ -160,6 +170,7 @@ export async function extractFiles(input: ExtractFilesInput): Promise<ExtractedF
     if (result.parseErrors.length > 0) {
       out.parseErrors.push({ file: discoveredFile.path, errors: result.parseErrors })
     }
+    if (result.kind !== "parse-timeout") origins.remember(result.path, result.imports)
 
     switch (result.kind) {
       case "parse-timeout": {

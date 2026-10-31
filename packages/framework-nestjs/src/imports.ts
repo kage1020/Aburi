@@ -24,6 +24,7 @@ interface NameOrigin {
 interface NamespaceOrigin {
   readonly source: string
   readonly fromNestjs: boolean
+  readonly origins: ReadonlyMap<string, string> | undefined
 }
 
 export interface ImportedBindings {
@@ -42,20 +43,28 @@ export function readImportedNames(
 
   for (const edge of imports) {
     assertImportEdgeSource(edge, origin)
-    const fromNestjs = isNestjsModule(edge.source)
     if (edge.symbols === "*") {
       const binding = edge.namespaceBinding
       if (binding === undefined) continue
       assertNamespaceBinding(binding, edge, origin)
       if (namespaces.get(binding)?.fromNestjs === true) continue
-      namespaces.set(binding, { source: edge.source, fromNestjs })
+      namespaces.set(binding, {
+        source: edge.source,
+        fromNestjs: isNestjsModule(edge.source),
+        origins: edge.origins,
+      })
       continue
     }
     for (const raw of edge.symbols) {
       const binding = splitAliasedImportName(raw)
       assertImportBinding(binding, raw, edge, origin)
       if (names.get(binding.local)?.fromNestjs === true) continue
-      names.set(binding.local, { imported: binding.imported, source: edge.source, fromNestjs })
+      const source = edge.origins?.get(binding.imported) ?? edge.source
+      names.set(binding.local, {
+        imported: binding.imported,
+        source,
+        fromNestjs: isNestjsModule(source),
+      })
     }
   }
 
@@ -76,7 +85,9 @@ export function resolveDecoratorName(
     const head = headSegment(qualifier)
     const viaNamespace = bindings.namespaces.get(head)
     if (viaNamespace !== undefined) {
-      return { canonical: name, confidence: viaNamespace.fromNestjs ? "high" : "medium" }
+      const member = memberSegment(qualifier) ?? name
+      const source = viaNamespace.origins?.get(member) ?? viaNamespace.source
+      return { canonical: name, confidence: isNestjsModule(source) ? "high" : "medium" }
     }
     const viaName = bindings.names.get(head)
     if (viaName !== undefined) {
@@ -94,4 +105,9 @@ export function resolveDecoratorName(
 function headSegment(qualifier: string): string {
   const dot = qualifier.indexOf(".")
   return dot === -1 ? qualifier : qualifier.slice(0, dot)
+}
+
+/** The segment after the head, the member a namespace receiver reads from its module, if any. */
+function memberSegment(qualifier: string): string | undefined {
+  return qualifier.split(".")[1]
 }
