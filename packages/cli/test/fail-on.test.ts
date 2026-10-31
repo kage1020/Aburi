@@ -202,6 +202,17 @@ describe("evaluateClause — what a clause counts", () => {
     expect(uncountedDuplicates(parseFailOn(spec), diff)).toEqual(ids)
   })
 
+  it("leaves a duplicate in a test file out of the uncounted ones under the non-test scope", () => {
+    const inTestFile = removedEntry("fixture", DUPLICATE)
+    const diff = diffWith([
+      removedEntry("duplicate", DUPLICATE),
+      { ...inTestFile, symbol: { ...inTestFile.symbol, inTestFile: true } },
+    ])
+    expect(uncountedDuplicates(parseFailOn("removed"), diff, "non-test")).toEqual([
+      "ts:src/a.ts#duplicate",
+    ])
+  })
+
   it("counts the changes whose delta moved the axis, and only those", () => {
     const diff = diffWith([
       changed(SYMBOL, { apiChanged: true }),

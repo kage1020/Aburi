@@ -144,7 +144,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       : EXIT.GATE
 
   warnAboutComparison({ ...compared, notCompared: diff.notCompared }, warn)
-  warnOnUncountedDuplicates(uncountedDuplicates(failOn, diff), warn)
+  warnOnUncountedDuplicates(uncountedDuplicates(failOn, diff, options.failOnScope), warn)
   const callResolution = compared.headIR.stats.callResolution
   return {
     ...written,

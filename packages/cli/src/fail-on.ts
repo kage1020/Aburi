@@ -211,10 +211,11 @@ function deltaMoved(
 export function uncountedDuplicates(
   clauses: readonly FailOnClause[],
   diff: DiffResult,
+  scope: FailOnScope = "all",
 ): SymbolId[] {
   const tokens = new Set(clauses.map((clause) => clause.token))
   if (!tokens.has("removed") || tokens.has("removed:duplicate")) return []
-  return countedIds("removed:duplicate", diff, "all")
+  return countedIds("removed:duplicate", diff, scope)
 }
 
 function countedIds(token: FailOnToken, diff: DiffResult, scope: FailOnScope): SymbolId[] {

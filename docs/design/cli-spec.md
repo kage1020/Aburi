@@ -852,6 +852,8 @@ The scope narrows the clauses rather than adding one, so `--fail-on removed --fa
   ts:src/billing/legacy.ts#refundInvoice
 ```
 
+The line naming the removed duplicates a `removed` clause did not count (Removed duplicates, above) reads the same scope, so a duplicate in a test file is not named under `non-test`, where no clause would have counted it.
+
 #### Uses of Direction-Specific fail-on
 
 `--fail-on dropped-toggled:to-kept` detects "symbols previously treated as dropped became kept". Useful for deliberate review of drop-rule relaxation.
