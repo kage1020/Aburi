@@ -15,5 +15,3 @@ The text is now rebuilt from the syntax tree's tokens:
 A comment written between the `:` and the type was recorded as the type: `x: /* c */ A | B` recorded `/* c */`, so editing the comment moved `api` and editing the type did not. It now records `A | B`.
 
 This moves the `api` fingerprint of every Symbol whose signature holds such a type, once, so an IR scanned before this release, compared with one scanned after, reports those Symbols as API changes and trips `--fail-on api-changed` or `changed`. On this repository, scanning one tree with both versions moves the `api` of 20 Symbols, 19 for an object type written over lines and one for a function type's parameter list with a trailing comma, and changes nothing else. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
-
-Joining a union in a method's parameter, or in a bodiless overload, still changes the `syntax` fingerprint of the class or function that holds it, because the syntax string keeps a union's leading `|`. The method's own fingerprints stay put, and the class shows up as a syntax-only change.
