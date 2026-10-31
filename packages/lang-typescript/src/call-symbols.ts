@@ -111,6 +111,13 @@ function inlineHandlers(call: Node): Node[] {
   return bodies.sort((a, b) => a.startIndex - b.startIndex)
 }
 
+export function invokedFunction(call: Node): Node | null {
+  let root: Node | null = null
+  for (const step of spineCalls(call)) root = step
+  const callee = root?.childForFieldName("function") ?? null
+  return callee === null ? null : asFunctionValue(callee)
+}
+
 function* spineCalls(call: Node): Iterable<Node> {
   let cursor: Node | null = call
   while (cursor !== null) {

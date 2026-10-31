@@ -43,6 +43,7 @@ export {
   isQnameSegment,
   isQualifiedName,
   isSymbolId,
+  MODULE_SCOPE_QNAME,
   makeComponentId,
   makeLanguageId,
   makeMemberQname,

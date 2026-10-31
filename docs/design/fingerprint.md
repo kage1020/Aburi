@@ -113,7 +113,7 @@ Examples:
 - `A.B.C.method` → `method`
 - `topLevelFunc` → `topLevelFunc`
 
-`<default>` stays `<default>` as-is.
+`<default>` and `<module>` stay as they are.
 
 ### 3.4 Guaranteed invariance conditions
 

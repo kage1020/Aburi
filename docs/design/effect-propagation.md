@@ -302,6 +302,7 @@ Every implementation of the propagation pass MUST pass the following. IDs are pr
 | PR9 | Controller `Ctl` (`Decorator.boundary=true`) → service → repository with `db.write` | `Ctl.effects[]` receives the propagated `db.write` (Boundary is not a propagation stop, §4.3) |
 | PR10 | Unresolved call: `A`'s call to some target has `resolved: null` (no `CallEdge` emitted) | `A.effects[]` receives nothing from that call site; propagation only follows `CallEdge[]` |
 | PR11 | Cross-language edge candidate (`from` and `to` differ in language prefix) | Not present in `CallEdge[]` per [`call-resolution.md`](./call-resolution.md) §7.3, so no propagation attempted |
+| PR11a | `seed.ts` writes at its top level (`await prisma.user.deleteMany({})`) and calls `seed()`, which creates; `app.ts` imports it (`import "./seed"`) | `seed.ts#<module>` carries the local `db.write` and the one propagated from `seed`. No Symbol of `app.ts` receives either: an import is not a `CallEdge`, and nothing calls `<module>` (§12.10) |
 
 ### 11.5 Diff and determinism
 
@@ -365,3 +366,8 @@ When two upstream paths reach the same `(effectId, target)` with different plugi
 3. Keep one deterministically.
 
 Options (1) and (2) force every consumer that reads `derivedBy` today (locally-detected entries, [`ir-schema.md`](./ir-schema.md) §9) to add a shape check, and they leak a propagation-internal detail (the fact that two plugins classified the same effect) into a field whose stable meaning is "the single evidence string for this effect". Locally-detected entries stay `string`; propagated entries stay `string`; the merge picks the lexicographically smallest string. This is deterministic, requires no schema widening, and keeps the field's contract uniform across all `Effect` records. The one lost fact — "a second plugin also classified this effect under a different name" — is recoverable by walking `derivedFrom` and inspecting each origin's local `Effect.derivedBy`.
+
+### 12.10 Why importing a module carries none of its module scope's effects
+
+A file's top-level statements are its `<module>` Symbol ([`ir-schema.md`](./ir-schema.md) §3.3), so what it does when it is evaluated has effects like any body, and they arrive there from the functions it calls like any caller's. They go no further. Propagating them along import edges would attribute them to code that does not perform them, the reason §12.1 gives for the direction: a module is evaluated once per process, by whichever import reaches it first, so a `deleteMany` at the top of `seed.ts` is not something `app.ts` does each time anything in it runs, and putting it on every Symbol of every importer would report one write as many. An import is not a `CallEdge` and nothing calls `<module>`, so it is a sink: the reviewer reads the effect on the file that makes it.
+

@@ -32,7 +32,7 @@ describe("a function behind a wrapper is a function", () => {
   it.each([
     ["a wrapped value that is not a function", "export const h = (1) as any", false],
     ["a call, which is not a wrapper", "export const h = (withAuth(() => { q() }))", true],
-    ["a call it is the callee of", "export const h = (() => { q() })()", false],
+    ["a call it is the callee of", "export const h = (() => { q() })()", true],
   ])("leaves %s a const", async (_label, source, hasBody) => {
     const symbol = await symbolOf(source, "ts:src/a.ts#h")
 

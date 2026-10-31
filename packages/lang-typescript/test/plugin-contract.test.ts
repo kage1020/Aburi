@@ -48,6 +48,8 @@ describe("every rationale extraction emits is one the manifest declares", () => 
       ["object-literal-initializer", "object-method", "property-assigned-function"],
     ],
     ["export const h = withAuth(() => {})", ["call-argument-function"]],
+    ["export const h = (() => { q() })()", ["invoked-function"]],
+    ["doThing()", ["module-scope"]],
     [
       'app.route("/x").get(() => {})',
       ["call-statement:app.get", "chained-call", "path-literal:/x", "inline-handler"],

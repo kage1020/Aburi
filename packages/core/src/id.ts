@@ -4,6 +4,10 @@ import { CoreError, type CoreErrorCode } from "./errors"
 
 export const DEFAULT_EXPORT_QNAME = "<default>"
 
+export const MODULE_SCOPE_QNAME = "<module>"
+
+const RESERVED_QNAMES: ReadonlySet<string> = new Set([DEFAULT_EXPORT_QNAME, MODULE_SCOPE_QNAME])
+
 const LANGUAGE_ID_PATTERN = /^[a-z][a-z0-9]*$/
 
 export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
@@ -360,7 +364,7 @@ function qualifiedNameViolation(qname: string): GrammarViolation | null {
       value: qname,
     }
   }
-  if (qname === DEFAULT_EXPORT_QNAME) return null
+  if (RESERVED_QNAMES.has(qname)) return null
   if (containsAnonymousMarker(qname)) {
     return {
       code: "anonymous-symbol-id-attempted",
@@ -405,6 +409,6 @@ function assertQnameSegment(
 }
 
 function containsAnonymousMarker(qname: string): boolean {
-  if (qname.startsWith("<") && qname !== DEFAULT_EXPORT_QNAME) return true
+  if (qname.startsWith("<")) return true
   return /<anon|@L\d+/.test(qname)
 }

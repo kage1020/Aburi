@@ -1,3 +1,4 @@
+import { unwrapValue } from "@aburi/core"
 import {
   CALL_ARGUMENT_FUNCTION_DERIVED_BY,
   type ExtractionContext,
@@ -11,7 +12,7 @@ import {
   makeSourceRange,
   nameFieldText,
 } from "./ast-helpers"
-import { layOutBodies, wrappedFunctions } from "./call-symbols"
+import { invokedFunction, layOutBodies, wrappedFunctions } from "./call-symbols"
 import { classMemberCandidates } from "./class-candidates"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
@@ -114,7 +115,7 @@ function makeVariableCandidate(
       ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
     ]
   }
-  const bodies = initializer === null ? [] : wrappedFunctions(initializer)
+  const { bodies, evidence } = initializerFunctions(initializer)
   return [
     {
       id,
@@ -125,13 +126,35 @@ function makeVariableCandidate(
       decorators: [],
       signature: null,
       source: makeSourceRange(statement, ctx),
-      derivedBy:
-        bodies.length === 0
-          ? exportEvidence(statement)
-          : [CALL_ARGUMENT_FUNCTION_DERIVED_BY, ...exportEvidence(statement)],
+      derivedBy: [...evidence, ...exportEvidence(statement)],
       ...layOutBodies(bodies, statement),
     },
   ]
+}
+
+interface InitializerFunctions {
+  bodies: Node[]
+  evidence: string[]
+}
+
+function initializerFunctions(initializer: Node | null): InitializerFunctions {
+  const call = initializer === null ? null : unwrapValue(initializer)
+  if (call === null || call.type !== "call_expression") return { bodies: [], evidence: [] }
+  const handed = wrappedFunctions(call)
+  const invoked = invokedFunction(call)?.childForFieldName("body") ?? null
+  if (invoked === null || invoked.text.length === 0) {
+    return {
+      bodies: handed,
+      evidence: handed.length > 0 ? [CALL_ARGUMENT_FUNCTION_DERIVED_BY] : [],
+    }
+  }
+  return {
+    bodies: [invoked, ...handed],
+    evidence:
+      handed.length > 0
+        ? ["invoked-function", CALL_ARGUMENT_FUNCTION_DERIVED_BY]
+        : ["invoked-function"],
+  }
 }
 
 function objectMemberCandidates(

@@ -299,6 +299,7 @@ describe("a field holding a function handed to a call is a member Symbol", () =>
       ["Promise", "a"],
     ],
     ["a call handed no function", "  client = makeClient(options)", ["makeClient"]],
+    ["a function the value invokes in place", "  seed = (() => { a() })()", ["<computed>", "a"]],
   ])("leaves %s on the class", async (_label, field, onClass) => {
     const source = classOf(field)
 

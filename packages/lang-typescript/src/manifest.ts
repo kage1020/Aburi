@@ -25,6 +25,8 @@ export const langTypescriptManifest: LangManifest = {
       "argument-names",
       "inline-handler",
       "call-argument-function",
+      "invoked-function",
+      "module-scope",
       "object-literal-initializer",
       "object-method",
       "property-assigned-function",
