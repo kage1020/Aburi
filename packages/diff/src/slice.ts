@@ -189,10 +189,10 @@ function collectEdges(
   baseEdges: readonly CallEdge[],
   headEdges: readonly CallEdge[],
   nodeIds: ReadonlySet<SymbolId>,
-  nodeIdsByBase: ReadonlyMap<SymbolId, SymbolId>,
+  pairedHeadIds: ReadonlyMap<SymbolId, SymbolId>,
 ): [SymbolId, SymbolId][] {
   const pairs: [SymbolId, SymbolId][] = []
-  const asNodeId = (id: SymbolId) => nodeIdsByBase.get(id) ?? id
+  const asNodeId = (id: SymbolId) => pairedHeadIds.get(id) ?? id
   for (const edge of baseEdges) {
     appendEdgeIfBothNodes(asNodeId(edge.from), asNodeId(edge.to), nodeIds, pairs)
   }

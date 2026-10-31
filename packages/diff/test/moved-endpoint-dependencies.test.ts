@@ -1,88 +1,159 @@
-import { dependency, fp, makeIR, makeSymbol } from "@aburi/test-support"
-import type { Dependency, Symbol as IRSymbol } from "@aburi/types"
+import { guardedBody, makeIR } from "@aburi/test-support"
+import type { SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { changeLines, diffOf } from "./helpers"
+import { callEdge, changeLines, diffOf, fn, withSkipped } from "./helpers"
 
-const call = (from: IRSymbol, to: IRSymbol, overrides: Partial<Dependency> = {}) =>
-  dependency({ from: from.id, to: to.id, via: "call", ...overrides })
+const analyzeUseArguments = (file: string) => fn(file, "analyzeUseArguments", "analyzeUseArguments")
+const isPathLiteral = (file: string, name = "isPathLiteral") =>
+  fn(file, name, "isPathLiteral", { rules: guardedBody("ready") })
 
-/** `name` declared in `file`, its fingerprints `seed`'s, so the same seed in two files is a move. */
-const declared = (file: string, name: string, seed = name) =>
-  makeSymbol({ id: `ts:${file}#${name}`, name, fingerprint: fp(seed) })
-
-const caller = declared("src/middleware.ts", "analyzeUseArguments")
-const callerMoved = declared("src/use.ts", "analyzeUseArguments")
-const callee = declared("src/middleware.ts", "isPathLiteral")
-const calleeMoved = declared("src/ast-helpers.ts", "isPathLiteral")
-const calleeMovedAndChanged = makeSymbol({
+const caller = analyzeUseArguments("src/middleware.ts")
+const callerMoved = analyzeUseArguments("src/use.ts")
+const callee = isPathLiteral("src/middleware.ts")
+const calleeMoved = isPathLiteral("src/ast-helpers.ts")
+const calleeMovedAndChanged = {
   ...calleeMoved,
-  id: calleeMoved.id,
-  fingerprint: { ...fp("isPathLiteral"), syntax: "0123456789ab" },
-})
-const other = declared("src/ast-helpers.ts", "isIdentifier")
+  fingerprint: { ...calleeMoved.fingerprint, syntax: "0123456789ab" },
+}
+const calleeRenamed = isPathLiteral("src/middleware.ts", "isLiteralPath")
+const other = fn("src/ast-helpers.ts", "isIdentifier", "isIdentifier")
 
-describe("a call edge whose endpoints only moved", () => {
+const NO_CHANGE = { added: [], removed: [], unknown: [] }
+
+describe("a call edge whose endpoints were paired under new ids", () => {
   it.each([
-    ["its callee", [caller, callee], [caller, calleeMoved], call(caller, calleeMoved)],
-    ["its caller", [caller, callee], [callerMoved, callee], call(callerMoved, callee)],
-    ["both ends", [caller, callee], [callerMoved, calleeMoved], call(callerMoved, calleeMoved)],
+    ["its callee moved", caller, calleeMoved, [`moved ${callee.id} -> ${calleeMoved.id}`]],
+    ["its caller moved", callerMoved, callee, [`moved ${caller.id} -> ${callerMoved.id}`]],
     [
-      "a callee that moved and changed",
-      [caller, callee],
-      [caller, calleeMovedAndChanged],
-      call(caller, calleeMovedAndChanged),
+      "both ends moved",
+      callerMoved,
+      calleeMoved,
+      [`moved ${callee.id} -> ${calleeMoved.id}`, `moved ${caller.id} -> ${callerMoved.id}`],
     ],
-  ])("is no dependency change when %s moved", (_label, base, head, headEdge) => {
-    const [from, to] = base as [IRSymbol, IRSymbol]
+    [
+      "its callee moved and changed",
+      caller,
+      calleeMovedAndChanged,
+      [`moved+changed ${callee.id} -> ${calleeMoved.id}`],
+    ],
+    [
+      "its callee was renamed in its file",
+      caller,
+      calleeRenamed,
+      [`moved ${callee.id} -> ${calleeRenamed.id}`],
+    ],
+  ])("is no dependency change when %s", (_label, headCaller, headCallee, changes) => {
     const diff = diffOf(
-      makeIR({ symbols: base, dependencies: [call(from, to)] }),
-      makeIR({ symbols: head, dependencies: [headEdge] }),
-    )
-
-    expect(diff.summary).toMatchObject({ depsAdded: 0, depsRemoved: 0 })
-    expect(diff.dependencies).toMatchObject({ added: [], removed: [] })
-  })
-
-  it("leaves the Symbol side reporting the move", () => {
-    const diff = diffOf(
-      makeIR({ symbols: [caller, callee], dependencies: [call(caller, callee)] }),
-      makeIR({ symbols: [caller, calleeMoved], dependencies: [call(caller, calleeMoved)] }),
-    )
-
-    expect(changeLines(diff.symbols)).toEqual([`moved ${callee.id} -> ${calleeMoved.id}`])
-  })
-})
-
-describe("a call edge whose endpoint moved and that also changed", () => {
-  it("is removed, under the ids the base wrote, when the call went", () => {
-    const diff = diffOf(
-      makeIR({ symbols: [caller, callee], dependencies: [call(caller, callee)] }),
-      makeIR({ symbols: [caller, calleeMoved] }),
-    )
-
-    expect(diff.dependencies).toMatchObject({ added: [], removed: [call(caller, callee)] })
-  })
-
-  it("is added beside the moved edge when the moved caller calls something new", () => {
-    const diff = diffOf(
-      makeIR({ symbols: [caller, callee, other], dependencies: [call(caller, callee)] }),
+      makeIR({ symbols: [caller, callee], dependencies: [callEdge(caller.id, callee.id)] }),
       makeIR({
-        symbols: [callerMoved, callee, other],
-        dependencies: [call(callerMoved, callee), call(callerMoved, other)],
+        symbols: [headCaller, headCallee],
+        dependencies: [callEdge(headCaller.id, headCallee.id)],
       }),
     )
 
-    expect(diff.dependencies).toMatchObject({ added: [call(callerMoved, other)], removed: [] })
+    expect(changeLines(diff.symbols)).toEqual(changes)
+    expect(diff.dependencies).toEqual(NO_CHANGE)
+  })
+})
+
+describe("a call that changed while an endpoint moved", () => {
+  it("is removed, under the ids the base wrote, when the call went", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [caller, callee], dependencies: [callEdge(caller.id, callee.id)] }),
+      makeIR({ symbols: [caller, calleeMoved] }),
+    )
+
+    expect(diff.dependencies).toEqual({
+      ...NO_CHANGE,
+      removed: [callEdge(caller.id, callee.id)],
+    })
+  })
+
+  it("adds a moved caller's new call and leaves its unchanged one alone", () => {
+    const diff = diffOf(
+      makeIR({ symbols: [caller, callee, other], dependencies: [callEdge(caller.id, callee.id)] }),
+      makeIR({
+        symbols: [callerMoved, callee, other],
+        dependencies: [callEdge(callerMoved.id, callee.id), callEdge(callerMoved.id, other.id)],
+      }),
+    )
+
+    expect(diff.dependencies).toEqual({
+      ...NO_CHANGE,
+      added: [callEdge(callerMoved.id, other.id)],
+    })
   })
 
   it("is a removed and an added edge when its direction flipped", () => {
-    const before = call(caller, callee)
-    const after = call(caller, calleeMoved, { direction: "inbound" })
+    const before = callEdge(caller.id, callee.id)
+    const after = callEdge(caller.id, calleeMoved.id, { direction: "inbound" })
     const diff = diffOf(
       makeIR({ symbols: [caller, callee], dependencies: [before] }),
       makeIR({ symbols: [caller, calleeMoved], dependencies: [after] }),
     )
 
-    expect(diff.dependencies).toMatchObject({ added: [after], removed: [before] })
+    expect(diff.dependencies).toEqual({ ...NO_CHANGE, added: [after], removed: [before] })
+  })
+})
+
+describe("a call edge whose callee moved out of a file the head skipped", () => {
+  const lost: SkippedFile = { path: "src/middleware.ts", reason: "parse-failed" }
+
+  it.each([
+    [
+      "is no dependency change when the head holds the call under the new id",
+      [callEdge(callerMoved.id, calleeMoved.id)],
+      NO_CHANGE,
+    ],
+    [
+      "is unknown, under the ids the base wrote, when the head holds no call",
+      [],
+      {
+        ...NO_CHANGE,
+        unknown: [
+          {
+            dependency: callEdge(callerMoved.id, callee.id),
+            absentFrom: "head",
+            lostFiles: [lost],
+          },
+        ],
+      },
+    ],
+  ])("%s", (_label, headDependencies, expected) => {
+    const diff = diffOf(
+      makeIR({
+        symbols: [callerMoved, callee],
+        dependencies: [callEdge(callerMoved.id, callee.id)],
+      }),
+      withSkipped(makeIR({ symbols: [callerMoved, calleeMoved], dependencies: headDependencies }), [
+        lost,
+      ]),
+    )
+
+    expect(diff.dependencies).toEqual(expected)
+  })
+})
+
+describe("base edges that read as one under the head ids", () => {
+  it("refuse the diff rather than drop one of them", () => {
+    const undeclared = calleeMoved.id
+
+    expect(() =>
+      diffOf(
+        makeIR({
+          symbols: [callee, other],
+          dependencies: [callEdge(callee.id, other.id), callEdge(undeclared, other.id)],
+        }),
+        makeIR({
+          symbols: [calleeMoved, other],
+          dependencies: [callEdge(calleeMoved.id, other.id)],
+        }),
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ir-identity-collision",
+        value: `(${calleeMoved.id}, ${other.id}, call)`,
+      }),
+    )
   })
 })

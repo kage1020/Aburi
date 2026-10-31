@@ -1,12 +1,8 @@
-import { dependency, makeIR, makeSymbol } from "@aburi/test-support"
+import { makeIR, makeSymbol } from "@aburi/test-support"
 import type { IR, SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { renameDirections } from "../src"
-import { diffOf, withSkipped } from "./helpers"
-
-function call(from: string, to: string) {
-  return dependency({ from, to, via: "call" })
-}
+import { callEdge, diffOf, withSkipped } from "./helpers"
 
 const RENAMES = new Map([["src/big.ts", "src/billing.ts"]])
 const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
@@ -130,7 +126,7 @@ describe("an edge into a renamed file one side skipped", () => {
     const diff = diffAcrossRename(
       makeIR({
         symbols: [kept, atOld],
-        dependencies: [call("ts:src/big.ts#Billing", "ts:src/kept.ts#kept")],
+        dependencies: [callEdge("ts:src/big.ts#Billing", "ts:src/kept.ts#kept")],
       }),
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/billing.ts", reason: "over-size" }]),
     )
@@ -138,7 +134,7 @@ describe("an edge into a renamed file one side skipped", () => {
     expect(diff.summary.depsRemoved).toBe(0)
     expect(diff.dependencies.unknown).toStrictEqual([
       {
-        dependency: call("ts:src/big.ts#Billing", "ts:src/kept.ts#kept"),
+        dependency: callEdge("ts:src/big.ts#Billing", "ts:src/kept.ts#kept"),
         absentFrom: "head",
         lostFiles: [{ path: "src/billing.ts", reason: "over-size" }],
       },
@@ -150,14 +146,14 @@ describe("an edge into a renamed file one side skipped", () => {
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/big.ts", reason: "parse-timeout" }]),
       makeIR({
         symbols: [kept, atNew],
-        dependencies: [call("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing")],
+        dependencies: [callEdge("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing")],
       }),
     )
 
     expect(diff.summary.depsAdded).toBe(0)
     expect(diff.dependencies.unknown).toStrictEqual([
       {
-        dependency: call("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing"),
+        dependency: callEdge("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing"),
         absentFrom: "base",
         lostFiles: [{ path: "src/big.ts", reason: "parse-timeout" }],
       },
@@ -169,7 +165,7 @@ describe("an edge into a renamed file one side skipped", () => {
     const diff = diffAcrossRename(
       makeIR({
         symbols: [kept, atOld, helper],
-        dependencies: [call("ts:src/big.ts#Billing", "ts:src/big.ts#charge")],
+        dependencies: [callEdge("ts:src/big.ts#Billing", "ts:src/big.ts#charge")],
       }),
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/billing.ts", reason: "over-size" }]),
     )
@@ -185,7 +181,7 @@ describe("an edge into a renamed file one side skipped", () => {
     const diff = diffAcrossRename(
       makeIR({
         symbols: [kept, fromRenamed, toStaying],
-        dependencies: [call("ts:src/a.ts#A", "ts:src/m.ts#M")],
+        dependencies: [callEdge("ts:src/a.ts#A", "ts:src/m.ts#M")],
       }),
       withSkipped(makeIR({ symbols: [kept] }), [
         { path: "src/z.ts", reason: "parse-failed" },
