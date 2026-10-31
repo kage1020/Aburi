@@ -16,6 +16,7 @@ export type {
   Generator as DiffGenerator,
   IRRef,
   MatchRationale,
+  MiddlewareDelta,
   NotComparedFile,
   SignatureDelta,
   SkippedFile as DiffSkippedFile,

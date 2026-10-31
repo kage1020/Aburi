@@ -266,6 +266,68 @@ describe("calls", () => {
   })
 })
 
+describe("middleware", () => {
+  const middlewareDelta = (base: string[] | undefined, head: string[] | undefined) =>
+    computeSymbolDelta(
+      symbolWith(base === undefined ? {} : { middleware: base }, "a"),
+      symbolWith(head === undefined ? {} : { middleware: head }, "b"),
+    ).middleware
+
+  it.each<[string, string[] | undefined, string[] | undefined, object]>([
+    [
+      "one removed",
+      ["auth", "audit"],
+      ["audit"],
+      { added: [], removed: ["auth"], reordered: false },
+    ],
+    ["one added", ["audit"], ["auth", "audit"], { added: ["auth"], removed: [], reordered: false }],
+    [
+      "two swapped",
+      ["auth", "audit"],
+      ["audit", "auth"],
+      { added: [], removed: [], reordered: true },
+    ],
+    [
+      "the last one removed",
+      ["auth"],
+      undefined,
+      { added: [], removed: ["auth"], reordered: false },
+    ],
+    [
+      "the first one added",
+      undefined,
+      ["auth"],
+      { added: ["auth"], removed: [], reordered: false },
+    ],
+    [
+      "none moved",
+      ["auth", "audit"],
+      ["auth", "audit"],
+      { added: [], removed: [], reordered: false },
+    ],
+    [
+      "one of a repeated name removed",
+      ["audit", "auth", "audit"],
+      ["auth", "audit"],
+      { added: [], removed: ["audit"], reordered: false },
+    ],
+    [
+      "one replaced while the rest kept their order",
+      ["auth", "validate(a)", "audit"],
+      ["auth", "validate(b)", "audit"],
+      { added: ["validate(b)"], removed: ["validate(a)"], reordered: false },
+    ],
+  ])("reports %s", (_what, base, head, expected) => {
+    expect(middlewareDelta(base, head)).toEqual(expected)
+  })
+
+  it("is left out when neither side names any", () => {
+    expect(computeSymbolDelta(symbolWith({}, "a"), symbolWith({}, "b"))).not.toHaveProperty(
+      "middleware",
+    )
+  })
+})
+
 describe("signature", () => {
   const signatureDelta = (base: Signature | null, head: Signature | null) =>
     computeSymbolDelta(symbolWith({ signature: base }, "a"), symbolWith({ signature: head }, "b"))

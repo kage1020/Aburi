@@ -122,7 +122,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     for (const raw of candidates) {
       if (deadline.expired()) return abandonedFile()
 
-      const { candidate, confidence, extKindBy } = mergeFrameworkClassification(
+      const { candidate, confidence, extKindBy, middleware } = mergeFrameworkClassification(
         normalizeCandidateStrings(raw),
         frameworks,
         frameworkCtx,
@@ -187,6 +187,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
           rules: body.rules,
           effects: classifiedEffects,
           calls: keptCalls,
+          middleware,
           normalizedAstString: normalized,
           confidence,
         }),

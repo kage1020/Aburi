@@ -111,6 +111,16 @@ branches. A removed `guard` line means somebody removed a condition.
 `db.transaction`, `event.publish`, `network.rpc`. A method that gained
 `db.write` now writes to your database.
 
+A framework registration also lists its **Middleware**, the functions an
+Express route or `use` runs before its handler, in order. Removing one is a
+logic change that names it:
+
+```md
+- middleware removed: `requireAdmin`
+```
+
+A route that lost its authorization check reads as that, not as a reformat.
+
 ## A slice
 
 The Slice View groups the changed symbols that call one another, so a feature

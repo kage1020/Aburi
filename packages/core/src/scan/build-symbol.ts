@@ -61,6 +61,7 @@ export interface BuildKeptSymbolInput {
   rules: Rule[]
   effects: Effect[]
   calls: Call[]
+  middleware: readonly string[]
   normalizedAstString: string
   confidence: Confidence
 }
@@ -79,6 +80,7 @@ export function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     rules: input.rules.map(normalizeRuleStrings).sort((a, b) => a.line - b.line),
     effects: [...input.effects].sort((a, b) => (a.line ?? 0) - (b.line ?? 0)),
     calls: [...input.calls].sort((a, b) => a.line - b.line),
+    ...(input.middleware.length > 0 ? { middleware: [...input.middleware] } : {}),
     source: input.candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },
     confidence: input.confidence,

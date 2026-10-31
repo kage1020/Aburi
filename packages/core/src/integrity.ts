@@ -216,6 +216,9 @@ function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
     for (const [index, call] of symbol.calls.entries()) {
       reportUnnormalized(call.target, symbol.id, `calls[${index}].target`, out)
     }
+    for (const [index, name] of (symbol.middleware ?? []).entries()) {
+      reportUnnormalized(name, symbol.id, `middleware[${index}]`, out)
+    }
   }
   for (const dep of ir.dependencies) {
     for (const role of ["from", "to"] as const) {

@@ -133,6 +133,11 @@ describe("logicFingerprint ignores", () => {
       caller(WRITE, propagatedEffect("x-acme:create", "prisma.invoice.create")),
       caller(WRITE),
     ],
+    [
+      "whitespace inside a middleware name",
+      body({ middleware: ["requireRole(  'admin'  )"] }),
+      body({ middleware: ["requireRole( 'admin' )"] }),
+    ],
   ])("%s", (_what, a, b) => {
     expect(logicFingerprint(a)).toBe(logicFingerprint(b))
   })
@@ -170,6 +175,17 @@ describe("logicFingerprint moves with", () => {
       caller(propagatedEffect("db.write", "prisma.invoice.create")),
       caller(),
     ],
+    ["an added middleware", body({ middleware: ["requireAdmin"] }), body()],
+    [
+      "the order of middleware",
+      body({ middleware: ["audit", "requireAdmin"] }),
+      body({ middleware: ["requireAdmin", "audit"] }),
+    ],
+    [
+      "a middleware's name",
+      body({ middleware: ["requireRole('user')"] }),
+      body({ middleware: ["requireRole('admin')"] }),
+    ],
   ])("%s", (_what, a, b) => {
     expect(logicFingerprint(a)).not.toBe(logicFingerprint(b))
   })
@@ -199,6 +215,7 @@ describe("logicNamesNothing", () => {
     ["a rule carrying an expression", withRules(loop, rule({ type: "return", expr: "a + b" }))],
     ["a local effect", caller(WRITE)],
     ["a propagated effect alone", caller(propagatedEffect("db.write", "prisma.invoice.create"))],
+    ["a middleware alone", makeSymbol("ts:src/a.ts#foo", { middleware: ["requireAdmin"] })],
   ])("fails on %s", (_what, symbol) => {
     expect(logicNamesNothing(symbol)).toBe(false)
   })

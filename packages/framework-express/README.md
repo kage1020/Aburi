@@ -57,6 +57,25 @@ way: `Router`, `express.Router`, and `require.Router` for
 indentation or comments, so reformatting a call leaves its entries as they
 were.
 
+A route or `use` registration also names its middleware, which `@aburi/core`
+writes to the Symbol's `middleware` and the logic fingerprint reads, so a route
+that loses its authorization check is a logic change the report names
+(`- middleware removed: requireAdmin`) rather than a reformat. For a route it
+is every handler argument but the last, the handler; for `use`, every argument
+after the path, the router a mount hands over included; in a chain
+(`app.route("/users").get(a, h).post(b, h)`), each registration's in the order
+the chain makes them. Arrays and spreads of arrays are flattened, as Express
+flattens them. An inline function is left out, since its body is the
+registration's own and already read. Each entry is named from the syntax tree,
+so line breaks and comments do not reach it: `requireAdmin`, `auth.required`,
+`handlers.auth` for `handlers["auth"]`, a factory with its literal and named
+arguments (`requireRole("admin")`, and `rateLimit(…)` for
+`rateLimit({ max: 10 })`), `...guards` for a spread whose contents the
+statement does not show, and `<computed>` for anything else. A `use` with no
+path is named by its arguments already, so changing them makes it another
+registration rather than a changed one; app-level `app.use(mw)` above a route
+is its own registration and is not counted toward that route.
+
 Confidence is `high` when the file imports the `express` package or one of its
 subpaths (or reaches Express via CommonJS `require('express')`) and `medium`
 otherwise — the classification survives so the workspace projection still

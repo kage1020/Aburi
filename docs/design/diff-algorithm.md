@@ -833,6 +833,22 @@ delta.exportedAs = { added: [...], removed: [...], modified: [] }
 
 The names the module exports each side under ([fingerprint.md](./fingerprint.md) §3.8), compared as a set: `export { handler as GET }` becoming `export { handler as GET, handler as DELETE }` gives `added: ["DELETE"]`, and `export default function Page` becoming `export function Page` gives `added: ["Page"], removed: ["default"]`. A name is a string with nothing else to differ in, so `modified` stays empty. The api fingerprint leaves the names out when they are the declaration's own name alone; the delta compares them whole, the own name included, so it says which name an export gained or lost wherever the fingerprint moved for it, and a declaration that stops being exported names the export it lost beside its visibility change. A renamed declaration exported under its own name records both, `removed: ["isAdminUser"], added: ["canAdministerSite"]`; the Markdown leaves that pair to its name row ([`markdown-projection.md`](./markdown-projection.md) MP17d). The key is emitted unconditionally, empty included (§10.1).
 
+### 5.6 middleware delta
+
+```
+delta.middleware = {
+  added:     [...],   // names the head holds more often than the base, in head order
+  removed:   [...],   // names the base holds more often than the head, in base order
+  reordered: bool     // the names both sides hold run in a different order
+}
+```
+
+Present when either side's Symbol carries `middleware` ([`ir-schema.md`](./ir-schema.md) §5.7), the two lists being equal included, and absent when neither does, so a reader can tell "unchanged" from "nothing to compare". A side without the key compares as an empty list, so a route that loses its last middleware reports it removed.
+
+The lists are compared as multisets of names, not by position: removing the first of three middleware is one removal, not three changes. Where a name repeats, its earlier occurrences are the ones paired. `reordered` is true when the longest common subsequence of the two lists is shorter than the names they share. The lists themselves are on `before` and `after`, which is where the report reads the order from.
+
+A changed middleware is a removal and an addition: `requireRole("admin")` → `requireRole("user")` removes one name and adds the other. A name is the whole of what the IR records about an entry, so there is nothing for a `modified` bucket to say that the two rows do not.
+
 ## 6. Component / Dependency diff
 
 Not only Symbols but also Components / Dependencies are diffed, in separate arrays.
@@ -1134,6 +1150,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF18b | DF18a on a Symbol that also moved file | moved+changed: 1 |
 | DF18c | DF18a on a pair dropped on both sides | unchanged, as DF13 |
 | DF18d | Only the names a declaration is exported under changed: `export { handler as GET }` → `export { handler as GET, handler as DELETE }` | changed: 1, delta.apiChanged true, `delta.exportedAs.added: ["DELETE"]` (§5.5). Writing `export function f` as `function f` with `export { f }` is unchanged ([`fingerprint.md`](./fingerprint.md) A25) |
+| DF18e | `router.get("/users", requireAdmin, h)` → `router.get("/users", h)` | changed: 1, delta.logicChanged true, delta.middleware `{ added: [], removed: ["requireAdmin"], reordered: false }` → in Markdown: a Logic changes entry with ``- middleware removed: `requireAdmin` ``; swapping two middleware gives `reordered: true`, and a route that names none on either side has no delta.middleware (§5.6) |
 | DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word, and §3.3 applies the same rule where the logic names nothing |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
 | DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` floors an unsegmentable run to the words it must hold (§3.4.1) |

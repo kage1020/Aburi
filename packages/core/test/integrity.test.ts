@@ -395,6 +395,12 @@ describe("checkIRIntegrity — Unicode normalization", () => {
       },
     ],
     [
+      "symbols[].middleware[]",
+      (ir) => {
+        ir.symbols = [makeSymbol("ts:src/a.ts#foo", { middleware: [decomposed] })]
+      },
+    ],
+    [
       "dependencies[] endpoints",
       (ir) => {
         ir.components = [component({ id: "a", name: "a" }), component({ id: "b", name: "b" })]

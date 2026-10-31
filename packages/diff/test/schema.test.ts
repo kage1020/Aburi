@@ -60,6 +60,19 @@ describe("a diff buildDiff writes validates against aburi.diff.v1", () => {
     expect(diffSchemaViolations(diff)).toEqual([])
   })
 
+  it("with a Symbol whose middleware moved", () => {
+    const diff = diffSymbols(
+      [{ ...kept, middleware: ["requireAdmin", "audit"] }],
+      [{ ...kept, middleware: ["audit"], fingerprint: fp("x") }],
+    )
+    expect(soleChange(diff.symbols, "changed").delta.middleware).toEqual({
+      added: [],
+      removed: ["requireAdmin"],
+      reordered: false,
+    })
+    expect(diffSchemaViolations(diff)).toEqual([])
+  })
+
   it("with a Symbol whose only change is its confidence, its export names written empty", () => {
     const diff = diffSymbols([kept], [{ ...kept, confidence: "low" }])
     const { delta } = soleChange(diff.symbols, "changed")

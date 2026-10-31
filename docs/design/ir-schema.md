@@ -61,6 +61,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | `Component.description` | **yes** | **A** | always emitted; `null` when the component carries no description |
 | `Symbol.component` | **yes** | **A** | always emitted; `null` when the Symbol lies outside every Component |
 | `Symbol.signature` | **yes** | **A** | always emitted; `null` for Symbols with no callable signature |
+| `Symbol.middleware` | no | B | omitted when the Symbol names no middleware; never `[]` (§5.7) |
 | `Decorator.qualifier` | no | B | omitted when the decorator was written as a bare name; never `""` (§6) |
 | `Signature.inferredThrows` | no | B | omitted when nothing was inferred; never `[]` (§7) |
 | `Signature.inputs[].optional` | no | B | present iff `true`: a caller may omit the argument (schema-enforced by `const: true`, which refuses `false`, §7) |
@@ -101,7 +102,7 @@ Normalization therefore happens **where a string enters the process**, not where
 | `toRelativePosix` (workspace detection) | `components[].roots` and `workspace.managers[].roots` |
 | `resolveComponents` (CLI config load) | those same fields when they come from `aburi.json` rather than from detection |
 | `normalizePackagePath` (component detection) | `components[].publicApi` |
-| the scan pipeline's plugin boundary | `symbols[].source.file`, `signature.inputs[].name` and `signature.inputs[].bindings`, the import edges the call resolver matches, and the call target that becomes `calls[].target` or `effects[].target` |
+| the scan pipeline's plugin boundary | `symbols[].source.file`, `signature.inputs[].name` and `signature.inputs[].bindings`, the import edges the call resolver matches, the call target that becomes `calls[].target` or `effects[].target`, and the names a framework plugin hands back as `symbols[].middleware[]` |
 | `buildDropCFilter` | the `suppress` / `keep` / `dropCallees` prefixes those call targets are matched against |
 
 Normalization is all these entry points do to a path. None of them converts a native path into a POSIX one, because the conversion is not decidable from the string: `\` is a separator on Windows and an ordinary filename character on POSIX, so a rewrite applied to every path silently renames any file whose name holds one. A caller that knows it holds a native path converts it — `toRelativePosix` does, on the platform separator, which is a separator exactly where a filename cannot hold one — and everything else hands over a path that is already POSIX and is validated as it stands.
@@ -299,6 +300,7 @@ The core entity of the review unit.
   "rules": [ /* Rule[] */ ],                  // required
   "effects": [ /* Effect[] */ ],              // required
   "calls": [ /* Call[] */ ],                  // required
+  "middleware": ["requireAdmin"],             // Class B (§1.1) — omitted when the Symbol names no middleware (§5.7)
   "source": { /* SourceRange */ },            // required
   "fingerprint": { /* Fingerprint */ },       // required
   "confidence": "high",                       // required, enum §5.4
@@ -372,7 +374,15 @@ A Symbol's `derivedBy` entry that names something the source wrote — the call 
 - `false` (default): included in the IR output
 - `true`: judged to be decoration, but kept for transparency about what was dropped
 
-Symbols with `dropped: true` have `rules`/`effects`/`calls`/`fingerprint` set to their prescribed values (empty arrays / all fingerprints = "0"*12). The Markdown projection aggregates them in a collapsed `## Dropped` section (see [markdown-projection.md](./markdown-projection.md) §3.6). `aburi explain` outputs the full details. `dropReason` is a short human-readable phrase (e.g. `"pure DTO"`, `"logger boilerplate"`, `"generated file"`).
+Symbols with `dropped: true` have `rules`/`effects`/`calls`/`fingerprint` set to their prescribed values (empty arrays / all fingerprints = "0"*12), and carry no `middleware`. The Markdown projection aggregates them in a collapsed `## Dropped` section (see [markdown-projection.md](./markdown-projection.md) §3.6). `aburi explain` outputs the full details. `dropReason` is a short human-readable phrase (e.g. `"pure DTO"`, `"logger boilerplate"`, `"generated file"`).
+
+### 5.7 `middleware`
+
+The middleware a framework registration hands its handler to, in the order it runs, as the framework plugin names them ([`lang-plugin.md`](./lang-plugin.md) §5.2.4). `router.get("/users", requireAdmin, validate(query), listUsers)` carries `["requireAdmin", "validate(query)"]`.
+
+It exists because a registration's middleware is neither a rule nor an effect, and is not a call made from the registration's body, so before it the only axis it moved was `syntax`: a route that lost its authorization check was reported as a reformat. The `logic` fingerprint reads it ([`fingerprint.md`](./fingerprint.md) §4.1), so adding, removing or reordering one is a logic change, and the diff names which ([`diff-algorithm.md`](./diff-algorithm.md) §5.5).
+
+It is **Class B** per §1.1: a Symbol that names no middleware — every Symbol that is not a framework registration, and a registration whose only handlers are written inline — omits the key, never `[]`, and the schema enforces `minItems: 1` and `minLength: 1` on each entry. A dropped Symbol carries none (§5.6). Because the key is absent wherever there is nothing to record, a Symbol without middleware hashes exactly as it did before the field existed.
 
 ## 6. Decorator
 

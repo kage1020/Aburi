@@ -206,6 +206,7 @@ function cloneSymbol(symbol: IRSymbol): IRSymbol {
     decorators: symbol.decorators.map((d) => ({ ...d })),
     rules: symbol.rules.map((r) => ({ ...r })),
     effects: symbol.effects.map((e) => ({ ...e })),
+    ...(symbol.middleware === undefined ? {} : { middleware: [...symbol.middleware] }),
     fingerprint: { ...symbol.fingerprint },
   }
 }

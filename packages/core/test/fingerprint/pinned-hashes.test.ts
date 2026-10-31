@@ -68,6 +68,14 @@ describe("fingerprints are pinned across releases", () => {
     expect(logicFingerprint(makeSymbol("ts:src/a.ts#foo"))).toBe("a0af04270155")
   })
 
+  it("logicFingerprint of a registration that names its middleware and nothing else", () => {
+    // echo -n '{"effects":[],"middleware":["requireAdmin","validate(user)"],"rules":[]}' | sha256sum | cut -c1-12
+    const symbol = makeSymbol("ts:src/a.ts#app__get__$users__d0", {
+      middleware: ["requireAdmin", "validate(user)"],
+    })
+    expect(logicFingerprint(symbol)).toBe("5d67296d624b")
+  })
+
   it("logicFingerprint of a body with rules, local effects and propagated ones", () => {
     const symbol = makeSymbol("ts:src/a.ts#foo", {
       rules: [

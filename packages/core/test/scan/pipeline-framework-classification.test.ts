@@ -97,6 +97,38 @@ describe("runFilePipeline — framework classification", () => {
     ])
   })
 
+  it("records the middleware the winning classification names, in NFC and without empty names", async () => {
+    const framework = stubFrameworkPlugin("framework-route", {
+      classifySymbol: () => ({
+        extKind: "framework:express:route",
+        derivedBy: "framework-route:hit",
+        middleware: ["requireAdmin", "", "caf\u0065\u0301"],
+      }),
+    })
+
+    const { symbols } = await extractOneSymbol({ frameworks: [framework] })
+
+    expect(symbols[0]?.middleware).toEqual(["requireAdmin", "caf\u00e9"])
+  })
+
+  it.each<[string, string[] | undefined]>([
+    ["names none", undefined],
+    ["names an empty list", []],
+    ["names only empty names", [""]],
+  ])("leaves the middleware out when the classification %s", async (_label, middleware) => {
+    const framework = stubFrameworkPlugin("framework-route", {
+      classifySymbol: () => ({
+        extKind: "framework:express:route",
+        derivedBy: "framework-route:hit",
+        ...(middleware === undefined ? {} : { middleware }),
+      }),
+    })
+
+    const { symbols } = await extractOneSymbol({ frameworks: [framework] })
+
+    expect(symbols[0]).not.toHaveProperty("middleware")
+  })
+
   it.each<[string, readonly FrameworkPlugin[], Confidence]>([
     [
       "the winning classifier's confidence",
@@ -140,6 +172,22 @@ describe("runFilePipeline — drop decisions", () => {
     expect(seen).toEqual(["framework:first:role"])
     expect(symbols[0]?.dropped).toBe(true)
     expect(symbols[0]?.dropReason).toBe("dropper says so")
+  })
+
+  it("keeps no middleware on a dropped Symbol, as it keeps no rules", async () => {
+    const framework = stubFrameworkPlugin("framework-route", {
+      classifySymbol: () => ({
+        extKind: "framework:express:route",
+        derivedBy: "framework-route:hit",
+        middleware: ["requireAdmin"],
+      }),
+      symbolDropHint: () => ({ reason: "generated", category: "B" }),
+    })
+
+    const { symbols } = await extractOneSymbol({ frameworks: [framework] })
+
+    expect(symbols[0]?.dropped).toBe(true)
+    expect(symbols[0]).not.toHaveProperty("middleware")
   })
 
   it.each<[string, SymbolCandidate, readonly FrameworkPlugin[], string | null]>([

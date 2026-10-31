@@ -250,6 +250,12 @@ Contracts:
   starts from, read through parentheses, `as`, `satisfies`, `!` and every call
   on the way — `app.get` for `app.get(…)`, `(app as Express).get(…)` and
   `app.route("/x").get(…)` alike.
+- A plugin for a framework that registers handlers by call can return
+  `middleware`: what the registration runs before its handler, in order, named
+  from the syntax tree by the same rule as `derivedBy`. The pipeline writes it to
+  `Symbol.middleware`, which the logic fingerprint reads, so a removed
+  authorization step is a logic change the report names. Leave inline functions
+  out: their bodies are already the Symbol's.
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
   `extKindPrefixes` / `derivedByPrefixes`.
 - Match a decorator on the name it was **imported** under, not the one the source

@@ -4,6 +4,7 @@ import {
   effectRow,
   groupedCallRows,
   inlineCode,
+  joinCode,
   orderEffects,
   renderDocument,
   requireDropReason,
@@ -61,6 +62,14 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
     lines.push("## Signature")
     lines.push("")
     lines.push(sig)
+    lines.push("")
+  }
+
+  const middleware = symbol.middleware ?? []
+  if (middleware.length > 0) {
+    lines.push("## Middleware")
+    lines.push("")
+    lines.push(joinCode(middleware))
     lines.push("")
   }
 
