@@ -23,7 +23,7 @@ export interface ScoredPair extends Endpoints {
   score: number
 }
 
-interface Assignment {
+export interface Assignment {
   pairs: readonly ScoredPair[]
   baseIds: ReadonlySet<SymbolId>
   headIds: ReadonlySet<SymbolId>

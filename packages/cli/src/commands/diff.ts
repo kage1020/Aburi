@@ -118,7 +118,9 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       head: irRef(compared.headRef, compared.headIR),
       generator,
       ...(compared.gitRenames === null ? {} : { gitRenames: compared.gitRenames }),
-      logger: createLogger(options.logLevel === undefined ? {} : { minimum: options.logLevel }),
+      // The matcher writes only debug lines, and tracing them walks what it left unpaired, so a run
+      // at any other level is spared the walk.
+      ...(options.logLevel === "debug" ? { logger: createLogger({ minimum: "debug" }) } : {}),
     })
   } catch (error) {
     if (error instanceof DiffError) throw classifyDiffError(error)

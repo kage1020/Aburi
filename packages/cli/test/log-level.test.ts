@@ -146,10 +146,12 @@ describe("aburi scan — the log of the files it removes", () => {
 })
 
 describe("aburi diff — the matcher's refusals", () => {
-  it.each([
-    ["writes one debug: line for each at --log-level debug", ["--log-level", "debug"], true],
-    ["writes none of them at the default level", [], false],
-  ])("%s", async (_, flags, shown) => {
+  it.each<[string, readonly string[], NodeJS.ProcessEnv, boolean]>([
+    ["writes one debug: line for each at --log-level debug", ["--log-level", "debug"], {}, true],
+    ["writes them at ABURI_LOG_LEVEL=debug", [], { ABURI_LOG_LEVEL: "debug" }, true],
+    ["writes none of them at --log-level info", ["--log-level", "info"], {}, false],
+    ["writes none of them at the default level", [], {}, false],
+  ])("%s", async (_, flags, env, shown) => {
     const paths = await writeIRs(
       workspace.root,
       documentWith({ symbols: [makeSymbol({ id: "ts:src/a.ts#render", name: "render" })] }),
@@ -161,7 +163,7 @@ describe("aburi diff — the matcher's refusals", () => {
       `debug: diff/stage4: ${id} is not compared by name: its name says too little to pair on\n`
 
     expect(
-      await loggedBy(["diff", "--base", paths.base, "--head", paths.head, ...flags], {}),
+      await loggedBy(["diff", "--base", paths.base, "--head", paths.head, ...flags], env),
     ).toEqual({
       code: EXIT.SUCCESS,
       lines: shown ? [refused("ts:src/a.ts#render"), refused("ts:src/b.ts#render")] : [],
