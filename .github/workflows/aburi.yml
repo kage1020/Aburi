@@ -46,6 +46,7 @@ jobs:
           cli: workspace
           comment: ${{ env.CAN_COMMENT }}
           fail-on: "removed,dropped-toggled:to-dropped:>10"
+          fail-on-scope: non-test
 
       - name: Hand the comment to the companion workflow
         id: handoff

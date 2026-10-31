@@ -1,4 +1,20 @@
 {
   "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
-  "languages": ["lang-typescript"]
+  "languages": ["lang-typescript"],
+  "testFiles": [
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*.test-d.*",
+    "**/*.spec-d.*",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__fixtures__/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/e2e/**",
+    "packages/test-support/**",
+    "packages/test-harness/**",
+    "examples/*/before/**",
+    "examples/*/after/**"
+  ]
 }
