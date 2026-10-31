@@ -43,10 +43,17 @@ describe("classifyNestCall — a receiver declared as the emitter class", () => 
     })
   })
 
-  it("keeps the name's tag where the receiver is also a recognised name", () => {
-    const call = makeCall({ target: "this.eventBus.emit", receiverType: "EventEmitter2" })
+  it.each([
+    ["the emitter class", "EventEmitter2"],
+    ["a type the file's emitter import does not bind", "Server"],
+  ])("lets a recognised name decide, under its own tag, whatever it is declared as: %s", (_label, receiverType) => {
+    const call = makeCall({ target: "this.eventBus.emit", receiverType })
 
-    expect(classifyNestCall(call, ctx)?.derivedBy).toBe("effects-plugin:nest:eventBus.emit")
+    expect(classifyNestCall(call, ctx)).toEqual({
+      effectId: "event.publish",
+      confidence: "high",
+      derivedBy: "effects-plugin:nest:eventBus.emit",
+    })
   })
 
   it.each([

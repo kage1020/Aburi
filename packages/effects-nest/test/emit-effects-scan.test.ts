@@ -94,6 +94,36 @@ describe("scan — event emitters in a NestJS service file", () => {
     expect(create.calls.map((c) => c.target)).toEqual(["this.server.emit"])
   })
 
+  it.each([
+    ["an aliased import", 'import { EventEmitter2 as Bus } from "@nestjs/event-emitter"', "Bus"],
+    ["a namespace import", 'import * as ee from "eventemitter2"', "ee.EventEmitter2"],
+    ["a default import", 'import EventEmitter2 from "eventemitter2"', "EventEmitter2"],
+  ])("publishes through a field declared as the emitter class under the name %s binds", async (_label, importLine, type) => {
+    await workspace.writeSource(
+      "src/orders.service.ts",
+      [
+        importLine,
+        "",
+        "export class OrdersService {",
+        `  constructor(private readonly prisma: PrismaClient, private readonly bus: ${type}) {}`,
+        "  create(id: string) {",
+        '    this.bus.emit("order.created", { id })',
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    expect(symbolNamed(await scanWorkspace(), "OrdersService.create").effects).toMatchObject([
+      {
+        id: "event.publish",
+        target: "this.bus.emit",
+        confidence: "high",
+        derivedBy: "effects-plugin:nest:EventEmitter2.emit",
+      },
+    ])
+  })
+
   it("publishes in a file that imports eventemitter2 itself", async () => {
     await workspace.writeSource(
       "src/publish.ts",

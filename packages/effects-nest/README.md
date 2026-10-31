@@ -30,8 +30,13 @@ create(id: string) {
 The type is the one the language plugin reads off the class (a constructor
 parameter property or a typed field), and it must be the `EventEmitter2` the
 file imports from an emitter module: under its own name, under an alias
-(`EventEmitter2 as Bus`), or through a namespace (`ee.EventEmitter2`). A plain
-parameter (`publish(bus: EventEmitter2)`) is recognised by name only.
+(`EventEmitter2 as Bus`), through a namespace (`ee.EventEmitter2`), or as
+`eventemitter2`'s default import. Only a field of `this` that the class itself
+declares carries a type: a parameter or local
+(`publish(bus: EventEmitter2) { bus.emit(…) }`), an inherited field and
+`this.hub.bus.emit(…)` go through the name check alone, so `bus.emit(…)` there
+stays a call. The name check comes first: `this.eventBus.emit(…)` is a publish
+tagged `eventBus.emit` whatever `eventBus` is declared as.
 
 Layered gate: the owning file must import a recognised event-emitter module
 (`@nestjs/event-emitter` or `eventemitter2`), the method must be `emit`, and the

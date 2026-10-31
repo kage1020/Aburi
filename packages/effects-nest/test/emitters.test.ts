@@ -35,18 +35,6 @@ describe("hasNestEmitterImport", () => {
   ])("returns false when the file imports %s", (_label, imports) => {
     expect(hasNestEmitterImport(imports, PATH)).toBe(false)
   })
-
-  it("throws on an empty ImportEdge.source, naming the plugin, the file, and the line", () => {
-    expect(() => hasNestEmitterImport([edge("", 9)], PATH)).toThrow(
-      `effects-nest (${PATH}, line 9): ImportEdge.source is empty`,
-    )
-  })
-
-  it("throws even when a broken ImportEdge sits after a legitimate match", () => {
-    expect(() =>
-      hasNestEmitterImport([edge("@nestjs/event-emitter", 1), edge("", 2)], PATH),
-    ).toThrow(/ImportEdge\.source is empty/)
-  })
 })
 
 describe("namesNestEmitterClass", () => {
@@ -73,6 +61,11 @@ describe("namesNestEmitterClass", () => {
       [namespaced("eventemitter2", "ee")],
       "ee.EventEmitter2",
     ],
+    [
+      "the default import of eventemitter2, which exports the class as its default",
+      [importEdge({ source: "eventemitter2", symbols: ["default as Bus"] })],
+      "Bus",
+    ],
   ])("returns true for %s", (_label, imports, typeName) => {
     expect(namesNestEmitterClass(imports, typeName, PATH)).toBe(true)
   })
@@ -91,6 +84,19 @@ describe("namesNestEmitterClass", () => {
     ],
     ["a class of that name from another module", [edge("./local-emitter")], "EventEmitter2"],
     [
+      "a class of that name from another module, beside an emitter module's import of something else",
+      [
+        edge("./local-emitter"),
+        importEdge({ source: "@nestjs/event-emitter", symbols: ["OnEvent"], line: 2 }),
+      ],
+      "EventEmitter2",
+    ],
+    [
+      "the default import of @nestjs/event-emitter, which has no default",
+      [importEdge({ source: "@nestjs/event-emitter", symbols: ["default as EventEmitter2"] })],
+      "EventEmitter2",
+    ],
+    [
       "a namespace import under another name",
       [namespaced("eventemitter2", "ee")],
       "events.EventEmitter2",
@@ -103,10 +109,24 @@ describe("namesNestEmitterClass", () => {
   ])("returns false for %s", (_label, imports, typeName) => {
     expect(namesNestEmitterClass(imports, typeName, PATH)).toBe(false)
   })
+})
 
+describe.each([
+  ["hasNestEmitterImport", (imports: ImportEdge[]) => hasNestEmitterImport(imports, PATH)],
+  [
+    "namesNestEmitterClass",
+    (imports: ImportEdge[]) => namesNestEmitterClass(imports, "EventEmitter2", PATH),
+  ],
+])("%s on a broken ImportEdge", (_name, read) => {
   it("throws on an empty ImportEdge.source, naming the plugin, the file, and the line", () => {
-    expect(() => namesNestEmitterClass([edge("", 9)], "EventEmitter2", PATH)).toThrow(
+    expect(() => read([edge("", 9)])).toThrow(
       `effects-nest (${PATH}, line 9): ImportEdge.source is empty`,
+    )
+  })
+
+  it("throws even when a broken ImportEdge sits after a legitimate match", () => {
+    expect(() => read([edge("@nestjs/event-emitter", 1), edge("", 2)])).toThrow(
+      /ImportEdge\.source is empty/,
     )
   })
 })

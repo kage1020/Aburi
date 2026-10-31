@@ -34,21 +34,30 @@ export function namesNestEmitterClass(
   filePath: string,
 ): boolean {
   const origin = { plugin: EFFECTS_NEST_PLUGIN_NAME, filePath }
-  return imports.some((edge) => {
+  for (const edge of imports) {
     assertImportEdgeSource(edge, origin)
+    if (edge.symbols === "*" && edge.namespaceBinding !== undefined) {
+      assertNamespaceBinding(edge.namespaceBinding, edge, origin)
+    }
+  }
+  return imports.some((edge) => {
     if (!isNestEmitterModule(edge.source)) return false
     if (edge.symbols === "*") {
-      const binding = edge.namespaceBinding
-      if (binding === undefined) return false
-      assertNamespaceBinding(binding, edge, origin)
-      return typeName === `${binding}.${NEST_EMITTER_CLASS}`
+      return (
+        edge.namespaceBinding !== undefined &&
+        typeName === `${edge.namespaceBinding}.${NEST_EMITTER_CLASS}`
+      )
     }
-    return edge.symbols.some(
-      (raw) =>
-        (raw === NEST_EMITTER_CLASS && typeName === NEST_EMITTER_CLASS) ||
-        raw === `${NEST_EMITTER_CLASS} as ${typeName}`,
-    )
+    const bound = bindings(edge.source)
+    return edge.symbols.some((raw) => bound.has(raw))
   })
+
+  function bindings(source: string): ReadonlySet<string> {
+    const named = typeName === NEST_EMITTER_CLASS ? [NEST_EMITTER_CLASS] : []
+    // `eventemitter2` also exports the class as its default; `@nestjs/event-emitter` has no default.
+    const defaulted = source === "eventemitter2" ? [`default as ${typeName}`] : []
+    return new Set([...named, `${NEST_EMITTER_CLASS} as ${typeName}`, ...defaulted])
+  }
 }
 
 const NEST_EVENT_EMITTER_IDENTIFIERS_LIST = ["eventBus", "EventEmitter2"] as const

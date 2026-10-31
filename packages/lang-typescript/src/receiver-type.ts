@@ -10,6 +10,8 @@ const THIS_REBINDING_FUNCTIONS: ReadonlySet<string> = new Set([
 
 const PARAMETER_PROPERTY_MODIFIERS = ["accessibility_modifier", "override_modifier", "readonly"]
 
+const PARAMETER_TYPES: ReadonlySet<string> = new Set(["required_parameter", "optional_parameter"])
+
 interface ThisScope {
   readonly classBody: Node
   readonly isStatic: boolean
@@ -30,9 +32,18 @@ export function receiverTypeOf(callee: Node): string | null {
 
 function thisScope(from: Node): ThisScope | null {
   let child = from
+  let inParameterDecorator = false
   for (let node = from.parent; node !== null; child = node, node = node.parent) {
     if (THIS_REBINDING_FUNCTIONS.has(node.type)) return null
+    if (node.type === "decorator" && PARAMETER_TYPES.has(node.parent?.type ?? "")) {
+      inParameterDecorator = true
+    }
     if (!bindsThisFor(node, child)) continue
+    // A parameter's decorator is evaluated with the class, outside the method its list belongs to.
+    if (inParameterDecorator) {
+      inParameterDecorator = false
+      continue
+    }
     const classBody = node.parent
     if (classBody?.type !== "class_body") return null
     const isStatic = node.type === "class_static_block" || hasChildOfType(node, "static")
@@ -101,16 +112,28 @@ function namedType(declaration: Node): string | null {
 }
 
 function typeName(type: Node): string | null {
-  switch (type.type) {
-    case "type_identifier":
-      return type.text
-    case "nested_type_identifier":
-      return type.text.replace(/\s+/g, "")
-    case "generic_type": {
-      const name = type.childForFieldName("name")
-      return name === null ? null : typeName(name)
-    }
-    default:
-      return null
-  }
+  if (type.type !== "generic_type") return dottedName(type)
+  const name = type.childForFieldName("name")
+  return name === null ? null : typeName(name)
+}
+
+const NAME_TYPES: ReadonlySet<string> = new Set([
+  "identifier",
+  "type_identifier",
+  "property_identifier",
+])
+
+const DOTTED_NAME_FIELDS: ReadonlyMap<string, readonly [string, string]> = new Map([
+  ["nested_identifier", ["object", "property"]],
+  ["nested_type_identifier", ["module", "name"]],
+])
+
+// Read off the name's parts rather than its text, which keeps the spaces and comments around a `.`.
+function dottedName(node: Node | null): string | null {
+  if (node === null) return null
+  if (NAME_TYPES.has(node.type)) return node.text
+  const fields = DOTTED_NAME_FIELDS.get(node.type)
+  if (fields === undefined) return null
+  const [qualifier, name] = fields.map((field) => dottedName(node.childForFieldName(field)))
+  return qualifier == null || name == null ? null : `${qualifier}.${name}`
 }
