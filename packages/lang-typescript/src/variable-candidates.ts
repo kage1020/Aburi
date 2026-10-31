@@ -1,10 +1,17 @@
-import { unwrapValue } from "@aburi/core"
-import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { asFunctionValue, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
-import { inlineHandlers } from "./call-symbols"
+import {
+  asClassValue,
+  asFunctionValue,
+  hasChildOfType,
+  makeSourceRange,
+  nameFieldText,
+} from "./ast-helpers"
+import { layOutBodies, wrappedFunctions } from "./call-symbols"
+import { classMemberCandidates } from "./class-candidates"
 import { foldMemberGroup, groupMemberDeclaration, type MemberGroup } from "./declaration-merge"
 import { refuseAnonymousId } from "./declared-name"
+import { readDecorators } from "./decorators"
 import { exportEvidence, topLevelVisibility } from "./export-evidence"
 import { readLeadingJsDoc } from "./leading-jsdoc"
 import { objectEntryOf, objectLiteralOf } from "./object-members"
@@ -65,6 +72,25 @@ function makeVariableCandidate(
       },
     ]
   }
+  const classNode = initializer === null ? null : asClassValue(initializer)
+  if (classNode !== null) {
+    return [
+      {
+        id,
+        kind: "class",
+        extKind: null,
+        name: qname,
+        visibility: topLevelVisibility(statement),
+        decorators: readDecorators(classNode),
+        signature: null,
+        source: makeSourceRange(statement, ctx),
+        derivedBy: ["variable-assigned-class", ...exportEvidence(statement)],
+        bodyNode: classNode.childForFieldName("body"),
+        fullNode: classNode,
+      },
+      ...classMemberCandidates(classNode, ctx, [...namespacePath, name]),
+    ]
+  }
   const object = initializer === null ? null : objectLiteralOf(initializer)
   if (object !== null) {
     return [
@@ -84,7 +110,7 @@ function makeVariableCandidate(
       ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
     ]
   }
-  const [lead, ...rest] = initializer === null ? [] : wrappedFunctions(initializer, statement)
+  const bodies = initializer === null ? [] : wrappedFunctions(initializer)
   return [
     {
       id,
@@ -96,19 +122,12 @@ function makeVariableCandidate(
       signature: null,
       source: makeSourceRange(statement, ctx),
       derivedBy:
-        lead === undefined
+        bodies.length === 0
           ? exportEvidence(statement)
           : ["call-argument-function", ...exportEvidence(statement)],
-      bodyNode: lead?.bodyNode ?? null,
-      fullNode: statement,
-      ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
+      ...layOutBodies(bodies, statement),
     },
   ]
-}
-
-function wrappedFunctions(initializer: Node, statement: Node): MergedDeclaration<Node>[] {
-  const call = unwrapValue(initializer)
-  return call.type === "call_expression" ? inlineHandlers(call, statement) : []
 }
 
 function objectMemberCandidates(

@@ -20,11 +20,6 @@ export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSour
   }
 }
 
-export function functionValueOf(node: Node): Node | null {
-  const value = node.childForFieldName("value")
-  return value === null ? null : asFunctionValue(value)
-}
-
 const FUNCTION_VALUE_TYPES: ReadonlySet<string> = new Set([
   "arrow_function",
   "function_expression",
@@ -34,6 +29,11 @@ const FUNCTION_VALUE_TYPES: ReadonlySet<string> = new Set([
 export function asFunctionValue(node: Node): Node | null {
   const value = unwrapValue(node)
   return FUNCTION_VALUE_TYPES.has(value.type) ? value : null
+}
+
+export function asClassValue(node: Node): Node | null {
+  const value = unwrapValue(node)
+  return value.type === "class" ? value : null
 }
 
 export function hasErrorChild(node: Node): boolean {

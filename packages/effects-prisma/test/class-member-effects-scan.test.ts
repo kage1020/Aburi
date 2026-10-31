@@ -73,6 +73,30 @@ describe.each([
   })
 })
 
+describe("scan — a class whose field holds a function handed to a call", () => {
+  it("puts the write on the member, so constructing the class does not report it", async () => {
+    await workspace.writeSource(
+      "src/user.service.ts",
+      userService([
+        "handle = withAuth(async (data: unknown) => {",
+        "  return this.prisma.user.create({ data })",
+        "})",
+      ]),
+    )
+    await workspace.writeSource("src/factory.ts", FACTORY)
+
+    const result = await scanWorkspace()
+    const handle = symbolById(result, "ts:src/user.service.ts#UserService.handle")
+    const service = symbolById(result, "ts:src/user.service.ts#UserService")
+
+    expect([handle.kind, handle.dropped]).toEqual(["method", false])
+    expect(handle.effects.map((e) => e.id)).toEqual(["db.write"])
+    expect([service.dropped, service.effects]).toEqual([false, []])
+    expect(service.calls.map((c) => c.target)).toEqual(["withAuth"])
+    expect(symbolById(result, "ts:src/factory.ts#makeService").effects).toEqual([])
+  })
+})
+
 function writeBoot(className: string, module: string, args = ""): Promise<void> {
   return workspace.writeSource(
     "src/boot.ts",
@@ -197,5 +221,62 @@ describe("scan — a member beside a namespace export of the same name", () => {
     expect([exported.kind, exported.dropped]).toEqual(["type", true])
     expect(owner.calls).toEqual([])
     expect(result.ir.symbols.flatMap((s) => s.effects.map((e) => e.id))).toEqual(["db.write"])
+  })
+})
+
+describe("scan — a class a binding holds", () => {
+  const members = [
+    "  seed = prisma.user.count()",
+    "  static {",
+    "    prisma.user.deleteMany()",
+    "  }",
+    "  reset() {",
+    "    prisma.user.create({ data: {} })",
+    "  }",
+    "  static list() {",
+    "    return prisma.user.findMany()",
+    "  }",
+    "}",
+  ]
+
+  it("records the Symbols and effects the same class declared gets", async () => {
+    await workspace.writeSource(
+      "src/a.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "const prisma = new PrismaClient()",
+        "",
+        "export const Registry = class {",
+        ...members,
+        "",
+        "export class Named {",
+        ...members,
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const shapeOf = (owner: string) =>
+      result.ir.symbols
+        .filter(
+          (s) =>
+            s.name === owner || s.name.startsWith(`${owner}.`) || s.name.startsWith(`${owner}::`),
+        )
+        .map((s) => ({
+          member: s.name.slice(owner.length),
+          kind: s.kind,
+          effects: s.effects.map((e) => `${e.id} ${e.target}`),
+        }))
+
+    expect(shapeOf("Registry")).toEqual([
+      {
+        member: "",
+        kind: "class",
+        effects: ["db.read prisma.user.count", "db.write prisma.user.deleteMany"],
+      },
+      { member: ".reset", kind: "method", effects: ["db.write prisma.user.create"] },
+      { member: "::list", kind: "method", effects: ["db.read prisma.user.findMany"] },
+    ])
+    expect(shapeOf("Registry")).toEqual(shapeOf("Named"))
   })
 })

@@ -23,6 +23,7 @@ describe("every rationale extraction emits is one the manifest declares", () => 
     ["export const { a } = m", ["destructured-binding"]],
     ["export const x = 1", ["export-keyword"]],
     ["export const f = () => 1", ["variable-assigned-function", "export-keyword"]],
+    ["export const A = class { m() {} }", ["variable-assigned-class", "class-method"]],
     ["export class A { m() {} }", ["export-keyword", "class-method"]],
     ["export class A { static m() {} }", ["static-method"]],
     ["export class A { constructor() {} }", ["constructor-declaration"]],
