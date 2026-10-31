@@ -1,4 +1,7 @@
 import type { Decorator, Symbol as IRSymbol, Signature } from "@aburi/types"
+import { exportNames } from "../export-names"
+import { DEFAULT_EXPORT_QNAME } from "../id"
+import { DEFAULT_EXPORT_NAME } from "../import-edge"
 import { compareCodeUnit } from "../order"
 import { hashCanonicalObject } from "./hash"
 import { lastQnameSegment } from "./short-name"
@@ -6,6 +9,7 @@ import { normalizeFingerprintString } from "./string"
 
 interface ApiInput {
   decorators: Array<{ name: string; raw: string; boundary: boolean }>
+  exportedAs?: string[]
   extKind: string | null
   kind: string
   shortName: string
@@ -32,14 +36,26 @@ export function apiFingerprint(symbol: IRSymbol): string {
 }
 
 function buildApiInput(symbol: IRSymbol): ApiInput {
+  const exportedAs = canonicalizeExportNames(symbol)
   return {
     decorators: canonicalizeDecorators(symbol.decorators),
+    ...(exportedAs === null ? {} : { exportedAs }),
     extKind: symbol.extKind ?? null,
     kind: symbol.kind,
     shortName: lastQnameSegment(symbol.name),
     signature: canonicalizeSignature(symbol.signature ?? null),
     visibility: symbol.visibility,
   }
+}
+
+// Left out for a Symbol exported under its own name alone, or not at all: `visibility` already tells
+// those apart, and they hash as they would without the names. An anonymous default export's own
+// name is `default`.
+function canonicalizeExportNames(symbol: IRSymbol): string[] | null {
+  const names = exportNames(symbol).sort(compareCodeUnit)
+  const ownName = symbol.name === DEFAULT_EXPORT_QNAME ? DEFAULT_EXPORT_NAME : symbol.name
+  if (names.length === 0 || (names.length === 1 && names[0] === ownName)) return null
+  return names
 }
 
 function canonicalizeDecorators(

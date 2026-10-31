@@ -10,6 +10,7 @@ import type {
   IR,
   IRRef,
   IRSymbol,
+  Logger,
   NotComparedFile,
   Summary,
   SymbolChange,
@@ -37,7 +38,7 @@ import {
   type SymbolPair,
 } from "./match"
 import { computeSlices } from "./slice"
-import { classifyStatus, dropDirection, representativeSymbol } from "./status"
+import { classifyStatus, dropDirection, headIdsByBaseId, representativeSymbol } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
@@ -54,6 +55,7 @@ export interface DiffInput {
   generator?: { name: string; version: string }
   gitRenames?: GitRenameMap | null
   delta?: DeltaOptions
+  logger?: Logger
 }
 
 const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
@@ -71,7 +73,7 @@ export function buildDiff(
     input.gitRenames ?? null,
   )
   const stage3 = matchStageLogicFingerprint(stage2.remainingBase, stage2.remainingHead)
-  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead)
+  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead, input.logger)
   const stageDroppedWeak = matchStageDroppedWeak(stage4.remainingBase, stage4.remainingHead)
 
   const pairs: SymbolPair[] = [
@@ -189,7 +191,12 @@ export function buildDiff(
   summary.componentsRemoved = components.removed.length
   summary.componentsChanged = components.changed.length
 
-  const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, sides)
+  const dependencies = diffDependencies(
+    input.baseIR.dependencies,
+    input.headIR.dependencies,
+    sides,
+    headIdsByBaseId(symbols),
+  )
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
   summary.depsUnknown = dependencies.unknown.length

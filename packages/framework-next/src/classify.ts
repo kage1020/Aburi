@@ -1,7 +1,7 @@
+import { exportNames } from "@aburi/core"
 import {
-  EXPORT_CLAUSE_DERIVED_BY_PREFIX,
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
   EXPORT_DEFAULT_DERIVED_BY,
-  EXPORT_KEYWORD_DERIVED_BY,
   type ExtractionContext,
   type OpaqueAstNode,
   type SymbolCandidate,
@@ -46,7 +46,7 @@ function classifyRouteSymbol(
   ctx: ExtractionContext,
 ): SymbolClassification | null {
   if (!ROUTE_HANDLER_KINDS.has(symbol.kind)) return null
-  const verbs = exportedNames(symbol).filter(isNextHttpVerb)
+  const verbs = exportNames(symbol).filter(isNextHttpVerb)
   if (verbs.length === 0) return null
   return withDirective(
     {
@@ -57,24 +57,12 @@ function classifyRouteSymbol(
   )
 }
 
-/** `export-keyword` on a namespace member exports it from the namespace, not the module; matching the whole qname keeps `N.GET` from reading as a verb. */
-function exportedNames(symbol: SymbolCandidate<OpaqueAstNode>): string[] {
-  const names = new Set<string>()
-  if (symbol.derivedBy.includes(EXPORT_KEYWORD_DERIVED_BY)) names.add(symbol.name)
-  for (const token of symbol.derivedBy) {
-    if (token.startsWith(EXPORT_CLAUSE_DERIVED_BY_PREFIX)) {
-      names.add(token.slice(EXPORT_CLAUSE_DERIVED_BY_PREFIX.length))
-    }
-  }
-  return [...names]
-}
-
 function classifyComponentSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   file: AppRouterFile,
   ctx: ExtractionContext,
 ): SymbolClassification | null {
-  if (symbol.kind !== "function") return null
+  if (!isComponentValue(symbol)) return null
   if (!symbol.derivedBy.includes(EXPORT_DEFAULT_DERIVED_BY)) return null
   return withDirective(
     {
@@ -83,6 +71,12 @@ function classifyComponentSymbol(
     },
     ctx,
   )
+}
+
+/** `withAuth(function Page() {…})` is a `const` the language plugin cannot see to be a function; the function it is handed is the evidence. */
+function isComponentValue(symbol: SymbolCandidate<OpaqueAstNode>): boolean {
+  if (symbol.kind === "function") return true
+  return symbol.kind === "const" && symbol.derivedBy.includes(CALL_ARGUMENT_FUNCTION_DERIVED_BY)
 }
 
 function withDirective(base: SymbolClassification, ctx: ExtractionContext): SymbolClassification {

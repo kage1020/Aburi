@@ -62,6 +62,7 @@ Represents the symbol's **externally observable contract**. Changes when the "pu
   "extKind": <Symbol.extKind>,
   "shortName": <lastSegment(Symbol.name)>,     // see §3.3
   "visibility": <Symbol.visibility>,
+  "exportedAs": [<name>],                       // sorted; left out for its own name alone or none, see §3.8
   "decorators": [
     {
       "name": <Decorator.name>,
@@ -122,6 +123,8 @@ Examples:
 - Changing local variable names, the function body, or rules/effects does not change `api`
 - Reordering the **occurrence order** of decorators does not change `api` (because of the sort convention)
 - **Changing only the class-scope portion of `Symbol.name` (`InvoiceService.createInvoice` → `BillingService.createInvoice`) does not change `api`** (the last segment is the same)
+- Breaking a type over lines, or joining it back onto one line, does not change `api`: `| A | B` ↔ `A | B`, `Array<` … `| A` … `| B` … `>` ↔ `Array<A | B>`, `(` … `a: A,` … `) => void` ↔ `(a: A) => void`, `{` … `a: A` … `b: B` … `}` ↔ `{ a: A; b: B }`. A formatter that breaks a type adds the line breaks, a trailing comma before a closing bracket and a union's leading `|`, drops an object type's `;` between members, and undoes each of these when it joins the type, so the language plugin records each type as it reads on one line ([lang-plugin.md](./lang-plugin.md) LP11e). It is the plugin's to do rather than the fingerprint's: the canonical string sees only text, where telling a union's operator from a `|` inside a string literal type takes the grammar, and the recorded text is also what the diff's delta rows and its rename pairing compare
+- Exporting a declaration under its own name by an export clause instead of the `export` keyword (`export function f` → `function f` with `export { f }`), or reordering the names a clause exports it under, does not change `api` (§3.8)
 
 ### 3.5 Guaranteed change conditions
 
@@ -132,6 +135,7 @@ Examples:
 - `shortName` change (= renaming the method/function itself) → changes
 - `async` / `generator` flag change → changes
 - `kind` / `extKind` change → changes
+- The names the module exports the declaration under change → changes: a name added to or removed from an export clause (`export { handler as GET }` → `export { handler as GET, handler as DELETE }`), a clause renaming its export (`export { connect as open }` → `export { connect as start }`), a default export made a named one (`export default function Page` → `export function Page`), or an export under the declaration's own name dropped beside an alias (§3.8)
 
 ### 3.6 Why decorator arguments are included in api
 
@@ -141,6 +145,12 @@ The URL portion of `@Post('/invoices')` and the Guard of `@UseGuards(RolesGuard)
 
 Renaming a class such as `InvoiceService` → `BillingService` is common implementation work, but the public contract of each method (signature, decorators, return type) is unchanged.
 A class rename is **detected as `moved` in stage 4 (name+signature similarity)**, with `delta.apiChanged: false`. It is never mass-listed in the API changes section (the highest-severity section).
+
+### 3.8 The names a declaration is exported under
+
+An importer reaches a declaration by the name its module exports it under, and that name is not always the one it was declared with: `const handler = NextAuth(options)` with `export { handler as GET, handler as POST }` is the module's `GET` and `POST`, and Next.js serves a request by which of them the module exports. Adding `handler as DELETE` opens an endpoint, and `export { connect as open }` becoming `export { connect as start }` breaks every `import { open }`, while `shortName` and `visibility` stay as they were. The names are part of the contract for §3.6's reason.
+
+They are read from `derivedBy` ([lang-plugin.md](./lang-plugin.md) LP6a–LP6c): `export-keyword` names the Symbol's own `name`, `export-default` names `default`, and `export-clause:<name>` names `<name>`. The input holds each once, sorted, so the order a module writes its clauses in is no contract. The keyword and a clause exporting a declaration under its own name read as one export because both name the Symbol's own name. When the names are that own name alone, or none, `exportedAs` is left out: `visibility` already tells those two apart, and such a Symbol hashes as it would without the names. An anonymous default export is named `<default>` and exported as `default`, which is its own name in that reading. The own name is the whole qname, so a namespace member exported by the keyword, `N.GET`, is exported under its own name and not as the module's `GET`.
 
 ## 4. `logic` fingerprint
 
@@ -242,7 +252,7 @@ Of the input fields, `rules[].type` and `rules[].loopKind` classify a construct 
 
 ## 5. `syntax` fingerprint
 
-Represents the **AST structure** of the symbol body. Changes on any structural change other than formatting.
+Represents the **AST structure** of the Symbol: its body, and the parts of its declaration the api axis does not read, a class's head and a function's parameter list ([lang-plugin.md](./lang-plugin.md) LP8p, LP8p1). Changes on any structural change other than formatting.
 
 ### 5.1 Input fields
 
@@ -253,7 +263,7 @@ The language plugin generates a **normalized AST string** per Symbol and compute
 1. Contains no comment nodes
 2. Contains no position information (line, column, byte offset)
 3. Contains no whitespace tokens
-4. Is an S-expression representing node kinds and child-node structure, plus every unnamed token except the punctuation a formatter adds, drops or swaps without changing the program: string delimiters, an optional `;`, a trailing `,`, and brackets the structure already implies. Punctuation that is the only record of something is not a formatter's, and stays in: the commas that make a hole in a JavaScript array (`[, x]` against `[x]`)
+4. Is an S-expression representing node kinds and child-node structure, plus every unnamed token except the punctuation a formatter adds, drops or swaps without changing the program: string delimiters, an optional `;`, a trailing `,`, a union's or an intersection's leading `|` or `&` (`| A | B` reads as `A | B`, without the extra level the parser gives the leading form), the parentheses around an arrow function's lone parameter (`x => …` reads as `(x) => …`, with the levels the parser gives the parenthesised form), and brackets the structure already implies. Punctuation that is the only record of something is not a formatter's, and stays in: the commas that make a hole in a JavaScript array (`[, x]` against `[x]`)
 5. Includes identifier and literal values (concrete values, not structure alone)
 6. Contains nothing the parser inserted: a MISSING node, the parser's repair of a broken file, is treated as unwritten
 
@@ -284,7 +294,7 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 - Whitespace / newline / indentation changes → unchanged
 - Line terminators (LF, CRLF, a lone CR) → unchanged
 - Adding / removing comments → unchanged
-- The quotes around a string that needs no escape either way, a trailing comma, optional semicolons → unchanged
+- The quotes around a string that needs no escape either way, a trailing comma, optional semicolons, a union's leading `|` or an intersection's leading `&`, the parentheses around an arrow function's lone parameter → unchanged
 
 These are the punctuation item 4 leaves out, not formatter output in general. A formatter that quotes an object key (`{ a: 1 }` → `{ "a": 1 }`), picks the quote that needs fewer escapes (`'it\'s'` → `"it's"`), wraps a multi-line expression in parentheses, or rewrites JSX (`<Foo></Foo>` → `<Foo />`) changes the structure, and `syntax` changes with it.
 
@@ -296,6 +306,7 @@ Line terminators are held by the core, not by `normalizeAst`, which is why S2d i
 - Renaming an identifier → changes (`syntax` is structure-based, not meaning-based, so identifiers are treated as part of the structure)
 - Changing a literal → changes
 - Changing an operator, a declaration keyword (`let` / `const`), a modifier or a primitive type → changes
+- Changing a function's parameter list where the api axis does not read it — a parameter's name, a destructuring pattern, a default's value → changes. The api input reads a parameter's type and form only (§3.1), so the language plugin's normalized string covers the list as well as the body ([lang-plugin.md](./lang-plugin.md) LP8p1). The list goes in whole, so an edit to a parameter's type or form changes `syntax` as well as `api`; a return type or a type parameter, outside the list, changes `api` alone
 
 ### 5.5 Uses of the syntax fingerprint
 
@@ -367,7 +378,9 @@ The reference implementation and every language plugin must pass the following t
 | A12 | Change only the class-scope portion of `Symbol.name` (`Old.method` → `New.method`) | api unchanged |
 | A13 | Change `language` (never happens in practice; defensive) | api unchanged (`language` is not part of the input) |
 | A22 | Change `signature.inputs[].name` from `ids` to `...ids` | api unchanged (A1's case: rest-ness is `rest`, and a marker spelled into `name` reaches no axis) |
-| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value) |
+| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value); syntax changes (S5b) |
+| A24 | Join a parameter type broken over lines onto one line: `\| ClassProvider \| FactoryProvider` → `ClassProvider \| FactoryProvider`, `Array<` … `\| A` … `\| B` … `>` → `Array<A \| B>`, `(` … `request: Request,` … `) => void` → `(request: Request) => void` | api unchanged (LP11e records each spelling as the one-line text) |
+| A25 | Export a declaration under its own name by a clause instead of the keyword, or reorder the names a clause exports it under | api unchanged (§3.8) |
 
 ### 7.3 api change conditions
 
@@ -384,6 +397,7 @@ The reference implementation and every language plugin must pass the following t
 | A14 | Change `shortName` (last segment) | api changes |
 | A20 | Toggle `signature.inputs[].optional` (absent ↔ `true`) | api changes |
 | A21 | Toggle `signature.inputs[].rest` (absent ↔ `true`) | api changes |
+| A26 | Change the names a module exports a declaration under (`export { handler as GET }` → `export { handler as DELETE }`, `export default function Page` → `export function Page`) | api changes (§3.8) |
 
 ### 7.4 logic invariance conditions
 
@@ -422,6 +436,8 @@ The reference implementation and every language plugin must pass the following t
 | S2b | Add a trailing comma | syntax unchanged |
 | S2c | Drop optional semicolons | syntax unchanged |
 | S2d | Save the file with CRLF or a lone CR | syntax unchanged — guaranteed by the core's scan, not by `normalizeAst` (§5.3) |
+| S2e | Join a union broken over lines onto one line, dropping its leading `\|` (`\| A` … `\| B` → `A \| B`), or an intersection, dropping its leading `&`, in a type alias, a parameter, a method's parameter or an overload | syntax unchanged |
+| S2f | Put an arrow function's lone parameter in parentheses (`x => …` → `(x) => …`), wherever the arrow is written: a const, a class field, an object entry, a call's argument, a body | syntax unchanged |
 
 ### 7.7 syntax change conditions
 
@@ -431,6 +447,7 @@ The reference implementation and every language plugin must pass the following t
 | S4 | Rename an identifier | syntax changes |
 | S5 | Change a literal | syntax changes |
 | S5a | Change an operator, a declaration keyword, a modifier or a primitive type (`a + b` → `a - b`, `let` → `const`, `private` → `public`, `number` → `string`) | syntax changes |
+| S5b | Change a destructuring parameter's pattern (`{ a: b }` → `{ c: b }`, `[, b]` → `[b]`) or a parameter's default value (`limit = 20` → `limit = 10`) | syntax changes; api unchanged (A1, A23) |
 
 ### 7.7.1 syntax test criteria every language plugin must satisfy
 
@@ -540,8 +557,14 @@ export function apiFingerprint(sym) {
     typeParameters: sym.signature.typeParameters.map(canonical)
   } : null
 
+  // §3.8: every name the module exports sym under, unless it is sym's own name alone
+  const exportedAs = [...new Set(sym.derivedBy.flatMap(token => exportName(sym, token)))].sort()
+  const ownName = sym.name === '<default>' ? 'default' : sym.name
+  const ownOnly = exportedAs.length === 0 || (exportedAs.length === 1 && exportedAs[0] === ownName)
+
   return hash({
     decorators,
+    ...(ownOnly ? {} : { exportedAs }),
     extKind: sym.extKind,
     kind: sym.kind,
     shortName: lastSegment(sym.name),   // §3.3
@@ -549,6 +572,12 @@ export function apiFingerprint(sym) {
     visibility: sym.visibility
     // language excluded: already separated by the <language>: prefix of Symbol.id
   })
+}
+
+function exportName(sym, token) {
+  if (token === 'export-keyword') return [sym.name]
+  if (token === 'export-default') return ['default']
+  return token.startsWith('export-clause:') ? [token.slice('export-clause:'.length)] : []
 }
 
 export function logicFingerprint(sym) {

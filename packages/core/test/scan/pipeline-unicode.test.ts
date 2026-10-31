@@ -148,18 +148,34 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
     expect(result).toMatchObject({ kind: "parse-failed", imports: [importing(composed)] })
   })
 
-  it("hands every classifier the normalized target", async () => {
-    const seen: string[] = []
+  it.each([
+    [
+      "the target and the receiver type",
+      { target: `${decomposed}.emit`, receiverType: decomposed },
+      { target: `${composed}.emit`, receiverType: composed },
+    ],
+    [
+      "the receiver type where the target needs nothing",
+      { target: "this.bus.emit", receiverType: decomposed },
+      { target: "this.bus.emit", receiverType: composed },
+    ],
+    [
+      "the target of a call with no receiver type",
+      { target: `${decomposed}.emit` },
+      { target: `${composed}.emit` },
+    ],
+  ])("hands every classifier the normalized call: %s", async (_label, written, normalized) => {
+    const seen: CallCandidate[] = []
     await extractOneSymbol({
       effects: [
-        stubEffectsPlugin("effects-watch", (call) => {
-          seen.push(call.target)
+        stubEffectsPlugin("effects-watch", (handed) => {
+          seen.push(handed)
           return null
         }),
       ],
-      body: { rules: [], calls: [makeCall({ target: `${decomposed}.emit` })] },
+      body: { rules: [], calls: [makeCall(written)] },
     })
-    expect(seen).toEqual([`${composed}.emit`])
+    expect(seen).toStrictEqual([makeCall(normalized)])
   })
 
   it("hands a classifier the plugin's own call when nothing needed normalizing", async () => {

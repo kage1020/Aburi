@@ -92,6 +92,8 @@ export interface CallCandidate {
   /** Per-argument literal value, or null when the argument is not a literal. */
   literalArgs: (string | null)[]
   dynamicReceiver?: boolean
+  /** The named type the receiver is declared with, type arguments aside, e.g. `EventEmitter2`. */
+  receiverType?: string
 }
 
 export interface BodyExtraction {

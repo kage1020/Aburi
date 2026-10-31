@@ -275,8 +275,11 @@ Contracts:
   (`lastQnameSegment(symbol.name)`), `declaratorValue` returns that initializer
   read through `as`, `satisfies`, `!` and parentheses. It returns `null` for a
   name with no initializer of its own (`declare const Ctx: Context<string>`,
-  `let x`) and for one a destructuring pattern binds. All three come from
-  `@aburi/core`. Searching the whole statement for its first call finds one
+  `let x`) and for one a destructuring pattern binds. A default export written
+  as a call handed a function (`export default memo(function Row() { … })`) is
+  a `const` named `<default>` whose `fullNode` is the `export_statement`; for it
+  the same call returns the statement's value, read through the same wrappers.
+  All three come from `@aburi/core`. Searching the whole statement for its first call finds one
   that may belong to another name.
 - An optional `symbolDropHint(symbol, ctx)` drops a Symbol the way a language
   plugin's does. Every framework plugin is asked, not only the one that

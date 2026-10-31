@@ -244,6 +244,7 @@
         "effects":    { "$ref": "#/$defs/ArrayDelta" },
         "calls":      { "$ref": "#/$defs/ArrayDelta" },
         "decorators": { "$ref": "#/$defs/ArrayDelta" },
+        "exportedAs": { "$ref": "#/$defs/ArrayDelta" },
         "signature":  {
           "oneOf": [
             { "$ref": "#/$defs/SignatureDelta" },

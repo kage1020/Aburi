@@ -34,6 +34,10 @@ export function renderDeltaBody(change: ChangedEntry): string[] {
   const nameRows = rows.length
   appendSignatureDelta(rows, delta.signature ?? null, [before.signature, after.signature])
   appendDecoratorDelta(rows, delta.decorators, [before.decorators, after.decorators])
+  if (!onlyOwnNameRenamed(delta.exportedAs, before.name, after.name)) {
+    appendInlineRow(rows, "export name added", delta.exportedAs?.added ?? [])
+    appendInlineRow(rows, "export name removed", delta.exportedAs?.removed ?? [])
+  }
   appendMiddlewareDelta(rows, delta.middleware, [before.middleware ?? [], after.middleware ?? []])
   appendArrayGroup(rows, "rules", delta.rules, RULES, [before.rules, after.rules])
   appendArrayGroup(rows, "effects", delta.effects, EFFECTS, [before.effects, after.effects])
@@ -52,6 +56,17 @@ export function renderDeltaBody(change: ChangedEntry): string[] {
   }
   if (!explained) appendUnexplainedChangeNote(delta, rows)
   return rows
+}
+
+// The name row already says it, and it alone decides whether a name change explains the API flag.
+function onlyOwnNameRenamed(
+  exportedAs: ArrayDelta | undefined,
+  before: string,
+  after: string,
+): boolean {
+  if (exportedAs === undefined) return false
+  const { added, removed } = exportedAs
+  return added.length === 1 && added[0] === after && removed.length === 1 && removed[0] === before
 }
 
 function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {

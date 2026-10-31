@@ -19,6 +19,10 @@ Recognised files under `app/**/`:
 
 A component role (`page` through `not-found`) is the file's default export, written
 `export default function Page()`, `export default Page` or `export { Page as default }`.
+A default export written as a call handed a function (`export default withAuth(function Page() { … })`)
+is one too, and so is a default-exported `const` initialised by such a call
+(`const Page = withAuth(() => { … })` with `export default Page`). A `const` whose call is
+handed no function (`const Page = withAuth(Inner)`) gets no role.
 
 A route is what `route.{ts,js}` exports under an HTTP verb name (`GET`, `POST`, `PUT`,
 `DELETE`, `PATCH`, `OPTIONS`, `HEAD`). Next.js dispatches to the module's exports by name, so
@@ -45,11 +49,11 @@ and a `const` where it cannot (a destructuring, a call's result). Both get the o
 plugin's reading. Export clauses are read by `@aburi/lang-typescript`, which records the name
 each clause exports a declaration under.
 
-The verbs a route serves are recorded in `derivedBy`, which no fingerprint reads, so `aburi diff`
-does not report a clause-exported handler gaining or losing a verb
-(`export { handler as GET }` becoming `export { handler as GET, handler as DELETE }`). A handler
-exported by its keyword is named by its verb, so changing the verb reports it as removed and
-added.
+The names a declaration is exported under are an input of its `api` fingerprint, so a
+clause-exported handler gaining or losing a verb (`export { handler as GET }` becoming
+`export { handler as GET, handler as DELETE }`) is an API change in `aburi diff`, reported with
+the export names it gained and lost. A handler exported by its keyword is named by its verb, so
+changing the verb reports it as removed and added.
 
 Component roles accept both React (`.tsx` / `.jsx`) and non-React (`.ts` / `.js`)
 extensions. `route.*` intentionally does **not** accept `.tsx` / `.jsx`: route
