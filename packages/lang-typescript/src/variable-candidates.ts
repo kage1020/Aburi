@@ -1,4 +1,8 @@
-import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
+import {
+  CALL_ARGUMENT_FUNCTION_DERIVED_BY,
+  type ExtractionContext,
+  type SymbolCandidate,
+} from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import {
   asClassValue,
@@ -124,7 +128,7 @@ function makeVariableCandidate(
       derivedBy:
         bodies.length === 0
           ? exportEvidence(statement)
-          : ["call-argument-function", ...exportEvidence(statement)],
+          : [CALL_ARGUMENT_FUNCTION_DERIVED_BY, ...exportEvidence(statement)],
       ...layOutBodies(bodies, statement),
     },
   ]
