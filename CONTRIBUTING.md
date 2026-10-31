@@ -46,10 +46,12 @@ and Windows, and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/w
 builds your branch, diffs it against the pull request's base with the CLI your branch
 contains, and posts the report as a comment it rewrites on every push. Its gate
 (`removed,dropped-toggled:to-dropped:>10`) turns the check red when a symbol disappears or
-bodies are emptied in bulk. It counts only the packages' own code: the tests, the test helpers in
-`packages/test-support` and `packages/test-harness`, and the showcase's sample projects are the
-`testFiles` in [`aburi.json`](aburi.json), and their changes are listed in the report's folded
-`🧪 Test files` section without failing the check.
+bodies are emptied in bulk. A helper deleted while an identical one stays does not count when its
+body has something to compare (a guard, a branch, a return value): the report lists it as a removed
+duplicate of the one that stayed. The gate counts only the packages' own code: the tests, the test
+helpers in `packages/test-support` and `packages/test-harness`, and the showcase's sample projects
+are the `testFiles` in [`aburi.json`](aburi.json), and their changes are listed in the report's
+folded `🧪 Test files` section without failing the check.
 
 From a fork, that run's token is read-only and cannot post, so a third workflow does it:
 [`aburi-comment.yml`](.github/workflows/aburi-comment.yml) picks the report up from the
