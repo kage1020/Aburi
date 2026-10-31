@@ -24,6 +24,14 @@ Each one lands in a single bucket:
 `?N unknown` shows up when that count is non-zero. When you see it, read the
 added and removed counts beside it as lower bounds.
 
+`-3 removed (2 duplicates)` says two of the three removed symbols were
+duplicates: the head revision still has a symbol of the same kind with the same
+body, as when two identical helpers become one. `--fail-on removed` does not
+count them, and `--fail-on removed:duplicate` does. Only a body with something
+to compare counts (a guard, a branch, a return value, an effect), and never a
+symbol a framework plugin classified, such as a route handler or a React
+component, because its role is not in its body.
+
 ## The sections
 
 Sections appear in a fixed order, most important first. Aburi drops the empty
@@ -31,11 +39,11 @@ ones and folds Moved, Dropped changes and Syntax-only changes behind a `<details
 
 | Section | What it tells you | Your next move |
 |---|---|---|
-| ⚠ API changes | A public surface moved: signature, throws, or decorators. | Check every caller. |
+| ⚠ API changes | A public surface moved: signature, throws, decorators, or the names a declaration is exported under, such as a new `DELETE` route handler. | Check every caller. |
 | 🔧 Logic changes | Control flow or effects changed inside a body. | This is the review. |
 | 🧵 Slice View | The changed symbols that call one another, grouped into one slice per call chain. | Read a feature end to end. |
 | ➕ Added | New symbols, rendered in full. | Read the effects and rules. |
-| ➖ Removed | Symbols that disappeared. | Confirm you meant to delete them. |
+| ➖ Removed | Symbols that disappeared. A duplicate names the symbol that still holds its body. | Confirm you meant to delete them, and that a duplicate's callers moved to the survivor. |
 | ❔ Unknown | One revision never analysed the file. | Fix the scan, not the code. |
 | 🚫 Not compared | Neither revision analysed the file. | A standing blind spot. |
 | 🔀 Moved + Changed | Relocated and modified. | Read it like a Logic change. |

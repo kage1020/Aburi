@@ -137,10 +137,22 @@ export function dependencySideView(ir: IR): DependencySideView {
 export function diffDependencies(
   base: readonly Dependency[],
   head: readonly Dependency[],
-  sides: { base: DependencySideView; head: DependencySideView; renames: RenameDirections },
+  sides: LossSides,
+  pairedHeadIds: ReadonlyMap<DependencyEndpoint, DependencyEndpoint>,
 ): DependencyDiff & { unknown: DependencyUnknown[] } {
+  const asHeadEndpoint = (endpoint: DependencyEndpoint) => pairedHeadIds.get(endpoint) ?? endpoint
   const baseKeys = new Map<string, Dependency>()
-  for (const dependency of base) baseKeys.set(dependencyKey(dependency), dependency)
+  for (const dependency of base) {
+    const read = {
+      ...dependency,
+      from: asHeadEndpoint(dependency.from),
+      to: asHeadEndpoint(dependency.to),
+    }
+    const key = dependencyKey(read)
+    const earlier = baseKeys.get(key)
+    if (earlier !== undefined) throw translatedCollision(earlier, dependency, read)
+    baseKeys.set(key, dependency)
+  }
   const headKeys = new Map<string, Dependency>()
   for (const dependency of head) headKeys.set(dependencyKey(dependency), dependency)
   const added: Dependency[] = []
@@ -190,14 +202,34 @@ function endpointsLostBy(
     .sort(compareBy((file) => file.path))
 }
 
+// The integrity checker would refuse an endpoint that names no declared Symbol, but `buildDiff` does
+// not run it, and such an endpoint can carry the head id another base edge is translated to.
+function translatedCollision(first: Dependency, second: Dependency, read: Dependency): DiffError {
+  const shown = showDependencyIdentity(identityOf(read))
+  return new DiffError(
+    `baseIR.dependencies holds ${showDependencyIdentity(identityOf(first))} and ` +
+      `${showDependencyIdentity(identityOf(second))}, which both read as ${shown} under the ` +
+      "head ids the Symbol pairing gave their endpoints; one of them would drop out of the diff.",
+    { code: "ir-identity-collision", value: shown },
+  )
+}
+
 export const DEPENDENCY_IDENTITY_FIELDS = ["from", "to", "via"] as const
 
 export function dependencyIdentity(parts: readonly string[]): string {
   return parts.join("::")
 }
 
+export function showDependencyIdentity(parts: readonly string[]): string {
+  return `(${parts.join(", ")})`
+}
+
+function identityOf(dependency: Dependency): string[] {
+  return DEPENDENCY_IDENTITY_FIELDS.map((field) => dependency[field])
+}
+
 function dependencyKey(dependency: Dependency): string {
-  return dependencyIdentity(DEPENDENCY_IDENTITY_FIELDS.map((field) => dependency[field]))
+  return dependencyIdentity(identityOf(dependency))
 }
 
 const compareDependencies = compareBy(dependencyKey)

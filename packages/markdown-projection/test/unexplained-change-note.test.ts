@@ -59,6 +59,14 @@ describe("the note under a fingerprint flag no row explains", () => {
       },
       "  - try (L2)",
     ],
+    [
+      "export name",
+      {
+        apiChanged: true,
+        exportedAs: { added: ["DELETE"], removed: [], modified: [] },
+      },
+      "- export name added: `DELETE`",
+    ],
   ])("gives way to a %s row, which explains the fingerprint", (_, flags, row) => {
     const md = projectChanges([changed(f, flags, { visibility: "internal" })])
     expect(md).toContain(row)
@@ -85,6 +93,17 @@ describe("the note under a fingerprint flag no row explains", () => {
     const md = projectChanges([renamedPair(from, "src/a.ts", to, "src/a.ts")])
     expect(md).toContain(`- name: \`${from}\` → \`${to}\``)
     expect(md).toContain(note("API"))
+  })
+
+  it("stays beside an owner rename of the name a namespace member is exported under", () => {
+    const md = projectChanges([
+      renamedPair("Repo.save", "src/a.ts", "UserRepo.save", "src/a.ts", {
+        syntaxChanged: true,
+        exportedAs: { added: ["UserRepo.save"], removed: ["Repo.save"], modified: [] },
+      }),
+    ])
+    expect(md).not.toContain("export name")
+    expect(md).toContain(note("syntax"))
   })
 
   it("is not written for a change no fingerprint flag records", () => {

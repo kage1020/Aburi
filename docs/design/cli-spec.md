@@ -342,14 +342,16 @@ supplies, so all three commands that scan report them, rather than one command's
 printing them while the other two discard the report. A caller that supplies no sink gets no
 incident report.
 
-That is not the same as silence. The run's `Logger` is a separate channel — per file rather
-than per run, governed by `--log-level` (§3) and `ABURI_LOG_LEVEL` (§11), and still writing to
-`process.stderr` whatever streams the caller injected. The level is the command's rather than
-one scan's: `diff` hands it to both of its scans and `explain` to the one it rescans with, so no
-scan logs at a level the reader did not choose. An embedder passes it as `logLevel` to
-`runScan`, `runDiff` or `runExplain`, and gets `warn` without one. An embedded scan with no sink
-is quiet, not mute, and routing that channel to the caller is a known gap rather than something
-this contract covers.
+That is not the same as silence. The run's `Logger` is a separate channel — per file, or per
+Symbol or pair from the matcher, rather than per run, governed by `--log-level` (§3) and
+`ABURI_LOG_LEVEL` (§11), and still writing to `process.stderr` whatever streams the caller
+injected. The level is the command's rather than one scan's: `diff` hands it to both of its
+scans, and to the matcher when it is `debug`, the only level at which the matcher traces what
+stage 4 refuses on a rule ([`diff-algorithm.md`](./diff-algorithm.md) §3.4.7); `explain` hands
+it to the one scan it rescans with. So nothing logs at a level the reader did not choose. An
+embedder passes it as `logLevel` to `runScan`, `runDiff` or `runExplain`, and gets `warn`
+without one. An embedded scan with no sink is quiet, not mute, and routing that channel to the
+caller is a known gap rather than something this contract covers.
 It is also why the files above are listed by the CLI itself rather than left to that channel:
 at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `unroutable` and an
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
@@ -808,7 +810,7 @@ Used in CI for gates such as "PRs containing changes of a specific status requir
 
 ```bash
 aburi diff main..HEAD --fail-on changed,removed
-# exit 3 if even one symbol has status "changed" or "removed"
+# exit 3 if even one symbol is "changed", or "removed" without duplicating a head symbol
 ```
 
 `unknown` counts Symbols only — it reads `symbols[]`, not `dependencies[]`, and not `notCompared[]`. A gate written meaning "fail if this diff is incomplete" therefore catches neither the dependency side ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1) nor a file both scans skipped (§6.3), and no token exists for either. A bare token for the second would be the wrong default in any case: a workspace with a permanent over-size bundle would trip it on every pull request, which is an argument for a threshold rather than a flag. Whether the gate vocabulary should grow either family is an open decision.
@@ -819,12 +821,26 @@ aburi diff main..HEAD --fail-on changed,removed
 |---|---|
 | Status granularity | `added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` / `unknown` |
 | Delta granularity | `api-changed` / `logic-changed` / `syntax-changed` / `confidence-changed` |
-| Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` |
+| Subtype granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` / `removed:duplicate` |
 | Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |
 
 Multiple values may be given, comma-separated. Every segment must be a clause: an empty one (`added,`, `added,,removed`) exits 2, as a value with no clause at all does.
 
 `--fail-on` may also be repeated, so a script can write one clause per `--fail-on`: each occurrence adds its clauses after those of the occurrences before it, and `--fail-on changed --fail-on removed` gates exactly as `--fail-on changed,removed` does — the order included, which decides the clause a tripped gate names. Keeping only the last occurrence would leave the earlier clauses unchecked, and the run would pass on the change they were written to block. Each occurrence is read as a value of its own: an error quotes the one at fault and counts clauses within it (`--fail-on removed, --fail-on changed` exits 2 with `--fail-on value "removed," is invalid: clause 2 of 2 is empty; …`), and an empty occurrence exits 2 beside a valid one as it does alone. `runDiff`, which also takes the values as a list, refuses an empty one as it refuses an empty value, since either leaves the gate checking nothing.
+
+#### Removed duplicates
+
+`removed` counts the removals that duplicate no head Symbol, and `removed:duplicate` the ones whose `duplicateOf` names a head Symbol holding their body ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2). That is narrower than every removal whose body survives: a removed Symbol with an `extKind`, or one whose logic names nothing (a body that only calls something, or returns a literal), is never a duplicate, and counts under `removed` even when a head Symbol holds it byte for byte. Deduplicating N identical helpers into one leaves N−1 `removed` entries whatever the author does, so a gate that counted them would fail every such refactor until it was taken out of the workflow.
+
+`--fail-on removed,removed:duplicate` trips on every removal, as a bare `removed` did before duplicates were told apart. A threshold does not carry over that way: `removed:>N` counted every removal and now counts the ones that duplicate nothing, and no combination of clauses holds the two kinds together to one threshold. A diff written before `duplicateOf` existed carries none, and `removed` counts all of its removals.
+
+When the clauses hold `removed`, with or without a threshold, and no `removed:duplicate`, a diff with removed duplicates in it adds a line on stderr, whether the gate trips or not: a count and a capped list of ids, as the line for a file both scans skipped (§6.6) has.
+
+```
+⚠ --fail-on removed did not count 2 removal(s) of a duplicate whose body a head Symbol holds (removed:duplicate counts them): ts:src/a.test.ts#makeEmptyIR, ts:src/b.test.ts#blankIR.
+```
+
+A workflow that kept `--fail-on removed` across the release that narrowed it would otherwise pass a pull request it used to fail, with nothing in its log to say why.
 
 #### Uses of Direction-Specific fail-on
 
@@ -837,7 +853,8 @@ In cases where a drop-rule change legitimately fires `dropped-toggled` in bulk (
 
 #### Evaluation Rules
 
-- Status granularity (`changed`, etc.): fires if even one Symbol has the given status
+- Status granularity (`changed`, etc.): fires if even one Symbol has the given status; `removed` leaves out a removed duplicate of a head Symbol, which `removed:duplicate` counts
+- Every clause counts `symbols[]` entries, never the `summary` counters, so the count and the Symbols it names are one list
 - Delta granularity (`api-changed`, etc.): fires if even one Symbol has status `changed` or `moved+changed` with the corresponding `delta.<axis>Changed: true`. A diff written before `delta.confidenceChanged` existed carries no key, and `confidence-changed` counts nothing in it
 
 Examples:
@@ -848,10 +865,20 @@ aburi diff main..HEAD --fail-on api-changed
 # changed symbols where only logic changed, and moved (status only), have no effect
 
 aburi diff main..HEAD --fail-on api-changed,removed,dropped-toggled
-# fires on API change OR removal OR drop-rule fluctuation
+# fires on API change OR a removal that duplicates nothing OR drop-rule fluctuation
 ```
 
 This allows fine-grained CI gates, making operational policies such as "only API changes require approval, logic changes are warnings" possible today.
+
+A tripped clause names the Symbols it counted on stderr, under its line and indented, by the id its entry carries (the head's, or the base's for a removal and for an `unknown` whose file the head never analysed), ten at most and then how many more:
+
+```
+--fail-on removed tripped (observed: 2 removed)
+  ts:src/billing/legacy.ts#refundInvoice
+  ts:src/billing/legacy.ts#voidInvoice
+```
+
+A red check that said only `removed tripped` sent its reader to the report to find which removal, and on a pull request whose removals were expected left nothing to say why the gate fired but a comment. The first line keeps its form, so a script reading it reads it as before.
 
 A Symbol whose extraction confidence moved is `changed` even when no fingerprint did ([`diff-algorithm.md`](./diff-algorithm.md) §4), so `--fail-on changed` fires on it. A plugin can decide confidence from a file-level signal (the Express plugin reads whether the file imports `express`), so one edit can move every Symbol in a file at once. A gate that should not fire on that writes the axes it cares about (`--fail-on api-changed,logic-changed`, which a confidence-only change does not trip) and, where a mass shift should still be noticed, a threshold on the confidence axis (`confidence-changed:>20`).
 
@@ -1097,7 +1124,7 @@ and left at the code the answer itself earned.
 | Stream | Use |
 |---|---|
 | stdout | Results (summary lines, JSON, Markdown body). Pipeable; the target of CI parsing |
-| stderr | Warnings, error messages, the per-file log; progress and colored UI once they exist (planned) |
+| stderr | Warnings, error messages, the run's log; progress and colored UI once they exist (planned) |
 
 Example: `aburi diff main..HEAD > result.txt 2> log.txt`
 
@@ -1227,10 +1254,12 @@ Render meaningful code structure as IR for review
 
 Options:
   -v, --version                      output the version number
-  --log-level <level>                per-file log on stderr: debug | info | warn
-                                     | error (default: ABURI_LOG_LEVEL, or
+  --log-level <level>                the run's log on stderr: debug | info |
+                                     warn | error (default: ABURI_LOG_LEVEL, or
                                      warn); info adds the files scan removes,
-                                     and error shows none of it
+                                     debug each file extracted and why diff left
+                                     a Symbol unpaired, and error shows none of
+                                     it
   -h, --help                         display help for command
 
 Commands:
@@ -1310,6 +1339,7 @@ a command's option, not a global one (§3).
 | CL53 | `aburi scan` where `package.json` and `aburi.json` both open with one byte order mark | exit 0, the Component named after the `package.json` |
 | CL54 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3` or `2`), never `1`; the other stream byte for byte, the same artefacts, and no base worktree or temporary directory left behind. stdout on a descriptor that refuses writes (one opened read-only) still exits 1, with the errno on stderr |
 | CL55 | `aburi diff main..HEAD` with a `pluginOptions` key that names no loaded plugin (`config.md` C10) | The warning once, with no side label, while the base scan's own lines keep theirs; the exit code is the one the run has without the key |
+| CL56 | `aburi diff … --fail-on removed` over a removed duplicate of a head Symbol, over a removal that duplicates nothing, and over eleven of the second kind | exit 0 for the duplicate, with the stderr line naming it as uncounted, and exit 3 under `--fail-on removed:duplicate`, which names it under its tripped line and adds no such line; exit 3 for the other, stderr naming it on an indented line under `--fail-on removed tripped (observed: 1 removed)`; for eleven, ten ids and `… and 1 more` (§6.7) |
 | CL59 | `aburi diff main..HEAD --concurrency 2`, where both scans finish, where the base scan stops, where the head scan stops, and where both stop | The two scans are in flight at the same time, and the exit code, stdout, stderr, the per-file log and the report are those of the same run under `--concurrency 1`: a base that stops ends the run with the base's error, whatever the head did (§14.1) |
 | CL60 | `aburi diff main..HEAD --concurrency` with `0`, `-1`, `1.5`, `two` or an empty value | exit 2, `--concurrency must be a positive integer (got "<value>")` |
 

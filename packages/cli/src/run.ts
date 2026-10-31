@@ -12,7 +12,7 @@ import {
   parsePath,
   refuseRepeatedValues,
 } from "./cli-options"
-import { formatFailOnMessage, runDiff } from "./commands/diff"
+import { runDiff } from "./commands/diff"
 import { type CoverageDoubt, runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
 import { runScan } from "./commands/scan"
@@ -20,7 +20,7 @@ import { resolveConfigPath } from "./config-path"
 import { type LogLevel, readEnv } from "./env"
 import { assertNever, CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
-import { FailOnParseError } from "./fail-on"
+import { FailOnParseError, formatTriggered } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
 import { describeWorkspaceDetection, UNNAMEABLE_BECAUSE } from "./unresolved-report"
 import { VOCAB_DISCOVERED_FILENAME } from "./vocab-discovered"
@@ -47,7 +47,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .version(version, "-v, --version")
     .option(
       "--log-level <level>",
-      "per-file log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info adds the files scan removes, and error shows none of it",
+      "the run's log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info adds the files scan removes, debug each file extracted and why diff left a Symbol unpaired, and error shows none of it",
       parseLogLevel,
     )
     .exitOverride()
@@ -289,7 +289,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           }
           if (report.diffMdPath !== null) stdout.write(`→ ${report.diffMdPath}\n`)
           if (report.triggered !== null) {
-            stderr.write(`${formatFailOnMessage(report.triggered)}\n`)
+            stderr.write(`${formatTriggered(report.triggered)}\n`)
           }
           return report.exitCode
         })(),

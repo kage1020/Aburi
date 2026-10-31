@@ -1,5 +1,5 @@
-import { errorFrom, fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
-import type { IR, Symbol as IRSymbol, SkippedFile, SymbolChange } from "@aburi/types"
+import { dependency, errorFrom, fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
+import type { Dependency, IR, Symbol as IRSymbol, SkippedFile, SymbolChange } from "@aburi/types"
 import { buildDiff, DiffError, type DiffInput, type SymbolPair } from "../src"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
@@ -111,4 +111,12 @@ export function dropped(file: string, name: string, kind: IRSymbol["kind"] = "cl
     dropReason: "size",
     fingerprint: zeroFp(),
   })
+}
+
+export function callEdge(
+  from: string,
+  to: string,
+  overrides: Partial<Dependency> = {},
+): Dependency {
+  return dependency({ from, to, via: "call", ...overrides })
 }
