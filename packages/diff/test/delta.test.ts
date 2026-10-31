@@ -125,6 +125,47 @@ describe("decorators", () => {
   })
 })
 
+describe("the names a declaration is exported under", () => {
+  const exportedAsDelta = (base: string[], head: string[]) =>
+    computeSymbolDelta(symbolWith({ derivedBy: base }, "a"), symbolWith({ derivedBy: head }, "b"))
+      .exportedAs
+
+  it.each<[string, string[], string[], { added: string[]; removed: string[] }]>([
+    [
+      "a name gained",
+      ["export-clause:GET"],
+      ["export-clause:GET", "export-clause:DELETE"],
+      { added: ["DELETE"], removed: [] },
+    ],
+    [
+      "a renamed export",
+      ["export-clause:GET"],
+      ["export-clause:DELETE"],
+      { added: ["DELETE"], removed: ["GET"] },
+    ],
+    [
+      "a default export turned named",
+      ["export-default"],
+      ["export-keyword"],
+      { added: ["Foo"], removed: ["default"] },
+    ],
+    ["an export dropped", ["export-keyword"], [], { added: [], removed: ["Foo"] }],
+  ])("reports %s", (_, base, head, moved) => {
+    expect(exportedAsDelta(base, head)).toEqual({ ...moved, modified: [] })
+  })
+
+  it.each([
+    [
+      "the keyword and a clause naming the declaration's own name",
+      ["export-keyword"],
+      ["export-clause:Foo"],
+    ],
+    ["nothing", ["export-clause:GET"], ["export-clause:GET"]],
+  ])("reports nothing for %s, and still writes the field", (_, base, head) => {
+    expect(exportedAsDelta(base, head)).toEqual(NOTHING)
+  })
+})
+
 describe("effects", () => {
   const local = (overrides: Partial<Effect> = {}) =>
     effect({

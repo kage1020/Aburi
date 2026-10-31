@@ -39,7 +39,7 @@ ones and folds Moved, Dropped changes, Syntax-only changes and Test files behind
 
 | Section | What it tells you | Your next move |
 |---|---|---|
-| ⚠ API changes | A public surface moved: signature, throws, or decorators. | Check every caller. |
+| ⚠ API changes | A public surface moved: signature, throws, decorators, or the names a declaration is exported under, such as a new `DELETE` route handler. | Check every caller. |
 | 🔧 Logic changes | Control flow or effects changed inside a body. | This is the review. |
 | 🧵 Slice View | The changed symbols that call one another, grouped into one slice per call chain. | Read a feature end to end. |
 | ➕ Added | New symbols, rendered in full. | Read the effects and rules. |
