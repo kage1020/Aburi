@@ -51,6 +51,10 @@ describe("an option that takes one value, given twice", () => {
       repeated("--max-bytes", "1000", "0"),
     ],
     [
+      ["diff", "main..HEAD", "--concurrency", "1", "--concurrency", "2"],
+      repeated("--concurrency", "1", "2"),
+    ],
+    [
       ["diff", "main..HEAD", "--config", "a.json", "--config", "b.json"],
       repeated("--config", "a.json", "b.json"),
     ],

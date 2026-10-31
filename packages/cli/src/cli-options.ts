@@ -36,6 +36,13 @@ export function parseMaxBytes(value: string): number {
   return parsed
 }
 
+export function parseConcurrency(value: string): number {
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new InvalidArgumentError(`--concurrency must be a positive integer (got "${value}")`)
+  }
+  return Number(value)
+}
+
 export function parsePath(value: string): string {
   if (value.length === 0) throw new InvalidArgumentError("a path must not be empty")
   return value

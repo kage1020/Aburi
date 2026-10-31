@@ -70,9 +70,8 @@ consecutive scans of an unchanged tree produce byte-identical IR.
 - **Large monorepos.** A 1,000-file scan finishes in under 30 seconds
   single-threaded, so the [worker pool](./design/performance.md) would buy at
   best ~4× on a 4-core runner — the ideal scaling, unmeasured — on a workload
-  already inside its budget. What is left to parallelise is `aburi diff`, which
-  runs two scans and costs a measured 1.7–2.2× one; two independent scans are
-  cheaper to run at once than one sharded scan.
+  already inside its budget. `aburi diff`, which runs two scans, now runs them
+  at once instead of costing 1.7–2.2× one.
 - **A functional language.** Scala or Rust, proving that the extension
   vocabulary can express pattern matching and algebraic data types.
 
