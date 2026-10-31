@@ -1,5 +1,64 @@
 # @aburi/framework-next
 
+## 0.3.0
+
+### Minor Changes
+
+- 7d4dbf9: A default export written as a call handed a function, which `@aburi/lang-typescript` now gives a `<default>` `const` Symbol, can take a framework role. `@aburi/framework-next` gives an App Router file's role (`page`, `layout`, `template`, `loading`, `error`, `not-found`) to a default-exported `const` that carries `call-argument-function`, so `export default withAuth(function Page() { … })` and `const Page = withAuth(() => { … }); export default Page` are pages; a `const` default export whose call is handed no function is still not one. `@aburi/framework-react` reads `export default memo(function Row() { … })` as a `framework:react:memo`, and `forwardRef(…)` as a `framework:react:forward-ref`, as it reads the same call bound to a `const`. It reads the call through `@aburi/core`'s `declaratorValue`, which now returns a default export statement's value, read through `unwrapValue`, when asked for the name `<default>`, and `null` for any other name. `@aburi/types` exports the token as `CALL_ARGUMENT_FUNCTION_DERIVED_BY`; nothing a scan writes changes.
+
+  The `api` fingerprint reads `extKind`, so it moves once for a `const` App Router component bound apart from its default export. One with no role takes `framework:next:<role>`. One that `@aburi/framework-react` classified moves too when `@aburi/framework-next` is listed before it in `frameworks`, since the first framework that answers classifies the Symbol: `const Page = memo(function Page() { … }); export default Page` in `app/**/page.tsx` goes from `framework:react:memo` to `framework:next:page`. Listed the other way round, it stays a memo. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains or loses those of them that have effects. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugins and is unaffected.
+
+- 107c1c6: A route handler is what a route file exports under an HTTP verb name
+
+  `framework:next:route` went to every `function` Symbol in `app/**/route.{ts,js}` whose name, or a namespaced name's last segment, is an HTTP verb, exported or not, and to nothing else. Auth.js's `export const { GET, POST } = handlers` and a wrapped handler such as `export const GET = auth(async (req) => …)` are `const` Symbols and were not routes, while a local `function OPTIONS()` helper, which Next.js never dispatches to, was one. The plugin now reads what the module exports: a `function` or `const` Symbol is a route for each HTTP verb it is exported as, by the `export` keyword or by an export clause, so `async function POST() {}` with `export { POST }` stays a route and `const handler = NextAuth(options)` with `export { handler as GET, handler as POST }` is one, `handler` carrying `framework:next:route:GET` and `framework:next:route:POST`. A declaration the module does not export is not a route, nor one exported only as `default`, from inside a namespace, by a type-only clause (`export type { handler as GET }`, which is erased at runtime) or through CommonJS `module.exports`. Both kinds get the one extKind `framework:next:route`, whose `baseKind` stays `function`. A page, layout or other App Router component whose default export is written `export { Page as default }` is now classified, as `export default Page` is. Export clauses are read by `@aburi/lang-typescript` from this release on; with an older one, a handler exported only through a clause is no longer a route.
+
+  The `api` fingerprint reads `extKind`, so it moves for every Symbol this classifies differently: the `const` and clause-exported handlers and clause-exported components that gain their kind, and the verb-named functions that lose it: unexported, exported only as `default`, by a type-only clause or through `module.exports`, or declared inside a namespace. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains or loses those of them that have effects. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugins and is unaffected.
+
+### Patch Changes
+
+- b7a7148: The declaration files carry less JSDoc: comments that restated the code, and citations of design documents in the IR, diff, config and plugin schemas' descriptions, are gone. No behaviour changes.
+- ad21560: A JSON file that opens with a UTF-8 byte order mark is now read as it would be without one. PowerShell 5's `Out-File` and `Set-Content` write that mark under `-Encoding utf8`, and Node's `require()`, npm and pnpm read past it, but Aburi handed it to the parser: a `package.json` that opened with one stopped `aburi scan` and `aburi init` with `Failed to parse JSON at <workspace>/package.json`, exit 1, and an `aburi.json` that did stopped `aburi scan` with `Failed to load Aburi config: Config at <path> is not valid JSONC: InvalidSymbol at offset 0 (len 1)`, exit 2. One leading mark is now read past by component detection in a package's `package.json` or `project.json`, and in the root `package.json`, whether detection or the workspace-root walk reads it (`pnpm-workspace.yaml`, `Cargo.toml` and `pyproject.toml` already were); by the config loader in `aburi.json` and `aburi.jsonc`, which reports a repeated key at the column the editor shows; by `parsePluginManifest` and `loadPluginManifest`; and by `aburi diff --base/--head` and `aburi explain --ir` in an IR file. A second mark, or one anywhere but the start, is refused with the same error code as before. A `package.json` or `project.json` detection cannot parse is now reported with the parser's own detail after the path, or, when the file opens with more than one mark, with `it opens with more than one byte order mark (U+FEFF), and only one is read past`, which an editor that hides the marks gives no other way to find. `@aburi/core` exports the `stripUtf8Bom` it reads them with, which is why it is `minor`, and `@aburi/framework-next` now finds a module's `"use client"` through it, with no change in what it finds.
+
+  A repository with such a manifest could not be scanned before, so no stored IR of it changes. The one layout whose output moves is a tree with no `.git` below a `package.json` that declares `workspaces` and opens with a byte order mark: the root walk passed over that manifest, so the workspace root was the inner directory, and it is now the outer one, as it is without the mark. Every Symbol id and component root there gains the path between the two, so an IR scanned before this release, compared with one scanned after, reports those Symbols under new ids. That earlier root was wrong rather than previously correct output, so the other packages stay `patch`, as for the line-terminator fix. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with this release and is unaffected.
+
+- a090f5b: The READMEs describe what the packages do. `@aburi/config` returns `found: false` when no config exists rather than falling back to an autodetected one, and `aburi scan` refuses that empty config. `@aburi/lang-typescript` is loaded by its plugin name, `lang-typescript`, not by `typescript` or `ts`. `@aburi/framework-next` tags a `"use server"` App Router file as `framework:next:server-action` as well as a `"use client"` one as `framework:next:client-component`, and only on the Symbols it already classifies.
+- Updated dependencies [19ead65]
+- Updated dependencies [af4b970]
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [50ea5bb]
+- Updated dependencies [90fa1cb]
+- Updated dependencies [b7a7148]
+- Updated dependencies [9c21737]
+- Updated dependencies [7d4dbf9]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [ad04fff]
+- Updated dependencies [13f8ba9]
+- Updated dependencies [1a56ce7]
+- Updated dependencies [107c1c6]
+- Updated dependencies [b2155c1]
+- Updated dependencies [b2155c1]
+- Updated dependencies [f32e45b]
+- Updated dependencies [b7a7148]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [6be7d2e]
+- Updated dependencies [ad21560]
+- Updated dependencies [36fd72f]
+- Updated dependencies [6afef8b]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [d4fca12]
+- Updated dependencies [659f00c]
+- Updated dependencies [463d616]
+- Updated dependencies [47f8ef9]
+- Updated dependencies [65c758f]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.2.2
 
 ### Patch Changes

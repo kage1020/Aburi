@@ -1,5 +1,32 @@
 # @aburi/effects-nest
 
+## 0.4.0
+
+### Minor Changes
+
+- af4b970: `.emit(...)` on a field declared as `EventEmitter2` is now classified as `event.publish`, whatever the field is called. Only the receiver names `eventBus` and `EventEmitter2` were recognised, so the injection NestJS documents, `constructor(private readonly eventEmitter: EventEmitter2)` with `this.eventEmitter.emit("order.created", …)`, stayed a plain call and `aburi diff` reported adding one as a syntax-only change. The type must be the `EventEmitter2` the file imports from `@nestjs/event-emitter` or `eventemitter2`, under its own name, an alias, a namespace or `eventemitter2`'s default import; the effect is `high` confidence and tagged `effects-plugin:nest:EventEmitter2.emit`. A field declared with another type, such as a socket.io `Server`, stays a call, and a receiver named `eventBus` is still recognised by its name whatever its type. An IR scanned before this release reports such a method, and every caller its effect propagates to, as a logic change once, which trips `--fail-on logic-changed` or `changed`. Rescan the base rather than comparing against a stored IR. This needs `@aburi/lang-typescript` from the same release, which reads the declared type.
+
+### Patch Changes
+
+- b7a7148: The declaration files carry less JSDoc: comments that restated the code, and citations of design documents in the IR, diff, config and plugin schemas' descriptions, are gone. No behaviour changes.
+- Updated dependencies [af4b970]
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [7d4dbf9]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [107c1c6]
+- Updated dependencies [b2155c1]
+- Updated dependencies [b7a7148]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [ad21560]
+- Updated dependencies [36fd72f]
+- Updated dependencies [659f00c]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+  - @aburi/plugin-registry@0.5.1
+
 ## 0.3.2
 
 ### Patch Changes

@@ -1,5 +1,25 @@
 # @aburi/test-support
 
+## 0.0.2
+
+### Patch Changes
+
+- Updated dependencies [af4b970]
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [7d4dbf9]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [107c1c6]
+- Updated dependencies [b2155c1]
+- Updated dependencies [b7a7148]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [36fd72f]
+- Updated dependencies [659f00c]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+
 ## 0.0.1
 
 ### Patch Changes

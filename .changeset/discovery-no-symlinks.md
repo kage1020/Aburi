@@ -1,7 +1,0 @@
----
-"@aburi/core": patch
----
-
-Discovery no longer follows symlinks. Followed, a link gives a file one Symbol id per path reaching it and brings in files from outside the workspace: a linked directory such as `shared -> src` listed every file under it a second time, doubling every change `aburi diff` counted, a link out of the workspace put that machine's files into the Document, and a cyclic link was expanded once. No link, to a file or a directory, is a candidate for extraction now. Git keeps a link as an entry and never looks behind it; discovery goes no further. Component detection's language census and the nx detector's search for `project.json` make the same decision. Package patterns declared in `pnpm-workspace.yaml` or `workspaces` are still resolved through links, as pnpm and npm resolve them, so a package declared through a link stays a Component, one that now owns no file.
-
-Only a workspace that holds symlinks sees a difference. There, an IR scanned before this release, compared with one scanned after, reports the Symbols that were reached only through a link as removed, once, and a component's `languages` no longer counts files only a link reaches. A workspace where a link gave an nx project a second path loses the Component at the link, and the id-collision suffix the survivor carried goes with it, so its id changes too. Rescan the base rather than comparing against a stored IR, or a gate on `removed` trips once. `aburi diff <base>..<head>` scans both sides with this release and is unaffected.

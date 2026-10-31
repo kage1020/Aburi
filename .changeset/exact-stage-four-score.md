@@ -1,7 +1,0 @@
----
-"@aburi/diff": patch
----
-
-The name-and-signature stage of the matcher now compares its score with the threshold in exact fractions. The score, `0.5 × member + 0.3 × signature + 0.2`, was summed in floating point, so a pair that scored exactly its row's threshold could land a rounding error to one side of it or the other. A method that moved file and gained a fourth name token with one of four parameters retyped (`createUserAccount(a: string, b: number, c: Date, d: boolean)` → `createUserAccountRecord(…, d: Options)`, exactly 0.85) scored `0.8499999999999999` and was reported as one `added` and one `removed`, tripping `--fail-on removed`, while other pairs at the same score rounded up and paired. Every term of the score is a ratio of two counts, so it is now kept as one fraction and compared with its row (1, 19/20 or 17/20) by cross-multiplying integers, and such a pair is one `moved+changed` with rationale `name-signature`. Two candidates whose scores are the same fraction now also tie, and the lower base id, then head id, settles them, where rounding used to choose.
-
-The IR does not change, so no rescan is needed: two stored IRs compared with this release report these pairs as `moved+changed` where the previous release reported an addition and a removal. `signatureSimilarity` now returns its exact mean divided out once, which can differ from the previous value in the last bit; `jaccard`, `nameSimilarity` and `memberSimilarity` return what they did.
