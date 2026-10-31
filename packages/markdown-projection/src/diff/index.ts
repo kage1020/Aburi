@@ -127,8 +127,9 @@ function titleRef(ref: string): string {
 
 function summaryLine(diff: DiffResult): string {
   const summary = diff.summary
-  const folded = summary.removedFolded ?? 0
-  const removed = folded === 0 ? "removed" : `removed (${folded} folded)`
+  const duplicates = summary.removedDuplicates ?? 0
+  const removed =
+    duplicates === 0 ? "removed" : `removed (${counted(duplicates, "duplicate", "duplicates")})`
   const line = withUnknown(
     `+${summary.added} added · -${summary.removed} ${removed} · ~${summary.changed} changed · ${summary.moved} moved · ${summary.movedChanged} moved+changed`,
     diff,

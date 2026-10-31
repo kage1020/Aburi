@@ -144,7 +144,12 @@ describe("diffDependencies", () => {
     ["effect", { effect: null }, { effect: "db.write" }],
   ])("reports an edge whose %s changed as an added + removed pair", (_, before, after) => {
     expect(
-      diffDependencies([billingToPayments(before)], [billingToPayments(after)], NO_LOSSES),
+      diffDependencies(
+        [billingToPayments(before)],
+        [billingToPayments(after)],
+        NO_LOSSES,
+        new Map(),
+      ),
     ).toEqual({
       added: [billingToPayments(after)],
       removed: [billingToPayments(before)],
@@ -155,7 +160,7 @@ describe("diffDependencies", () => {
   it("reports an edge only base holds as removed, and one only head holds as added", () => {
     const old = dependency({ from: "a", to: "b" })
     const fresh = dependency({ from: "a", to: "c" })
-    expect(diffDependencies([old], [fresh], NO_LOSSES)).toEqual({
+    expect(diffDependencies([old], [fresh], NO_LOSSES, new Map())).toEqual({
       added: [fresh],
       removed: [old],
       unknown: [],
@@ -171,7 +176,7 @@ describe("diffDependencies", () => {
     const za = dependency({ from: "z", to: "a" })
     const az = dependency({ from: "a", to: "z" })
     const ab = dependency({ from: "a", to: "b" })
-    expect(diffDependencies([], [symbolEdge, za, az, ab], NO_LOSSES).added).toEqual([
+    expect(diffDependencies([], [symbolEdge, za, az, ab], NO_LOSSES, new Map()).added).toEqual([
       ab,
       az,
       symbolEdge,

@@ -550,7 +550,7 @@ The line ends `· N in test files` when N of its changes are in **Test files**, 
 gives still count every change and say how many of them are test code; a diff with none carries no
 `· 0 in test files`.
 
-`-N removed` reads `-N removed (M folded)` when `summary.removedFolded` is non-zero: M of the N removals left their body in a head Symbol ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2), which is why `--fail-on removed` passed while the line counts N. The CLI's glyph line (`+A -R ~C ↔M ⤴MC`) is left as it is: it is read by scripts, and `-R` stays the count of `removed` entries.
+`-N removed` reads `-N removed (M duplicates)` when `summary.removedDuplicates` is non-zero, `(1 duplicate)` for one: M of the N removals duplicated a head Symbol that holds their body ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2), and `--fail-on removed` counts only the other N−M. The CLI's glyph line (`+A -R ~C ↔M ⤴MC`) is left as it is: it is read by scripts, and `-R` stays the count of `removed` entries.
 
 ### 6.2 Display form of each section
 
@@ -636,12 +636,12 @@ Full symbol rendering (same as §5.2), less the fingerprint line (§12.7):
 - db.write: `prisma.invoice.update` (L120) [effects-prisma]
 ```
 
-A removal folded into a head Symbol (`foldedInto`, [`diff-algorithm.md`](./diff-algorithm.md) §3.5.2) names the survivor under its **File** line, so the entry does not read as deleted behaviour:
+A removed duplicate of a head Symbol (`duplicateOf`, [`diff-algorithm.md`](./diff-algorithm.md) §3.5.2) names the survivor under its **File** line, so the entry does not read as deleted behaviour:
 
 ```md
 ### `makeEmptyIR` *(function)*
 **File**: `packages/cli/test/diff-fs.test.ts:14`
-**Folded into**: `ts:packages/cli/test/fixtures.ts#emptyIR`, which holds the same body
+**Duplicate of**: `ts:packages/cli/test/fixtures.ts#emptyIR`, which holds the same body
 ```
 
 The survivor is named by its id, which carries its file: the diff records only the id, and a survivor nothing else changed has no entry of its own to take a line from.
@@ -883,8 +883,8 @@ heading, a line saying the entries are short, and one row per Symbol,
 - `handleInvoice` *(function)* — `src/billing/invoice.ts:42`
 ```
 
-(the confidence badge follows the kind as on the heading; Removed adds `` (folded into `<id>`) `` to
-a folded removal; Unknown adds the side and the skip reason,
+(the confidence badge follows the kind as on the heading; Removed adds `` (duplicate of `<id>`) `` to
+a removed duplicate; Unknown adds the side and the skip reason,
 Moved + Changed where it moved from, Confidence changes the two values, `` (`high` → `medium`) ``;
 a pair whose name changed carries its Moved + Changed row's ``(from …)`` in API changes, Logic
 changes and Confidence changes too, ahead of the two values, so its old name stays in whichever of
@@ -1112,7 +1112,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP17a | `modified` rule, effect, call, decorator or input whose entry's `before` holds the base element it was paired with, differing in a compared field | That field reads `<base> → <head>` in its place: ``loop (`for` → `while`)``, `[effects-drizzle → effects-prisma]`, an origin `(L5) → [propagated from …]`, ``resolved: `<id>` → none``, `` `@nest.Post()` → `@Post()` ``, `` `limit: number` → `limit?: number` ``; a confidence as `⚠ medium (was high)`, or `(was ⚠ medium)` when it rose to `high`. A field the diff does not compare (`line`, `derivedBy`) gets no base value, and neither does a field whose base value reads like its head value. A base element under another key, in `removed`, or equal to the head element is not taken for the paired one, nor are the base elements equal to an unchanged head element while there are no more of them than of such head elements |
 | MP17b | `modified` element with several candidate bases: several `modified` elements under one key, or base elements equal but for their line | A field the candidates disagree on, or one of them shares with the head element, shows the head value alone; a field they agree on and differ from the head element on still gets their value |
 | MP17c | diff entry whose delta flags `asyncChanged`, `generatorChanged`, `typeParametersChanged`, `componentChanged` or `visibilityChanged` | One row per flag with the base value before the head one: `- signature.async: false → true`, ``- signature.typeParameters: none → `<T>` ``, ``- component: `billing` → none``, ``- visibility: `internal` → `public` `` |
-| MP17e | diff with a `removed` entry whose `foldedInto` names a head Symbol, and `summary.removedFolded` 1 | The entry carries ``**Folded into**: `<id>`, which holds the same body`` under its **File** line, and its names-only row ends `` (folded into `<id>`) ``; the Summary line reads `-1 removed (1 folded)` and the glyph line `-1`. A `foldedInto` of `null`, an absent one, and a `removedFolded` of 0 or absent add nothing |
+| MP17e | diff with a `removed` entry whose `duplicateOf` names a head Symbol, and `summary.removedDuplicates` 1 | The entry carries ``**Duplicate of**: `<id>`, which holds the same body`` under its **File** line, and its names-only row ends `` (duplicate of `<id>`) ``; the Summary line reads `-1 removed (1 duplicate)`, `(2 duplicates)` for two, and the glyph line `-1`. A `duplicateOf` of `null`, an absent one, and a `removedDuplicates` of 0 or absent add nothing |
 | MP18 | diff whose `dependencies.added` holds a call edge between two Symbols of one file, one between two files, and one from a Component to a Symbol | The first reads `` `a` → `b` in `<file>` (via `call`) ``, the second `` `a` in `<file>` → `b` in `<file>` (via `call`) ``, the third `` `billing` → `b` in `<file>` (via `import`) ``; no Symbol id appears |
 | MP19 | diff with an added, a removed and an unknown Symbol, each with a non-zero fingerprint | No entry carries a `<sub>` fingerprint line; the same Symbol on its component page does |
 | MP20 | Symbol block whose calls are `log` (L3), `svc.save` (L5), `log` (L9) and `log` (L9) | **Calls** reads ``- `log` (L3, L9)`` then ``- `svc.save` (L5)`` |

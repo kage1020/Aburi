@@ -107,7 +107,7 @@
         "depsRemoved":       { "type": "integer", "minimum": 0 },
         "unknown":           { "type": "integer", "minimum": 0, "description": "Symbols whose fate could not be determined because one document never analysed their file. Optional rather than required so a diff written before the counter existed stays valid; absence means \"this document predates the counter\", not \"nothing was unknown\"." },
         "depsUnknown":       { "type": "integer", "minimum": 0, "description": "Dependencies whose fate could not be determined, for the same reason and on the same terms as `unknown`. Counts `dependencies.unknown[]`, so `depsAdded` and `depsRemoved` exclude them." },
-        "removedFolded":     { "type": "integer", "minimum": 0, "description": "The `removed` entries whose `foldedInto` names a head Symbol. Counted inside `removed`, not beside it. Optional only so a diff written before the counter existed stays valid; absence means \"this document predates the counter\", not \"nothing was folded\"." }
+        "removedDuplicates": { "type": "integer", "minimum": 0, "description": "The `removed` entries whose `duplicateOf` names a head Symbol. Counted inside `removed`, not beside it. Optional only so a diff written before the counter existed stays valid; absence means \"this document predates the counter\", not \"no removal was a duplicate\"." }
       }
     },
 
@@ -173,12 +173,12 @@
       "properties": {
         "status": { "const": "removed" },
         "symbol": { "$ref": "#/$defs/Symbol" },
-        "foldedInto": {
+        "duplicateOf": {
           "oneOf": [
             { "$ref": "#/$defs/SymbolId" },
             { "type": "null" }
           ],
-          "description": "The head Symbol of the same kind that holds this one's body — its logic and its syntax fingerprints — when one does and the logic names something: the removal folded a duplicate into it, as deduplicating N identical helpers into one leaves N−1 of them unpaired. Null when no head Symbol does. Optional only so a diff written before the field existed stays valid; a current writer always emits it, null included, because such a writer reported every removal bare and absence cannot mean \"not folded\"."
+          "description": "The id of the head Symbol, paired or not, with this one's kind, logic fingerprint and syntax fingerprint, when that logic names something and this Symbol has no `extKind`; the closest name when several qualify, ties to the lower id. Null otherwise. Optional only so a diff written before the field existed stays valid; a current writer always emits it, null included, because a writer that predates it reported every removal bare, duplicate or not, so absence cannot mean \"not a duplicate\"."
         }
       }
     },

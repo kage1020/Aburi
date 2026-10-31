@@ -1,6 +1,10 @@
 import { checkDocumentShape, DOCUMENT_SUBJECT } from "@aburi/core"
 import type { IR } from "@aburi/types"
-import { DEPENDENCY_IDENTITY_FIELDS, dependencyIdentity } from "./components"
+import {
+  DEPENDENCY_IDENTITY_FIELDS,
+  dependencyIdentity,
+  showDependencyIdentity,
+} from "./components"
 import { DiffError } from "./errors"
 
 export function ensureSchemasAgree(base: IR, head: IR): void {
@@ -57,7 +61,7 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
       ),
     keyOf: dependencyIdentity,
     noun: "(from, to, via) triple",
-    show: (parts) => `(${parts.join(", ")})`,
+    show: showDependencyIdentity,
     consequence:
       "direction and effect are deliberately outside Dependency identity, so a " +
       "repeat surfaces as an added + removed pair no reader can tell from a real flip",

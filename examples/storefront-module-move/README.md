@@ -6,5 +6,4 @@ every line of the helpers is in the diff.
 
 None of it changes what the code does. Aburi pairs each helper with its old self by fingerprint, so the
 report lists them as moved rather than as a removal and an unrelated addition. It reports no API or logic
-change anywhere; the only other entries are the cart's call edges, which now point at the helpers' new
-home.
+change anywhere, and the cart's calls into the helpers read as unchanged.

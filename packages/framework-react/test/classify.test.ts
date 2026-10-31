@@ -79,6 +79,20 @@ describe("classifyReactSymbol", () => {
       "memo:React.memo",
     ],
     [
+      "a default export written as memo(...)",
+      "export default memo(function Row() { return <li /> })",
+      "<default>",
+      "memo",
+      "memo:memo",
+    ],
+    [
+      "a default export written as forwardRef(...)",
+      "export default forwardRef((p, r) => <button ref={r} />)",
+      "<default>",
+      "forward-ref",
+      "forward-ref:forwardRef",
+    ],
+    [
       "a PascalCase function returning <X.Provider>",
       "export function ThemeProvider({ children }) { return <ThemeCtx.Provider value={null}>{children}</ThemeCtx.Provider> }",
       "ThemeProvider",

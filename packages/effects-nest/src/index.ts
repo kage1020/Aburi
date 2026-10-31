@@ -5,9 +5,11 @@ export {
   isNestEmitMethod,
   isNestEventEmitterIdentifier,
   NEST_EMIT_METHOD,
+  NEST_EMITTER_CLASS,
   NEST_EVENT_EMITTER_IDENTIFIERS,
   type NestEmitMethod,
   type NestEventEmitterIdentifier,
+  namesNestEmitterClass,
 } from "./emitters"
 export { effectsNestManifest } from "./manifest"
 export { NestEffectsPlugin, nestEffectsPlugin } from "./plugin"

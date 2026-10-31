@@ -1,4 +1,4 @@
-import type { IR, NotComparedFile } from "@aburi/types"
+import type { IR, NotComparedFile, SymbolId } from "@aburi/types"
 import { EXIT } from "../exit-codes"
 import { joinCapped } from "../listing"
 import type { WarnFn } from "../warn"
@@ -106,6 +106,15 @@ function warnOnSymmetricLosses(notCompared: readonly NotComparedFile[], warn: Wa
   if (notCompared.length === 0) return
   warn(
     `⚠ ${notCompared.length} file(s) were skipped by both scans; see notCompared[] in diff.json: ${joinCapped(notCompared.map(notComparedName))}.`,
+  )
+}
+
+// `removed` counted every removal before it left duplicates out, so a workflow that kept its gate
+// across an upgrade would otherwise narrow without a line in its log.
+export function warnOnUncountedDuplicates(duplicates: readonly SymbolId[], warn: WarnFn): void {
+  if (duplicates.length === 0) return
+  warn(
+    `⚠ --fail-on removed did not count ${duplicates.length} removal(s) of a duplicate whose body a head Symbol holds (removed:duplicate counts them): ${joinCapped(duplicates)}.`,
   )
 }
 

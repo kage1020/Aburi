@@ -1,4 +1,5 @@
 import { COMPUTED_TARGET_SEGMENT } from "@aburi/types"
+import { DEFAULT_EXPORT_QNAME } from "./id"
 
 export interface SyntaxNode {
   readonly type: string
@@ -26,6 +27,10 @@ export function findNamedChildOfType(node: SyntaxNode, typeName: string): Syntax
 }
 
 export function declaratorValue(statement: SyntaxNode, name: string): SyntaxNode | null {
+  if (statement.type === "export_statement") {
+    const value = name === DEFAULT_EXPORT_QNAME ? statement.childForFieldName("value") : null
+    return value === null ? null : unwrapValue(value)
+  }
   for (const child of statement.namedChildren) {
     if (child === null || child.type !== "variable_declarator") continue
     const declared = child.childForFieldName("name")

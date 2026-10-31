@@ -87,7 +87,7 @@ describe("evaluateFailOn — the count each status watches", () => {
     ...emptySummary(),
     added: 1,
     removed: 8,
-    removedFolded: 6,
+    removedDuplicates: 6,
     changed: 3,
     moved: 4,
     movedChanged: 5,
@@ -99,7 +99,7 @@ describe("evaluateFailOn — the count each status watches", () => {
   const expected: Record<FailOnStatus, number> = {
     added: 1,
     removed: 2,
-    "removed:folded": 6,
+    "removed:duplicate": 6,
     changed: 3,
     moved: 4,
     "moved+changed": 5,
@@ -115,12 +115,22 @@ describe("evaluateFailOn — the count each status watches", () => {
     )
   })
 
-  it("counts every removal under removed for a diff written before folds were counted", () => {
-    const { removedFolded: _dropped, ...older } = summary
+  it("counts every removal under removed for a diff written before duplicates were counted", () => {
+    const { removedDuplicates: _dropped, ...older } = summary
     expect(evaluateFailOn({ kind: "bare", status: "removed" }, older, breakdown).observed).toBe(8)
     expect(
-      evaluateFailOn({ kind: "bare", status: "removed:folded" }, older, breakdown).observed,
+      evaluateFailOn({ kind: "bare", status: "removed:duplicate" }, older, breakdown).observed,
     ).toBe(0)
+  })
+
+  it.each<FailOnStatus>([
+    "removed",
+    "removed:duplicate",
+  ])("refuses %s over more duplicates than removals rather than read a negative count", (status) => {
+    const inconsistent = { ...emptySummary(), removed: 1, removedDuplicates: 2 }
+    expect(() => evaluateFailOn({ kind: "bare", status }, inconsistent)).toThrow(
+      "evaluateFailOn: summary.removedDuplicates (2) exceeds summary.removed (1)",
+    )
   })
 
   it("reports zero unknowns for a diff written before the counter existed", () => {
