@@ -21,6 +21,7 @@
     "@aburi/framework-nestjs": "workspace:*",
     "@aburi/framework-next": "workspace:*",
     "@aburi/framework-react": "workspace:*",
+    "@aburi/framework-trpc": "workspace:*",
     "@aburi/lang-typescript": "workspace:*",
     "@aburi/test-support": "workspace:*",
     "@aburi/types": "workspace:*",

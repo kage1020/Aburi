@@ -11,8 +11,8 @@ tested, and exercised end to end against a NestJS-shaped fixture project.
 
 **Analysis.** TypeScript and JavaScript, parsed with tree-sitter WASM. Aburi
 detects pnpm, npm, Yarn, and Bun workspaces and nx projects on its own, recognises NestJS, Next.js App
-Router, Express, and React as frameworks, and reads Prisma, Drizzle, tRPC, and
-NestJS events as effects.
+Router, Express, React, and the tRPC server as frameworks, and reads Prisma,
+Drizzle, tRPC client calls, and NestJS events as effects.
 
 **Dependencies.** Aburi resolves calls to the symbols they reach within a file,
 an import, a component, or the workspace, and builds a symbol-level dependency
@@ -57,9 +57,6 @@ consecutive scans of an unchanged tree produce byte-identical IR.
   unresolved bucket almost everywhere, and classifying a sample of it comes
   first — whatever share is a resolver gap rather than a genuinely unknowable
   callee is fixable without type information at all.
-- **`@aburi/framework-trpc`.** The server side of tRPC (`t.router`,
-  `publicProcedure.query` / `mutation` / `subscription`). The existing
-  `effects-trpc` covers the client call side alone.
 
 ## Later
 

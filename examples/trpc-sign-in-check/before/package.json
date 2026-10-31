@@ -1,0 +1,9 @@
+{
+  "name": "blog-api",
+  "private": true,
+  "dependencies": {
+    "@prisma/client": "^6.0.0",
+    "@trpc/server": "^11.0.0",
+    "zod": "^3.23.0"
+  }
+}

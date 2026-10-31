@@ -45,7 +45,8 @@ out.
 classified. A router definition is a Boundary, not a call that reaches the
 network, and per [`extension-vocab.md`](../../docs/design/extension-vocab.md)
 a `type: "effects"` plugin may not declare the `framework:trpc:*` extKinds that
-Boundary classification would need. That belongs to a companion framework plugin.
+Boundary classification would need. That belongs to
+[`@aburi/framework-trpc`](../framework-trpc/README.md).
 
 This matters concretely because the two sides collide: the language plugin
 normalizes `publicProcedure.input(schema).query(resolver)` to

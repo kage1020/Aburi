@@ -27,6 +27,7 @@ Install as many as apply. They do not conflict.
 | `@aburi/framework-next` | App Router files (`page`, `layout`, `route`, `template`, `loading`, `error`, `not-found`), noting a `"use client"` / `"use server"` directive at the top of one |
 | `@aburi/framework-express` | Router instances, route handlers, middleware, error handlers, mount points |
 | `@aburi/framework-react` | Function components, custom hooks, contexts and providers, `forwardRef`, `memo`, higher-order components |
+| `@aburi/framework-trpc` | The tRPC server: the `initTRPC` instance, routers, `query` / `mutation` / `subscription` procedures, base procedures, middleware |
 
 Nothing here fits? For a decorator-based framework,
 [`frameworkHints`](./configuration.md#teach-it-your-in-house-framework) covers

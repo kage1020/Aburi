@@ -32,7 +32,7 @@ features:
     details: Add --fail-on removed and your pipeline fails when a symbol disappears. The bundled GitHub Action posts the report as a pull request comment.
   - icon: 🧩
     title: Knows your framework
-    details: Aburi recognises NestJS routes, Next.js App Router files, Express handlers, React components, and Prisma and Drizzle queries out of the box.
+    details: Aburi recognises NestJS routes, Next.js App Router files, Express handlers, tRPC procedures, React components, and Prisma and Drizzle queries out of the box.
   - icon: 🔁
     title: Deterministic, no LLM
     details: Static analysis with tree-sitter. The same commit always produces the same report, so a difference between two runs is a real difference.
