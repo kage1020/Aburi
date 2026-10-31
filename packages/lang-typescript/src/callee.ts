@@ -50,13 +50,6 @@ interface CalleeShape {
   readonly opaque: boolean
 }
 
-export const TYPE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
-  "non_null_expression",
-  "as_expression",
-  "satisfies_expression",
-  "type_assertion",
-])
-
 const UNMODELLED_EXPRESSION: CalleeShape = {
   target: COMPUTED_TARGET_SEGMENT,
   dynamic: true,
@@ -64,8 +57,6 @@ const UNMODELLED_EXPRESSION: CalleeShape = {
 }
 
 const META_PROPERTIES: ReadonlySet<string> = new Set(["import.meta", "new.target"])
-
-const LINE_BREAK = /[\n\r\u2028\u2029]/
 
 export function wrappedExpression(node: Node): Node | null {
   return node.type === "type_assertion"
@@ -133,21 +124,26 @@ export function describeCallee(node: Node): CalleeShape | null {
       if (inner === null) return null
       return { target: inner.target, dynamic: true, opaque: false }
     }
+    case "as_expression":
+    case "satisfies_expression":
+    case "type_assertion": {
+      const innerNode = wrappedExpression(node)
+      return innerNode === null ? null : describeCallee(innerNode)
+    }
+    case "non_null_expression":
+      return describeNonNull(node)
     default:
-      if (TYPE_WRAPPER_TYPES.has(node.type)) return describeTypeWrapper(node)
       return node.text.length > 0 ? UNMODELLED_EXPRESSION : null
   }
 }
 
-function describeTypeWrapper(node: Node): CalleeShape | null {
+function describeNonNull(node: Node): CalleeShape | null {
   const innerNode = wrappedExpression(node)
   if (innerNode === null) return null
   const inner = describeCallee(innerNode)
   if (inner === null) return null
   if (inner.dynamic) return { target: inner.target, dynamic: true, opaque: false }
-  if (LINE_BREAK.test(node.text)) return UNMODELLED_EXPRESSION
-  if (node.text.split(".").some((segment) => segment.length === 0)) return UNMODELLED_EXPRESSION
-  return { target: node.text, dynamic: false, opaque: true }
+  return { target: `${inner.target}!`, dynamic: false, opaque: true }
 }
 
 function subscriptSegment(node: Node): string | null {

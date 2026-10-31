@@ -99,6 +99,18 @@ const check = (...condition: string[]) =>
     "",
   ].join("\n")
 
+const returning = (open: string, close: string) =>
+  [
+    "export function total(a: number, b: number): number {",
+    `  return ${open}compute(a, b)${close}`,
+    "}",
+    "",
+    "export function larger(a: number, b: number): number {",
+    `  return ${open}a > b ? a : b${close}`,
+    "}",
+    "",
+  ].join("\n")
+
 const SYNTAX_ONLY = delta({ syntaxChanged: true })
 
 describe("an edit to what a caller passes is an api change", () => {
@@ -182,6 +194,24 @@ describe("an edit outside every rule and signature is a syntax-only change", () 
       registry("static items: string[] = []"),
       ["Registry"],
     ],
+    [
+      "parentheses a formatter puts around a returned call and a returned conditional",
+      returning("", ""),
+      returning("(\n    ", "\n  )"),
+      ["larger", "total"],
+    ],
+    [
+      "a union joined onto one line in a method's parameter, on the class alone",
+      "export class Module {\n  add(\n    provider:\n      | ClassProvider\n      | ValueProvider,\n  ): void {\n    use(provider)\n  }\n}\n",
+      "export class Module {\n  add(provider: ClassProvider | ValueProvider): void {\n    use(provider)\n  }\n}\n",
+      ["Module"],
+    ],
+    [
+      "a concise conditional rewritten as a block that returns it in parentheses",
+      "export const larger = (a: number, b: number): number => (a > b ? a : b)\n",
+      "export const larger = (a: number, b: number): number => {\n  return (a > b ? a : b)\n}\n",
+      ["larger"],
+    ],
   ])("reports %s", async (_label, before, after, names) => {
     const diff = await diffOfEdit(workspace, FILE, before, after)
     const changed = changedSymbols(diff)
@@ -198,6 +228,26 @@ describe("a formatting edit is no change", () => {
       "comments written into a guard and a return",
       price("", ""),
       price("/* nothing to charge */ ", "/* member discount */ "),
+    ],
+    [
+      "a union parameter joined onto one line",
+      "export function add(\n  provider:\n    | ClassProvider\n    | ValueProvider,\n): void {\n  use(provider)\n}\n",
+      "export function add(provider: ClassProvider | ValueProvider): void {\n  use(provider)\n}\n",
+    ],
+    [
+      "a union inside a generic argument joined onto one line",
+      "export function add(\n  parts: Array<\n    | ClassProvider\n    | ValueProvider\n  >,\n): void {\n  use(parts)\n}\n",
+      "export function add(parts: Array<ClassProvider | ValueProvider>): void {\n  use(parts)\n}\n",
+    ],
+    [
+      "an object type parameter joined onto one line",
+      "export function load(\n  options: {\n    path: string\n    strict?: boolean\n  },\n): void {\n  use(options)\n}\n",
+      "export function load(options: { path: string; strict?: boolean }): void {\n  use(options)\n}\n",
+    ],
+    [
+      "a function type's parameters joined onto one line",
+      "export function on(\n  handler: (\n    request: Request,\n    response: Response,\n  ) => void,\n): void {\n  use(handler)\n}\n",
+      "export function on(handler: (request: Request, response: Response) => void): void {\n  use(handler)\n}\n",
     ],
     [
       "a guard re-wrapped over several lines",
