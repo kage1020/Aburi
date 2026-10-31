@@ -218,6 +218,27 @@ describe("a fault in the plugin set is not a per-file fault", () => {
     )
   })
 
+  it("re-throws a plugin's refusal of its own pluginOptions, which it reads from the config its hook is given", async () => {
+    const effects = stubEffectsPlugin("effects-stub", (_call, ctx) => {
+      const given = ctx.config.pluginOptions?.["effects-stub"]
+      if (typeof given !== "object" || given === null || !("queues" in given)) {
+        throw Object.assign(new Error("effects-stub needs pluginOptions.queues"), {
+          code: "scan-plugin-misconfigured",
+        })
+      }
+      return null
+    })
+    const withOptions = (value: object) => ({
+      config: { pluginOptions: { "effects-stub": value } },
+    })
+
+    const { result } = await run({ ...withOptions({ queues: ["billing"] }), effects: [effects] })
+    expect(result.extractionFailures).toEqual([])
+    await expect(run({ ...withOptions({ queue: "billing" }), effects: [effects] })).rejects.toThrow(
+      /needs pluginOptions.queues/,
+    )
+  })
+
   it("absorbs a coded error that describes the file, and keeps its code beside the message", async () => {
     const error = new CoreError('qualified name "a\u{1F642}" contains a non-identifier', {
       code: "anonymous-symbol-id-attempted",

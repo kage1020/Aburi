@@ -61,7 +61,7 @@ describe("aburi diff — the two scans it ran", () => {
       baseLine:
         '⚠ base ref "main": extraction-failed (1) — a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.',
     },
-  ])("says a pluginOptions key that names no loaded plugin once and unlabelled, and exits as it would without the key, when the base holds $base", async ({
+  ])("says each pluginOptions line, for a key that names no loaded plugin or a frameworkHints entry's plugin, once and unlabelled, and exits as it would without the keys, when the base holds $base", async ({
     base,
     exitCode,
     faultedScans,
@@ -69,13 +69,19 @@ describe("aburi diff — the two scans it ran", () => {
   }) => {
     const { report, warnings } = await diffRevisions(
       { base: [base, "ok.stub"], head: ["ok.stub"] },
-      { config: { pluginOptions: { "effects-prsima": {}, "lang-stub": {} } } },
+      {
+        config: {
+          frameworkHints: [{ name: "acme", decorators: {} }],
+          pluginOptions: { "effects-prsima": {}, "lang-stub": {}, "hint-acme": {} },
+        },
+      },
     )
 
     expect(report.exitCode).toBe(exitCode)
     expect(report.faultedScans).toEqual(faultedScans)
     expect(warnings.filter((line) => line.includes("pluginOptions"))).toEqual([
-      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-stub); its options are ignored.',
+      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-stub, hint-acme).',
+      '⚠ pluginOptions["hint-acme"] names the plugin built from the frameworkHints entry "acme", which takes no options; write its rules in that entry.',
     ])
     expect(warnings).toContain(baseLine)
   })

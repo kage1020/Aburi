@@ -43,7 +43,7 @@ export function reportScanIncidents(
   for (const line of describeWorkspaceDetection(report)) sayIncident(line)
   reportCoverageFault(report.coverageFault, sayIncident)
   reportPluginNamedFrameworks(report.pluginNamedFrameworks, sayIncident)
-  reportUnmatchedPluginOptions(report, warn, said)
+  reportStrayPluginOptions(report, warn, said)
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
   reportUndeclaredVocab(report.undeclaredVocab, report.vocabDiscoveredPath, sayIncident, warn)
@@ -192,10 +192,13 @@ function reportPluginNamedFrameworks(
 }
 
 /** Not labelled: a pluginOptions key reaches no artifact, and every scan of one command reads the same config. */
-function reportUnmatchedPluginOptions(report: ScanReport, warn: WarnFn, said: Set<string>): void {
+function reportStrayPluginOptions(report: ScanReport, warn: WarnFn, said: Set<string>): void {
   const loaded = report.loadedPlugins.join(", ")
-  for (const key of report.unmatchedPluginOptions) {
-    const line = `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}); its options are ignored.`
+  for (const { key, hintEntry } of report.strayPluginOptions) {
+    const line =
+      hintEntry === null
+        ? `⚠ pluginOptions["${key}"] names no loaded plugin (loaded: ${loaded}).`
+        : `⚠ pluginOptions["${key}"] names the plugin built from the frameworkHints entry "${hintEntry}", which takes no options; write its rules in that entry.`
     if (said.has(line)) continue
     said.add(line)
     warn(line)

@@ -15,7 +15,15 @@ import {
   projectComponent,
   projectWorkspace,
 } from "@aburi/markdown-projection"
-import type { CallResolutionStats, ComponentId, Config, IR, Logger, ParseError } from "@aburi/types"
+import type {
+  CallResolutionStats,
+  ComponentId,
+  Config,
+  FrameworkPlugin,
+  IR,
+  Logger,
+  ParseError,
+} from "@aburi/types"
 import {
   COMPONENTS_DIRNAME,
   IR_JSON_FILENAME,
@@ -53,7 +61,7 @@ import {
 } from "./scan-components"
 import { findCoverageFault } from "./scan-coverage"
 import { reportScanIncidents } from "./scan-incidents"
-import type { ScanReport } from "./scan-report"
+import type { ScanReport, StrayPluginOptions } from "./scan-report"
 
 export interface ScanOptions {
   cwd?: string
@@ -180,9 +188,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     fellBackToSingleComponent,
     pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
     loadedPlugins,
-    unmatchedPluginOptions: Object.keys(config.pluginOptions ?? {}).filter(
-      (key) => !loadedPlugins.includes(key),
-    ),
+    strayPluginOptions: strayPluginOptions(config, loadedPlugins, loaded.syntheticPlugins),
     exitCode:
       scanResult.extractionFailures.length > 0 ||
       coverageFault !== null ||
@@ -229,6 +235,24 @@ function describeParseErrors(errors: readonly ParseError[]): string {
   if (first === undefined) return "parse errors reported without detail"
   const where = `${first.line}:${first.column} — ${first.message}`
   return errors.length === 1 ? where : `${errors.length} errors, first at ${where}`
+}
+
+function strayPluginOptions(
+  config: Config,
+  loadedPlugins: readonly string[],
+  hintPlugins: readonly FrameworkPlugin[],
+): StrayPluginOptions[] {
+  // A hint plugin provides one framework, the id its frameworkHints entry is named by.
+  const hintEntries = new Map(
+    hintPlugins.flatMap(({ manifest }) =>
+      manifest.provides.frameworks.map((entry) => [manifest.name, entry] as const),
+    ),
+  )
+  return Object.keys(config.pluginOptions ?? {}).flatMap((key): StrayPluginOptions[] => {
+    const hintEntry = hintEntries.get(key)
+    if (hintEntry !== undefined) return [{ key, hintEntry }]
+    return loadedPlugins.includes(key) ? [] : [{ key, hintEntry: null }]
+  })
 }
 
 function requireUndeclaredVocab(result: ScanResult): readonly UndeclaredVocabOccurrence[] {

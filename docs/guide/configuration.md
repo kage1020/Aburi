@@ -83,20 +83,26 @@ as the language id `"ts"`, stops the scan with exit 2 and names the plugin to wr
 instead.
 
 Order matters in `effects` alone. The first plugin to recognise a call wins, so
-put your project-specific plugins first. Options for an individual plugin go
-under `pluginOptions`, keyed by the plugin's manifest name:
+put your project-specific plugins first.
+
+Options for an individual plugin go under `pluginOptions`, keyed by the
+plugin's manifest name. None of the plugins that ship with Aburi takes options;
+a third-party plugin that takes options documents them:
 
 ```jsonc
 {
+  "effects": ["@myorg/aburi-effects"],
   "pluginOptions": {
-    "effects-prisma": { "treatExtendsAsTx": true }
+    "effects-myorg": { "queues": ["billing", "mail"] }
   }
 }
 ```
 
 A key that is not the manifest name of a plugin the scan loaded (a misspelling,
 or a plugin none of the three lists enables) gets a warning on stderr naming the
-plugins that did load, and its options are ignored.
+plugins that did load. A key for `hint-<name>`, the plugin Aburi builds from each
+[`frameworkHints`](#teach-it-your-in-house-framework) entry, gets a warning too:
+that plugin takes no options, so its rules go in the entry.
 
 ## Define components
 
@@ -215,7 +221,7 @@ setting in CI.
 | `languages` | `[]` | Language plugins to load. A scan needs at least one; `aburi init` writes the ones it detects. |
 | `frameworks` | `[]` | Framework plugins to load. |
 | `effects` | `[]` | Effects plugins, in priority order. |
-| `pluginOptions` | `{}` | Per-plugin options, keyed by plugin name. |
+| `pluginOptions` | `{}` | Options for third-party plugins, keyed by manifest name. |
 | `components` | autodetect | Explicit component boundaries. |
 | `suppress` | `[]` | Identifier prefixes to drop from effects and calls. |
 | `keep` | `[]` | Exceptions to `suppress` and to the built-in drop rules. |

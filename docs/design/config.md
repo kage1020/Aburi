@@ -46,11 +46,6 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
   "frameworks": ["framework-nestjs"],
   "effects": ["effects-prisma", "effects-pino"],
 
-  // Per-plugin options (optional)
-  "pluginOptions": {
-    "effects-prisma": { "treatExtendsAsTx": true }
-  },
-
   // Component override (autodetect is the default)
   "components": [
     { "id": "billing", "roots": ["apps/billing"] }
@@ -183,21 +178,24 @@ Earlier entries in `effects` have higher priority. Placing a project-specific pl
 
 ### 5.4 `pluginOptions`
 
-Opaque per-plugin configuration.
+Opaque per-plugin configuration. No plugin that ships with Aburi reads options, so the field is for third-party plugins.
 
 ```jsonc
 {
+  "effects": ["@myorg/aburi-effects"],
   "pluginOptions": {
-    "effects-prisma": { "treatExtendsAsTx": true },
-    "framework-nestjs": { "considerHttpExceptionAsThrow": false }
+    // keyed by the manifest name of @myorg/aburi-effects
+    "effects-myorg": { "queues": ["billing", "mail"] }
   }
 }
 ```
 
 - Keys are plugin manifest names
-- Values are arbitrary objects interpreted by the plugin (the Aburi core does not inspect their contents)
-- Each plugin is responsible for documenting the schema of its options
-- A key that is not the manifest name of a plugin the scan loaded — a misspelling, or a plugin none of `languages` / `frameworks` / `effects` enables — is a warning, one per key in config order, naming the key and the plugins that did load. Its options are ignored, and the exit code is the one the run would have had without the key. The loaded plugins are the manifest names the registry holds once the plugins are loaded, so the `hint-<name>` plugin of each `frameworkHints` entry (§8.3) counts as loaded, and a plugin loaded by package id or path matches only under its manifest name. `aburi diff` says each such line once, without a side label, because both of its scans load the head's config and plugin set ([`cli-spec.md`](./cli-spec.md) §5.6)
+- Values are arbitrary JSON values interpreted by the plugin (the Aburi core does not inspect their contents). The core hands every plugin the whole config (`config` on the extraction and classification contexts), and a plugin reads the value under its own manifest name
+- Each plugin is responsible for validating its options and documenting their schema
+- A key that is not the manifest name of a plugin the scan loaded — a misspelling, or a plugin none of `languages` / `frameworks` / `effects` enables — is a warning, one per key in config order, naming the key and the plugins that did load. The exit code is the one the run would have had without the key. The loaded plugins are the manifest names the registry holds once the plugins are loaded, so the `hint-<name>` plugin of each `frameworkHints` entry (§8.3) counts as loaded (it is listed under `loaded:`; its key is the next bullet's case), and a plugin loaded by package id or path matches only under its manifest name
+- A key that names the `hint-<name>` plugin of a `frameworkHints` entry is a warning too, in the same config order: Aburi builds that plugin from the entry and it reads no options, so the line names the entry its rules belong in
+- `aburi diff` says each line of either kind once, without a side label, because both of its scans load the head's config and plugin set ([`cli-spec.md`](./cli-spec.md) §5.6)
 
 ## 6. `components`
 
@@ -492,7 +490,7 @@ writes it down, mapping each detected language and framework to the first-party 
 | C7d | Two entries writing `framework:acme:a` and `framework:acme:b` | Exit 2 naming the second entry |
 | C8 | Extracting undeclared vocab with `strict: false` | Warning only; recorded in `out/aburi-vocab-discovered.json` |
 | C9 | Passing CLI `--strict` | Overrides config `strict: false` |
-| C10 | A `pluginOptions` key that names no loaded plugin, misspelled (`effects-prsima` beside `effects: ["effects-prisma"]`) or not enabled; and, alongside, a loaded plugin's name and the `hint-acme` of a `frameworkHints` entry named `acme` | Exit code unchanged; one warning per unmatched key, in config order: `pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, effects-prisma, hint-acme); its options are ignored.` Nothing for the loaded names |
+| C10 | A `pluginOptions` key that names no loaded plugin, misspelled (`effects-prsima` beside `effects: ["effects-prisma"]`) or not enabled; and, alongside, a loaded plugin's name and the `hint-acme` of a `frameworkHints` entry named `acme` | Exit code unchanged; one warning per key, in config order: `pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, effects-prisma, hint-acme).` for the unmatched one, `pluginOptions["hint-acme"] names the plugin built from the frameworkHints entry "acme", which takes no options; write its rules in that entry.` for the hint plugin's. Nothing for the loaded plugin's name |
 | C11 | `minParsedFileRatio` omitted, and a scan that parsed some files and lost others | Exit 0 |
 | C12 | `minParsedFileRatio: 0.9`, and a scan that parsed half the files it found | Exit 3, naming both counts and the floor |
 | C13 | `minParsedFileRatio` equal to the ratio the scan achieved | Exit 0 |

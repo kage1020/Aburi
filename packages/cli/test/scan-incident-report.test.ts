@@ -401,13 +401,13 @@ describe("reportScanIncidents — the other incidents", () => {
         unrepresentableFiles: [unspellable("odd\\name.ts", "odd\\name.ts")],
         pluginNamedFrameworks: [{ component: "web", value: "lang-typescript", frameworkIds: [] }],
         loadedPlugins: ["lang-typescript", "effects-prisma"],
-        unmatchedPluginOptions: ["effects-prsima"],
+        strayPluginOptions: [{ key: "effects-prsima", hintEntry: null }],
       },
       "head",
     )
     expect(lines[0]).toContain('⚠ head: Component "web" lists "lang-typescript"')
     expect(lines[1]).toBe(
-      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, effects-prisma); its options are ignored.',
+      '⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, effects-prisma).',
     )
     expect(lines[2]).toContain("⚠ head: 1 file(s) were left out of the IR and out of its counts")
   })

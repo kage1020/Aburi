@@ -244,7 +244,7 @@ A planned `--quiet` would print the census lines alone.
 
 ```
 ⚠ Component "api" lists "framework-nestjs" in frameworks, which names a plugin, not a framework; the IR carries it as written. Write "nestjs".
-⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, framework-nestjs, effects-prisma); its options are ignored.
+⚠ pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, framework-nestjs, effects-prisma).
 ⚠ 3 file(s) had recoverable parse errors.
     src/widget.tsx: 4 errors, first at 31:12 — syntax error
     src/panel.tsx: 12:4 — syntax error
@@ -266,16 +266,17 @@ The `frameworks` line comes ahead of the parse lines because the artifact cannot
 reproduce it: a first-party plugin that is not loaded is absent from `plugins[]`, so nothing in
 the IR says `framework-next` was a plugin's name ([config.md](./config.md) §6).
 
-The `pluginOptions` line follows it, one per key that names no loaded plugin
-([config.md](./config.md) §5.4), for the same reason: the IR records the plugins that loaded but
-not the options the config gave. Of the `⚠` lines a scan reports it is the only one that never
-carries a scan's label, and a command says it once however many scans it runs. The `frameworks`
-line keeps its label, and under `aburi diff` is said by each scan, because the value it names
-lands in that scan's IR (`components[].frameworks` carries it as written), so each copy
-describes something its side's artifact holds. A `pluginOptions` key reaches no artifact at all,
-and `aburi diff`'s two scans read the same config and load the same plugins (§6.4 step 3,
-§6.4.1.5), so a label would pin it on one side and a second copy would say nothing new. The scans
-of one command share the set of lines already said, which `runScan` takes as `incidents.said`.
+The `pluginOptions` line follows it, one per key that names no loaded plugin or the plugin of a
+`frameworkHints` entry ([config.md](./config.md) §5.4), for the same reason: the IR records the
+plugins that loaded but not the options the config gave. Of the `⚠` lines a scan reports it is
+the only one that never carries a scan's label, and a command says it once however many scans it
+runs. The `frameworks` line keeps its label, and under `aburi diff` is said by each scan, because
+the value it names lands in that scan's IR (`components[].frameworks` carries it as written), so
+each copy describes something its side's artifact holds. A `pluginOptions` key reaches no
+artifact at all, and `aburi diff`'s two scans read the same config and load the same plugins
+(§6.4 step 3, §6.4.1.5), so a label would pin it on one side and a second copy would say nothing
+new. The scans of one command share the set of lines already said, which `runScan` takes as
+`incidents.said`.
 
 The parse-error line names its files, which nothing else does: mostly they are in the IR, so
 `stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
