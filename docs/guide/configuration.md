@@ -86,8 +86,11 @@ keep:
 }
 ```
 
-The globs read like `ignore`'s, and `[]` marks nothing. Use `testFiles` rather than `ignore` for
-tests: an ignored file is never read, and the calls a test makes leave the graph with it.
+The globs read like `ignore`'s: `fixtures` or `fixtures/` marks the root's `fixtures/` directory,
+and `**/fixtures/**` marks every one. A pattern that starts with `!` takes files back out, so
+`["**/test/**", "!src/test"]` keeps a production `src/test/` out of the fold. `[]` marks nothing.
+Use `testFiles` rather than `ignore` for tests: an ignored file is never read, and the calls a
+test makes leave the graph with it.
 
 ## Choose plugins
 

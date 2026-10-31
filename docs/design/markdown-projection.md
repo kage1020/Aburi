@@ -538,17 +538,20 @@ between Moved and Dropped changes, unfolded, and Confidence changes between Drop
 Syntax-only changes. Moved + Changed is not folded either, because it carries semantic
 change worth reading.
 
-Every Symbol change lands in exactly one place. A change whose Symbol carries `inTestFile`
-([`ir-schema.md`](./ir-schema.md) §5.7) — the head's for a pair, as the head's file is the one the
-entry names — is in **Test files** and in none of the sections above it, so a pull request that
-only edits fixtures reads as one. The Component and Dependency sections are not split: an edge
-names its ends by id and carries no mark, and both stay as the diff gives them.
+A change whose Symbol carries `inTestFile` ([`ir-schema.md`](./ir-schema.md) §5.7) — the head's
+for a pair, as the head's file is the one the entry names — is in **Test files** and not in the
+sections above it, and every other change is in those sections and not in **Test files**, so a pull
+request that only edits fixtures reads as one. A Slice that reaches beyond test code still draws its
+test members (§6.2). An edge carries no mark, but a Symbol-level edge comes or goes only as its
+caller's calls change, so an added or removed one whose `from` is the Symbol of a change in **Test
+files** — either id, for a pair — is listed there and not in Dependency changes. Every other edge,
+and every Component change, stays where the diff puts it.
 
 The `· ?N unknown` suffix on the Summary line appears only when `summary.unknown` is non-zero, so the line a reviewer skims on every PR does not carry a permanent `?0`. It qualifies the counts beside it: added and removed are both smaller than the truth by that much.
 
-The line ends `· N in test files` when N of its changes are in **Test files**, so the counts it
-gives still count every change and say how many of them are test code; a diff with none carries no
-`· 0 in test files`.
+The line ends `· N in test files` when N of the diff's Symbol changes, dropped changes included, are
+test code. The counts before it still count every change, test code too, and the fold's
+`<summary>` counts the same N; a diff with none carries no `· 0 in test files`.
 
 `-N removed` reads `-N removed (M duplicates)` when `summary.removedDuplicates` is non-zero, `(1 duplicate)` for one: M of the N removals duplicated a head Symbol that holds their body ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.2), and `--fail-on removed` counts only the other N−M. The CLI's glyph line (`+A -R ~C ↔M ⤴MC`) is left as it is: it is read by scripts, and `-R` stays the count of `removed` entries.
 
@@ -777,7 +780,8 @@ component whose only difference is in a field this version of the projection has
 A Symbol end is written by its name and file, the way a moved Symbol's route is, rather than by its
 id: the id repeats the language on every end, and an edge between two Symbols of one file, the
 common case for a call, wrote the same path twice. Such an edge names the file once, after both
-names. A Component end is written by its id.
+names. A Component end is written by its id. An added or removed edge whose caller is a change of
+test code is listed in **Test files** instead (§6.1).
 
 The Unknown group is not split by level the way the added and removed groups are. Only a Symbol endpoint has a file to lose ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1), so every entry in it is a symbol-level edge by construction. Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
 
@@ -836,11 +840,16 @@ The changes of test code, by name, grouped in the order of the sections above:
 **1 moved**
 - `mock` *(const)* — `packages/cli/test/serializer.test.ts:21` (from `packages/cli/test/serializer-refusal.test.ts`)
 
+**1 dependency added**
+- `documentWith` in `packages/cli/test/ir-documents.ts` → `makeIR` in `packages/test-support/src/ir.ts` (via `call`)
+
 </details>
 ```
 
-Each row is the names-only row of the section the change would otherwise be in (§6.4), so a
-reviewer who does open the fold finds each Symbol where its full entry would have been. A moved
+Each Symbol row is the names-only row of the section the change would otherwise be in (§6.4), so a
+reviewer who does open the fold finds each Symbol where its full entry would have been. The edges
+of those Symbols (§6.1) follow the moved groups as `dependency added` and `dependency removed`, in
+the row form of Dependency changes. A moved
 pair is listed once, under moved + changed or moved, where the sections above list a moved pair
 with a changed body in both Moved + Changed and the section of its delta. A group counts one in
 the singular (`1 API change`, `1 added`), and so does the fold's summary (`1 symbol in a test file`).
@@ -1123,6 +1132,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP21a | diff whose one pair moved out of a test file, and one whose pair moved into one | The first in `## 🔀 Moved`, the second in `## 🧪 Test files`: the head decides |
 | MP21b | diff with a Slice of two test Symbols, a test singleton, and a Slice from a test Symbol into code under test | No Slice View for the first two; the third drawn with its test member |
 | MP21c | diff with one change outside test files and ten inside, projected with a budget that holds the first and the note but not the fold | The note names `🧪 Test files` as the one section omitted |
+| MP21d | diff with an added test Symbol whose call edge was added, a test pair whose id changed with an edge added from its head id and one removed from its base id, and a changed production Symbol with an added edge | The fold ends with `**2 dependencies added**` and `**1 dependency removed**` after its moved group; `## 🔗 Dependency changes` lists only the production edge, and without it is not rendered |
 
 ## 12. Design decisions
 

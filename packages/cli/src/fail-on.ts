@@ -1,4 +1,9 @@
-import type { DiffResult, Symbol as IRSymbol, SymbolChange, SymbolId } from "@aburi/types"
+import {
+  type DiffResult,
+  representativeSymbol,
+  type SymbolChange,
+  type SymbolId,
+} from "@aburi/types"
 import { assertNever } from "./errors"
 import { MAX_LISTED } from "./listing"
 
@@ -221,16 +226,12 @@ export function uncountedDuplicates(
 function countedIds(token: FailOnToken, diff: DiffResult, scope: FailOnScope): SymbolId[] {
   return diff.symbols
     .filter((change) => inScope(scope, change) && counts(token, change))
-    .map((change) => entrySymbol(change).id)
+    .map((change) => representativeSymbol(change).id)
 }
 
 /** The head decides for a pair, as it does where the report lists the entry. */
 function inScope(scope: FailOnScope, change: SymbolChange): boolean {
-  return scope === "all" || entrySymbol(change).inTestFile !== true
-}
-
-function entrySymbol(change: SymbolChange): IRSymbol {
-  return "symbol" in change ? change.symbol : change.after
+  return scope === "all" || representativeSymbol(change).inTestFile !== true
 }
 
 export function formatTriggered({ clause, observed, symbols, scope }: TrippedClause): string {

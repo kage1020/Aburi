@@ -1,4 +1,4 @@
-import type { DiffResult } from "@aburi/types"
+import { type DiffResult, representativeSymbol } from "@aburi/types"
 import { counted, inlineCode } from "../format"
 import { renderComponentChanges } from "./component-changes"
 import { renderDependencyChanges } from "./dependency-changes"
@@ -21,10 +21,10 @@ import {
   indexSymbols,
   indexUnknown,
 } from "./names-only"
-import { entrySymbol, partition } from "./partition"
+import { partition } from "./partition"
 import { assemble, foldedSection, plainSection, type Section } from "./size-cap"
 import { renderSliceView } from "./slice-view"
-import { inTestFile, renderTestFiles } from "./test-files"
+import { inTestFile, renderTestFiles, splitDependencies } from "./test-files"
 
 export interface ProjectDiffOptions {
   readonly maxBytes?: number
@@ -43,16 +43,16 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
       "projectDiff: fullReportLocation must not contain a line break; it is set inside a one-line note.",
     )
   }
+  const testChanges = diff.symbols.filter(inTestFile)
   const heading = [
     `# Aburi diff: ${titleRef(diff.base.ref)}..${titleRef(diff.head.ref)}`,
     "",
-    `**Summary**: ${summaryLine(diff)}`,
+    `**Summary**: ${summaryLine(diff, testChanges.length)}`,
     "",
   ]
-
-  const testChanges = diff.symbols.filter(inTestFile)
+  const dependencies = splitDependencies(diff.dependencies, testChanges)
   const buckets = partition(diff.symbols.filter((change) => !inTestFile(change)))
-  const testIds = new Set(testChanges.map((change) => entrySymbol(change).id))
+  const testIds = new Set(testChanges.map((change) => representativeSymbol(change).id))
   // A Slice with no members is left for the Slice View to refuse.
   const slices = diff.slices.filter(
     ({ members }) => members.length === 0 || members.some((id) => !testIds.has(id)),
@@ -84,7 +84,7 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
       `${buckets.moved.length} moved (no semantic change)`,
     ),
     plainSection("## 🧱 Component changes", renderComponentChanges(diff)),
-    plainSection("## 🔗 Dependency changes", renderDependencyChanges(diff)),
+    plainSection("## 🔗 Dependency changes", renderDependencyChanges(dependencies.kept)),
     foldedSection(
       "## 💧 Dropped changes",
       renderDroppedToggled(buckets.droppedToggled),
@@ -102,7 +102,7 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     ),
     foldedSection(
       "## 🧪 Test files",
-      renderTestFiles(testChanges),
+      renderTestFiles(testChanges, dependencies.inTests),
       counted(testChanges.length, "symbol in a test file", "symbols in test files"),
     ),
   ].filter((entry): entry is Section => entry !== null)
@@ -125,7 +125,7 @@ function titleRef(ref: string): string {
   return COMMIT_SHA.test(ref) ? ref : inlineCode(ref)
 }
 
-function summaryLine(diff: DiffResult): string {
+function summaryLine(diff: DiffResult, inTests: number): string {
   const summary = diff.summary
   const duplicates = summary.removedDuplicates ?? 0
   const removed =
@@ -134,7 +134,6 @@ function summaryLine(diff: DiffResult): string {
     `+${summary.added} added · -${summary.removed} ${removed} · ~${summary.changed} changed · ${summary.moved} moved · ${summary.movedChanged} moved+changed`,
     diff,
   )
-  const inTests = diff.symbols.filter(inTestFile).length
   return inTests === 0 ? line : `${line} · ${inTests} in test files`
 }
 

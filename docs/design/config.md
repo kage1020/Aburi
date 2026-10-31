@@ -131,7 +131,8 @@ Glob patterns naming the files that hold test code.
 }
 ```
 
-- The syntax of `ignore` (§3): POSIX, relative to the workspace root, a `*` or `**` matching a name that starts with a dot. A pattern is read in NFC, the form every IR path is in
+- The syntax of `ignore` (§3): POSIX, relative to the workspace root, a `*` or `**` matching a name that starts with a dot, and a pattern that does not end in `*` naming a directory as well as a file, as the walk reads an `ignore` entry: `test` and `test/` mark every file under the root's `test/`. A pattern is read in NFC, the form every IR path is in
+- A pattern that starts with `!` (but not `!(`) takes the files it names out of what the others mark, whatever their order: `["**/test/**", "!src/test"]` marks every `test/` directory but `src/test/`. A list of `!` patterns alone marks nothing. The walk skips a `!` entry of `ignore`, so this is where the two syntaxes part; reading `!src/test/**` as a glob of its own would mark every other file in the workspace
 - Absent, the default list applies: `**/*.test.*`, `**/*.spec.*`, `**/*.test-d.*`, `**/*.spec-d.*`, `**/__tests__/**`, `**/__mocks__/**`, `**/__fixtures__/**`, `**/test/**`, `**/tests/**`, `**/e2e/**`. Given, the list **replaces** the default one, so a workspace whose `src/test/` is production code can leave that pattern out; `[]` marks no file
 - A file it names is scanned like any other. Its Symbols keep their calls, effects and edges, so Slice View and `aburi explain` still read them, and each carries `inTestFile: true` (ir-schema.md §5.7)
 - What the mark changes is downstream: `diff.md` lists those Symbols' changes in a trailing folded section instead of the sections above it (markdown-projection.md §6.2), and `aburi diff --fail-on-scope non-test` leaves them out of the gate (cli-spec.md §6.7)
@@ -530,6 +531,9 @@ writes it down, mapping each detected language and framework to the first-party 
 | C24 | `testFiles` omitted, over `src/a.test.ts`, `src/__tests__/b.ts`, `test/c.ts`, `tools/.harness/test/d.ts` and `src/testing.ts` | Every Symbol of the first four carries `inTestFile: true`; the last file's carry no key |
 | C25 | `testFiles: ["src/order.ts"]` | Only that file's Symbols carry the key: the default list no longer applies |
 | C26 | `testFiles: []` | No Symbol carries the key, and every fingerprint is the one the default list gives |
+| C27 | `testFiles: ["test", "src/__mocks__/"]` | The Symbols of `test/helpers.ts` and `src/__mocks__/db.ts` carry the key; those of `tools/test/run.ts` do not, as neither pattern starts with `**/` |
+| C28 | `testFiles: ["**/test/**", "!tools"]`, and `testFiles: ["!tools/**"]` | The first marks `test/helpers.ts` and not `tools/test/run.ts`; the second marks no file |
+| C29 | C24 with a plugin that drops the Symbol of `src/a.test.ts` | That Symbol carries `dropped: true` and `inTestFile: true` |
 
 ## 14.1 Config Schema Compatibility Policy
 

@@ -22,12 +22,6 @@ export function dropDirection(head: IRSymbol): DropDirection {
   return head.dropped ? "to-dropped" : "to-kept"
 }
 
-export function representativeSymbol(change: SymbolChange): IRSymbol {
-  return change.status === "added" || change.status === "removed" || change.status === "unknown"
-    ? change.symbol
-    : change.after
-}
-
 export function headIdsByBaseId(changes: readonly SymbolChange[]): ReadonlyMap<SymbolId, SymbolId> {
   const out = new Map<SymbolId, SymbolId>()
   for (const change of changes) {
