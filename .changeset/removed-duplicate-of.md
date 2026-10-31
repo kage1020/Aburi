@@ -1,6 +1,0 @@
----
-"@aburi/types": minor
-"@aburi/diff": minor
----
-
-A removal whose body a head Symbol still holds says so. Deduplicating two identical helpers into one pairs one of them with the survivor and leaves the other `removed`, and nothing joined the two for a reader. A `removed` entry now carries `duplicateOf`: the id of the head Symbol, paired or not, with its kind, its logic fingerprint and its syntax fingerprint, when that logic names something and the removed Symbol has no `extKind`; the closest name when several qualify, ties to the lower id; `null` otherwise. The syntax has to agree because unrelated helpers share a logic fingerprint often (one `if (x === null) throw new Error(…)` guard is the whole logic of many), and a duplicate is left out of `--fail-on removed`. A Symbol with an `extKind` is never a duplicate, because a plugin read its role from outside its body: two Next.js `GET` handlers in two route files can share a body, and deleting one still retires an endpoint. `summary.removedDuplicates` counts the entries with a `duplicateOf`, which `summary.removed` still counts too. `aburi diff` writes both on every diff, `null` and `0` included, so a reader can tell "not a duplicate" from a diff written before the field existed. Both fields are additive and optional in `aburi.diff.v1.json`.

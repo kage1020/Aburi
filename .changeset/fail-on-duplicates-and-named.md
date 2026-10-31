@@ -1,9 +1,0 @@
----
-"@aburi/cli": minor
----
-
-`--fail-on removed` no longer trips on a removed duplicate of a head Symbol, and a tripped gate names the Symbols that tripped it. Deduplicating two identical helpers into one always left one of them `removed`, so the gate the docs recommend starting with failed every such refactor. `removed` now counts the removals whose `duplicateOf` is `null` or absent, and the new `removed:duplicate` counts the others: `--fail-on removed,removed:duplicate` trips on every removal, as `removed` did before. A threshold does not carry over: `removed:>N` counted every removal and now counts only those that are not duplicates, and no combination of clauses holds the two to one threshold. When the clauses hold `removed` and no `removed:duplicate`, `aburi diff` names on stderr the duplicates it did not count, so a gate kept across the upgrade does not narrow without a word.
-
-The stderr line a tripped clause prints is followed by the id of each Symbol it counted, indented, ten at most and then `… and N more`, so a red check says which removal it was. Every clause now counts `symbols[]` entries rather than the `summary` counters, so the count and the ids are one list.
-
-For library users: `FailOnToken` and `FailOnStatusToken` gain `removed:duplicate`, so an exhaustive `switch` over them needs the case. `runDiff`'s `triggered` and `evaluateFailOn`'s `firstTriggered` are a `TrippedClause`, whose `symbols` is required, so a caller that builds `{ clause, observed }` for `formatFailOnMessage` must add it. `evaluateClause` returns a `ClauseOutcome`, which carries the same `symbols`. `ClauseOutcome` and `TrippedClause` are new exports. `formatTriggered` takes a `TrippedClause` in place of a clause and a count, and `formatFailOnMessage` is now the same function under its earlier name.

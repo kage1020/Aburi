@@ -1,5 +1,69 @@
 # @aburi/framework-react
 
+## 0.4.0
+
+### Minor Changes
+
+- 50ea5bb: The Express and React plugins now name a call in `derivedBy` from the syntax tree instead of copying the callee's source text. A chain a formatter wrapped over several lines put its line breaks and indentation into the entry (`framework:express:route:router\n  .delete`), a comment inside the chain was copied in, and a `;` in that comment split the entry in two, because the pipeline splits a classification's `derivedBy` on `;` (`router // admin; see the runbook\n  .use(…)` gave `framework:express:error-middleware:router // admin` and ` see the runbook\n  .use`). A receiver written `(app as Express)` left an empty name, `framework:express:route:.get`, `app!.get(…)` gave `app!.get`, `app?.get(…)` gave `app?.get`, and `require('express').Router()` and `require("express").Router()` gave different entries for the same call. The route, middleware, error-middleware and mount entries are now `<receiver>.<method>`: the method called and the name the receiver chain starts from, read through parentheses, `as`, `satisfies` and `!` and through every call on the way, which is the value `@aburi/lang-typescript`'s `call-statement:` entry on the same Symbol carries. Those calls are now `router.delete`, `router.use`, `app.get` and `require.Router`. The error-middleware and mount entries of a chained `.use(…)` follow that reading as the route and middleware entries already did, so `app.use(cors()).use("/api", apiRouter)` is `framework:express:mount:app.use` rather than `framework:express:mount:app.use(cors()).use`, and a Router is named by its factory the same way (`express.Router`, `Router`). The React plugin names a `createContext`, `forwardRef` or `memo` call the same way: `React\n  .memo(Inner)`, `(React as any).memo(Inner)` and `React?.memo(Inner)` are `framework:react:memo:React.memo`, `loadReact().memo(Inner)` is `framework:react:memo:loadReact.memo`, and a receiver that is not a name is `<computed>`: `new Registry().memo(Inner)` gives `framework:react:memo:<computed>.memo`, and so does `(<any>React).memo(Inner)`, because a `<T>x` assertion is not read through.
+
+  The method is now the callee's property rather than whatever followed the last `.` in its text, so a call whose `.` ends a line (`app.\n  get("/users", listUsers)`, `React.\n  memo(Inner)`) or is followed by a comment holding a `.` is classified as its one-line spelling is, where it was left unclassified. The React plugin's hook detection reads a call the same way, so `React.\n  useState(0)` in a `use*` function now gives `framework:react:hook:hook-call` as `React.useState(0)` does. Both plugins read a callee through `@aburi/core`'s `calleeName`; a const's call is still the one `declaratorValue` reads from its own declarator.
+
+  Both plugins stop re-exporting `calleeText` and `calleeLeaf` from `@aburi/core`, which read a callee's text; import them from `@aburi/core` if you still need them. `@aburi/framework-express` no longer exports `calleeRoot`, which read a receiver out of the callee's text; `calleeName(call).name` gives the receiver and method. `RouterCall` and the React plugin's `WrapperCall` are now `@aburi/core`'s `CalleeName`, `{ name, leaf }`: the field that held the callee's text, `callee`, is `name`, which holds `<receiver>.<method>`.
+
+  No fingerprint reads these `framework:` entries and `aburi diff` does not compare them, so an IR scanned before this release, compared with one scanned after, differs in those entries only inside the IR and in `aburi explain`. A call that is now classified gains its `extKind`, which the `api` fingerprint reads: it is reported as an api change, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains it if it has effects. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugins and is unaffected.
+
+- a2c196a: A function component is now a `framework:react:provider` when any of its returns hands back a `<X.Provider>` element, not only when the first `return` holding JSX does. A loading guard above the provider (`if (user === undefined) return <Spinner />`) made it a `framework:react:component`, while the same guard written `return null` kept it a provider. Every `return` in the function's own body is read, and a `return` in a nested function, generator or method belongs to that function. Each returned value, and a concise arrow's body, is read through `as`, `satisfies`, `!` and parentheses, into both arms of a conditional, both sides of `||` and `??` (only the left when it is an element, which is never falsy or nullish), and the last operand of `&&`. So `const AuthProvider = ({ user, children }) => (<AuthContext.Provider value={user}>{children}</AuthContext.Provider>)` and `return loading ? <Spinner /> : <AuthContext.Provider value={user}>…</AuthContext.Provider>` are providers too, where both were components. Only the returned element itself is read, not one inside it: a provider the function returns inside a call or an array (`return items.map((item) => <Ctx.Provider value={item} />)`, `return [<Ctx.Provider value={1} />]`) made it a provider and now leaves it a component, and so does one returned by a generator expression (`function* () {}`) nested in it, which the old reader counted as the function's own return. A provider inside a fragment or another element, and React 19's `<Ctx value={…}>` spelling, are components as before; the README lists them. `findReturnedJsxElementNames` is exported, and `findReturnedJsxElementName` returns the first of those names, so its answer changes in three ways: a parenthesised concise body gives the element's name where it gave `null`, a returned call or array gives `null` where it gave the name of an element inside it, and a fragment returned before a named element (`if (x) return <>a</> ; return <Ctx.Provider />`) gives that element's name where it gave `null`, because a fragment has no name and is skipped.
+
+  The `api` fingerprint reads `extKind`, so it moves for every function this reclassifies between `framework:react:component` and `framework:react:provider`. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes. Both are `framework:` extKinds, so the Markdown projection's Boundary effect surface lists the same Symbols. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
+
+- 90fa1cb: A `const` is now a `framework:react:context`, `framework:react:forward-ref` or `framework:react:memo` only when its own initializer is the `createContext(...)`, `forwardRef(...)` or `memo(...)` call. A `const` Symbol's node is its whole declaration statement, and the first call anywhere in it decided the role whichever name was asked about: in `export const ThemeContext = createContext("light"), DEFAULT_THEME = "light"` both names were contexts, in `export const A = memo(X), B = forwardRef(Y)` `B` was a memo, and in `export const theme = getTheme(), Ctx = createContext(null)` `Ctx` had no role. A const that only contained a wrapper call took its role too: a route table (`[{ path: "/", element: memo(Page) }]`), a handler map (`{ save: () => forwardRef(…) }`), `new Holder(memo(Row))`, `flag ? memo(A) : B`, and a name destructured from one (`const { displayName } = memo(Row)`). The initializer is read through `as`, `satisfies`, `!` and parentheses only, as `@aburi/lang-typescript` reads it to name the Symbol, so `memo(Row) as typeof Row` is still a memo, while a wrapper behind an old-style type assertion (`<Context<T>>createContext(…)`, `<any>memo(Inner)`, written in a `.ts` file) is no longer classified. Its outermost call names the role, so `memo(forwardRef(…))` is still a memo and `withTheme(memo(Row))` is none. `extractWrapperCall` now takes the Symbol's name as a second argument.
+
+  The `api` fingerprint reads `extKind`, so it moves for every const this reclassifies: a name declared beside a wrapper, or holding one inside its initializer, loses the role, and so does a wrapper behind `<T>x`; a wrapper declared after a name whose initializer holds any call takes its own role, where it had that call's or none (`Row` in `export const f = () => g(), Row = memo(Inner)` gains memo, and `Ctx` in `export const routes = [memo(A)], Ctx = createContext(null)` goes from memo to context). An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains or loses those of them that have effects. A wrapper whose statement's first call is a wrapper of the same kind keeps its kind; at most its `framework:` entry in `derivedBy` changes (`React.memo` for `memo`), which no fingerprint reads. A const that its statement declares alone, initialised by the wrapper call itself or through `as`, `satisfies`, `!` or parentheses, is read as before. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
+
+### Patch Changes
+
+- b7a7148: The declaration files carry less JSDoc: comments that restated the code, and citations of design documents in the IR, diff, config and plugin schemas' descriptions, are gone. No behaviour changes.
+- 7d4dbf9: A default export written as a call handed a function, which `@aburi/lang-typescript` now gives a `<default>` `const` Symbol, can take a framework role. `@aburi/framework-next` gives an App Router file's role (`page`, `layout`, `template`, `loading`, `error`, `not-found`) to a default-exported `const` that carries `call-argument-function`, so `export default withAuth(function Page() { … })` and `const Page = withAuth(() => { … }); export default Page` are pages; a `const` default export whose call is handed no function is still not one. `@aburi/framework-react` reads `export default memo(function Row() { … })` as a `framework:react:memo`, and `forwardRef(…)` as a `framework:react:forward-ref`, as it reads the same call bound to a `const`. It reads the call through `@aburi/core`'s `declaratorValue`, which now returns a default export statement's value, read through `unwrapValue`, when asked for the name `<default>`, and `null` for any other name. `@aburi/types` exports the token as `CALL_ARGUMENT_FUNCTION_DERIVED_BY`; nothing a scan writes changes.
+
+  The `api` fingerprint reads `extKind`, so it moves once for a `const` App Router component bound apart from its default export. One with no role takes `framework:next:<role>`. One that `@aburi/framework-react` classified moves too when `@aburi/framework-next` is listed before it in `frameworks`, since the first framework that answers classifies the Symbol: `const Page = memo(function Page() { … }); export default Page` in `app/**/page.tsx` goes from `framework:react:memo` to `framework:next:page`. Listed the other way round, it stays a memo. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes, and the Markdown projection's Boundary effect surface, which lists Symbols by a `framework:` extKind, gains or loses those of them that have effects. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugins and is unaffected.
+
+- Updated dependencies [19ead65]
+- Updated dependencies [af4b970]
+- Updated dependencies [c6ce311]
+- Updated dependencies [b7a7148]
+- Updated dependencies [50ea5bb]
+- Updated dependencies [90fa1cb]
+- Updated dependencies [b7a7148]
+- Updated dependencies [9c21737]
+- Updated dependencies [7d4dbf9]
+- Updated dependencies [3b52db9]
+- Updated dependencies [dfffac9]
+- Updated dependencies [ad04fff]
+- Updated dependencies [13f8ba9]
+- Updated dependencies [1a56ce7]
+- Updated dependencies [107c1c6]
+- Updated dependencies [b2155c1]
+- Updated dependencies [b2155c1]
+- Updated dependencies [f32e45b]
+- Updated dependencies [b7a7148]
+- Updated dependencies [80be216]
+- Updated dependencies [50c0bd2]
+- Updated dependencies [a6cd1ac]
+- Updated dependencies [f9d300c]
+- Updated dependencies [1a41bef]
+- Updated dependencies [6be7d2e]
+- Updated dependencies [ad21560]
+- Updated dependencies [36fd72f]
+- Updated dependencies [6afef8b]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [d4fca12]
+- Updated dependencies [659f00c]
+- Updated dependencies [463d616]
+- Updated dependencies [47f8ef9]
+- Updated dependencies [65c758f]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.3.2
 
 ### Patch Changes
