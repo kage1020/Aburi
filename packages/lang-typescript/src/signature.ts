@@ -1,7 +1,13 @@
 import { compareCodeUnit } from "@aburi/core"
 import type { Signature } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { findChild, firstNonCommentChild, thrownValue, walkDescendants } from "./ast-helpers"
+import {
+  findChild,
+  firstNonCommentChild,
+  leadingOperatorOperand,
+  thrownValue,
+  walkDescendants,
+} from "./ast-helpers"
 import { collectPatternBindings, isRepairedPattern } from "./pattern-bindings"
 
 export function buildSignature(declaration: Node, jsDocText: string | null): Signature {
@@ -112,11 +118,6 @@ function readReturnType(node: Node): string[] {
   return text.length > 0 ? [text] : []
 }
 
-const LEADING_OPERATORS: ReadonlyMap<string, string> = new Map([
-  ["union_type", "|"],
-  ["intersection_type", "&"],
-])
-
 const VERBATIM_TYPES: ReadonlySet<string> = new Set(["string", "template_literal_type"])
 
 const OPENING_BRACKETS: ReadonlySet<string> = new Set(["<", "(", "["])
@@ -160,15 +161,9 @@ function typeTokens(node: Node, out: TypeToken[]): TypeToken[] {
     return out
   }
   if (node.type === "object_type") return objectTypeTokens(node, out)
-  const children = node.children
-  const leading = LEADING_OPERATORS.get(node.type)
-  const operand = children[1]
-  const operatorFirst =
-    leading !== undefined &&
-    children[0]?.type === leading &&
-    operand !== undefined &&
-    !operand.isMissing
-  for (const child of operatorFirst ? children.slice(1) : children) typeTokens(child, out)
+  const operand = leadingOperatorOperand(node)
+  if (operand !== null) return typeTokens(operand, out)
+  for (const child of node.children) typeTokens(child, out)
   return out
 }
 

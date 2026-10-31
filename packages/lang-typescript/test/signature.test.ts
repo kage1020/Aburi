@@ -74,6 +74,7 @@ describe("a type is recorded as it reads on one line", () => {
       ["T extends A = B"],
     ],
     ["a comment between the colon and the type", "(x: /* c */ | A | B) {}", ["A | B"]],
+    ["a comment after the leading operator", "(x: | /* c */ A | B) {}", ["A | B"]],
     [
       "a line comment above a broken union",
       "(\n  x:\n    // the class form\n    | A\n    | B,\n) {}",

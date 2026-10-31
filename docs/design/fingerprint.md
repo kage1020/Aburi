@@ -239,7 +239,7 @@ Of the input fields, `rules[].type` and `rules[].loopKind` classify a construct 
 
 ## 5. `syntax` fingerprint
 
-Represents the **AST structure** of the symbol body. Changes on any structural change other than formatting.
+Represents the **AST structure** of the Symbol: its body, and the parts of its declaration the api axis does not read, a class's head and a function's parameter list ([lang-plugin.md](./lang-plugin.md) LP8p, LP8p1). Changes on any structural change other than formatting.
 
 ### 5.1 Input fields
 
@@ -250,7 +250,7 @@ The language plugin generates a **normalized AST string** per Symbol and compute
 1. Contains no comment nodes
 2. Contains no position information (line, column, byte offset)
 3. Contains no whitespace tokens
-4. Is an S-expression representing node kinds and child-node structure, plus every unnamed token except the punctuation a formatter adds, drops or swaps without changing the program: string delimiters, an optional `;`, a trailing `,`, and brackets the structure already implies. Punctuation that is the only record of something is not a formatter's, and stays in: the commas that make a hole in a JavaScript array (`[, x]` against `[x]`)
+4. Is an S-expression representing node kinds and child-node structure, plus every unnamed token except the punctuation a formatter adds, drops or swaps without changing the program: string delimiters, an optional `;`, a trailing `,`, a union's or an intersection's leading `|` or `&` (`| A | B` reads as `A | B`, without the extra level the parser gives the leading form), the parentheses around an arrow function's lone parameter (`x => …` reads as `(x) => …`, with the levels the parser gives the parenthesised form), and brackets the structure already implies. Punctuation that is the only record of something is not a formatter's, and stays in: the commas that make a hole in a JavaScript array (`[, x]` against `[x]`)
 5. Includes identifier and literal values (concrete values, not structure alone)
 6. Contains nothing the parser inserted: a MISSING node, the parser's repair of a broken file, is treated as unwritten
 
@@ -281,7 +281,7 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 - Whitespace / newline / indentation changes → unchanged
 - Line terminators (LF, CRLF, a lone CR) → unchanged
 - Adding / removing comments → unchanged
-- The quotes around a string that needs no escape either way, a trailing comma, optional semicolons → unchanged
+- The quotes around a string that needs no escape either way, a trailing comma, optional semicolons, a union's leading `|` or an intersection's leading `&`, the parentheses around an arrow function's lone parameter → unchanged
 
 These are the punctuation item 4 leaves out, not formatter output in general. A formatter that quotes an object key (`{ a: 1 }` → `{ "a": 1 }`), picks the quote that needs fewer escapes (`'it\'s'` → `"it's"`), wraps a multi-line expression in parentheses, or rewrites JSX (`<Foo></Foo>` → `<Foo />`) changes the structure, and `syntax` changes with it.
 
@@ -293,6 +293,7 @@ Line terminators are held by the core, not by `normalizeAst`, which is why S2d i
 - Renaming an identifier → changes (`syntax` is structure-based, not meaning-based, so identifiers are treated as part of the structure)
 - Changing a literal → changes
 - Changing an operator, a declaration keyword (`let` / `const`), a modifier or a primitive type → changes
+- Changing a function's parameter list where the api axis does not read it — a parameter's name, a destructuring pattern, a default's value → changes. The api input reads a parameter's type and form only (§3.1), so the language plugin's normalized string covers the list as well as the body ([lang-plugin.md](./lang-plugin.md) LP8p1). The list goes in whole, so an edit to a parameter's type or form changes `syntax` as well as `api`; a return type or a type parameter, outside the list, changes `api` alone
 
 ### 5.5 Uses of the syntax fingerprint
 
@@ -364,7 +365,7 @@ The reference implementation and every language plugin must pass the following t
 | A12 | Change only the class-scope portion of `Symbol.name` (`Old.method` → `New.method`) | api unchanged |
 | A13 | Change `language` (never happens in practice; defensive) | api unchanged (`language` is not part of the input) |
 | A22 | Change `signature.inputs[].name` from `ids` to `...ids` | api unchanged (A1's case: rest-ness is `rest`, and a marker spelled into `name` reaches no axis) |
-| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value) |
+| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value); syntax changes (S5b) |
 | A24 | Join a parameter type broken over lines onto one line: `\| ClassProvider \| FactoryProvider` → `ClassProvider \| FactoryProvider`, `Array<` … `\| A` … `\| B` … `>` → `Array<A \| B>`, `(` … `request: Request,` … `) => void` → `(request: Request) => void` | api unchanged (LP11e records each spelling as the one-line text) |
 
 ### 7.3 api change conditions
@@ -418,6 +419,8 @@ The reference implementation and every language plugin must pass the following t
 | S2b | Add a trailing comma | syntax unchanged |
 | S2c | Drop optional semicolons | syntax unchanged |
 | S2d | Save the file with CRLF or a lone CR | syntax unchanged — guaranteed by the core's scan, not by `normalizeAst` (§5.3) |
+| S2e | Join a union broken over lines onto one line, dropping its leading `\|` (`\| A` … `\| B` → `A \| B`), or an intersection, dropping its leading `&`, in a type alias, a parameter, a method's parameter or an overload | syntax unchanged |
+| S2f | Put an arrow function's lone parameter in parentheses (`x => …` → `(x) => …`), wherever the arrow is written: a const, a class field, an object entry, a call's argument, a body | syntax unchanged |
 
 ### 7.7 syntax change conditions
 
@@ -427,6 +430,7 @@ The reference implementation and every language plugin must pass the following t
 | S4 | Rename an identifier | syntax changes |
 | S5 | Change a literal | syntax changes |
 | S5a | Change an operator, a declaration keyword, a modifier or a primitive type (`a + b` → `a - b`, `let` → `const`, `private` → `public`, `number` → `string`) | syntax changes |
+| S5b | Change a destructuring parameter's pattern (`{ a: b }` → `{ c: b }`, `[, b]` → `[b]`) or a parameter's default value (`limit = 20` → `limit = 10`) | syntax changes; api unchanged (A1, A23) |
 
 ### 7.7.1 syntax test criteria every language plugin must satisfy
 
