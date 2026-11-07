@@ -367,8 +367,10 @@ Contracts:
   `hasMatchingImport` (matches a module specifier after checking every
   `ImportEdge.source`). Both enforce the language plugin's normalized-output
   contract from the [language plugin spec](../design/lang-plugin.md), and both
-  take a `{ plugin, filePath }` record so the thrown message names your plugin
-  and the offending file. The same module carries the readers for the receiver
+  take a `{ plugin, filePath }` record so the `PluginInputError` they throw
+  names your plugin and the offending file. Its `code` says what was malformed
+  (`unnormalized-callee`, `unnormalized-import-source`, …), and the scan keeps it
+  on the withdrawn file's `extractionFailures` entry. The same module carries the readers for the receiver
   check — `identifierWords` / `identifierMentions` (a word split, so `feedback`
   does not read as `db`) and `hasLiteralFirstArgument`:
 

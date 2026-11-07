@@ -15,6 +15,32 @@ export interface PluginInputOrigin {
   readonly filePath: string
 }
 
+export type PluginInputErrorCode =
+  /** `CallCandidate.target` is empty or has an empty segment. */
+  | "unnormalized-callee"
+  /** `ImportEdge.source` is empty. */
+  | "unnormalized-import-source"
+  /** An `ImportEdge.symbols` entry has an empty half. */
+  | "unnormalized-import-binding"
+  /** `ImportEdge.namespaceBinding` is empty. */
+  | "unnormalized-namespace-binding"
+
+/** A language plugin's output that breaks the contract the guard's caller reads it under. */
+export class PluginInputError extends Error {
+  readonly code: PluginInputErrorCode
+  /** The plugin whose guard refused the value. */
+  readonly plugin: string
+  readonly filePath: string
+
+  constructor(message: string, code: PluginInputErrorCode, origin: PluginInputOrigin) {
+    super(message)
+    this.name = "PluginInputError"
+    this.code = code
+    this.plugin = origin.plugin
+    this.filePath = origin.filePath
+  }
+}
+
 export interface CallTargetSegments {
   readonly segments: NonEmptySegments
   readonly last: string
@@ -26,19 +52,26 @@ export function assertNonEmptySegments(
 ): CallTargetSegments {
   const where = `${origin.plugin} (${origin.filePath})`
   if (target.length === 0) {
-    throw new Error(
+    throw new PluginInputError(
       `${where}: CallCandidate.target is empty — language plugin emitted an unnormalized callee`,
+      "unnormalized-callee",
+      origin,
     )
   }
 
   const [first = "", ...rest] = target.split(".")
 
-  const emptySegment = `${where}: CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`
-  if (first.length === 0) throw new Error(emptySegment)
+  const emptySegment = () =>
+    new PluginInputError(
+      `${where}: CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`,
+      "unnormalized-callee",
+      origin,
+    )
+  if (first.length === 0) throw emptySegment()
 
   let last = first
   for (const segment of rest) {
-    if (segment.length === 0) throw new Error(emptySegment)
+    if (segment.length === 0) throw emptySegment()
     last = segment
   }
 
@@ -47,8 +80,10 @@ export function assertNonEmptySegments(
 
 export function assertImportEdgeSource(edge: ImportEdge, origin: PluginInputOrigin): void {
   if (edge.source.length > 0) return
-  throw new Error(
+  throw new PluginInputError(
     `${origin.plugin} (${origin.filePath}, line ${edge.line}): ImportEdge.source is empty — language plugin emitted an unnormalized import edge`,
+    "unnormalized-import-source",
+    origin,
   )
 }
 
@@ -61,8 +96,10 @@ export function assertImportBinding(
   origin: PluginInputOrigin,
 ): void {
   if (binding.imported.length > 0 && binding.local.length > 0) return
-  throw new Error(
+  throw new PluginInputError(
     `${origin.plugin} (${origin.filePath}, line ${edge.line}): ImportEdge.symbols entry "${raw}" has an empty half — language plugin emitted an unnormalized import edge`,
+    "unnormalized-import-binding",
+    origin,
   )
 }
 
@@ -72,8 +109,10 @@ export function assertNamespaceBinding(
   origin: PluginInputOrigin,
 ): void {
   if (binding.length > 0) return
-  throw new Error(
+  throw new PluginInputError(
     `${origin.plugin} (${origin.filePath}, line ${edge.line}): ImportEdge.namespaceBinding is empty — language plugin emitted an unnormalized import edge`,
+    "unnormalized-namespace-binding",
+    origin,
   )
 }
 

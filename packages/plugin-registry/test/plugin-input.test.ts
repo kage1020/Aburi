@@ -1,4 +1,4 @@
-import { importEdge } from "@aburi/test-support"
+import { errorFrom, importEdge } from "@aburi/test-support"
 import { type EffectsManifest, type ImportEdge, PLUGIN_SCHEMA_URL } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -11,6 +11,7 @@ import {
   identifierMentions,
   identifierWords,
   matchesModuleOrSubpath,
+  PluginInputError,
   type PluginInputOrigin,
   receiverConfidence,
 } from "../src/plugin-input"
@@ -132,6 +133,39 @@ describe("assertNamespaceBinding", () => {
     expect(() => assertNamespaceBinding("", namespaceEdge, ORIGIN)).toThrow(
       "effects-example (src/service.ts, line 3): ImportEdge.namespaceBinding is empty — language plugin emitted an unnormalized import edge",
     )
+  })
+})
+
+describe("PluginInputError", () => {
+  it.each([
+    ["an empty callee", () => assertNonEmptySegments("", ORIGIN), "unnormalized-callee"],
+    [
+      "a callee with an empty segment",
+      () => assertNonEmptySegments("prisma..create", ORIGIN),
+      "unnormalized-callee",
+    ],
+    [
+      "an empty import source",
+      () => hasMatchingImport([edge("", 1)], ORIGIN, () => true),
+      "unnormalized-import-source",
+    ],
+    [
+      "an import entry with an empty half",
+      () => assertImportBinding({ imported: "", local: "T" }, " as T", edge("orm", 1), ORIGIN),
+      "unnormalized-import-binding",
+    ],
+    [
+      "an empty namespace binding",
+      () => assertNamespaceBinding("", edge("orm", 1), ORIGIN),
+      "unnormalized-namespace-binding",
+    ],
+  ])("codes %s, naming the plugin and the file", async (_label, attempt, code) => {
+    expect(await errorFrom(PluginInputError, attempt)).toMatchObject({
+      name: "PluginInputError",
+      code,
+      plugin: ORIGIN.plugin,
+      filePath: ORIGIN.filePath,
+    })
   })
 })
 

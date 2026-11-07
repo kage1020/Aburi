@@ -281,7 +281,8 @@ free to be stricter, but the shared guards are not.
 
 Consumers enforce this rather than work around it. `assertNonEmptySegments`,
 `assertImportEdgeSource`, `assertImportBinding` and `hasMatchingImport` in
-`@aburi/plugin-registry/plugin-input` are the shared guards. They throw, and a violation
+`@aburi/plugin-registry/plugin-input` are the shared guards. They throw a `PluginInputError`
+coded by the field that broke the contract, and a violation
 propagates rather than degrading to an unclassified call
 ([`effect-plugin.md`](./effect-plugin.md) §10, EP3a), so an unnormalized callee surfaces
 as a failed scan instead of a silently miscategorized effect.
