@@ -12,6 +12,7 @@ import { assertNotShallow, assertNotSparse, assertRefResolvable } from "../git/p
 import { collectRenames } from "../git/renames"
 import { defaultGitRunner, type GitRunner, gitChildEnv } from "../git/runner"
 import { submoduleIgnorePatterns } from "../git/submodules"
+import { warnOnPlainFileLinks } from "../git/symlinks"
 import { readIR } from "../ir-io"
 import { writeToStderr } from "../logger"
 import { cleanUpOnFatalSignal } from "../signal-cleanup"
@@ -62,6 +63,7 @@ export async function scanRevisions(
   const pinnedConfig = await context.pinConfigOnce()
   const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
   const submoduleIgnore = await submoduleIgnorePatterns(git, headWorkspaceRoot, warn)
+  await warnOnPlainFileLinks(git, headWorkspaceRoot, spec.base, warn)
   const gitRenames = await collectRenames(git, cwd, spec, warn)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   const worktreeParent = resolve(tempParent, "base")
