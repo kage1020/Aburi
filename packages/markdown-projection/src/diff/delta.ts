@@ -1,11 +1,12 @@
-import type {
-  ArrayDelta,
-  ComponentId,
-  Confidence,
-  MiddlewareDelta,
-  Signature,
-  SignatureDelta,
-  SymbolDelta,
+import {
+  type ArrayDelta,
+  type ComponentId,
+  type Confidence,
+  lastSegment,
+  type MiddlewareDelta,
+  type Signature,
+  type SignatureDelta,
+  type SymbolDelta,
 } from "@aburi/types"
 import {
   callRowText,
@@ -16,7 +17,6 @@ import {
   formatInput,
   inlineCode,
   joinCode,
-  lastSegment,
   ruleRowText,
   typeParametersText,
 } from "../format"

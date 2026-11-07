@@ -118,6 +118,7 @@ export type {
   WalkContext,
   WrittenSourceRange,
 } from "./plugins"
+export { lastSegment } from "./qualified-name"
 export {
   CONFIG_SCHEMA_URL,
   DIFF_SCHEMA_URL,

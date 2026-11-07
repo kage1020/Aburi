@@ -167,13 +167,6 @@ export function typeParametersText(typeParameters: readonly string[]): string {
   return `<${typeParameters.join(",")}>`
 }
 
-/** The segment of a qualified name, or of a call target, that follows its last `.` or `::`. */
-export function lastSegment(name: string): string {
-  const at = name.lastIndexOf("::")
-  const tail = at < 0 ? name : name.slice(at + 2)
-  return tail.slice(tail.lastIndexOf(".") + 1)
-}
-
 export function ruleRow(rule: Rule): string[] {
   const { type, line } = rule
   switch (type) {

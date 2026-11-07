@@ -1,3 +1,4 @@
+import { lastSegment } from "@aburi/types"
 import { CoreError } from "../errors"
 
 export function lastQnameSegment(qname: string): string {
@@ -7,10 +8,7 @@ export function lastQnameSegment(qname: string): string {
       value: qname,
     })
   }
-  const byColon = qname.split("::")
-  const tail = byColon[byColon.length - 1] as string
-  const byDot = tail.split(".")
-  const leaf = byDot[byDot.length - 1] as string
+  const leaf = lastSegment(qname)
   if (leaf.length === 0) {
     throw new CoreError(
       `lastQnameSegment received qualified name "${qname}" whose last segment is empty; the upstream Symbol id builder produced an invalid qname`,

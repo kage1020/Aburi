@@ -1,6 +1,7 @@
 import {
   type Call,
   type Symbol as IRSymbol,
+  lastSegment,
   representativeSymbol,
   type SliceId,
   type SliceRecord,
@@ -8,13 +9,7 @@ import {
   type SymbolDelta,
   type SymbolId,
 } from "@aburi/types"
-import {
-  appendAll,
-  compareStrings,
-  inlineCode,
-  lastSegment,
-  ProjectionInvariantError,
-} from "../format"
+import { appendAll, compareStrings, inlineCode, ProjectionInvariantError } from "../format"
 import { fileLine, moveRoute, skippedFile } from "./entries"
 import { assertNeverChange } from "./partition"
 

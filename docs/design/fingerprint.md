@@ -116,6 +116,8 @@ Examples:
 
 `<default>` and `<module>` stay as they are.
 
+`@aburi/types` exports this function as `lastSegment`, and every package that needs the short name reads it there: the core for the api fingerprint, the diff's name matchers, and the report when it decides whether a renamed pair's name row explains its API flag. It gives `""` for an empty name, or for one that ends in a separator. The core refuses that result with `anonymous-symbol-id-attempted`, since no Symbol it fingerprints has such a name; the diff and the report read a Document written by someone else and take the empty segment as it is.
+
 ### 3.4 Guaranteed invariance conditions
 
 - Changing `signature.inputs[].name` does not change `api` (parameter names are not part of the contract)

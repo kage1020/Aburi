@@ -1,3 +1,4 @@
+import { lastSegment } from "@aburi/types"
 import { NONE, quotient, type Ratio, WHOLE } from "./ratio"
 
 export function tokenizeName(input: string): string[] {
@@ -105,17 +106,8 @@ export function jaccardTokens(a: string, b: string): number {
   return jaccard(tokenizeName(a), tokenizeName(b))
 }
 
-function splitQualifiedName(qname: string): { owner: string; member: string } {
-  const lastStatic = qname.lastIndexOf("::")
-  const lastDot = qname.lastIndexOf(".")
-  if (lastStatic > lastDot)
-    return { owner: qname.slice(0, lastStatic), member: qname.slice(lastStatic + 2) }
-  if (lastDot >= 0) return { owner: qname.slice(0, lastDot), member: qname.slice(lastDot + 1) }
-  return { owner: "", member: qname }
-}
-
-export function lastSegment(qname: string): string {
-  return splitQualifiedName(qname).member
+function ownerPart(qname: string): string {
+  return qname.slice(0, Math.max(0, Math.max(qname.lastIndexOf("::"), qname.lastIndexOf("."))))
 }
 
 type TokenSets = (value: string) => ReadonlySet<string>
@@ -131,11 +123,7 @@ export function memberSimilarity(baseName: string, headName: string): number {
 }
 
 export function ownersAreCompatible(baseName: string, headName: string): boolean {
-  return ownersCompatible(
-    splitQualifiedName(baseName).owner,
-    splitQualifiedName(headName).owner,
-    uncachedTokenSets,
-  )
+  return ownersCompatible(ownerPart(baseName), ownerPart(headName), uncachedTokenSets)
 }
 
 function sameWord(a: string, b: string): boolean {
@@ -257,7 +245,7 @@ export function createNameScorer(): NameScorer {
   const ownerOf = (qname: string): string => {
     const cached = owners.get(qname)
     if (cached !== undefined) return cached
-    const built = splitQualifiedName(qname).owner
+    const built = ownerPart(qname)
     owners.set(qname, built)
     return built
   }

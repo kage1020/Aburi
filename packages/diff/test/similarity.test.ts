@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import {
   jaccard,
   jaccardTokens,
-  lastSegment,
   memberSimilarity,
   nameEvidence,
   nameSimilarity,
@@ -146,23 +145,6 @@ describe("memberSimilarity", () => {
   })
   it("is the whole name when there is no owner", () => {
     expect(memberSimilarity("getUser", "getUsers")).toBeCloseTo(1 / 3, 5)
-  })
-})
-
-describe("lastSegment", () => {
-  it("returns the segment after the last dot", () => {
-    expect(lastSegment("Cls.method")).toBe("method")
-  })
-  it("returns the segment after ::", () => {
-    expect(lastSegment("Cls::static")).toBe("static")
-  })
-  it("returns the whole name if no separator", () => {
-    expect(lastSegment("plain")).toBe("plain")
-  })
-  it("returns the segment after the last separator of either kind", () => {
-    expect(lastSegment("C::Inner.g")).toBe("g")
-    expect(lastSegment("C::K::s")).toBe("s")
-    expect(lastSegment("A.C::m")).toBe("m")
   })
 })
 

@@ -1,7 +1,7 @@
-import type { Symbol as IRSymbol, Logger } from "@aburi/types"
+import { type Symbol as IRSymbol, type Logger, lastSegment } from "@aburi/types"
 import { atLeast, quotient, type Ratio, WHOLE, weightedMean } from "../ratio"
 import { signatureSimilarityRatio } from "../signature"
-import { createNameScorer, lastSegment, type NameScorer, tokenizeName } from "../similarity"
+import { createNameScorer, type NameScorer, tokenizeName } from "../similarity"
 import {
   type Assignment,
   acceptInScoreOrder,

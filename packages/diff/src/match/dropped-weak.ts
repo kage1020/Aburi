@@ -1,5 +1,4 @@
-import type { Symbol as IRSymbol, SymbolId } from "@aburi/types"
-import { lastSegment } from "../similarity"
+import { type Symbol as IRSymbol, lastSegment, type SymbolId } from "@aburi/types"
 import { compareByEndpoints, type Endpoints, type StageResult, stageResult } from "./pairing"
 
 export function matchStageDroppedWeak(
