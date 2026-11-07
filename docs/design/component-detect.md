@@ -346,6 +346,7 @@ When multiple detectors return the same path (e.g., both pnpm and turbo detect `
 
 - **Merge into one** workspace candidate (dedupe by path)
 - Record `manager` information from both (two entries in `workspace.managers[]`)
+- Two manifests that spell one tool — `pnpm-workspace.yaml` and a `package.json#workspaces` beside `pnpm-lock.yaml` — give that tool one entry in `workspace.managers[]`, holding every root either declares, and each directory one candidate
 - A single Component
 - Keep **every** manifest the detectors found for that directory, plus the `package.json` under its root whether or not one of them reported it, and read them in §4.1's order for `id` and `name`. A directory claimed by pnpm and nx at once has a `package.json` and a `project.json`, and they routinely name it differently: the first is the published npm name the rest of the Document is written against, the second an nx project name
 - A manifest that is present and cannot be read — bad JSON, or an IO failure that is not "no such file" — aborts detection with `workspace-manifest-malformed` naming the file. Absent is the ordinary case and says nothing; unreadable is an identity this run cannot see, and answering with the next manifest's name would hide it
@@ -434,6 +435,7 @@ Implementation guidance:
 | CD47 | `package.json#main: "./"`, or `exports: {".": "./src/ok.js", "./": "./"}` | No entry for the package directory: no `publicApi` key, or `publicApi = ["src/ok.js"]`. The IR satisfies its schema |
 | CD48 | `main`, `module`, `types` or `typings` set to `"."`, `"./."`, `"././"`, `"./lib/"`, `"./lib/."`, `"/"`, `"/dist/index.mjs"`, `"C:/dist/index.d.ts"`, `"a:index.js"`, `"../shared/index.d.ts"` or `"./src/../index.js"`, or to a value that is not a string; or an `exports` folder mapping `"./lib/": "./lib/"` | No entry for any of them |
 | CD49 | `main: "././dist/index.js"`, `module: "./dist/./index.js"` or `types: "dist//index.js"` | publicApi = ["dist/index.js"] for each |
+| CD50 | `pnpm-workspace.yaml: packages: ["apps/*"]` and `package.json#workspaces: ["libs/*", "apps/*"]` beside `pnpm-lock.yaml`, with `apps/billing` and `libs/shared` | One `managers[]` entry, `{tool: "pnpm", roots: ["apps/billing", "libs/shared"]}`, and one candidate per directory |
 
 ## 11. Design decisions
 
