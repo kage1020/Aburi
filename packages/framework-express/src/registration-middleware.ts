@@ -1,5 +1,6 @@
 import {
   calleeName,
+  chainCalls,
   readStaticString,
   type SyntaxNode,
   unwrapValue,
@@ -13,7 +14,7 @@ const UNREAD_ARGUMENT = "…"
 
 // An inline function is left out: its body is the registration's own, and already read as such.
 export function registrationMiddleware(call: SyntaxNode): string[] {
-  const chain = registrationsInChain(call)
+  const chain = chainCalls(call).reverse()
   return chain.flatMap((registration, index) => {
     const leaf = calleeName(registration)?.leaf
     if (leaf === EXPRESS_MIDDLEWARE_METHOD) return named(useArguments(registration))
@@ -32,23 +33,6 @@ const ALL_METHODS = "all"
 function isRouteRegistration(call: SyntaxNode): boolean {
   const leaf = calleeName(call)?.leaf
   return leaf !== undefined && isRouteMethod(leaf) && hasRouteArguments(call)
-}
-
-function registrationsInChain(call: SyntaxNode): SyntaxNode[] {
-  const chain: SyntaxNode[] = []
-  let cursor: SyntaxNode | null = call
-  while (cursor !== null) {
-    const step: SyntaxNode = unwrapValue(cursor)
-    if (step.type === "call_expression") {
-      chain.push(step)
-      cursor = step.childForFieldName("function")
-    } else if (step.type === "member_expression") {
-      cursor = step.childForFieldName("object")
-    } else {
-      cursor = null
-    }
-  }
-  return chain.reverse()
 }
 
 function useArguments(call: SyntaxNode): SyntaxNode[] {

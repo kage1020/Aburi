@@ -5,12 +5,14 @@ import {
   calleeLeaf,
   calleeName,
   calleeText,
+  chainCalls,
   declaratorValue,
   findFirstDescendantOfType,
   findNamedChildOfType,
   receiverChain,
   type SyntaxNode,
   unwrapValue,
+  walkReceiverChain,
   writtenChildren,
 } from "../src/syntax-node"
 
@@ -189,6 +191,48 @@ describe("receiverChain", () => {
     ],
   ])("reads %s", (_label, receiver, path, root) => {
     expect(receiverChain(receiver)).toEqual({ path, root })
+  })
+})
+
+describe("walkReceiverChain", () => {
+  it("passes each call, member access and index outermost first, through the wrappers", () => {
+    const root = identifier("routers")
+    const index = withFields("subscript_expression", {
+      object: node({ type: "parenthesized_expression", namedChildren: [root] }),
+    })
+    const read = member(index, "route")
+    const route = call(read)
+    const get = member(node({ type: "non_null_expression", namedChildren: [route] }), "get")
+    const registration = call(get)
+    expect(walkReceiverChain(registration)).toEqual({
+      steps: [registration, get, route, read, index],
+      root,
+    })
+  })
+
+  it.each([
+    ["a bare name", identifier("app")],
+    ["this", node({ type: "this", text: "this" })],
+    ["a member access with no object", withFields("member_expression", {})],
+    ["a call with no callee", callWith(null)],
+  ])("starts from %s with no step", (_label, root) => {
+    expect(walkReceiverChain(root)).toEqual({ steps: [], root })
+  })
+})
+
+describe("chainCalls", () => {
+  it("lists the calls a chain passes, outermost first", () => {
+    const start = callWith(null)
+    const route = call(member(start, "route"))
+    const get = call(member(route, "get"))
+    expect(chainCalls(get)).toEqual([get, route, start])
+  })
+
+  it("stops at the first index", () => {
+    const get = call(
+      member(withFields("subscript_expression", { object: call(identifier("x")) }), "get"),
+    )
+    expect(chainCalls(get)).toEqual([get])
   })
 })
 

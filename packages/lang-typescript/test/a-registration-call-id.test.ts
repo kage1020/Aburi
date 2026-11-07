@@ -51,6 +51,9 @@ describe("a module-level registration call is a Symbol", () => {
     ["a method no framework registers through", "Sentry.captureException(new Error('boom'))"],
     ["a bare identifier's call", "setup()"],
     ["a registration inside a namespace", "namespace N { app.get('/x', h) }"],
+    ["a chain through an index", "routers['admin'].get('/x', h)"],
+    ["a chain from this", "this.app.get('/x', h)"],
+    ["a chain from a value that is not a name", "new App().get('/x', h)"],
   ])("is not made of %s", async (_label, source) => {
     expect((await symbolsOf(`${source}\nconst y = 2\n`)).filter((s) => s.kind === "call")).toEqual(
       [],

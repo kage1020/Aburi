@@ -106,7 +106,7 @@ export function calleeName(callNode: SyntaxNode): CalleeName | null {
   const object = callee.childForFieldName("object")
   const leaf = callee.childForFieldName("property")?.text ?? ""
   if (object === null || leaf.length === 0) return null
-  return { name: `${chainRoot(object)}.${leaf}`, leaf }
+  return { name: `${rootName(walkReceiverChain(object).root)}.${leaf}`, leaf }
 }
 
 export interface ReceiverChain {
@@ -118,27 +118,54 @@ export interface ReceiverChain {
 
 /** The receiver `calleeName` names, read step for step as it reads it. */
 export function receiverChain(node: SyntaxNode): ReceiverChain {
-  const path: string[] = []
+  const { steps, root } = walkReceiverChain(node)
+  const path = steps.flatMap((step) => {
+    if (step.type !== "member_expression") return []
+    const property = step.childForFieldName("property")?.text ?? ""
+    return property.length > 0 ? [property] : []
+  })
+  return { path, root: rootName(root) }
+}
+
+interface ChainNode<N> {
+  readonly type: string
+  readonly namedChildren: readonly (N | null)[]
+  childForFieldName(name: string): N | null
+}
+
+export interface ReceiverChainWalk<N> {
+  /** Each call, member access and index passed on the way down to the root, outermost first. */
+  readonly steps: readonly N[]
+  /** The node the chain starts from. */
+  readonly root: N
+}
+
+/**
+ * The one walk down a receiver chain, through `unwrapValue`'s wrappers. Every reader of a chain
+ * takes it from here, so a framework's name for a call and the language plugin's cannot drift.
+ */
+export function walkReceiverChain<N extends ChainNode<N>>(node: N): ReceiverChainWalk<N> {
+  const steps: N[] = []
   let cursor = unwrapValue(node)
   for (let next = chainStep(cursor); next !== null; next = chainStep(cursor)) {
-    if (cursor.type === "member_expression") {
-      const property = cursor.childForFieldName("property")?.text ?? ""
-      if (property.length > 0) path.push(property)
-    }
+    steps.push(cursor)
     cursor = unwrapValue(next)
   }
-  return { path, root: rootName(cursor) }
+  return { steps, root: cursor }
+}
+
+/** The calls a chain passes before its first index, outermost first, where it starts included. */
+export function chainCalls<N extends ChainNode<N>>(node: N): N[] {
+  const { steps, root } = walkReceiverChain(node)
+  const calls: N[] = []
+  for (const step of [...steps, root]) {
+    if (step.type === "subscript_expression") break
+    if (step.type === "call_expression") calls.push(step)
+  }
+  return calls
 }
 
 const NAMED_ROOT_TYPES: ReadonlySet<string> = new Set(["identifier", "this"])
-
-function chainRoot(node: SyntaxNode): string {
-  let cursor = unwrapValue(node)
-  for (let next = chainStep(cursor); next !== null; next = chainStep(cursor)) {
-    cursor = unwrapValue(next)
-  }
-  return rootName(cursor)
-}
 
 // Any other root's text would carry its line breaks and comments into the name.
 function rootName(root: SyntaxNode): string {
@@ -147,7 +174,7 @@ function rootName(root: SyntaxNode): string {
     : COMPUTED_TARGET_SEGMENT
 }
 
-function chainStep(node: SyntaxNode): SyntaxNode | null {
+function chainStep<N extends ChainNode<N>>(node: N): N | null {
   if (node.type === "call_expression") return node.childForFieldName("function")
   if (node.type === "member_expression" || node.type === "subscript_expression") {
     return node.childForFieldName("object")

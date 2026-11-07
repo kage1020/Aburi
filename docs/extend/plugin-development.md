@@ -259,7 +259,11 @@ Contracts:
   access; `name` is `<receiver>.<method>`, the receiver being the name the chain
   starts from, read through parentheses, `as`, `satisfies`, `!` and every call
   on the way — `app.get` for `app.get(…)`, `(app as Express).get(…)` and
-  `app.route("/x").get(…)` alike.
+  `app.route("/x").get(…)` alike. To read more of a chain than its name, take
+  the nodes from the same walk: `walkReceiverChain(node)` returns `{ steps, root }`,
+  every call, member access and index on the way down, outermost first, and the
+  node the chain starts from; `chainCalls(call)` returns the calls a registration
+  chains, up to the first index.
 - A plugin for a framework that registers handlers by call can return
   `middleware`: what the registration runs before its handler, in order, named
   from the syntax tree by the same rule as `derivedBy`. The pipeline writes it to

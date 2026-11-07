@@ -1,4 +1,10 @@
-import { asSyntaxNode, type SyntaxNode, unwrapValue, writtenChildren } from "@aburi/core"
+import {
+  asSyntaxNode,
+  chainCalls,
+  type SyntaxNode,
+  unwrapValue,
+  writtenChildren,
+} from "@aburi/core"
 import { isPathLiteral } from "./ast-helpers"
 
 /** Route-registering method names, lower-case to match `member_expression` property text verbatim. */
@@ -71,19 +77,12 @@ function eitherIsHandlerShaped(a: SyntaxNode | null, b: SyntaxNode | null): bool
 const ROUTE_CHAIN_METHOD = "route"
 
 function hasRouteCallUpTheChain(call: SyntaxNode): boolean {
-  let cursor = call.childForFieldName("function")
-  while (cursor !== null) {
-    const step = unwrapValue(cursor)
-    if (step.type === "member_expression") {
-      cursor = step.childForFieldName("object")
-      continue
-    }
-    if (step.type !== "call_expression") return false
-    const callee = step.childForFieldName("function")
-    if (callee !== null && isRouteCall(unwrapValue(callee), step)) return true
-    cursor = callee
-  }
-  return false
+  return chainCalls(call)
+    .slice(1)
+    .some((step) => {
+      const callee = step.childForFieldName("function")
+      return callee !== null && isRouteCall(unwrapValue(callee), step)
+    })
 }
 
 function isRouteCall(callee: SyntaxNode, call: SyntaxNode): boolean {

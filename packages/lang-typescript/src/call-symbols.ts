@@ -1,4 +1,4 @@
-import { readStaticString, unwrapValue } from "@aburi/core"
+import { chainCalls, readStaticString, unwrapValue, walkReceiverChain } from "@aburi/core"
 import {
   CALL_ARGUMENT_FUNCTION_DERIVED_BY,
   type ExtractionContext,
@@ -126,7 +126,7 @@ export function layOutBodies(
 
 function inlineHandlers(call: Node): Node[] {
   const bodies: Node[] = []
-  for (const step of spineCalls(call)) {
+  for (const step of chainCalls(call)) {
     const args = argumentsOf(step)
     if (args === null) continue
     for (const argument of args.namedChildren) {
@@ -140,9 +140,7 @@ function inlineHandlers(call: Node): Node[] {
 }
 
 function invokedBody(call: Node): Node | null {
-  let root: Node | null = null
-  for (const step of spineCalls(call)) root = step
-  const callee = root?.childForFieldName("function") ?? null
+  const callee = chainCalls(call).at(-1)?.childForFieldName("function") ?? null
   const invoked = callee === null ? null : asFunctionValue(callee)
   return invoked === null ? null : writtenBody(invoked)
 }
@@ -151,23 +149,6 @@ function invokedBody(call: Node): Node | null {
 function writtenBody(fn: Node): Node | null {
   const body = fn.childForFieldName("body")
   return body === null || body.text.length === 0 ? null : body
-}
-
-function* spineCalls(call: Node): Iterable<Node> {
-  let cursor: Node | null = call
-  while (cursor !== null) {
-    const step: Node = unwrapValue(cursor)
-    if (step.type === "call_expression") {
-      yield step
-      cursor = step.childForFieldName("function")
-      continue
-    }
-    if (step.type === "member_expression") {
-      cursor = step.childForFieldName("object")
-      continue
-    }
-    cursor = null
-  }
 }
 
 interface MemberCall {
@@ -191,29 +172,13 @@ function parseMemberCallee(callee: Node): MemberCall | null {
   return { receiver: root.name, method, chained: root.chained }
 }
 
+// A name through an index would drop what the index picks (`routers["admin"].get` and
+// `routers["user"].get` alike), and a root that is not a name, `this` included, has none to slug.
 function rootReceiver(node: Node): { name: string; chained: boolean } | null {
-  let cursor: Node = unwrapValue(node)
-  let chained = false
-  while (true) {
-    if (cursor.type === "identifier") {
-      if (cursor.text.length === 0) return null
-      return { name: cursor.text, chained }
-    }
-    if (cursor.type === "member_expression") {
-      const object = cursor.childForFieldName("object")
-      if (object === null) return null
-      cursor = unwrapValue(object)
-      continue
-    }
-    if (cursor.type === "call_expression") {
-      const inner = cursor.childForFieldName("function")
-      if (inner === null) return null
-      chained = true
-      cursor = unwrapValue(inner)
-      continue
-    }
-    return null
-  }
+  const { steps, root } = walkReceiverChain(node)
+  if (root.type !== "identifier" || root.text.length === 0) return null
+  if (steps.some((step) => step.type === "subscript_expression")) return null
+  return { name: root.text, chained: steps.some((step) => step.type === "call_expression") }
 }
 
 function firstCallExpression(exprStatement: Node): Node | null {
@@ -235,7 +200,7 @@ function argumentsOf(call: Node): Node | null {
 function registrationPath(call: Node): string | null {
   let path: string | null = null
   let at = Number.POSITIVE_INFINITY
-  for (const step of spineCalls(call)) {
+  for (const step of chainCalls(call)) {
     const callee = step.childForFieldName("function")
     if (callee === null || unwrapValue(callee).type !== "member_expression") continue
     const args = argumentsOf(step)

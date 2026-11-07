@@ -170,13 +170,16 @@ export {
   calleeLeaf,
   calleeName,
   calleeText,
+  chainCalls,
   declaratorValue,
   findFirstDescendantOfType,
   findNamedChildOfType,
   type ReceiverChain,
+  type ReceiverChainWalk,
   receiverChain,
   type SyntaxNode,
   unwrapValue,
+  walkReceiverChain,
   writtenChildren,
 } from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
