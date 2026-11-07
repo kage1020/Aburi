@@ -101,8 +101,8 @@ for two separate reasons worth keeping apart:
   space is what separates the value from the run — the spec says as much.
 - **It is safe.** The parser removes one space from each end again, but only when the content
   *both* begins and ends with a space and is not made entirely of spaces. Hence padding on both
-  ends or neither. The one value this cannot round-trip is an all-space one: a single space
-  renders as three, because the stripping rule declines to touch it.
+  ends or neither, and none on a value of spaces alone, which the stripping rule leaves whole
+  and so renders as written.
 
 Newlines collapse to a single space inside a code span, because a span belongs to one row. A
 value that needs its lines is a fenced block instead — and a fenced block cannot sit mid-row:
@@ -119,16 +119,25 @@ report the change.
 GFM resolves table cells before it parses inlines, so a `|` in a value opens a column the header
 row never declared and every cell after it shifts left — inside a code span too, where a reader
 would expect the pipe to be literal. Every cell this projection emits therefore escapes `|` as
-`\|`, which the row scanner reads as a literal pipe, and maps newlines to `<br>`.
+`\|`, which the row scanner reads as a literal pipe. A row also ends at a newline, so one becomes
+`<br>` outside a code span and a space inside one, the space CommonMark would read it as there.
 
-The scanner reads a backslash and the character after it as one escape pair, so a value that
-already contains `\|` needs its backslash doubled first: escaped naively it becomes `\\|`, where
-the first backslash consumes the second and the pipe delimits again. Only a backslash run
-directly in front of a pipe is doubled, so a path elsewhere in the cell keeps its backslashes.
-The cost is one visible backslash inside the code span, which is the price of a column that
-still lines up; GFM has no encoding that avoids both.
+GFM's row scanner takes the backslash off every `\|` before the cell's inlines are parsed, code
+spans included, and a backslash right before the pipe escapes it whatever stands before that
+backslash. So a cell reads as the same Markdown reads outside a table when every pipe carries one
+backslash more than it would there:
 
-Which cells can actually carry one is narrower than it looks: `ComponentId` is kebab-case,
+- **In a code span**, where no backslash is an escape, every pipe gets one. A call target
+  `pipe(a\|b)` is written `` `pipe(a\\|b)` ``, and the scanner's removal leaves the span holding
+  exactly the target.
+- **Outside one**, a pipe the Markdown leaves bare gets one, and a pipe it already escapes — an
+  odd run of backslashes in front of it — keeps the run it has. An even run is a run of escaped
+  backslashes, so the pipe after it is bare and gets the one more.
+
+Which runs of backticks are code spans is CommonMark's rule: a run opens a span when a run of the
+same length closes it later, and a backtick a backslash escapes outside a span opens nothing.
+
+Which cells can actually carry a pipe or a backslash is narrower than it looks: `ComponentId` is kebab-case,
 `EffectId` is a frozen enum or an `x-…` pattern, and `RelativePath` and `SymbolId` forbid
 backslash outright. `RelativePath` admits `|`, and `Call.target` (`minLength: 1`, nothing else)
 admits both. The escaping is applied to every cell regardless — a table whose correctness
@@ -1122,7 +1131,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
 | MP13b | diff with one thin removed Symbol and eight syntax-only changes, a component added, projected with a budget that holds Removed whole but not as names | `➖ Removed` is kept whole rather than omitted, since its names-only form costs more in the note than it saves; with a budget that also holds Component changes, both are kept |
 | MP13c | diff with twelve API changes and one thin removed Symbol, projected with a budget that holds API changes only as names | `➖ Removed` is kept whole below the names-only API changes wherever that fits: not named only in a larger document, and not omitted |
-| MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
+| MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced, alone, on a component page and as an Added entry in `diff.md` | Rendered, the Rules list holds the rule as its one item and `**Effects**:` is the paragraph after it, not part of the item, in both cases; no blank line before a list or after the last section, and never two in a row |
 | MP15 | A signature with an optional input and a rest input; a diff entry whose `signature.inputs.added` holds a rest input | `(a?: string, ...ids: string[])` in the signature line, and `` `...ids: string[]` `` in the diff row (§5.5). An input with an empty `type` prints as its name alone |
 | MP16 | A value holding `_x_`, `*x*`, `<T>`, a backtick, `~~s~~` and a newline followed by `## `, as a thrown type, as a propagated effect's direct source (Symbol block, Boundary effect surface, delta row), as a Component `name`, as a component-level Dependency endpoint (component page, `workspace.md` list), as the generator's `name` or `version` or the `generatedAt` of the `workspace.md` header, as either ref of the `diff.md` title, and as a `dropReason` (component page, Dropped changes, `explain`) | Rendered as CommonMark, each shows the value as written, its newline as a space: no emphasis, no HTML and no block of its own (§3.4.2) |
 | MP16a | A `diff.md` title whose ref is a commit SHA of 40 or of 7 lowercase hex digits, and one whose ref is six hex digits, uppercase hex or a branch name | The SHA bare, which GitHub links; every other ref in a span (§6.1) |
@@ -1143,6 +1152,9 @@ All Markdown projection output is **English, with fixed wording**.
 | MP21d | diff with an added test Symbol whose call edge was added, a test pair whose id changed with an edge added from its head id and one removed from its base id, and a changed production Symbol with an added edge | The fold ends with `**2 dependencies added**` and `**1 dependency removed**` after its moved group; `## 🔗 Dependency changes` lists only the production edge, and without it is not rendered |
 | MP22 | Symbol block, and `aburi explain` page, of a registration whose `middleware` is `requireAdmin`, `validate(user)` | ``**Middleware**: `requireAdmin`, `validate(user)` `` straight after the Signature line, and a `## Middleware` section between Signature and Rules; neither for a Symbol without the key |
 | MP23 | diff entry whose `delta.middleware` removed `requireAdmin`, added `rateLimit(…)`, or reordered `requireAdmin`, `audit` into `audit`, `requireAdmin` | ``- middleware removed: `requireAdmin` ``, ``- middleware added: `rateLimit(…)` ``, ``- middleware reordered: `requireAdmin`, `audit` → `audit`, `requireAdmin` ``, and no "no field-level detail" row; an unmoved `delta.middleware` writes no row |
+| MP24 | A table cell holding a pipe, a pipe behind one or two backslashes, a lone or a trailing backslash, or a line ending, written bare and in a code span; the Components table with roots, and the call resolution table with targets and candidates, holding such values | Rendered, every row has the header's number of cells, and each cell reads as the same Markdown reads outside a table: a code span holds the value byte for byte (§3.4.1) |
+| MP25 | A code span of a value holding backticks inside or at either end, a leading or trailing space, spaces alone, or a template literal; a fenced block whose source holds a run of three or four backticks, or a fence line indented two spaces, at the top level and in a rule's list item | Rendered, the span holds the value byte for byte and the block's content is the source (§3.4) |
+| MP26 | A Symbol's rules, some of them fenced, on a component page | Rendered, one list with an item per rule, each fenced payload inside its own item |
 
 ## 12. Design decisions
 

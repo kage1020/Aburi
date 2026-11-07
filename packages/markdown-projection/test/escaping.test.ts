@@ -24,7 +24,8 @@ import {
   projectSymbolExplain,
   projectWorkspace,
   ruleRow,
-  tableCell,
+  tableHeader,
+  tableRow,
 } from "../src"
 import {
   componentPage,
@@ -34,54 +35,50 @@ import {
   projectChanges,
 } from "./fixtures"
 import { sectionOf, shownText } from "./markdown"
+import { blocksUnder, first, type Inline, rendered, renderedInline } from "./rendered"
 
 const THROWN_TEMPLATE = `new Error(\`unknown kind: \${k}\`)`
 const CACHE_KEY_TEMPLATE = `redis.get(\`k:\${id}\`)`
 
 describe("inlineCode", () => {
-  it("widens the fence past the longest interior backtick run", () => {
-    expect(inlineCode("a `b` c")).toBe("``a `b` c``")
-    expect(inlineCode("a ``b`` c")).toBe("```a ``b`` c```")
+  it.each([
+    "x > 0",
+    "a `b` c",
+    "a ``b`` c",
+    "`x`",
+    "``",
+    " x",
+    "x ",
+    " ",
+    "   ",
+    "a\\b",
+    "<T>",
+    "*x*",
+    THROWN_TEMPLATE,
+    CACHE_KEY_TEMPLATE,
+  ])("writes %j as a code span a renderer reads back whole", (value) => {
+    expect(renderedInline(inlineCode(value)).code).toEqual([value])
   })
 
-  it("pads when the value opens or closes with a backtick, so CommonMark keeps it whole", () => {
-    expect(inlineCode("`x`")).toBe("`` `x` ``")
-  })
-
-  it("leaves a value with no backtick and no edge space in a one-backtick span", () => {
-    expect(inlineCode("x > 0")).toBe("`x > 0`")
-  })
-
-  it("collapses newline runs, because a code span is one row by construction", () => {
-    expect(inlineCode("a\n  b")).toBe("`a b`")
-  })
+  it.each(["a\n  b", "a\r\nb", "a\rb"])(
+    "reads the line break in %j as the one space CommonMark makes of it",
+    (value) => {
+      expect(renderedInline(inlineCode(value)).code).toEqual(["a b"])
+    },
+  )
 
   it("names the empty string, because an empty code span cannot be written", () => {
     expect(inlineCode("")).toBe("(empty)")
   })
-
-  it("pads an edge space too, so the value keeps the space it was given", () => {
-    expect(inlineCode(" x")).toBe("`  x `")
-    expect(inlineCode("x ")).toBe("` x  `")
-  })
-
-  it("treats a lone carriage return as the line break CommonMark reads it as", () => {
-    expect(inlineCode("a\rb")).toBe("`a b`")
-    expect(tableCell("a\rb")).toBe("a<br>b")
-  })
-
-  it("cannot round-trip a value that is only spaces", () => {
-    expect(inlineCode(" ")).toBe("`   `")
-  })
 })
 
 describe("codeFragment", () => {
-  it("widens the block fence past a fence-length run inside the source", () => {
-    const source = `${"x".repeat(90)}\n\`\`\`\ny`
-    const rendered = codeFragment(source)
-    expect(rendered.startsWith("\n````\n")).toBe(true)
-    expect(rendered.endsWith("\n````\n")).toBe(true)
-  })
+  it.each([`${"x".repeat(90)}\n\`\`\`\ny`, "````\na", "  ```\n  x\n  ```", "~~~\nz"])(
+    "fences %j in a block a renderer reads back whole",
+    (source) => {
+      expect(first(rendered(codeFragment(source)), "code").content).toBe(`${source}\n`)
+    },
+  )
 
   it("keeps the three-backtick fence when the source holds none", () => {
     expect(codeFragment("short", { forceFence: true })).toBe("\n```\nshort\n```\n")
@@ -93,20 +90,81 @@ describe("codeFragment", () => {
 })
 
 describe("tableCell", () => {
-  it("escapes the pipe that would otherwise open a column", () => {
-    expect(tableCell("`pipe(a|b)`")).toBe("`pipe(a\\|b)`")
+  const AWKWARD = [
+    "a|b",
+    "a\\|b",
+    "a\\\\|b",
+    "|",
+    "\\|",
+    "|\\",
+    "\\",
+    "a\\",
+    "x | y \\| z",
+    "C:\\src",
+  ]
+
+  /** The one row of a two-column table whose first cell holds `markdown`. */
+  function rowHolding(markdown: string): readonly Inline[] {
+    const table = first(
+      rendered([...tableHeader(["cell", "next"]), tableRow([markdown, "next"])].join("\n")),
+      "table",
+    )
+    expect(table.rows).toHaveLength(1)
+    return table.rows[0] ?? []
+  }
+
+  it.each([
+    ...AWKWARD,
+    ...AWKWARD.map((value) => inlineCode(value)),
+    "a\nb",
+    "a\rb",
+    "p|q `c|d` r\\|s",
+    "\\`a|b`",
+    "`unclosed|",
+    "``a`|`b``",
+  ])("reads %j in its own column, as it reads outside a table", (markdown) => {
+    expect(rowHolding(markdown)).toEqual([renderedInline(markdown), { text: "next", code: [] }])
+  })
+})
+
+describe("a projection's tables, as a renderer reads them", () => {
+  const VALUES = ["apps/a|b", "pipe(a\\|b)", "x\\\\|y", "`|`"]
+  // A Symbol id admits a pipe but no backslash.
+  const CANDIDATES = [symbolId("ts:src/a|b.ts#f"), symbolId("ts:src/c.ts#g|h")]
+
+  function columns(md: string, header: readonly string[]) {
+    const table = rendered(md).find(
+      (block) =>
+        block.kind === "table" && block.head.map((cell) => cell.text).join() === header.join(),
+    )
+    if (table?.kind !== "table") throw new Error(`no table headed ${header.join(", ")}`)
+    for (const row of table.rows) expect(row).toHaveLength(header.length)
+    return table.rows
+  }
+
+  it("keeps every Components row to the header's columns, each root whole", () => {
+    const md = projectWorkspace(
+      makeIR({ components: [component({ id: "web", name: "Web", roots: VALUES })] }),
+    )
+    const [row] = columns(md, ["id", "roots", "languages", "frameworks", "symbols"])
+    expect(row?.[1]?.code).toEqual(VALUES)
   })
 
-  it("maps a newline to a break, because a GFM row ends at one", () => {
-    expect(tableCell("a\nb")).toBe("a<br>b")
-  })
-
-  it("doubles the backslash run in front of the pipe, so the escape is not itself escaped", () => {
-    expect(tableCell("a\\|b")).toBe("a\\\\\\|b")
-  })
-
-  it("leaves a backslash that no pipe follows alone", () => {
-    expect(tableCell("C:\\src")).toBe("C:\\src")
+  it("keeps every call resolution row to the header's columns, each target and candidate whole", () => {
+    const calls = VALUES.map((target, i) => ({ target, line: i + 1, resolved: null }))
+    const caller = makeSymbol({ id: "ts:src/ctl.ts#Ctl.route", name: "Ctl.route", calls })
+    const md = projectSymbolExplain(caller, {
+      unresolvedCalls: calls.map((c) => ({
+        symbolId: symbolId("ts:src/ctl.ts#Ctl.route"),
+        target: c.target,
+        line: c.line,
+        bucket: "ambiguous",
+        candidates: CANDIDATES,
+      })),
+    })
+    const rows = columns(md, ["line", "target", "resolved", "bucket", "candidates"])
+    expect(rows.map((row) => row[1]?.code)).toEqual(VALUES.map((value) => [value]))
+    for (const row of rows) expect(row[4]?.code).toEqual(CANDIDATES)
   })
 })
 
@@ -151,7 +209,7 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
     ])
   })
 
-  it("keeps the rules of one symbol in a single list", () => {
+  it("renders a Symbol's rules as one list, each fenced payload inside its own item", () => {
     const md = projectComponent({
       component: component({ id: "billing", name: "Billing" }),
       symbols: [
@@ -161,17 +219,27 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
           component: "billing",
           rules: [
             rule({ type: "guard", line: 3, condition: LONG_CONDITION }),
+            rule({ type: "switch", line: 5, condition: "a\n```\nb" }),
             rule({ type: "loop", line: 9, loopKind: "for" }),
+            rule({ type: "throw", line: 12, what: THROWN_TEMPLATE }),
           ],
         }),
       ],
       dependencies: [],
     })
-    const body = md.slice(md.indexOf("**Rules**:"), md.indexOf("- loop"))
-    for (const line of body.split("\n").slice(1)) {
-      if (line === "") continue
-      expect(line.startsWith("- ") || line.startsWith("  ")).toBe(true)
-    }
+    const under = blocksUnder(rendered(md), "Rules:")
+    expect(under).toHaveLength(1)
+    const items = first(under, "list").items
+    expect(items.map((item) => item.map((block) => block.kind))).toEqual([
+      ["paragraph", "code"],
+      ["paragraph", "code"],
+      ["paragraph"],
+      ["paragraph"],
+    ])
+    expect(items.flatMap((item) => item.filter((block) => block.kind === "code"))).toEqual([
+      { kind: "code", content: `${LONG_CONDITION}\n` },
+      { kind: "code", content: "a\n```\nb\n" },
+    ])
   })
 })
 
@@ -186,71 +254,6 @@ describe("inline code spans elsewhere in the row", () => {
     expect(callRow({ target: "sql`select 1`", line: 4, resolved: null })).toBe(
       "- `` sql`select 1` `` (L4)",
     )
-  })
-})
-
-describe("table cells keep their column count", () => {
-  function cellCount(row: string): number {
-    let cells = 1
-    for (let i = 0; i < row.length; i++) {
-      if (row[i] === "\\") {
-        i++
-        continue
-      }
-      if (row[i] === "|") cells++
-    }
-    return cells
-  }
-
-  it("holds the Components table to five columns when a root carries a pipe", () => {
-    const md = projectWorkspace(
-      makeIR({
-        components: [component({ id: "web", name: "Web", roots: ["apps/a|b"] })],
-      }),
-    )
-    const header = md.split("\n").find((l) => l.startsWith("| id |")) ?? ""
-    const row = md.split("\n").find((l) => l.startsWith("| web |")) ?? ""
-    expect(row).not.toBe("")
-    expect(cellCount(row)).toBe(cellCount(header))
-    expect(row).toContain("apps/a\\|b")
-  })
-
-  it("holds the call resolution table when a call target carries a pipe", () => {
-    const caller = makeSymbol({
-      id: "ts:src/ctl.ts#Ctl.route",
-      name: "Ctl.route",
-      calls: [{ target: "pipe(a|b)", line: 3, resolved: null }],
-    })
-    const md = projectSymbolExplain(caller, {
-      unresolvedCalls: [
-        {
-          symbolId: symbolId("ts:src/ctl.ts#Ctl.route"),
-          target: "pipe(a|b)",
-          line: 3,
-          bucket: "no-match",
-          candidates: [],
-        },
-      ],
-    })
-    const header = md.split("\n").find((l) => l.startsWith("| line |")) ?? ""
-    const row = md.split("\n").find((l) => l.startsWith("| 3 |")) ?? ""
-    expect(row).not.toBe("")
-    expect(cellCount(row)).toBe(cellCount(header))
-    expect(row).toContain("pipe(a\\|b)")
-  })
-
-  it("holds it when the target carries a backslash in front of the pipe", () => {
-    const target = "pipe(a\\|b)"
-    const caller = makeSymbol({
-      id: "ts:src/ctl.ts#Ctl.route",
-      name: "Ctl.route",
-      calls: [{ target, line: 4, resolved: null }],
-    })
-    const md = projectSymbolExplain(caller, { unresolvedCalls: [] })
-    const header = md.split("\n").find((l) => l.startsWith("| line |")) ?? ""
-    const row = md.split("\n").find((l) => l.startsWith("| 4 |")) ?? ""
-    expect(row).not.toBe("")
-    expect(cellCount(row)).toBe(cellCount(header))
   })
 })
 

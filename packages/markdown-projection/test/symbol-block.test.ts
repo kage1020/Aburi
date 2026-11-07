@@ -9,10 +9,11 @@ import {
   sig,
   zeroFp,
 } from "@aburi/test-support"
-import type { Decorator, SymbolChange } from "@aburi/types"
+import type { Decorator, Symbol as IRSymbol, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectComponent, renderSymbolBlock } from "../src"
 import { LONG_CONDITION, projectChanges } from "./fixtures"
+import { blocksUnder, first, rendered } from "./rendered"
 
 function handle(overrides: Omit<Parameters<typeof makeSymbol>[0], "id" | "name">) {
   return makeSymbol({ ...overrides, id: "ts:src/a.ts#handle", name: "handle" })
@@ -150,18 +151,37 @@ describe("renderSymbolBlock — what a Symbol block holds", () => {
 })
 
 describe("renderSymbolBlock — blank lines between list sections", () => {
-  it("gives a label the same blank line after a fenced rule as after an inline one", () => {
-    const withRule = (condition: string) =>
-      renderSymbolBlock(
-        handle({ rules: [rule({ type: "guard", condition, line: 3 })], effects: [EFFECT] }),
+  const renderings: [string, (symbol: IRSymbol) => string][] = [
+    ["a Symbol block", (symbol) => renderSymbolBlock(symbol).join("\n")],
+    [
+      "a component file",
+      (symbol) =>
+        projectComponent({
+          component: component({ id: "core", name: "core" }),
+          symbols: [symbol],
+          dependencies: [],
+        }),
+    ],
+    ["an Added symbol in diff.md", (symbol) => projectChanges([{ status: "added", symbol }])],
+  ]
+
+  it.each(
+    renderings.flatMap(([where, render]) => [
+      [where, "an inline", "x > 0", render] as const,
+      [where, "a fenced", LONG_CONDITION, render] as const,
+    ]),
+  )(
+    "ends the rules list before the Effects label in %s, after %s rule",
+    (_, _rule, condition, render) => {
+      const blocks = rendered(
+        render(handle({ rules: [rule({ type: "guard", condition, line: 3 })], effects: [EFFECT] })),
       )
-    const inline = withRule("x > 0")
-    const fenced = withRule(LONG_CONDITION)
-    expect(fenced).toContain("- guard (L3):")
-    for (const block of [inline, fenced]) {
-      expect(block[block.indexOf("**Effects**:") - 1]).toBe("")
-    }
-  })
+      const rules = blocksUnder(blocks, "Rules:")
+      expect(rules).toHaveLength(1)
+      expect(first(rules, "list").items).toHaveLength(1)
+      expect(blocksUnder(blocks, "Effects:").map((block) => block.kind)).toEqual(["list"])
+    },
+  )
 
   it("adds no blank line before a list or after the last section", () => {
     const block = renderSymbolBlock(handle({ calls: [CALL], fingerprint: zeroFp() }))
@@ -179,30 +199,6 @@ describe("renderSymbolBlock — blank lines between list sections", () => {
       }),
     )
     expect(block.filter((row, i) => row === "" && block[i + 1] === "")).toEqual([])
-  })
-
-  it("ends a fenced rule's list in a component file", () => {
-    const md = projectComponent({
-      component: component({ id: "core", name: "core" }),
-      symbols: [
-        handle({
-          rules: [rule({ type: "guard", condition: LONG_CONDITION, line: 3 })],
-          effects: [EFFECT],
-        }),
-      ],
-      dependencies: [],
-    })
-    expect(md).toContain("```\n\n**Effects**:\n")
-  })
-
-  it("separates the sections of an Added symbol in diff.md", () => {
-    const symbol = handle({
-      rules: [rule({ type: "guard", condition: "x > 0", line: 3 })],
-      effects: [EFFECT],
-      fingerprint: fp("v1"),
-    })
-    const md = projectChanges([{ status: "added", symbol }])
-    expect(md).toContain("- guard: `x > 0` (L3)\n\n**Effects**:\n")
   })
 })
 
