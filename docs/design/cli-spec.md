@@ -663,7 +663,7 @@ With refs (every git command these steps run gets the caller's environment as §
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
 6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.json`, `diff.md` or `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since each would describe another diff: a `--format md` run leaves no `diff.json` of an earlier run's, and a `--format json` run no `diff.md`, so none naming a `diff.full.md` that is gone. So a run that stops before this step (a plugin that fails to load, a strict scan's undeclared value) leaves no report at all rather than an earlier one a caller would take for its own. A path there that cannot be removed is refused like one that cannot be written
 7. Print the glyph line, the head's call-resolution census and the path of `diff.md` to stdout (§6.6)
-8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: from just after the temporary directory is created until this cleanup has finished, a listener for each removes the worktree and the temporary directory synchronously, then raises the same signal again, so on POSIX the exit status stays 128+N. On Windows a signal cannot be raised against the process again; the run exits with that same 128+N instead. A failed removal on this path is reported on stderr. The listener narrows the window rather than closing it: a signal sent to this process alone (not to its process group, as a terminal's Ctrl-C is) does not reach a `git worktree add` still running, and that child can finish registering the worktree after the cleanup has run, leaving it behind. `SIGKILL` cannot be caught, and leaves both behind, as does a write to stdout or stderr that fails for any reason but a reader that left (§9); `SIGQUIT` and `SIGBREAK` are not handled either
+8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: from just after the temporary directory is created until this cleanup has finished, a listener for each removes the worktree and the temporary directory synchronously, then raises the same signal again, so on POSIX the exit status stays 128+N. On Windows a signal cannot be raised against the process again; the run exits with that same 128+N instead. A failed removal on this path is reported on stderr. The listener narrows the window rather than closing it: a signal sent to this process alone (not to its process group, as a terminal's Ctrl-C is) does not reach a `git worktree add` still running, and that child can finish registering the worktree after the cleanup has run, leaving it behind. `SIGKILL` cannot be caught, and leaves both behind; `SIGQUIT` and `SIGBREAK` are not handled either
 
 With file inputs: skip steps 1-3 and start at step 5.
 
@@ -1109,10 +1109,13 @@ base scan's first warning, and the command still runs to its end — the head sc
 the base worktree's removal. What it writes after the reader left is lost, on stdout and on
 stderr alike. A pipeline under `set -o pipefail`, which GitHub Actions uses for `shell: bash`,
 reads the command's own answer, and `aburi explain` listing candidates into a closed pipe exits
-`2` rather than the `1` that means "not found". Any other failure to write either stream — a disk
-that refuses stdout or stderr redirected to a file — ends the process where the write failed,
-with `1` and Node's own report of the error. No cleanup runs: an `aburi diff` whose stderr is
-refused during the base scan leaves the base worktree and its temporary directory behind.
+`2` rather than the `1` that means "not found". Any other failure to write either stream — a
+descriptor opened only for reading, a disk that refuses stdout or stderr redirected to a file —
+is held until the run has finished, so the run goes on as it would for a reader that left: the
+artefacts, the base worktree's removal and its temporary directory. The command then exits `1`
+whatever code it reached, since the output it was asked for is incomplete, and writes one line
+naming the stream and the error on the other: `aburi: could not write to stderr: EBADF`. When
+both streams refuse, that line is lost too, and the code still says `1`.
 
 The line between `1` and `2` is who has to act, not which subsystem failed. `2` covers the whole
 of what the reader wrote: a config that does not parse, does not conform, or names the same
@@ -1146,6 +1149,8 @@ Example: `aburi diff main..HEAD > result.txt 2> log.txt`
 Either stream may lose its reader part way through (`| head -1`). That costs the reader the rest of
 that stream and nothing else: the other stream, the artefacts and the exit code are what they
 would have been (§9).
+A stream that refuses a write for another reason costs the rest of that stream and the exit code,
+which is `1`; the other stream carries one more line, naming the refused stream and its error (§9).
 
 The `--json` flag of the planned `aburi vocab` would dedicate stdout to machine-readable JSON.
 
@@ -1365,7 +1370,8 @@ a command's option, not a global one (§3).
 | CL51 | `aburi scan` in a workspace holding a directory the process may not list, whether the census, a manifest search or discovery meets it, or `aburi init` there | exit 1, with `Directory "<path>" could not be listed` and the errno on stderr, after `Failed to resolve components: ` (scan) or `Failed to detect components: ` (init) when a component search meets it. With `.gitignore` excluding that directory and no declared package pattern reaching it, `aburi scan` exits 0 and the IR holds the rest of the workspace, and with `--no-respect-gitignore` it exits 1 |
 | CL52 | `aburi diff --base <ir> --head <ir>` or `aburi explain --ir <ir>` where the file opens with one byte order mark (U+FEFF) | Read as without it. Two of them, or one after the first character, is exit 2, `IR file "<path>" is not valid JSON` |
 | CL53 | `aburi scan` where `package.json` and `aburi.json` both open with one byte order mark | exit 0, the Component named after the `package.json` |
-| CL54 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3` or `2`), never `1`; the other stream byte for byte, the same artefacts, and no base worktree or temporary directory left behind. stdout on a descriptor that refuses writes (one opened read-only) still exits 1, with the errno on stderr |
+| CL54 | `aburi diff HEAD~1..HEAD`, with and without a `--fail-on` that trips, or `aburi explain <ambiguous>`, with nothing reading stdout; the same two diffs or `aburi scan` with nothing reading stderr | The code the same run exits with when both streams are read (`0`, `3` or `2`), never `1`; the other stream byte for byte, the same artefacts, and no base worktree or temporary directory left behind |
+| CL54a | `aburi scan`, or `aburi diff HEAD~1..HEAD` with and without a `--fail-on` that trips, whose stdout or stderr is a descriptor that refuses writes (one opened read-only) | exit 1 once the run has finished: the other stream as the run writes it plus `aburi: could not write to <stream>: EBADF`, the same artefacts, and no base worktree or temporary directory left behind |
 | CL55 | `aburi diff main..HEAD` with a `pluginOptions` key that names no loaded plugin (`config.md` C10) | The warning once, with no side label, while the base scan's own lines keep theirs; the exit code is the one the run has without the key |
 | CL56 | `aburi diff … --fail-on removed` over a removed duplicate of a head Symbol, over a removal that duplicates nothing, and over eleven of the second kind | exit 0 for the duplicate, with the stderr line naming it as uncounted, and exit 3 under `--fail-on removed:duplicate`, which names it under its tripped line and adds no such line; exit 3 for the other, stderr naming it on an indented line under `--fail-on removed tripped (observed: 1 removed)`; for eleven, ten ids and `… and 1 more` (§6.7) |
 | CL57 | `aburi diff … --fail-on removed --fail-on-scope non-test` over the removal of a Symbol that carries `inTestFile` alone; the same with `--fail-on-scope all`; and over that removal beside the removal of a Symbol that carries none | exit 0; exit 3 with `--fail-on removed tripped (observed: 1 removed)`; exit 3 with `--fail-on removed tripped (observed: 1 removed outside test files)` naming the second Symbol alone. A pair counts under `non-test` when its head Symbol carries no mark, whatever the base's (§6.7) |

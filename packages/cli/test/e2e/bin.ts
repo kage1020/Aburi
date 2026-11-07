@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process"
-import { existsSync } from "node:fs"
+import { closeSync, existsSync, openSync } from "node:fs"
 import { readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
@@ -19,29 +19,42 @@ export function useBuiltBin(): void {
 
 export type OutputStream = "stdout" | "stderr"
 
+/**
+ * `unread`: the stream has no reader from the start, as a pipe has once its reader exits.
+ * `refused`: the stream is a descriptor opened only for reading, which refuses every write, with
+ * EBADF on every OS.
+ */
+export interface StreamFault {
+  stream: OutputStream
+  kind: "unread" | "refused"
+}
+
 export interface BinRun {
   code: number | null
   stdout: string
   stderr: string
 }
 
-/** The stream named by `unread` has no reader from the start, as a pipe has once its reader exits. */
 export function runBin(
   cwd: string,
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
-  unread: OutputStream | null = null,
+  fault: StreamFault | null = null,
 ): Promise<BinRun> {
-  return new Promise((resolve, reject) => {
+  const readOnly = fault?.kind === "refused" ? openSync(CLI_BIN, "r") : null
+  const stdio = (name: OutputStream) =>
+    readOnly !== null && fault?.stream === name ? readOnly : "pipe"
+  return new Promise<BinRun>((resolve, reject) => {
     const child = spawn(process.execPath, [CLI_BIN, ...argv], {
       cwd,
       env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", stdio("stdout"), stdio("stderr")],
     })
     const read: Record<OutputStream, string> = { stdout: "", stderr: "" }
     for (const name of ["stdout", "stderr"] as const) {
       const stream = child[name]
-      if (name === unread) {
+      if (stream === null) continue
+      if (fault?.kind === "unread" && fault.stream === name) {
         stream.destroy()
         continue
       }
@@ -52,6 +65,8 @@ export function runBin(
     }
     child.on("error", reject)
     child.on("close", (code) => resolve({ code, ...read }))
+  }).finally(() => {
+    if (readOnly !== null) closeSync(readOnly)
   })
 }
 

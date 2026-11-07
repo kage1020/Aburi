@@ -1,15 +1,14 @@
-import { spawnSync } from "node:child_process"
-import { open, readdir, rm } from "node:fs/promises"
+import { readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { commitAll, gitTestEnv, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, type ExitCode } from "../../src"
 import {
-  CLI_BIN,
   linkedWorktrees,
   type OutputStream,
   removeWorktreeTempDirs,
   runBin,
+  type StreamFault,
   useBuiltBin,
   worktreeTempDirs,
 } from "./bin"
@@ -37,10 +36,10 @@ afterEach(async () => {
   await removeWorktreeTempDirs(workspace.root)
 })
 
-async function runFromScratch(argv: readonly string[], unread: OutputStream | null = null) {
+async function runFromScratch(argv: readonly string[], fault: StreamFault | null = null) {
   // `explain` answers from the IR an earlier run left, and then has no scan to report on.
   await rm(join(workspace.root, "out"), { recursive: true, force: true })
-  const run = await runBin(workspace.root, argv, gitTestEnv(workspace.root), unread)
+  const run = await runBin(workspace.root, argv, gitTestEnv(workspace.root), fault)
   const written = await readdir(join(workspace.root, "out"), { recursive: true })
   return { ...run, written: written.sort() }
 }
@@ -63,7 +62,7 @@ describe("aburi, when the reader of stdout or stderr has gone", () => {
       expect(read.code).toBe(code)
       expect(read[unread], `the command writes to ${unread}`).not.toBe("")
 
-      const unreadRun = await runFromScratch(argv, unread)
+      const unreadRun = await runFromScratch(argv, { stream: unread, kind: "unread" })
       expect(unreadRun.code, unreadRun[other]).toBe(code)
       expect(unreadRun[other]).toBe(read[other])
       expect(unreadRun.written).toEqual(read.written)
@@ -71,21 +70,31 @@ describe("aburi, when the reader of stdout or stderr has gone", () => {
       expect(await worktreeTempDirs(workspace.root)).toEqual([])
     },
   )
+})
 
-  it("still exits 1, with Node's report of the error, when stdout refuses a write for another reason", async () => {
-    // A descriptor opened only for reading refuses every write, with EBADF on every OS.
-    const readOnly = await open(join(workspace.root, "package.json"), "r")
-    try {
-      const run = spawnSync(process.execPath, [CLI_BIN, "scan"], {
-        cwd: workspace.root,
-        env: gitTestEnv(workspace.root),
-        stdio: ["ignore", readOnly.fd, "pipe"],
-        encoding: "utf8",
-      })
-      expect(run.status).toBe(EXIT.RUNTIME)
-      expect(run.stderr).toContain("EBADF")
-    } finally {
-      await readOnly.close()
-    }
-  })
+describe("aburi, when stdout or stderr refuses a write", () => {
+  it.each<[string, OutputStream]>([
+    ["scan", "stdout"],
+    ["scan", "stderr"],
+    ["diff HEAD~1..HEAD", "stdout"],
+    ["diff HEAD~1..HEAD", "stderr"],
+    ["diff HEAD~1..HEAD --fail-on added", "stdout"],
+    ["diff HEAD~1..HEAD --fail-on added", "stderr"],
+  ])(
+    "`aburi %s` whose %s refuses writes runs to its end, exits 1 and names the stream on the other",
+    async (command, refused) => {
+      const argv = command.split(" ")
+      const other: OutputStream = refused === "stdout" ? "stderr" : "stdout"
+
+      const read = await runFromScratch(argv)
+      expect(read[refused], `the command writes to ${refused}`).not.toBe("")
+
+      const refusedRun = await runFromScratch(argv, { stream: refused, kind: "refused" })
+      expect(refusedRun.code, refusedRun[other]).toBe(EXIT.RUNTIME)
+      expect(refusedRun[other]).toBe(`${read[other]}aburi: could not write to ${refused}: EBADF\n`)
+      expect(refusedRun.written).toEqual(read.written)
+      expect(linkedWorktrees(workspace.root)).toEqual([])
+      expect(await worktreeTempDirs(workspace.root)).toEqual([])
+    },
+  )
 })

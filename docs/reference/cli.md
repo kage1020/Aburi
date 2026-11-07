@@ -36,7 +36,7 @@ working directory.
 | Code | Meaning |
 |---|---|
 | `0` | Success, no gate tripped. |
-| `1` | Runtime failure: an I/O error (a write the disk refused to an output file says which command and which output; one refused on stdout or stderr ends the process there, with Node's own report and no cleanup; a file or directory the scan may not read is named), an unexpected exception, or `explain` found no match. |
+| `1` | Runtime failure: an I/O error (a write the disk refused to an output file says which command and which output; one refused on stdout or stderr lets the run finish and clean up, then names the stream on the other: `aburi: could not write to stdout: EBADF`; a file or directory the scan may not read is named), an unexpected exception, or `explain` found no match. |
 | `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on, a config that loads no language plugin. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
@@ -385,9 +385,12 @@ const code = await runCli({ argv, stdout, stderr, env, cwd })
 decision to you. A CLI entry point should assign `process.exitCode`, as the
 `aburi` bin does: `process.exit()` can truncate output still being written to a
 pipe (`aburi scan … | head`). Like the bin, it should also listen for `error`
-on its output streams, ignore `EPIPE` and rethrow the rest: Node reports a
-reader that closed early as that event, and with no listener the process exits
-1 whatever `runCli` returned. The streams to listen on are the `stdout` and
+on its output streams: Node reports a reader that closed early as that event,
+and with no listener the process exits 1 whatever `runCli` returned. The bin
+ignores `EPIPE` and keeps any other error until the event loop drains, then
+exits 1 and names it on the other stream; rethrowing it from the listener
+instead ends the process at the write, before `runDiff` removes its base
+worktree. The streams to listen on are the `stdout` and
 `stderr` it passes, when they are pipes or sockets, and `process.stderr` in any
 case, since the scan's log goes there whichever streams were passed.
 
