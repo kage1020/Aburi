@@ -12,9 +12,11 @@ import {
   IR_SCHEMA_URL,
   type Symbol as IRSymbol,
   type LanguageId,
+  type RelativePath,
   type Rule,
   type Signature,
   type SliceId,
+  type SourceRange,
   type SymbolId,
 } from "@aburi/types"
 
@@ -37,16 +39,25 @@ export function languageId(raw: string): LanguageId {
   return raw as LanguageId
 }
 
+/** Path counterpart of `symbolId`; production code goes through `toDocumentPath`. */
+export function relativePath(raw: string): RelativePath {
+  return raw as RelativePath
+}
+
+/** A `SourceRange` whose `file` is a literal; the builder that takes it brands it. */
+export type SourceRangeOverride = Omit<SourceRange, "file"> & { file: string }
+
 /** Dependency endpoints hold either id kind and are told apart by shape. */
 export function endpoint(raw: string): DependencyEndpoint {
   return raw as DependencyEndpoint
 }
 
 export function makeSymbol(
-  overrides: Omit<Partial<IRSymbol>, "id" | "component"> & {
+  overrides: Omit<Partial<IRSymbol>, "id" | "component" | "source"> & {
     id: string
     name: string
     component?: string | null
+    source?: SourceRangeOverride
   },
 ): IRSymbol {
   return {
@@ -66,13 +77,16 @@ export function makeSymbol(
     effects: overrides.effects ?? [],
     calls: overrides.calls ?? [],
     ...(overrides.middleware === undefined ? {} : { middleware: overrides.middleware }),
-    source: overrides.source ?? {
-      file: filePartOf(overrides.id),
-      startLine: 1,
-      endLine: 10,
-      startColumn: null,
-      endColumn: null,
-    },
+    source:
+      overrides.source === undefined
+        ? {
+            file: relativePath(filePartOf(overrides.id)),
+            startLine: 1,
+            endLine: 10,
+            startColumn: null,
+            endColumn: null,
+          }
+        : { ...overrides.source, file: relativePath(overrides.source.file) },
     fingerprint: overrides.fingerprint ?? fp("aaa"),
     confidence: overrides.confidence ?? "high",
     derivedBy: overrides.derivedBy ?? [],
@@ -197,13 +211,17 @@ export function call(
   }
 }
 
-export function component(
-  overrides: Omit<Partial<Component>, "id"> & { id: string; name: string },
-): Component {
+export type ComponentOverrides = Omit<Partial<Component>, "id" | "roots"> & {
+  id: string
+  name: string
+  roots?: readonly string[]
+}
+
+export function component(overrides: ComponentOverrides): Component {
   return {
     id: componentId(overrides.id),
     name: overrides.name,
-    roots: overrides.roots ?? [`apps/${overrides.id}`],
+    roots: (overrides.roots ?? [`apps/${overrides.id}`]).map(relativePath),
     ...(overrides.publicApi === undefined ? {} : { publicApi: overrides.publicApi }),
     languages: overrides.languages ?? [languageId("ts")],
     ...(overrides.frameworks === undefined ? {} : { frameworks: overrides.frameworks }),

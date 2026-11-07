@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
-import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
+import type { RelativePath, SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { toNfc } from "../codepoints"
 import { symbolIdSeparatorSite, toDocumentPath, type UnnameableSite, unnameableSite } from "../id"
 import { compareBy } from "../order"
@@ -56,7 +56,7 @@ export interface DiscoverOptions {
 }
 
 export interface DiscoveredFile {
-  path: string
+  path: RelativePath
   fsPath: string
   size: number
 }

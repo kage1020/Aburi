@@ -5,6 +5,7 @@ import {
   errorFrom,
   makeCall,
   recordingLogger,
+  relativePath,
   spend,
   useScratchWorkspace,
 } from "@aburi/test-support"
@@ -93,7 +94,7 @@ describe("scan — the Document it assembles", () => {
       languageId: makeLanguageId("other"),
       fileExtensions: [".other"],
     })
-    const managers = [{ tool: "pnpm", roots: ["apps/a"] }]
+    const managers = [{ tool: "pnpm", roots: [relativePath("apps/a")] }]
     const { ir } = await scanStubs(workspace.root, {
       languages: [stubLanguagePlugin(), other],
       workspaceManagers: managers,

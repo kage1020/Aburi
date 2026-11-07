@@ -2,6 +2,7 @@ import {
   type CandidateOverrides,
   makeCandidate,
   noopRegistry,
+  relativePath,
   type ScratchWorkspace,
   silentLogger,
   spend,
@@ -83,7 +84,7 @@ const NO_CAPABILITIES: LanguageCapabilities = {
 const EMPTY_BODY: BodyExtraction = { rules: [], calls: [] }
 
 /** The one file a `.stub` plugin is handed when the test is not about the file. */
-const stubFile: SourceFile = { path: "test.stub", content: "" }
+const stubFile: SourceFile = { path: relativePath("test.stub"), content: "" }
 
 export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): LanguagePlugin {
   return {
@@ -133,15 +134,15 @@ export function stubCandidate(
   } = {},
 ): SymbolCandidate {
   const { id, file = "test.stub", ...rest } = overrides
-  const candidate = makeCandidate({
+  return makeCandidate({
     kind: "function",
     id: id ?? `stub:${file}#${name}`,
     name,
     source: { file, startLine: 1, endLine: 2, startColumn: null, endColumn: null },
     bodyNode: {},
     fullNode: {},
+    ...rest,
   })
-  return { ...candidate, ...rest }
 }
 
 /** A candidate named after `file`, which is all the workspace suites need to tell files apart. */

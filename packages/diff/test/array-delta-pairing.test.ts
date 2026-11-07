@@ -1,4 +1,4 @@
-import { call, decorator, effect, fp, makeSymbol, rule } from "@aburi/test-support"
+import { call, decorator, effect, fp, makeSymbol, relativePath, rule } from "@aburi/test-support"
 import type { Effect, Symbol as IRSymbol, Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { computeSymbolDelta } from "../src"
@@ -195,7 +195,7 @@ describe("an edited rule is paired with a free candidate within the window", () 
 describe("an element's line is counted from its Symbol's first line", () => {
   const startingAt = (startLine: number): Partial<IRSymbol> => ({
     source: {
-      file: "src/a.ts",
+      file: relativePath("src/a.ts"),
       startLine,
       endLine: startLine + 20,
       startColumn: null,

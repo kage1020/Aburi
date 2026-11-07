@@ -5,6 +5,7 @@ import {
   makeDiff,
   makeSymbol,
   movedChanged,
+  relativePath,
   rule,
   zeroFp,
 } from "@aburi/test-support"
@@ -69,7 +70,7 @@ export function symbolWithBody(name: string): IRSymbol {
 }
 
 export function relocated(symbol: IRSymbol, file: string): IRSymbol {
-  return { ...symbol, source: { ...symbol.source, file } }
+  return { ...symbol, source: { ...symbol.source, file: relativePath(file) } }
 }
 
 export function renamedPair(

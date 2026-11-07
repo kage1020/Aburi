@@ -1,4 +1,4 @@
-import { component, languageId, makeDiff } from "@aburi/test-support"
+import { type ComponentOverrides, component, languageId, makeDiff } from "@aburi/test-support"
 import type { Component } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
@@ -18,7 +18,7 @@ function changedSection(before: Component, after: Component): string[] {
   )
 }
 
-const billing = (overrides: Partial<Component> = {}) =>
+const billing = (overrides: Partial<ComponentOverrides> = {}) =>
   component({ id: "billing", name: "Billing", ...overrides })
 
 describe("projectDiff — Component changes", () => {

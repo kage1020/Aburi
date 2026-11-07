@@ -1,5 +1,13 @@
 import { makeLanguageId } from "@aburi/core"
-import { component, componentId, dependency, errorFrom, makeIR } from "@aburi/test-support"
+import {
+  type ComponentOverrides,
+  component,
+  componentId,
+  dependency,
+  errorFrom,
+  makeIR,
+  relativePath,
+} from "@aburi/test-support"
 import type { Component, ComponentDiff, Dependency } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -18,7 +26,7 @@ const UNCHANGED_AXES: ComponentDelta = {
   frameworksChanged: false,
 }
 
-const billing = (overrides: Partial<Omit<Component, "id">> = {}) =>
+const billing = (overrides: Partial<Omit<ComponentOverrides, "id">> = {}) =>
   component({ id: "billing", name: "billing", ...overrides })
 
 describe("diffComponents", () => {
@@ -41,28 +49,30 @@ describe("diffComponents", () => {
     expect(result.changed).toEqual([])
   })
 
-  it.each<[string, Partial<Component>, Partial<Component>, keyof ComponentDelta]>([
+  it.each<[string, Partial<ComponentOverrides>, Partial<ComponentOverrides>, keyof ComponentDelta]>(
     [
-      "roots",
-      { roots: ["apps/billing"] },
-      { roots: ["apps/billing", "packages/billing-domain"] },
-      "rootsChanged",
+      [
+        "roots",
+        { roots: ["apps/billing"] },
+        { roots: ["apps/billing", "packages/billing-domain"] },
+        "rootsChanged",
+      ],
+      [
+        "publicApi",
+        { publicApi: ["apps/billing/routes/**"] },
+        { publicApi: ["apps/billing/routes/**", "apps/billing/api/**"] },
+        "publicApiChanged",
+      ],
+      ["frameworks", { frameworks: [] }, { frameworks: ["nestjs"] }, "frameworksChanged"],
     ],
-    [
-      "publicApi",
-      { publicApi: ["apps/billing/routes/**"] },
-      { publicApi: ["apps/billing/routes/**", "apps/billing/api/**"] },
-      "publicApiChanged",
-    ],
-    ["frameworks", { frameworks: [] }, { frameworks: ["nestjs"] }, "frameworksChanged"],
-  ])("flags only %s when that field moves", (_, before, after, flag) => {
+  )("flags only %s when that field moves", (_, before, after, flag) => {
     const result = diffComponents([billing(before)], [billing(after)])
     expect(result.changed.map((entry) => entry.delta)).toEqual([
       { ...UNCHANGED_AXES, [flag]: true },
     ])
   })
 
-  it.each<[string, Partial<Component>, Partial<Component>]>([
+  it.each<[string, Partial<ComponentOverrides>, Partial<ComponentOverrides>]>([
     ["a renamed Component", { name: "Billing" }, { name: "Billing & Invoicing" }],
     [
       "an added language",
@@ -102,7 +112,7 @@ describe("diffComponents", () => {
       languages: [makeLanguageId("ts")],
       frameworks: [],
       publicApi: [],
-      roots: ["apps/billing"],
+      roots: [relativePath("apps/billing")],
       name: "billing",
       id: componentId("billing"),
     }

@@ -67,21 +67,19 @@ export function diffComponents(
 
 export interface DependencySideView {
   symbolFiles: ReadonlyMap<DependencyEndpoint, RelativePath>
-  lostFiles: ReadonlyMap<RelativePath, SkipReason>
+  lostFiles: ReadonlyMap<string, SkipReason>
   /** The skipped files each Component holds, by the document's own `components[]`. */
   componentLostFiles: ReadonlyMap<DependencyEndpoint, readonly DiffSkippedFile[]>
 }
 
 export interface RenameDirections {
-  readonly baseToHead: ReadonlyMap<RelativePath, RelativePath>
-  readonly headToBase: ReadonlyMap<RelativePath, readonly RelativePath[]>
+  readonly baseToHead: ReadonlyMap<string, string>
+  readonly headToBase: ReadonlyMap<string, readonly string[]>
 }
 
-export function renameDirections(
-  renames: ReadonlyMap<RelativePath, RelativePath> | null,
-): RenameDirections {
-  const baseToHead = new Map<RelativePath, RelativePath>(renames ?? [])
-  const headToBase = new Map<RelativePath, RelativePath[]>()
+export function renameDirections(renames: ReadonlyMap<string, string> | null): RenameDirections {
+  const baseToHead = new Map<string, string>(renames ?? [])
+  const headToBase = new Map<string, string[]>()
   for (const [basePath, headPath] of baseToHead) {
     const claimants = headToBase.get(headPath)
     if (claimants === undefined) headToBase.set(headPath, [basePath])
@@ -100,7 +98,7 @@ export interface LossSides {
 }
 
 export function lostCounterparts(
-  path: RelativePath,
+  path: string,
   absentFrom: AbsentSide,
   sides: LossSides,
 ): DiffSkippedFile[] {
@@ -117,7 +115,7 @@ export function lostCounterparts(
 }
 
 export function lostCounterpart(
-  path: RelativePath,
+  path: string,
   absentFrom: AbsentSide,
   sides: LossSides,
 ): DiffSkippedFile | undefined {
@@ -125,10 +123,10 @@ export function lostCounterpart(
 }
 
 function renamedOnAbsentSide(
-  path: RelativePath,
+  path: string,
   absentFrom: AbsentSide,
   renames: RenameDirections,
-): readonly RelativePath[] {
+): readonly string[] {
   if (absentFrom === "base") return renames.headToBase.get(path) ?? []
   const headPath = renames.baseToHead.get(path)
   return headPath === undefined ? [] : [headPath]
@@ -137,7 +135,7 @@ function renamedOnAbsentSide(
 export function dependencySideView(ir: IR): DependencySideView {
   const symbolFiles = new Map<DependencyEndpoint, RelativePath>()
   for (const symbol of ir.symbols) symbolFiles.set(symbol.id, symbol.source.file)
-  const lostFiles = new Map<RelativePath, SkipReason>()
+  const lostFiles = new Map<string, SkipReason>()
   const componentLostFiles = new Map<DependencyEndpoint, DiffSkippedFile[]>()
   const attribute = buildComponentAttribution(ir.components)
   for (const { path, reason } of ir.stats.skippedFiles ?? []) {
@@ -206,7 +204,7 @@ function endpointsLostBy(
   sides: LossSides,
 ): DiffSkippedFile[] {
   const holder = sides[absentFrom === "base" ? "head" : "base"]
-  const byPath = new Map<RelativePath, SkipReason>()
+  const byPath = new Map<string, SkipReason>()
   for (const endpoint of [dep.from, dep.to]) {
     const file = holder.symbolFiles.get(endpoint)
     if (file === undefined) continue

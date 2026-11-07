@@ -5,14 +5,13 @@ import {
   type DetectManagersResult,
   detectComponents,
   detectManagers,
-  type GrammarViolation,
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
   NPM_MANIFEST,
   posixSpellingViolation,
-  posixWorkspaceRelativeViolation,
   readWorkspacePackages,
+  toDocumentPath,
   type WorkspacePackage,
 } from "@aburi/core"
 import type { Component, Config, LanguagePlugin } from "@aburi/types"
@@ -84,15 +83,13 @@ function componentFromConfig(entry: NonNullable<Config["components"]>[number]): 
   const component: Component = {
     id: makeComponentId(entry.id),
     name: entry.name ?? entry.id,
-    roots: entry.roots.map((root) =>
-      assertSpelling(root, `components[id=${entry.id}] root`, posixWorkspaceRelativeViolation),
-    ),
+    roots: entry.roots.map((root) => toDocumentPath(root, `components[id=${entry.id}] root`)),
     languages: languages.length > 0 ? languages : [makeLanguageId("ts")],
     description: entry.description ?? null,
   }
   if (entry.publicApi !== undefined && entry.publicApi.length > 0) {
     component.publicApi = entry.publicApi.map((pattern) =>
-      assertSpelling(pattern, `components[id=${entry.id}] publicApi entry`, posixSpellingViolation),
+      assertSpelling(pattern, `components[id=${entry.id}] publicApi entry`),
     )
   }
   if (entry.frameworks !== undefined && entry.frameworks.length > 0) {
@@ -101,13 +98,9 @@ function componentFromConfig(entry: NonNullable<Config["components"]>[number]): 
   return component
 }
 
-function assertSpelling(
-  value: string,
-  subject: string,
-  violationOf: (value: string, subject: string) => GrammarViolation | null,
-): string {
+function assertSpelling(value: string, subject: string): string {
   const normalized = value.normalize("NFC")
-  const violation = violationOf(normalized, subject)
+  const violation = posixSpellingViolation(normalized, subject)
   if (violation !== null) throw new CoreError(violation.message, violation)
   return normalized
 }

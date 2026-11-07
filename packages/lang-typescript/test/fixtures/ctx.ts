@@ -1,4 +1,4 @@
-import { makeExtractionCtx } from "@aburi/test-support"
+import { makeExtractionCtx, relativePath } from "@aburi/test-support"
 import type {
   BodyExtraction,
   DropHint,
@@ -29,7 +29,7 @@ export function requireTree(tree: Tree | null): Tree {
 }
 
 export function parseSource(source: string, path = DEFAULT_PATH): Promise<ParseResult<Tree>> {
-  return parseTypescriptFile({ path, content: source })
+  return parseTypescriptFile({ path: relativePath(path), content: source })
 }
 
 /** The edges and diagnostics a parse produced, which is all an import test reads. */

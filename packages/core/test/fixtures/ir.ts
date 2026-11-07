@@ -1,8 +1,14 @@
-import { call, makeSymbol as makeSymbolRecord, zeroFp } from "@aburi/test-support"
+import {
+  call,
+  makeSymbol as makeSymbolRecord,
+  type SourceRangeOverride,
+  zeroFp,
+} from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 
-export type SymbolOverrides = Omit<Partial<IRSymbol>, "id" | "component" | "calls"> & {
+export type SymbolOverrides = Omit<Partial<IRSymbol>, "id" | "component" | "calls" | "source"> & {
   component?: string | null
+  source?: SourceRangeOverride
   calls?: Array<{ target: string; line: number; resolved: string | null }>
 }
 

@@ -1,4 +1,10 @@
-import { CLASSIFY_TIMEOUT_MAX_MS, type ScanInput, type ScanResult, scan } from "@aburi/core"
+import {
+  CLASSIFY_TIMEOUT_MAX_MS,
+  type ScanInput,
+  type ScanResult,
+  scan,
+  toDocumentPath,
+} from "@aburi/core"
 import { buildDiff } from "@aburi/diff"
 import { VocabRegistry } from "@aburi/plugin-registry"
 import type { ScratchWorkspace } from "@aburi/test-support"
@@ -100,7 +106,7 @@ export async function extractFile<TTree, TNode>(
   path: string,
   content: string,
 ): Promise<ExtractedFile<TNode>> {
-  const file = { path, content }
+  const file = { path: toDocumentPath(path), content }
   const { tree, imports } = await language.parseFile(file)
   if (tree === null) throw new Error(`${language.manifest.name} could not parse ${path}`)
   const registry = new VocabRegistry()

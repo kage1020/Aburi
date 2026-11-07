@@ -257,3 +257,31 @@ describe("a fault in the plugin set is not a per-file fault", () => {
     expect(result.extractionFailures[0]).not.toHaveProperty("code")
   })
 })
+
+describe("a candidate whose source.file no Document path spells withdraws its file", () => {
+  it.each([
+    ["a backslash", "src\\bad.stub"],
+    ["a parent segment", "../bad.stub"],
+    ["an absolute path", "/workspace/bad.stub"],
+  ])("with %s, coded as the path fault it is", async (_label, file) => {
+    const language = stubLanguagePlugin({
+      extractSymbols: (_tree, ctx) => [
+        ctx.file.path === "bad.stub"
+          ? fileCandidate(ctx.file.path, {
+              source: { file, startLine: 1, endLine: 2, startColumn: null, endColumn: null },
+            })
+          : fileCandidate(ctx.file.path),
+      ],
+    })
+    const { result } = await run({ languages: [language] })
+
+    expect(result.ir.symbols.map((s) => s.source.file)).toEqual(["a.stub", "c.stub"])
+    expect(result.extractionFailures).toEqual([
+      {
+        file: "bad.stub",
+        message: expect.stringContaining(`SymbolCandidate.source.file "${file}"`),
+        code: "non-posix-path",
+      },
+    ])
+  })
+})

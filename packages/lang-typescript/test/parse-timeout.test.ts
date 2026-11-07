@@ -1,5 +1,5 @@
 import { scanWith } from "@aburi/test-harness"
-import { recordingLogger, spend, useScratchWorkspace } from "@aburi/test-support"
+import { recordingLogger, relativePath, spend, useScratchWorkspace } from "@aburi/test-support"
 import { beforeAll, describe, expect, it } from "vitest"
 import { langTypescriptPlugin } from "../src/index"
 import { pluginOverriding } from "./fixtures/scan"
@@ -11,7 +11,7 @@ const OVERRUN_MS = 1250
 
 beforeAll(async () => {
   const warm = await langTypescriptPlugin.parseFile({
-    path: "warm.ts",
+    path: relativePath("warm.ts"),
     content: "export function warm() {}\n",
   })
   // Whoever calls `parseFile` directly owns the tree it hands back.

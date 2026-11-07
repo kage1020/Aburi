@@ -1,16 +1,23 @@
-import type { ExtractionContext, SymbolCandidate, SymbolKind, Visibility } from "@aburi/types"
-import { symbolId } from "./ir"
+import type {
+  ExtractionContext,
+  SymbolCandidate,
+  SymbolKind,
+  Visibility,
+  WrittenSourceRange,
+} from "@aburi/types"
+import { relativePath, symbolId } from "./ir"
 import { noopRegistry } from "./registry"
 
 /** An `ExtractionContext` over one in-memory file, backed by `noopRegistry`. */
 export function makeExtractionCtx(path = "src/a.ts", content = ""): ExtractionContext {
-  return { file: { path, content }, registry: noopRegistry, config: {} }
+  return { file: { path: relativePath(path), content }, registry: noopRegistry, config: {} }
 }
 
-/** `id` is widened back to `string` so cases keep writing literals; the branding happens in `makeCandidate`, once. */
-export type CandidateOverrides = Omit<Partial<SymbolCandidate<unknown>>, "id"> & {
+/** `id` and `source.file` are widened back to `string` so cases keep writing literals; the branding happens in `makeCandidate`, once. */
+export type CandidateOverrides = Omit<Partial<SymbolCandidate<unknown>>, "id" | "source"> & {
   kind: SymbolKind
   id?: string
+  source?: Omit<WrittenSourceRange, "file"> & { file: string }
 }
 
 /** Per-suite defaults for the fields the framework fixtures disagreed on. */
@@ -34,12 +41,9 @@ export function makeCandidate(
     visibility: overrides.visibility ?? defaults.visibility ?? "public",
     decorators: overrides.decorators ?? [],
     signature: overrides.signature ?? null,
-    source: overrides.source ?? {
-      file: filePath,
-      startLine: 1,
-      endLine: 1,
-      startColumn: null,
-      endColumn: null,
+    source: {
+      ...(overrides.source ?? { startLine: 1, endLine: 1, startColumn: null, endColumn: null }),
+      file: relativePath(filePath),
     },
     derivedBy: overrides.derivedBy ?? [],
     bodyNode: overrides.bodyNode ?? null,

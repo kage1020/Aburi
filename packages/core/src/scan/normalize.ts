@@ -6,11 +6,12 @@ import type {
   SymbolCandidate,
 } from "@aburi/types"
 import { toNfc } from "../codepoints"
+import { toDocumentPath } from "../id"
 
 export function normalizeCandidateStrings(
   candidate: SymbolCandidate<OpaqueAstNode>,
 ): SymbolCandidate<OpaqueAstNode> {
-  const file = toNfc(candidate.source.file)
+  const file = toDocumentPath(candidate.source.file, "SymbolCandidate.source.file")
   const signature = normalizeSignatureStrings(candidate.signature)
   const decorators = normalizeDecoratorNames(candidate.decorators)
   if (

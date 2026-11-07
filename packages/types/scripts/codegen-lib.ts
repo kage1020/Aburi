@@ -36,6 +36,7 @@ export const ENTRIES: readonly SchemaEntry[] = [
       ComponentId: brand("ComponentId"),
       DependencyEndpoint: "SymbolId | ComponentId",
       LanguageId: brand("LanguageId"),
+      RelativePath: brand("RelativePath"),
     },
     unbrandedIds: ["EffectId"],
   },

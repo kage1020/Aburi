@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
-import { recordingLogger } from "@aburi/test-support"
+import { recordingLogger, relativePath } from "@aburi/test-support"
 import type { ImportEdge, LanguagePlugin, ParseError } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -63,7 +63,7 @@ describe("runFilePipeline — a refused parse withdraws the file", () => {
   async function run(bad: BadParse) {
     const reached = noReach()
     const result = await runPipeline({
-      file: { path: "bad.stub", content: "bad" },
+      file: { path: relativePath("bad.stub"), content: "bad" },
       language: parsingBadAs(bad, reached),
     })
     return { result, reached }

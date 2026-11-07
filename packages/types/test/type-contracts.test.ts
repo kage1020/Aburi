@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, it } from "vitest"
 import type {
+  Component,
   ComponentId,
   Decorator,
   Dependency,
@@ -7,15 +8,18 @@ import type {
   DiffSkippedFile,
   LangManifest,
   OwnerDecorator,
+  RelativePath,
   SkippedFile,
   SkipReason,
   SliceId,
   SliceRecord,
+  SourceFile,
   SourceRange,
   Symbol,
   SymbolCandidate,
   SymbolId,
   SymbolUnknown,
+  WorkspaceManager,
   WrittenSourceRange,
 } from "../src/index"
 
@@ -61,6 +65,20 @@ describe("id brands", () => {
     expectTypeOf<SymbolCandidate["id"]>().toEqualTypeOf<SymbolId>()
     expectTypeOf<Symbol["id"]>().toEqualTypeOf<SymbolId>()
     expectTypeOf<Symbol["component"]>().toEqualTypeOf<ComponentId | null | undefined>()
+  })
+})
+
+describe("path brand", () => {
+  it("refuses a bare string as a path, but reads every path as a string", () => {
+    expectTypeOf<Assignable<string, RelativePath>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<RelativePath, string>>().toEqualTypeOf<true>()
+  })
+
+  it("types every IR path site and the file a language plugin is handed with it", () => {
+    expectTypeOf<SourceRange["file"]>().toEqualTypeOf<RelativePath>()
+    expectTypeOf<Component["roots"]>().toEqualTypeOf<RelativePath[]>()
+    expectTypeOf<WorkspaceManager["roots"]>().toEqualTypeOf<RelativePath[]>()
+    expectTypeOf<SourceFile["path"]>().toEqualTypeOf<RelativePath>()
   })
 })
 

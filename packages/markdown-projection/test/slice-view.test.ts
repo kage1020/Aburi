@@ -4,6 +4,7 @@ import {
   errorFrom,
   makeDiff,
   movedChanged,
+  relativePath,
   sliceId,
   sliceOf,
   symbolAt,
@@ -196,7 +197,7 @@ describe("projectDiff — the Slice View", () => {
     const a = chain("a", 8)
     const b = chain("b", 8).map((member) => ({
       ...member,
-      source: { ...member.source, file: "src/d.ts" },
+      source: { ...member.source, file: relativePath("src/d.ts") },
     }))
     const rows = treeRows(sliceView([...a, ...b].map(logicChange), [sliceOf(...a, ...b)]))
     expect(rows.filter((row) => !row.startsWith(" "))).toEqual([

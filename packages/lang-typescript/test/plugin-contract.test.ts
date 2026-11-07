@@ -1,4 +1,5 @@
 import { extractFile } from "@aburi/test-harness"
+import { relativePath } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   langTypescriptManifest,
@@ -93,7 +94,7 @@ describe("the files this plugin claims and drops", () => {
 describe("langTypescriptPlugin.releaseTree", () => {
   it("frees the tree it is given", async () => {
     const { tree } = await langTypescriptPlugin.parseFile({
-      path: "src/a.ts",
+      path: relativePath("src/a.ts"),
       content: "export function f() { return 1 }\n",
     })
     if (tree === null) throw new Error("the parse built no tree")

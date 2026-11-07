@@ -1,10 +1,15 @@
 import { readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, posix, relative, sep } from "node:path"
-import type { WorkspaceManager } from "@aburi/types"
+import type { RelativePath, WorkspaceManager } from "@aburi/types"
 import { parse as parseYaml } from "yaml"
 import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
-import { posixWorkspaceRelativeViolation, type UnnameableSite, unnameableSite } from "./id"
+import {
+  posixWorkspaceRelativeViolation,
+  toDocumentPath,
+  type UnnameableSite,
+  unnameableSite,
+} from "./id"
 import { compareBy, compareCodeUnit } from "./order"
 import { describeJsonType } from "./scan/faults"
 import { type GitignoreTree, openGitignoreTree } from "./scan/gitignore"
@@ -49,12 +54,15 @@ export interface UnnameableRoot {
 
 export interface WorkspaceCandidate {
   /** Workspace-root-relative POSIX path of the candidate directory. */
-  relativeRoot: string
+  relativeRoot: RelativePath
   absoluteRoot: string
   /** Tool that produced this candidate (the same path may appear once per tool). */
   managerTool: string
   manifestPath: string
 }
+
+/** A package directory as a search found it, before the scan knows a Document path can name it. */
+type FoundPackage = Omit<WorkspaceCandidate, "relativeRoot"> & { relativeRoot: string }
 
 export async function detectManagers(
   workspaceRoot: string,
@@ -122,7 +130,7 @@ function firstFailure(failures: readonly unknown[]): unknown {
 
 interface ManagerScan {
   tool: string
-  candidates: WorkspaceCandidate[]
+  candidates: FoundPackage[]
   manifestPath: string
   declaredPatterns: readonly string[]
 }
@@ -137,20 +145,20 @@ function mergeManager(
   workspaces: WorkspaceCandidate[],
   seen: Set<string>,
 ): UnnameableCandidate[] {
-  const roots = new Set<string>()
+  const roots = new Set<RelativePath>()
   const leftOut: UnnameableCandidate[] = []
-  for (const candidate of scan.candidates) {
-    const unnameable = unnameableCandidate(workspaceRoot, candidate)
+  for (const found of scan.candidates) {
+    const unnameable = unnameableCandidate(workspaceRoot, found)
     if (unnameable !== null) {
       leftOut.push(unnameable)
       continue
     }
-    assertInsideWorkspace(candidate, scan.tool)
-    roots.add(candidate.relativeRoot)
-    const key = `${candidate.managerTool}\t${candidate.relativeRoot}`
+    const relativeRoot = workspaceRelativeRoot(found, scan.tool)
+    roots.add(relativeRoot)
+    const key = `${found.managerTool}\t${relativeRoot}`
     if (seen.has(key)) continue
     seen.add(key)
-    workspaces.push(candidate)
+    workspaces.push({ ...found, relativeRoot })
   }
   managers.push({ tool: scan.tool, roots: [...roots] })
   return leftOut
@@ -160,7 +168,7 @@ function mergeManager(
 // the workspace: both are outside it, whatever their names, and are refused as such.
 function unnameableCandidate(
   workspaceRoot: string,
-  candidate: WorkspaceCandidate,
+  candidate: FoundPackage,
 ): UnnameableCandidate | null {
   const relativeRoot = spelledRelativePosix(workspaceRoot, candidate.absoluteRoot)
   if (isAbsolute(relativeRoot) || relativeRoot.split("/").includes("..")) return null
@@ -169,12 +177,12 @@ function unnameableCandidate(
   return { relativeRoot, reason: site.reason, unnameablePrefix: site.prefix }
 }
 
-function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): void {
+function workspaceRelativeRoot(candidate: FoundPackage, tool: string): RelativePath {
   const violation = posixWorkspaceRelativeViolation(
     candidate.relativeRoot,
     `${tool} workspace root`,
   )
-  if (violation === null) return
+  if (violation === null) return toDocumentPath(candidate.relativeRoot)
   throw new CoreError(
     `${violation.message}. A package outside the workspace root cannot be described by this IR, and the file walk never reaches it — declare it from the workspace that contains it, or move the workspace root.`,
     { code: "workspace-root-outside", value: candidate.relativeRoot },
@@ -261,7 +269,7 @@ async function detectNx(
     deep: 10,
     gitignore,
   })
-  const candidates: WorkspaceCandidate[] = []
+  const candidates: FoundPackage[] = []
   for (const projectFile of projectFiles) {
     if (gitignore !== null && (await gitignore.ignores(toRelativePosix(root, projectFile))))
       continue
@@ -282,7 +290,7 @@ async function resolveDeclaredPackages(
   workspaceRoot: string,
   patterns: readonly string[],
   managerTool: string,
-): Promise<WorkspaceCandidate[]> {
+): Promise<FoundPackage[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
   // pnpm and npm resolve these same patterns this way: through links, into nested checkouts, and
   // with no wildcard matching a leading dot.

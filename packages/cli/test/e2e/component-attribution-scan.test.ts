@@ -3,14 +3,14 @@ import { prismaEffectsPlugin } from "@aburi/effects-prisma"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { projectComponent, projectWorkspace } from "@aburi/markdown-projection"
 import { scanWith } from "@aburi/test-harness"
-import { useScratchWorkspace } from "@aburi/test-support"
+import { relativePath, useScratchWorkspace } from "@aburi/test-support"
 import type { Component } from "@aburi/types"
 import { beforeEach, describe, expect, it } from "vitest"
 
 const API: Component = {
   id: makeComponentId("api"),
   name: "@acme/api",
-  roots: ["packages/api"],
+  roots: [relativePath("packages/api")],
   languages: [makeLanguageId("ts")],
   description: null,
 }
@@ -18,7 +18,7 @@ const API: Component = {
 const WEB: Component = {
   id: makeComponentId("web"),
   name: "@acme/web",
-  roots: ["packages/web"],
+  roots: [relativePath("packages/web")],
   languages: [makeLanguageId("ts")],
   description: null,
 }

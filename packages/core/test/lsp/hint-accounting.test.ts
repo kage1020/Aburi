@@ -1,4 +1,4 @@
-import { decorator, symbolId } from "@aburi/test-support"
+import { decorator, relativePath, symbolId } from "@aburi/test-support"
 import type {
   Symbol as IRSymbol,
   LspEnrichmentStats,
@@ -152,7 +152,7 @@ describe("the owner class a hover names without its file", () => {
   }
 
   const at = (file: string, line: number): SourceRange => ({
-    file,
+    file: relativePath(file),
     startLine: line,
     endLine: line,
     startColumn: null,
@@ -342,7 +342,7 @@ describe("the owner class a hover names without its file", () => {
     const VIEWS = "src/views/users.ts"
     const inViews = (symbol: IRSymbol): IRSymbol => ({
       ...symbol,
-      source: { ...symbol.source, file: VIEWS },
+      source: { ...symbol.source, file: relativePath(VIEWS) },
     })
 
     const enrichment = await enrich({

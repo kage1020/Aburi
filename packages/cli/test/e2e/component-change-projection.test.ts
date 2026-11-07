@@ -1,6 +1,6 @@
 import { projectDiff } from "@aburi/markdown-projection"
 import { diffIRs } from "@aburi/test-harness"
-import { componentId, languageId, makeIR } from "@aburi/test-support"
+import { componentId, languageId, makeIR, relativePath } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 
@@ -10,7 +10,7 @@ function billing(overrides: { name?: string; description?: string | null } = {})
       {
         id: componentId("billing"),
         name: overrides.name ?? "Billing",
-        roots: ["apps/billing"],
+        roots: [relativePath("apps/billing")],
         languages: [languageId("ts")],
         description: overrides.description ?? null,
       },

@@ -6,6 +6,7 @@ import type {
   EffectId,
   ExtKind,
   LanguageId,
+  RelativePath,
   Rule,
   Signature,
   SourceRange,
@@ -19,7 +20,7 @@ export type ParsedTree = unknown
 export type OpaqueAstNode = unknown
 
 export interface SourceFile {
-  path: string
+  path: RelativePath
   content: string
 }
 

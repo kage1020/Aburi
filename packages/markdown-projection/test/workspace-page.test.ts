@@ -1,4 +1,12 @@
-import { component, dependency, effect, languageId, makeIR, makeSymbol } from "@aburi/test-support"
+import {
+  component,
+  dependency,
+  effect,
+  languageId,
+  makeIR,
+  makeSymbol,
+  relativePath,
+} from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { EFFECT_SURFACE_TOP_N, projectWorkspace } from "../src"
@@ -17,8 +25,8 @@ function withHeader(overrides: Partial<IR>): IR {
       root: ".",
       languages: [languageId("ts"), languageId("py")],
       managers: [
-        { tool: "uv", roots: ["services/api"] },
-        { tool: "pnpm", roots: [".", "tools"] },
+        { tool: "uv", roots: [relativePath("services/api")] },
+        { tool: "pnpm", roots: [relativePath("."), relativePath("tools")] },
       ],
     },
     generator: { name: "aburi", version: "1.2.3", plugins: [] },
