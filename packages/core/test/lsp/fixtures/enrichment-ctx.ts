@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url"
 import type { Config, Symbol as IRSymbol, LanguageId, Logger, LspServerConfig } from "@aburi/types"
+import type { ThisBindingSites } from "../../../src/call-site"
 import {
   type EnrichmentInput,
   type EnrichmentResult,
@@ -49,6 +50,7 @@ export interface EnrichmentCase {
   fsPaths?: Record<string, string>
   languageIds?: readonly LanguageId[] | null
   logger?: Logger
+  thisBindings?: ThisBindingSites
 }
 
 export function makeEnrichmentInput(input: EnrichmentCase): EnrichmentInput {

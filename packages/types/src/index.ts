@@ -114,6 +114,7 @@ export type {
   SourceFile,
   SymbolCandidate,
   SymbolClassification,
+  ThisBinding,
   VocabRegistry,
   WalkContext,
   WrittenSourceRange,

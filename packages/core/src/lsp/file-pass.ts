@@ -6,6 +6,7 @@ import type {
   LspServerConfig,
   SymbolId,
 } from "@aburi/types"
+import type { ThisBindingSites } from "../call-site"
 import { groupBy } from "../collections"
 import { compareCodeUnit } from "../order"
 import { fileExtension } from "../scan/route"
@@ -34,6 +35,7 @@ export interface LanguageFilesInput {
   stats: LspStatsBuilder
   fallback: FallbackState
   receiverHints: Map<string, ReceiverHint>
+  thisBindings: ThisBindingSites
   warnings: string[]
   logger: Logger
   now: () => number
@@ -87,7 +89,7 @@ export async function enrichLanguageFiles(input: LanguageFilesInput): Promise<vo
     if (!fileFellBack && outOfBudget()) fileFellBack = true
 
     if (!fileFellBack) {
-      const jobs = buildHoverJobs(fileSymbols, read.content)
+      const jobs = buildHoverJobs(fileSymbols, read.content, input.thisBindings)
       const hovers = new Map<number, Hover>()
       try {
         await runJobsWithConcurrency(jobs, concurrency, async (job, index) => {

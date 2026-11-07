@@ -122,6 +122,26 @@ const PROJECT: Record<string, string> = {
     "}",
     "",
   ].join("\n"),
+  "src/contexts.ts": [
+    "function pick(): (q: string) => string {",
+    "  return (q) => q",
+    "}",
+    "export class Maker {",
+    "  static make(): Maker { return new Maker() }",
+    "  make(): Maker { return this }",
+    "  static first = this.make()",
+    "  second = this.make()",
+    "  static {",
+    "    this.make()",
+    "  }",
+    "}",
+    "export class Finder {",
+    "  static find(q: string): string { return q }",
+    "  find: (q: string) => string = pick()",
+    '  found = this.find("x")',
+    "}",
+    "",
+  ].join("\n"),
 }
 
 const answers: {
@@ -207,7 +227,7 @@ describe("the LSP pass against recorded typescript-language-server answers", () 
     )
   })
 
-  it("resolves this. calls to a member of the caller's own kind", async () => {
+  it("resolves this. calls to a member of the kind this is where each is written", async () => {
     const result = await scanRecorded()
     const resolved = (id: string) => symbolById(result, id).calls.map((c) => c.resolved)
 
@@ -219,16 +239,24 @@ describe("the LSP pass against recorded typescript-language-server answers", () 
       "Pool.count": resolved("ts:src/kinds.ts#Pool.count"),
       Pool: resolved("ts:src/kinds.ts#Pool"),
       "Search.onInput": resolved("ts:src/kinds.ts#Search.onInput"),
+      Maker: resolved("ts:src/contexts.ts#Maker"),
+      Finder: resolved("ts:src/contexts.ts#Finder"),
     }).toEqual({
       "Store.run": ["ts:src/repo.ts#Store.count", "ts:src/repo.ts#Store.count"],
       "Factory::build": ["ts:src/repo.ts#Factory::create"],
       Factory: ["ts:src/repo.ts#Factory::create"],
       "Pool::total": ["ts:src/kinds.ts#Pool::size"],
       "Pool.count": ["ts:src/kinds.ts#Pool.size"],
-      Pool: [null],
+      Pool: ["ts:src/kinds.ts#Pool::size"],
       "Search.onInput": [null, null, null],
+      Maker: [
+        "ts:src/contexts.ts#Maker::make",
+        "ts:src/contexts.ts#Maker.make",
+        "ts:src/contexts.ts#Maker::make",
+      ],
+      Finder: ["ts:src/contexts.ts#pick", null],
     })
-    expect(result.ir.stats.lspEnrichment?.hintsProduced).toBe(9)
+    expect(result.ir.stats.lspEnrichment?.hintsProduced).toBe(13)
     expect(result.ir.stats.lspEnrichment?.hintsRejected).toEqual({
       unparseableHover: 0,
       ownerClassNotFound: 0,

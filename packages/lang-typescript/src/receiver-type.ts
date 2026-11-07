@@ -1,3 +1,4 @@
+import type { ThisBinding } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { firstNonCommentChild, hasChildOfType } from "./ast-helpers"
 
@@ -28,6 +29,12 @@ export function receiverTypeOf(callee: Node): string | null {
   if (field === null) return null
   const scope = thisScope(receiver)
   return scope === null ? null : declaredType(scope, field.text)
+}
+
+export function thisBindingAt(node: Node): ThisBinding | null {
+  const scope = thisScope(node)
+  if (scope === null) return null
+  return scope.isStatic ? "class" : "instance"
 }
 
 function thisScope(from: Node): ThisScope | null {

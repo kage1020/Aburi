@@ -76,7 +76,7 @@ interface EffectPlugin {
 ### 4.2 `CallCandidate` (from the language plugin)
 
 Normatively defined in [`lang-plugin.md`](./lang-plugin.md) §4.4. This document only references the same type.
-Summary: the 6 fields `{ target, line, argumentCount, inAwait, inNew, literalArgs }`, and two optional ones, `dynamicReceiver` and `receiverType`. `literalArgs` covers cases such as wanting to inspect the contents of an SQL string (non-literals are `null`). `receiverType` is the named type the receiver is declared with, when the language plugin can read one (§5.4).
+Summary: the 6 fields `{ target, line, argumentCount, inAwait, inNew, literalArgs }`, and three optional ones, `dynamicReceiver`, `receiverType` and `thisBinding`. `literalArgs` covers cases such as wanting to inspect the contents of an SQL string (non-literals are `null`). `receiverType` is the named type the receiver is declared with, when the language plugin can read one (§5.4).
 
 `target` is contract-guaranteed non-empty with no empty segments (lang-plugin.md §4.4, "Normalized-callee contract"). Effect plugins enforce that contract instead of coding around it: `assertNonEmptySegments` from `@aburi/plugin-registry/plugin-input` splits the target and throws on a violation, and `hasMatchingImport` does the same for `ImportEdge.source`. Both live in the registry rather than in each plugin so the next effect plugin inherits identical messages and identical fail-fast ordering. The guards ship as a dedicated subpath so importing them does not pull the registry's manifest validator (and its schema compilation) into a classifier's startup path.
 

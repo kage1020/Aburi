@@ -15,7 +15,7 @@ import type {
   SymbolCandidate,
   VocabRegistry,
 } from "@aburi/types"
-import { makeCallSiteKey } from "../call-site"
+import { type CallSiteBinding, isThisBinding, makeCallSiteKey } from "../call-site"
 import type { DropCFilter } from "./drop-c"
 import { normalizeCallStrings } from "./normalize"
 import {
@@ -50,10 +50,12 @@ export function classifyCalls(input: ClassifyCallsInput): {
   effects: Effect[]
   calls: Call[]
   dynamicCallSites: string[]
+  thisBindings: CallSiteBinding[]
 } {
   const classifiedEffects: Effect[] = []
   const survivingCalls: Call[] = []
   const dynamicCallSites: string[] = []
+  const thisBindings: CallSiteBinding[] = []
   const owner: OwnerSummary = {
     id: input.candidate.id,
     kind: input.candidate.kind,
@@ -111,15 +113,15 @@ export function classifyCalls(input: ClassifyCallsInput): {
     }
     if (!classified) {
       survivingCalls.push({ target: call.target, line: call.line, resolved: null })
-      if (call.dynamicReceiver === true) {
-        dynamicCallSites.push(makeCallSiteKey(input.file.path, call.line, call.target))
-      }
+      const key = makeCallSiteKey(input.file.path, call.line, call.target)
+      if (call.dynamicReceiver === true) dynamicCallSites.push(key)
+      if (isThisBinding(call.thisBinding)) thisBindings.push([key, call.thisBinding])
     }
   }
 
   classifiedEffects.sort(byTargetThenLine)
   survivingCalls.sort(byTargetThenLine)
-  return { effects: classifiedEffects, calls: survivingCalls, dynamicCallSites }
+  return { effects: classifiedEffects, calls: survivingCalls, dynamicCallSites, thisBindings }
 }
 
 function byTargetThenLine(

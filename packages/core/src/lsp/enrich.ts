@@ -6,6 +6,7 @@ import type {
   LspServerConfig,
   SymbolId,
 } from "@aburi/types"
+import { NO_THIS_BINDINGS, type ThisBindingSites } from "../call-site"
 import { groupBy } from "../collections"
 import { silentLogger } from "../logger"
 import { compareBy, compareCodeUnit } from "../order"
@@ -38,6 +39,8 @@ export interface EnrichmentInput {
    * from a plugin that was not loaded, so `null` checks no key.
    */
   languageIds: readonly LanguageId[] | null
+  /** What `this` is at each call site, as the language plugin recorded it. */
+  thisBindings?: ThisBindingSites
   logger?: Logger
   serverFactory?: ServerFactory
   now?: () => number
@@ -137,6 +140,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
         stats,
         fallback,
         receiverHints,
+        thisBindings: input.thisBindings ?? NO_THIS_BINDINGS,
         warnings,
         logger,
         now: input.now ?? (() => performance.now()),

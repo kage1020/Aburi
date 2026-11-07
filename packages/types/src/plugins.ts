@@ -119,7 +119,12 @@ export interface CallCandidate {
   dynamicReceiver?: boolean
   /** The named type the receiver is declared with, type arguments aside, e.g. `EventEmitter2`. */
   receiverType?: string
+  /** For a call through `this` or `super`, what `this` is where the call is written. */
+  thisBinding?: ThisBinding
 }
+
+/** `class` in a static block or a static member, `instance` in an instance member. */
+export type ThisBinding = "class" | "instance"
 
 export interface BodyExtraction {
   rules: Rule[]

@@ -112,6 +112,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     fileContents: extracted.fileContents,
     lspConfig: input.config.lsp,
     languageIds: input.languages.map((plugin) => plugin.languageId),
+    thisBindings: extracted.thisBindings,
     logger,
   }
   if (input.lspServerFactory !== undefined) enrichmentInput.serverFactory = input.lspServerFactory

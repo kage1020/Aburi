@@ -1,8 +1,8 @@
-import { decodeStringLiteral, isQnameSegment, readStaticString } from "@aburi/core"
+import { decodeStringLiteral, isQnameSegment, readStaticString, receiverHead } from "@aburi/core"
 import { type CallCandidate, COMPUTED_TARGET_SEGMENT } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { findChild, firstNonCommentChild, hasErrorChild } from "./ast-helpers"
-import { receiverTypeOf } from "./receiver-type"
+import { receiverTypeOf, thisBindingAt } from "./receiver-type"
 
 export function readCall(node: Node): CallCandidate | null {
   const isNew = node.type === "new_expression"
@@ -15,6 +15,9 @@ export function readCall(node: Node): CallCandidate | null {
     (arg): arg is Node => arg !== null && arg.type !== "comment",
   )
   const receiverType = receiverTypeOf(callee)
+  const thisBinding = THIS_RECEIVERS.has(receiverHead(shape.target) ?? "")
+    ? thisBindingAt(node)
+    : null
   return {
     target: shape.target,
     line: node.startPosition.row + 1,
@@ -24,8 +27,11 @@ export function readCall(node: Node): CallCandidate | null {
     literalArgs: args.map(literalOf),
     ...(shape.dynamic ? { dynamicReceiver: true } : {}),
     ...(receiverType === null ? {} : { receiverType }),
+    ...(thisBinding === null ? {} : { thisBinding }),
   }
 }
+
+const THIS_RECEIVERS: ReadonlySet<string> = new Set(["this", "super"])
 
 function literalOf(node: Node): string | null {
   switch (node.type) {
