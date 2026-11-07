@@ -34,6 +34,7 @@ A suite imports its own package's `src`, every other published `@aburi/*` packag
               └─ @aburi/markdown-projection
 @aburi/cli ── config, core, diff, markdown-projection, plugin-registry   (loads plugins at runtime)
 @aburi/github-action ── runs the CLI
+@aburi/mcp ── cli                           (runs the CLI, the workspace's own first)
 ```
 
 Private packages:

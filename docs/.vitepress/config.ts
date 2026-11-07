@@ -49,6 +49,7 @@ export default defineConfig({
           { text: "Supported stacks", link: "/guide/supported-stacks" },
           { text: "Configuration", link: "/guide/configuration" },
           { text: "CI integration", link: "/guide/ci-integration" },
+          { text: "AI coding agents", link: "/guide/ai-agents" },
         ],
       },
       {
@@ -98,6 +99,7 @@ export default defineConfig({
           { text: "Parallel parsing", link: "/design/performance" },
           { text: "LSP enrichment", link: "/design/lsp-enrichment" },
           { text: "GitHub Action", link: "/design/github-action" },
+          { text: "MCP server", link: "/design/mcp-server" },
         ],
       },
     ],

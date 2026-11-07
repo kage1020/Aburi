@@ -1,0 +1,57 @@
+{
+  "name": "@aburi/mcp",
+  "version": "0.0.0",
+  "description": "Aburi MCP server: answers an AI coding agent's questions about a workspace — what a change did, a component's API and effects, one Symbol's detail — over the Model Context Protocol, from the runs of the aburi CLI it makes",
+  "license": "Apache-2.0",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/mcp"
+  },
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "bin": {
+    "aburi-mcp": "./dist/bin/aburi-mcp.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aburi/cli": "workspace:*",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@aburi/lang-typescript": "workspace:*",
+    "@aburi/test-support": "workspace:*",
+    "@aburi/types": "workspace:*",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

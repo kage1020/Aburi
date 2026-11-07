@@ -109,6 +109,7 @@ way: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml).
 | [Supported stacks](https://aburi.dev/guide/supported-stacks) | Which plugins cover your framework. |
 | [Configuration](https://aburi.dev/guide/configuration) | Every field of `aburi.json`. |
 | [CI integration](https://aburi.dev/guide/ci-integration) | Gates and pull request comments. |
+| [AI coding agents](https://aburi.dev/guide/ai-agents) | The MCP server, for Claude Code and other agents. |
 | [CLI reference](https://aburi.dev/reference/cli) | Every flag and exit code. |
 | [Architecture](https://aburi.dev/extend/architecture) | How the pipeline fits together. |
 | [Plugin development](https://aburi.dev/extend/plugin-development) | Add a language, framework, or library. |
