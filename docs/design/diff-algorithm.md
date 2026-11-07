@@ -160,13 +160,13 @@ Matching logic fingerprint = same meaning. This catches a good share of "file mo
 
 A pair below the bar is now refused whether or not its base was the last one left in the group, where the lone branch used to take it. Which of several bases above the bar takes a shared head is still §3.8's call, so group membership still decides that much.
 
-**What this gives up.** In such a group a move is settled by its name alone. A class that moved file without git rename information pairs when its name barely changed (similarity ≥ 0.85) and says two words or more: `InvoiceRenderer` that moved is a move, while `Invoice` that moved and `InvoiceRenderer` renamed to `InvoicePrinter` (similarity 1/3) are each added + removed. No later stage takes these back. Stage 4 skips a head with a null signature (§3.4.3), and every class, interface, type alias and enum carries one, as does a `const` that does not hold a function — `DEFAULT_TIMEOUT` → `REQUEST_TIMEOUT` goes the same way as the class rename. Stage 4.5 takes only dropped Symbols. A function or method has a signature and gets stage 4 under its own rules, which refuse `Cls.getUser` → `Cls.fetchUser` too (member similarity 1/3, under the 0.95 row): with a body that only calls something, that rename was one `moved+changed` through the lone branch and is added + removed now.
+**What this gives up.** In such a group a move is settled by its name alone. A class that moved file without git rename information pairs when its name barely changed (similarity ≥ 0.85) and says two words or more: `InvoiceRenderer` that moved is a move, while `Invoice` that moved and `InvoiceRenderer` renamed to `InvoicePrinter` (similarity 1/3) leave this stage unpaired. An owner gets a second reading, on its members: stage 4 pairs a class whose members all paired into one class, under a name §3.4.6's gate accepts (§3.4.8). So `Invoice` that moved with a method is a move after all, and `InvoiceRenderer` → `InvoicePrinter` is added + removed whatever its methods did, because `renderer` has no partner. Nothing else takes these back. Stage 4 skips a head with a null signature (§3.4.3), and every class, interface, type alias and enum carries one, as does a `const` that does not hold a function. `DEFAULT_TIMEOUT` → `REQUEST_TIMEOUT` goes the same way as the class rename, and so does a class with no member Symbol to read, or an interface, a type alias or an enum, whose members have none. Stage 4.5 takes only dropped Symbols. A function or method has a signature and gets stage 4 under its own rules, which refuse `Cls.getUser` → `Cls.fetchUser` too (member similarity 1/3, under the 0.95 row): with a body that only calls something, that rename was one `moved+changed` through the lone branch and is added + removed now.
 
-An owner and its members are paired independently. `class Invoice { render() }` moved file is added + removed while `Invoice.render`, whose name says two words, is moved. A renamed class whose methods pair through §3.4.6's gate was already reported the same way; nothing reconciles an owner with its members.
+This stage pairs an owner and its members independently. `class Invoice { render() }` moved file leaves it with `Invoice.render` paired, since that name says two words, and `Invoice` unpaired. Stage 4 reconciles the two (§3.4.8).
 
 The kind is part of the group key for the reason it is part of stage 4's bucket key (§3.4.0): a function and a class are never one Symbol, whatever their bodies hash to. It also stops a Symbol whose kind changes while it moves file, on any logic fingerprint, non-empty included: a method extracted into a top-level function, or an `enum` rewritten as an `as const` object in another file, is added + removed, because stage 4's bucket carries the kind as well. Within one file the id survives the kind change and stage 1 pairs the two.
 
-Every Symbol stage 3 does not pair is handed to stage 4, a group that missed the bar included. What stage 4 can do with it is stage 4's rule: it skips a Symbol on either side whose name says one word or that has a null signature (§3.4.3), so for those Symbols stage 3 was the last stage to read them.
+Every Symbol stage 3 does not pair is handed to stage 4, a group that missed the bar included. What stage 4 can do with it is stage 4's rule: it skips a Symbol on either side whose name says one word or that has a null signature (§3.4.3), so for those Symbols stage 3 was the last stage to read them by name. An owner among them can still be paired on its members (§3.4.8).
 
 Dropped symbols all share the fingerprint `"000000000000"`, so they would collide massively under the same hash. Dropped-to-dropped matching is excluded from stages 3/4 and handled by a dedicated weak matcher (§3.4.5).
 
@@ -196,6 +196,8 @@ for h in remainingHead:
 
 for (b, h, score) in acceptInScoreOrder(candidates):      # §3.8
   pair, rationale: 'name-signature'
+
+pairOwnersThroughMembers(every pair so far)               # §3.4.8, rationale: 'name-signature'
 ```
 
 #### 3.4.0 Bucket pre-filter (mandatory)
@@ -273,7 +275,7 @@ if s.signature === null:            skip the Symbol, either side, leave for adde
 
 The name is read first, so a Symbol that fails both is skipped for its name, which is what §3.4.7 traces.
 
-**A null signature** makes `signatureSimilarity(null, null)` return 1.0, so two signature-less Symbols would pair on their names alone. A head with no signature is the case the rule exists for. A base with none could only meet a head with a signature, where the axis is 0 and the composite at most 0.7, under every row of the table — so the rule reads both sides at no cost to recall, and a signature-less base stays out of the buckets.
+**A null signature** makes `signatureSimilarity(null, null)` return 1.0, so two signature-less Symbols would pair on their names alone. A head with no signature is the case the rule exists for. A base with none could only meet a head with a signature, where the axis is 0 and the composite at most 0.7, under every row of the table — so the rule reads both sides at no cost to recall, and a signature-less base stays out of the buckets. An owner skipped here is read again by §3.4.8, on its members rather than its name.
 
 **A one-token qualified name** is the whole of what §3.4 has to read about that Symbol's identity. `main` supplies one word and an empty owner, so a top-level `main(x: string): void` scores 1.0 against any other top-level `main(x: string): void` and two unrelated CLI entry points are reported as one `moved+changed` — which `--fail-on moved` gates on. The first threshold row was written to prevent exactly this and could not, because 1.0 is the top of the scale.
 
@@ -454,7 +456,7 @@ Inflection is not on that spectrum. It is a closed, mechanical relation between 
 - **An added or dropped token.** `UserRepo` and `UserRepoV2` are two classes rather than one renamed; an added token is as much evidence of a sibling as of a rename.
 - **A changed nesting depth.** A rename changes what a class is called, not where it lives, so `Services.UserRepo` and `UserRepo` are different scopes.
 
-The evidence that would settle the first is not in the strings. The owner is itself a Symbol in the IR, so "was this class paired as a rename" is a question the stage could ask rather than guess at — which would mean stage 4 consuming its own output, and is the direction a future revision should take rather than a looser string rule.
+The evidence that would settle the first is not in the strings. The owner is itself a Symbol in the IR, so "was this class paired as a rename" is a question the stage could ask rather than guess at. §3.4.8 asks the converse, which owner a class's members paired into, and still puts the two owner names through this gate, so the abbreviation family stays added + removed: what the members say does not overrule what the names refuse. Admitting a method because its class was paired would mean stage 4 consuming its own output in the other direction, and that, not a looser string rule, is the direction a future revision should take.
 
 #### 3.4.2 signatureSimilarity
 
@@ -468,20 +470,64 @@ averaged.
 
 #### 3.4.7 What stage 4 says about a refusal
 
-Three of the rules stage 4 refuses on are traced: a Symbol whose name says too little and a Symbol with no signature (both §3.4.3), and a pair whose owners do not correspond (§3.4.6). The report says nothing about why a Symbol was left unpaired — the gate refuses `UserRepo` → `UsersRepository` deliberately, but a reviewer looking at the churn has nothing pointing them here. So each refusal is written to the run's `Logger` at `debug`, when `DiffInput.logger` is given, as one line naming the Symbol, or both Symbols of the refused pair, and the rule:
+Three of the rules stage 4 refuses on are traced: a Symbol whose name says too little and a Symbol with no signature (both §3.4.3), and a pair whose owners do not correspond (§3.4.6). So are three of the reasons §3.4.8 leaves an owner unpaired although its members paired. The report says nothing about why a Symbol was left unpaired — the gate refuses `UserRepo` → `UsersRepository` deliberately, but a reviewer looking at the churn has nothing pointing them here. So each refusal is written to the run's `Logger` at `debug`, when `DiffInput.logger` is given, as one line naming the Symbol, or both Symbols of the refused pair, and the rule:
 
 ```
 diff/stage4: ts:src/a.ts#render is not compared by name: its name says too little to pair on
 diff/stage4: ts:src/a.ts#buildConfig is not compared by name: it has no signature, and a name alone does not pair
 diff/stage4: ts:src/a.ts#UserRepo.findUser and ts:src/b.ts#UsersRepository.findUser are not paired: their owners do not correspond
+diff/stage4: ts:src/old.ts#Invoice is not paired through its members: they did not all pair into one owner
+diff/stage4: ts:src/old.ts#Invoice and ts:src/new.ts#Receipt are not paired through their members: their names do not correspond
+diff/stage4: ts:src/a.ts#Invoice and ts:src/c.ts#Invoice are not paired through their members: the head also holds members paired from elsewhere
 ```
 
-- **A Symbol line** is written for every non-dropped Symbol either rule turns away, including one with nothing to pair with, and stands for one entry of the report: `added` or `removed`, or `unknown` where the other side skipped its file (§3.5.1). A Symbol that fails both rules is traced once, for its name, which §3.4.3 reads first.
+- **A Symbol line** is written for every non-dropped Symbol either rule turns away and §3.4.8 does not pair, including one with nothing to pair with, and stands for one entry of the report: `added` or `removed`, or `unknown` where the other side skipped its file (§3.5.1). A Symbol that fails both rules is traced once, for its name, which §3.4.3 reads first. The lines are written once §3.4.8 has settled the owners, because an owner it pairs is an entry of neither kind.
 - **A gate line** is written after the pairings are chosen (§3.8), for a pair whose base and head both reach stage 5 unpaired and which cleared its row's threshold. So each line names two Symbols the report lists separately, which only the gate kept from being a candidate. A pair either of whose Symbols paired elsewhere is not traced, nor one that scored below its row, which is a judgement on the evidence rather than a rule. The line is per pair, so N such bases and M such heads write up to N × M lines.
+- **An owner line** is written for a base owner whose members paired and which §3.4.8 refused, for one of three of its rules: the members did not all pair into one head owner, the gate refused the two owners' names, or the head owner also holds members paired from another owner, or from none. Both Symbols such a line names reach stage 5 unpaired, and each keeps its Symbol line too, since stage 4 did not read its name either. The other refusals are not traced: a head owner that paired elsewhere, as for the gate line, or that §3.4.8 does not read; one of another kind, as for the bucket key below; and the rare one that keeps an owner §3.4.8 already paired from gaining a member from outside its partner.
 
 The kind in §3.4.0's bucket key is a rule too and is not traced: a function and a class are never one Symbol (§3.3), so there is no near miss for a line to explain.
 
 The channel is a diagnostic one: nothing it writes reaches the diff result or `aburi.diff.v1.json`, and `buildDiff`'s answer is the same with and without a logger. Tracing the gate walks the buckets again for the Symbols left unpaired, so it runs only when a logger is given, and `aburi diff` gives the matcher one only at `--log-level debug` or `ABURI_LOG_LEVEL=debug`, where the lines show on stderr.
+
+#### 3.4.8 Owners paired through their members
+
+Stage 3 reads a class by its name alone, and stage 4 does not read it at all (§3.4.3). So `class Invoice { render() }` that moved file, with no git rename information and a body that names nothing, reached stage 5 as `added Invoice` and `removed Invoice` beside `moved Invoice.render`: `--fail-on removed` and `--fail-on moved` both fired on one unchanged class. A class whose name was pluralised in place went the same way while §3.4.6's gate paired each of its methods. The pair the names cannot settle is settled by the members. An owner is itself a Symbol, and where its members went is already decided by the stages before, so the question can be asked rather than guessed:
+
+```
+after stage 4's pairs are accepted (§3.8):
+  pairs = every pair of stages 1 to 4
+  ownerOf(s) = the nearest Symbol of s's own document whose qualified name s's extends,
+               in s's file    # `api.v1.get` belongs to `api`: the object between has no Symbol
+
+  for b in the unpaired bases with a null signature, not dropped,
+           deepest qualified name first, then by id:
+    members = the pairs p with ownerOf(p.base) == b
+    if members is empty: continue                       # nothing to go on
+    if some ownerOf(p.head) differs, or is none: refuse # its members went more than one way
+    h = that head owner
+    if h is paired, dropped or has a signature: refuse
+    if h.kind != b.kind: refuse                         # §3.3: a class is never a namespace
+    if not ownersCorrespond(b.name, h.name): refuse     # §3.4.6's gate, on the owners' own names
+    if some pair p with ownerOf(p.head) == h has ownerOf(p.base) != b: refuse
+                                                        # h also took members from elsewhere
+    if ownerOf(h) was paired by this loop with an owner other than ownerOf(b): refuse
+    pair (b, h), rationale: 'name-signature', throughMembers: len(members)
+    pairs.append((b, h))                                # evidence for ownerOf(b) in its turn
+```
+
+**The Symbols it reads** are the ones stage 4 skips for a null signature, which is every owner a TypeScript document has: a class, a namespace, an object literal a binding holds. One with a signature has had stage 4's judgement already, and a dropped one is stage 4.5's. An interface, a type alias or an enum has no member Symbols ([`ir-schema.md`](./ir-schema.md) §3.2), so there is nothing for it to be paired on. A one-word name is no bar: it is what stage 3 could not read, and the members are the evidence here, not the name.
+
+**Every member, both ways.** The members of `b` must all have gone into `h`, and every member `h` received must have come from `b`. A class split into two (one method into `Printer`), a method that became a top-level function, and two classes merged into one each have no single counterpart, and pairing one of them would hide the other half of the change. A member that is added or removed says nothing about where its owner went and does not count either way, so a class that moved, dropping one method and gaining another, still pairs on the method that came with it.
+
+**The gate still applies.** A member's pair can rest on its body alone: stage 3's lone branch pairs a method whose logic names something without reading its owner. Without the gate, `Invoice.render` moving unchanged into `Receipt` would make `Invoice` and `Receipt` one class. The gate is asked of the owners' own qualified names, as stage 4 asks it of a member's owner, so every pair it admits is one stage 4 would have admitted for their members: `UserRepo` → `UsersRepo` pairs, `UserRepo` → `UsersRepository` does not.
+
+**Nested owners, in one pass.** An owner is settled after every owner nested in it, so a pair this loop makes is evidence for the next owner out: namespace `Billing` → `Billing` pairs on `Billing.Invoice` → `Billing.Invoices`, which paired on its method. The depth is the number of segments in the qualified name, and an owner always has fewer than its members, so its evidence is complete by its turn. The head side's is complete too, except in one shape the gate allows: a static nested `Billing::Invoice` in the head corresponds by its tokens to a top-level `BillingInvoices` in the base, so the pair (`BillingInvoices`, `Billing::Invoice`) can come up after (`Billing`, `Billing`). The last check refuses it rather than give an owner this loop paired a member from outside its partner. Which of the two is refused follows the order, which is fixed by depth and id, so the diff is still a function of the two Documents (§3.8). There is no choice to make among candidates otherwise: `b` has one target, and two bases that target one head both fail the reverse check, so no score is needed.
+
+**What the entry says.** The rationale is `name-signature`, because stage 4 made the pair, and the entry carries `throughMembers`, the number of member pairs it rests on. A rationale of its own would say this more directly, but adding a `MatchRationale` value is breaking (§10.1) and `--fail-on` readers key on the values there are. The count is an optional scalar written only on such a pair, and a writer that predates it never paired an owner this way, so its absence is unambiguous (§10.1). The members are listed as entries of their own, so a count is enough to send a reader to them; a list would be an array, which §10.1 would have every moved entry carry.
+
+**What it does not do.** It never pairs a member because its owner was paired; that is the direction §3.4.6 leaves to a future revision. A member's pair is as strong as the stage that made it, so an owner paired on one method stage 3 paired by name carries that pairing's risk, and the count says how much the pairing stands on. And it reads only what stages 1 to 4 decided: stage 4.5's weak matches of dropped Symbols are not evidence, because that stage's false-positive budget (§3.4.5) is granted on the premise that its pairs stay outside the IR's primary field of view.
+
+What it costs is one map per side from id to Symbol, a walk up a qualified name for each member pair, and a sort of the unpaired owners.
 
 ### 3.5 Stage 5: the remainder is added / removed / unknown
 
@@ -1041,6 +1087,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
     { "status": "moved",   "before": {...}, "after": {...}, "rationale": "git-rename" },
     { "status": "changed", "before": {...}, "after": {...}, "delta": { /* see §5 */ } },
     { "status": "moved+changed", "before": {...}, "after": {...}, "rationale": "...", "delta": {...} },
+    { "status": "moved", "before": {...}, "after": {...}, "rationale": "name-signature", "throughMembers": 2 /* only on an owner paired through its members — see §3.4.8 */ },
     { "status": "dropped-toggled", "before": {...}, "after": {...}, "direction": "to-dropped" | "to-kept" },
     { "status": "unknown", "symbol": {...}, "absentFrom": "head", "reason": "over-size", "lostPath": "..." /* only after a git rename — see §3.5.1 */ }
   ],
@@ -1092,7 +1139,7 @@ Collapsed sections are visible at **zero review cost**.
 | Stage 1 (ID match) | O(N) hash map lookup |
 | Stage 2 (git rename) | O(R) where R = renamed files |
 | Stage 3 (logic fingerprint) | O(N) grouping, then per group of B bases and H heads O(H) for the lone branch and O(B x H) per scored round; a group whose logic names nothing always scores (§3.3) |
-| Stage 4 (name+signature) | O(K x C) where K = remaining unmatched and C = bases sharing a member token (§3.4.0); O(K^2) when one token is shared by everything |
+| Stage 4 (name+signature) | O(K x C) where K = remaining unmatched and C = bases sharing a member token (§3.4.0); O(K^2) when one token is shared by everything. Pairing owners through their members (§3.4.8) adds O(P x D) for P pairs and a qualified-name depth D, and a sort of the unpaired owners |
 
 K is usually < 100 (most symbols are settled in stage 1). Effectively O(N), i.e. linear.
 
@@ -1191,7 +1238,10 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19d | A name of one word written without word boundaries — `メイン`, `초기화`, `ハンドラー`, `取得` | as DF19; the floor puts each under a word, as `main` and `handler` are |
 | DF19e | `ユーザー情報を取得する` moved file with an edited body **and** an added input | added: 1, removed: 1 — one token in its last segment, so §3.4.3's first threshold row asks the full 1.0 |
 | DF19f | A function whose body only calls something is deleted, and an unrelated class with one method is added elsewhere | removed: 1, added: 2 (the class and its method) — §3.3 never pairs across kinds |
-| DF19g | A class with one method moved file, without git rename information, and neither body names anything on the logic axis | moved: 2 when the class name says two words or more; when it says one, the class is added: 1, removed: 1 and the method moved: 1 — §3.3 pairs an owner and its members independently |
+| DF19g | A class with one method moved file, without git rename information, and neither body names anything on the logic axis | moved: 2 whatever the class name says. When it says two words or more, §3.3 pairs the class; when it says one, §3.4.8 pairs it through its method, rationale: "name-signature", `throughMembers: 1` |
+| DF19o | A class whose members paired into two classes, or one into a top-level function; one whose method moved into a class of a name §3.4.6's gate refuses (`Invoice` → `Receipt`); two classes merged into one; an owner whose kind changed (`let api = { get }` → `const api = { get }` in another file); one whose counterpart stage 1 already paired | the owner added: 1 and removed: 1, or removed: 1 beside the paired counterpart, and no `throughMembers` anywhere (§3.4.8); with a logger, one owner line for each of the first three shapes (§3.4.7) |
+| DF19p | A class pluralised in place (`UserRepo` → `UsersRepo`) with three methods; namespace `Billing` holding class `Billing.Invoice` → `Billing.Invoices` and its method; `const api = { v1: { get } }` moved file | the class moved, `throughMembers: 3`; both owners paired, the namespace through the class's pair, `throughMembers: 1` each, in either order of `symbols[]`; `api` paired through `api.v1.get`, the object between having no Symbol (§3.4.8) |
+| DF19q | A class that moved file dropping one method and gaining another; a static nested `Billing::Invoice` whose method came from a top-level `BillingInvoices` beside `Billing`, whose method moved with it | the class paired on the one method that came along, `throughMembers: 1`; `Billing` paired and `BillingInvoices` removed, `Billing::Invoice` added: an owner this pass paired never gains a member from outside its partner (§3.4.8) |
 | DF19h | A function whose body only calls something, or is one `for` loop over calls, is deleted, and an unrelated function of the same shape is added elsewhere; both names say two words or more | removed: 1, added: 1 — §3.3 has no lone-candidate branch where the logic names nothing |
 | DF19i | A function whose body returns a non-trivial expression moved file and was renamed, without git rename information — written as a concise arrow (`export const isAdminUser = (u) => u.role === "admin"`) or with a block body | moved+changed: 1, rationale: "logic-fingerprint", for both spellings — the arrow's expression is its `return` rule ([`lang-plugin.md`](./lang-plugin.md) LP19a), so its logic names something and §3.3's lone-candidate branch applies |
 | DF19j | git renames `src/big.ts` → `src/billing.ts`; the head skips `src/billing.ts` (or the base skips `src/big.ts`, or both do) | the base Symbols are `unknown` with `absentFrom: "head"` and `lostPath: "src/billing.ts"` (or the head Symbols `unknown` with `absentFrom: "base"` and `lostPath: "src/big.ts"`), never `removed` / `added`; skipped on both sides, one `notCompared[]` entry with `path: "src/billing.ts"` and `basePath: "src/big.ts"` (§3.5.1, §6.3) |
@@ -1201,7 +1251,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19n | The base holds a Component edge `billing` → `pricing`; the head skips a file under `billing`'s root, or only one under `pricing`'s (or the base skips one under `billing`'s and the head holds the edge) | `dependencies.unknown` with `absentFrom: "head"` and every skipped file of `billing` in `lostFiles[]`, never `removed`; a file of `pricing` alone leaves the edge `removed`; the base skipping is `unknown` with `absentFrom: "base"` (§6.2.1) |
 | DF20 | A pair whose stage-4 composite equals its row exactly: member 3/4 with signature 11/12, and member 7/10 with an identical signature, at 0.85; an identical member with signature 5/6 at 0.95; an identical member and signature at 1.0. End to end, `AccountService.createUserAccount(a: string, b: number, c: Date, d: boolean)` moved file and renamed `createUserAccountRecord` with `d: Options` | paired, rationale: "name-signature" — the composite is a fraction compared exactly (§3.4.3); one step below (two of four inputs retyped, a member of 7/11, its only input retyped at 0.95 or 1.0) added: 1, removed: 1 |
 | DF20a | Two bases score the same composite for one head, made of different axes — one renamed its member (3/4, signature 11/12), the other kept it (1, signature 1/2) | the lower base id pairs, whichever of the two it is (§3.8) |
-| DF20b | A Symbol whose name says too little, a Symbol with no signature, and a pair the owner gate refuses after clearing its row, each with a logger | the same result as without one, byte for byte, and one `debug` line per Symbol or refused pair naming the rule (§3.4.7); none for a pair stage 4 made, one that scored below its row, or one whose Symbols pair elsewhere |
+| DF20b | A Symbol whose name says too little, a Symbol with no signature, and a pair the owner gate refuses after clearing its row, each with a logger | the same result as without one, byte for byte, and one `debug` line per Symbol or refused pair naming the rule (§3.4.7); none for a pair stage 4 made, one that scored below its row, one whose Symbols pair elsewhere, or an owner §3.4.8 paired through its members |
 
 ## 10.1 Diff schema compatibility policy
 
@@ -1213,7 +1263,7 @@ In particular, because the CI gate (`aburi diff --fail-on`) depends on it:
 - Adding a `summary` field is non-breaking
 - Adding an optional `SymbolDelta` boolean is non-breaking, and the producer emits it unconditionally, `false` included, for the reason the next row gives
 - Adding an optional array is non-breaking on the same terms — to `componentDiff` / `dependencyDiff` or to the document itself — and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed. This is where the diff parts company with the IR, whose Class B fields (ir-schema.md §1.1) are omitted when empty: an IR reader can fall back on `totalFiles - parsedFiles`, and a diff reader has nothing to fall back on.
-- Adding an optional scalar to an entry is non-breaking, and unlike an array it may be left out when it has nothing to say, provided its absence is unambiguous by construction. `NotComparedFile.basePath` and `SymbolUnknown.lostPath` are the cases: each is written only when git renamed the file between the revisions, and a writer that predates them did not look across a rename at all, so it never produced an entry that needed one. In a document of either age, absence means "the other name is the same", and nothing has to be emitted to say so. A scalar whose absence an older writer could have meant differently is emitted unconditionally, as the `SymbolDelta` booleans are, and as `SymbolRemoved.duplicateOf` is, `null` included: a writer that predates it reported every removal bare, duplicate or not (§3.5.2).
+- Adding an optional scalar to an entry is non-breaking, and unlike an array it may be left out when it has nothing to say, provided its absence is unambiguous by construction. `NotComparedFile.basePath` and `SymbolUnknown.lostPath` are the cases: each is written only when git renamed the file between the revisions, and a writer that predates them did not look across a rename at all, so it never produced an entry that needed one. In a document of either age, absence means "the other name is the same", and nothing has to be emitted to say so. `throughMembers` on a `moved` or `moved+changed` entry is another: a writer that predates it never paired an owner through its members (§3.4.8), so in a document of either age, absence means the pairing rests on its rationale alone. A scalar whose absence an older writer could have meant differently is emitted unconditionally, as the `SymbolDelta` booleans are, and as `SymbolRemoved.duplicateOf` is, `null` included: a writer that predates it reported every removal bare, duplicate or not (§3.5.2).
 
 ## 11. Design decisions
 

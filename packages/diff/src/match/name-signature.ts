@@ -2,6 +2,7 @@ import type { Symbol as IRSymbol, Logger } from "@aburi/types"
 import { atLeast, quotient, type Ratio, WHOLE, weightedMean } from "../ratio"
 import { signatureSimilarityRatio } from "../signature"
 import { createNameScorer, lastSegment, type NameScorer, tokenizeName } from "../similarity"
+import { type OwnerRefusal, pairOwnersThroughMembers } from "./owners"
 import {
   type Assignment,
   acceptInScoreOrder,
@@ -10,18 +11,26 @@ import {
   type SymbolPair,
   saysEnoughToPair,
   stageResult,
+  unclaimed,
 } from "./pairing"
+
+export interface NameSignatureOptions {
+  /** What the earlier stages paired, which says where an owner's members went. */
+  paired?: readonly SymbolPair[]
+  logger?: Logger
+}
 
 export function matchStageNameSignature(
   remainingBase: readonly IRSymbol[],
   remainingHead: readonly IRSymbol[],
-  logger?: Logger,
+  { paired = [], logger }: NameSignatureOptions = {},
 ): StageResult {
+  const unread: { symbol: IRSymbol; why: string }[] = []
   const compared = (symbol: IRSymbol): boolean => {
     if (symbol.dropped) return false
     const why = ruleRefusing(symbol)
     if (why === undefined) return true
-    logger?.debug(`diff/stage4: ${symbol.id} is not compared by name: ${why}`)
+    if (logger !== undefined) unread.push({ symbol, why })
     return false
   }
   const buckets = new Map<string, Bucket>()
@@ -55,13 +64,38 @@ export function matchStageNameSignature(
     }
   }
   const assignment = acceptInScoreOrder(candidates)
-  if (logger !== undefined) traceOwnerRefusals(buckets, remainingHead, assignment, scorer, logger)
-  const matched: SymbolPair[] = assignment.pairs.map(({ base, head }) => ({
+  const scored: SymbolPair[] = assignment.pairs.map(({ base, head }) => ({
     base,
     head,
     rationale: "name-signature",
   }))
-  return stageResult(matched, remainingBase, remainingHead)
+  const owners = pairOwnersThroughMembers(
+    [...paired, ...scored],
+    unclaimed(remainingBase, assignment.baseIds),
+    unclaimed(remainingHead, assignment.headIds),
+  )
+  if (logger !== undefined) {
+    // Written once the owners are settled, so a line still stands for an entry left unpaired.
+    const pairedOwners = new Set(owners.matched.flatMap((pair) => [pair.base.id, pair.head.id]))
+    for (const { symbol, why } of unread) {
+      if (pairedOwners.has(symbol.id)) continue
+      logger.debug(`diff/stage4: ${symbol.id} is not compared by name: ${why}`)
+    }
+    traceGateRefusals(buckets, remainingHead, assignment, scorer, logger)
+    for (const refusal of owners.refusals) logger.debug(ownerRefusalLine(refusal))
+  }
+  return stageResult([...scored, ...owners.matched], remainingBase, remainingHead)
+}
+
+function ownerRefusalLine(refusal: OwnerRefusal): string {
+  if (refusal.rule === "split") {
+    return `diff/stage4: ${refusal.base.id} is not paired through its members: they did not all pair into one owner`
+  }
+  const why =
+    refusal.rule === "names"
+      ? "their names do not correspond"
+      : "the head also holds members paired from elsewhere"
+  return `diff/stage4: ${refusal.base.id} and ${refusal.head.id} are not paired through their members: ${why}`
 }
 
 function collectCandidate(
@@ -80,7 +114,7 @@ function collectCandidate(
 
 // Run after acceptance, so a line names two Symbols that both reach stage 5 unpaired rather than a
 // pair either of whose Symbols paired elsewhere.
-function traceOwnerRefusals(
+function traceGateRefusals(
   buckets: ReadonlyMap<string, Bucket>,
   remainingHead: readonly IRSymbol[],
   assignment: Assignment,

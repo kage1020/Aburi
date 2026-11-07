@@ -8,7 +8,7 @@ import type {
   SymbolUnknown,
 } from "@aburi/types"
 import { renderSymbolBlock } from "../component"
-import { inlineCode, requireDropReason, symbolTitle } from "../format"
+import { counted, inlineCode, requireDropReason, symbolTitle } from "../format"
 import { renderDeltaBody } from "./delta"
 import type { ChangedEntry } from "./partition"
 
@@ -29,7 +29,7 @@ export function renderChangedList(items: readonly ChangedEntry[]): string[] {
 export function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   return items.flatMap((item) => [
     `### ${symbolTitle(item.after)}`,
-    `**Moved**: ${moveRoute(item.before, item.after)} (${inlineCode(item.rationale)})`,
+    `**Moved**: ${moveRoute(item.before, item.after)} ${pairedBy(item)}`,
     "**Delta**:",
     ...renderDeltaBody(item),
     "",
@@ -112,6 +112,13 @@ export function moveRoute(before: IRSymbol, after: IRSymbol): string {
   )
 }
 
+/** An owner paired on its members has no name or signature the rationale could have read. */
+function pairedBy(entry: SymbolMoved | SymbolMovedChanged): string {
+  const rationale = inlineCode(entry.rationale)
+  if (entry.throughMembers === undefined) return `(${rationale})`
+  return `(${rationale} through ${counted(entry.throughMembers, "member", "members")})`
+}
+
 /**
  * A file that moved takes its Symbols with it, so the Symbols that kept their names along one
  * route share one row; a rename names itself in its route, and stays a row of its own.
@@ -120,7 +127,7 @@ export function renderMoved(items: readonly SymbolMoved[]): string[] {
   const rows: { route: string; names: string[] }[] = []
   const shared = new Map<string, string[]>()
   for (const entry of items) {
-    const route = `${moveRoute(entry.before, entry.after)} (${inlineCode(entry.rationale)})`
+    const route = `${moveRoute(entry.before, entry.after)} ${pairedBy(entry)}`
     const keepsName =
       entry.before.source.file !== entry.after.source.file && entry.before.name === entry.after.name
     if (!keepsName) {

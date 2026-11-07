@@ -1,8 +1,10 @@
+import { logicFingerprint } from "@aburi/core"
 import {
   changeLines,
   dependency,
   errorFrom,
   fp,
+  guardedBody,
   makeIR,
   makeSymbol,
   sig,
@@ -86,6 +88,24 @@ export function method(
   overrides: Partial<IRSymbol> = {},
 ): IRSymbol {
   return fn(file, name, seed, { kind: "method", ...overrides })
+}
+
+/** Logic that names nothing, so stage 3 reads the name alone, and no signature for stage 4. */
+export function bare(file: string, name: string, kind: IRSymbol["kind"] = "class"): IRSymbol {
+  const shape = makeSymbol({ id: `ts:${file}#${name}`, name, kind })
+  return { ...shape, fingerprint: { ...fp("bare"), logic: logicFingerprint(shape) } }
+}
+
+/** A guard names something, so stage 3 pairs a lone method on its logic whatever its owner. */
+export function guarded(file: string, name: string, logic: string): IRSymbol {
+  return makeSymbol({
+    id: `ts:${file}#${name}`,
+    name,
+    kind: "method",
+    signature: sig(),
+    rules: guardedBody(logic),
+    fingerprint: { ...fp(logic), logic },
+  })
 }
 
 export function dropped(file: string, name: string, kind: IRSymbol["kind"] = "class"): IRSymbol {

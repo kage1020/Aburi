@@ -118,6 +118,10 @@ export function lastSegment(qname: string): string {
   return splitQualifiedName(qname).member
 }
 
+export function ownerOf(qname: string): string {
+  return splitQualifiedName(qname).owner
+}
+
 type TokenSets = (value: string) => ReadonlySet<string>
 
 const uncachedTokenSets: TokenSets = (value) => new Set(tokenizeName(value))
@@ -131,11 +135,11 @@ export function memberSimilarity(baseName: string, headName: string): number {
 }
 
 export function ownersAreCompatible(baseName: string, headName: string): boolean {
-  return ownersCompatible(
-    splitQualifiedName(baseName).owner,
-    splitQualifiedName(headName).owner,
-    uncachedTokenSets,
-  )
+  return ownersCorrespond(ownerOf(baseName), ownerOf(headName))
+}
+
+export function ownersCorrespond(baseOwner: string, headOwner: string): boolean {
+  return ownersCompatible(baseOwner, headOwner, uncachedTokenSets)
 }
 
 function sameWord(a: string, b: string): boolean {
@@ -254,10 +258,10 @@ export function createNameScorer(): NameScorer {
     return built
   }
   const owners = new Map<string, string>()
-  const ownerOf = (qname: string): string => {
+  const cachedOwnerOf = (qname: string): string => {
     const cached = owners.get(qname)
     if (cached !== undefined) return cached
-    const built = splitQualifiedName(qname).owner
+    const built = ownerOf(qname)
     owners.set(qname, built)
     return built
   }
@@ -265,6 +269,6 @@ export function createNameScorer(): NameScorer {
     name: (baseName, headName) => nameJaccard(tokenSets, baseName, headName),
     member: (baseName, headName) => memberJaccardRatio(tokenSets, baseName, headName),
     ownersCompatible: (baseName, headName) =>
-      ownersCompatible(ownerOf(baseName), ownerOf(headName), tokenSets),
+      ownersCompatible(cachedOwnerOf(baseName), cachedOwnerOf(headName), tokenSets),
   }
 }

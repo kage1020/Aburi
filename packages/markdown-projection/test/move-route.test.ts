@@ -75,6 +75,47 @@ describe("a move's route in diff.md", () => {
   })
 })
 
+describe("an owner paired on its members, in diff.md", () => {
+  const owner = {
+    ...moved(
+      symbolAt("src/old.ts", "Invoice", 1),
+      symbolAt("src/new.ts", "Invoice", 1),
+      "name-signature",
+    ),
+    throughMembers: 1,
+  }
+  const member = moved(
+    symbolAt("src/old.ts", "Invoice.render", 2),
+    symbolAt("src/new.ts", "Invoice.render", 2),
+    "logic-fingerprint+name-disambiguation",
+  )
+  const renamedOwner = {
+    ...movedChanged(
+      symbolAt("src/repo.ts", "UserRepo", 1),
+      symbolAt("src/repo.ts", "UsersRepo", 1),
+      { syntaxChanged: true },
+      "name-signature",
+    ),
+    throughMembers: 3,
+  }
+  const md = projectChanges([owner, member, renamedOwner])
+
+  it("counts the member pairs after the rationale, in Moved + Changed", () => {
+    expect(md).toContain(
+      "**Moved**: within `src/repo.ts`: `UserRepo` (L1) → `UsersRepo` (L1) (`name-signature` through 3 members)",
+    )
+  })
+
+  it("gives the owner a row apart from the members that moved along its route", () => {
+    expect(md).toContain(
+      "- `Invoice`: `src/old.ts` → `src/new.ts` (`name-signature` through 1 member)",
+    )
+    expect(md).toContain(
+      "- `Invoice.render`: `src/old.ts` → `src/new.ts` (`logic-fingerprint+name-disambiguation`)",
+    )
+  })
+})
+
 describe("a move's route on a Slice member's row", () => {
   const caller = changed(symbolAt("src/cli.ts", "run", 3), { logicChanged: true })
 

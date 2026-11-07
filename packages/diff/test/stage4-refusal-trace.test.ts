@@ -1,7 +1,7 @@
 import { recordingLogger, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol, Summary } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { diffSymbols, dropped, fn, method } from "./helpers"
+import { bare, diffSymbols, dropped, fn, guarded, method } from "./helpers"
 
 function tracedBy(base: readonly IRSymbol[], head: readonly IRSymbol[]) {
   const logger = recordingLogger()
@@ -14,8 +14,12 @@ const notCompared = (id: string, why: string) =>
   `diff/stage4: ts:${id} is not compared by name: ${why}`
 const notPaired = (baseId: string, headId: string) =>
   `diff/stage4: ts:${baseId} and ts:${headId} are not paired: their owners do not correspond`
+const notThroughMembers = (baseId: string, headId: string, why: string) =>
+  `diff/stage4: ts:${baseId} and ts:${headId} are not paired through their members: ${why}`
 const SAYS_TOO_LITTLE = "its name says too little to pair on"
 const NO_SIGNATURE = "it has no signature, and a name alone does not pair"
+const RENDER = "aaaaaaaaaaa1"
+const PRINT = "aaaaaaaaaaa2"
 
 describe("stage 4 says why it left a Symbol out", () => {
   it.each([
@@ -69,6 +73,83 @@ describe("stage 4 says why it left a Symbol out", () => {
     expect(traced.lines).toEqual([
       notPaired("src/a.ts#UserRepo.findUser", "src/b.ts#UsersRepository.findUser"),
     ])
+  })
+})
+
+describe("stage 4 says why an owner's members did not pair it", () => {
+  it.each<[string, IRSymbol[], IRSymbol[], string[]]>([
+    [
+      "its methods paired into two classes",
+      [
+        bare("src/old.ts", "Invoice"),
+        guarded("src/old.ts", "Invoice.render", RENDER),
+        guarded("src/old.ts", "Invoice.print", PRINT),
+      ],
+      [
+        bare("src/new.ts", "Invoice"),
+        bare("src/new.ts", "Printer"),
+        guarded("src/new.ts", "Invoice.render", RENDER),
+        guarded("src/new.ts", "Printer.print", PRINT),
+      ],
+      [
+        notCompared("src/old.ts#Invoice", SAYS_TOO_LITTLE),
+        notCompared("src/new.ts#Invoice", SAYS_TOO_LITTLE),
+        notCompared("src/new.ts#Printer", SAYS_TOO_LITTLE),
+        "diff/stage4: ts:src/old.ts#Invoice is not paired through its members: they did not all pair into one owner",
+      ],
+    ],
+    [
+      "the owner gate refuses the two names",
+      [bare("src/old.ts", "Invoice"), guarded("src/old.ts", "Invoice.render", RENDER)],
+      [bare("src/new.ts", "Receipt"), guarded("src/new.ts", "Receipt.render", RENDER)],
+      [
+        notCompared("src/old.ts#Invoice", SAYS_TOO_LITTLE),
+        notCompared("src/new.ts#Receipt", SAYS_TOO_LITTLE),
+        notThroughMembers(
+          "src/old.ts#Invoice",
+          "src/new.ts#Receipt",
+          "their names do not correspond",
+        ),
+      ],
+    ],
+    [
+      "two classes merged into one",
+      [
+        bare("src/a.ts", "Invoice"),
+        guarded("src/a.ts", "Invoice.render", RENDER),
+        bare("src/b.ts", "Invoice"),
+        guarded("src/b.ts", "Invoice.print", PRINT),
+      ],
+      [
+        bare("src/c.ts", "Invoice"),
+        guarded("src/c.ts", "Invoice.render", RENDER),
+        guarded("src/c.ts", "Invoice.print", PRINT),
+      ],
+      [
+        notCompared("src/a.ts#Invoice", SAYS_TOO_LITTLE),
+        notCompared("src/b.ts#Invoice", SAYS_TOO_LITTLE),
+        notCompared("src/c.ts#Invoice", SAYS_TOO_LITTLE),
+        ...["src/a.ts#Invoice", "src/b.ts#Invoice"].map((baseId) =>
+          notThroughMembers(
+            baseId,
+            "src/c.ts#Invoice",
+            "the head also holds members paired from elsewhere",
+          ),
+        ),
+      ],
+    ],
+  ])("when %s", (_label, base, head, lines) => {
+    expect(tracedBy(base, head).lines).toEqual(lines)
+  })
+
+  it("writes nothing for an owner its members paired, which no longer stands for an entry", () => {
+    const traced = tracedBy(
+      [bare("src/old.ts", "Invoice"), method("src/old.ts", "Invoice.render", "a")],
+      [bare("src/new.ts", "Invoice"), method("src/new.ts", "Invoice.render", "a")],
+    )
+
+    expect(traced.diff.summary).toMatchObject({ moved: 2, added: 0, removed: 0 })
+    expect(traced.lines).toEqual([])
   })
 })
 

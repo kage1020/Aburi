@@ -77,7 +77,10 @@ export function buildDiff(
     input.gitRenames ?? null,
   )
   const stage3 = matchStageLogicFingerprint(stage2.remainingBase, stage2.remainingHead)
-  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead, input.logger)
+  const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead, {
+    paired: [...stage1.matched, ...stage2.matched, ...stage3.matched],
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  })
   const stageDroppedWeak = matchStageDroppedWeak(stage4.remainingBase, stage4.remainingHead)
 
   const pairs: SymbolPair[] = [
@@ -133,6 +136,7 @@ export function buildDiff(
         before: pair.base,
         after: pair.head,
         rationale: pair.rationale,
+        ...throughMembers(pair),
       })
       continue
     }
@@ -152,6 +156,7 @@ export function buildDiff(
       before: pair.base,
       after: pair.head,
       rationale: pair.rationale,
+      ...throughMembers(pair),
       delta: computeSymbolDelta(pair.base, pair.head, input.delta ?? {}),
     })
   }
@@ -234,6 +239,10 @@ export function buildDiff(
     slices,
     notCompared: filesNeitherSideRead(sides),
   }
+}
+
+function throughMembers(pair: SymbolPair): { throughMembers?: number } {
+  return pair.throughMembers === undefined ? {} : { throughMembers: pair.throughMembers }
 }
 
 function removedSymbol(symbol: IRSymbol, duplicateOf: SymbolId | null): SymbolRemoved {

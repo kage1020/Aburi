@@ -192,10 +192,11 @@
       "additionalProperties": false,
       "required": ["after", "before", "rationale", "status"],
       "properties": {
-        "status":    { "const": "moved" },
-        "before":    { "$ref": "#/$defs/Symbol" },
-        "after":     { "$ref": "#/$defs/Symbol" },
-        "rationale": { "$ref": "#/$defs/MatchRationale" }
+        "status":         { "const": "moved" },
+        "before":         { "$ref": "#/$defs/Symbol" },
+        "after":          { "$ref": "#/$defs/Symbol" },
+        "rationale":      { "$ref": "#/$defs/MatchRationale" },
+        "throughMembers": { "$ref": "#/$defs/ThroughMembers" }
       }
     },
 
@@ -216,11 +217,12 @@
       "additionalProperties": false,
       "required": ["after", "before", "delta", "rationale", "status"],
       "properties": {
-        "status":    { "const": "moved+changed" },
-        "before":    { "$ref": "#/$defs/Symbol" },
-        "after":     { "$ref": "#/$defs/Symbol" },
-        "rationale": { "$ref": "#/$defs/MatchRationale" },
-        "delta":     { "$ref": "#/$defs/SymbolDelta" }
+        "status":         { "const": "moved+changed" },
+        "before":         { "$ref": "#/$defs/Symbol" },
+        "after":          { "$ref": "#/$defs/Symbol" },
+        "rationale":      { "$ref": "#/$defs/MatchRationale" },
+        "throughMembers": { "$ref": "#/$defs/ThroughMembers" },
+        "delta":          { "$ref": "#/$defs/SymbolDelta" }
       }
     },
 
@@ -233,6 +235,12 @@
         "name-signature",
         "dropped-weak-match"
       ]
+    },
+
+    "ThroughMembers": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Present only on an owner no stage could pair by name or signature (a class, a namespace, an object a binding holds), paired with rationale `name-signature` on its members instead: every member pair of the base owner points into the head owner, every member pair of the head owner comes back from it, and the two names pass the owner gate. The number of those member pairs. A writer that predates the field never paired an owner this way, so its absence says the pairing rests on the rationale alone."
     },
 
     "SymbolDelta": {

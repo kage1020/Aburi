@@ -77,7 +77,10 @@ export async function diffOfMove(
   return diffIRs(baseIR, headIR)
 }
 
-/** Every change as status and names, with the stage that paired it where there is one, sorted. */
+/**
+ * Every change as status and names, with the stage that paired it where there is one, and the
+ * member pairs an owner was paired through, sorted.
+ */
 export function pairingOutcome(diff: DiffResult): string[] {
   return diff.symbols.map(describePairing).sort()
 }
@@ -85,7 +88,9 @@ export function pairingOutcome(diff: DiffResult): string[] {
 function describePairing(change: SymbolChange): string {
   if ("symbol" in change) return `${change.status} ${change.symbol.name}`
   const pairing = `${change.status} ${change.before.name} -> ${change.after.name}`
-  return "rationale" in change ? `${pairing} (${change.rationale})` : pairing
+  if (!("rationale" in change)) return pairing
+  const members = change.throughMembers === undefined ? "" : ` through ${change.throughMembers}`
+  return `${pairing} (${change.rationale}${members})`
 }
 
 /** Each Symbol the diff reports `changed`, by name, with its delta. */

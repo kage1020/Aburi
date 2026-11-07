@@ -6,6 +6,7 @@ export interface SymbolPair {
   base: IRSymbol
   head: IRSymbol
   rationale: MatchRationale
+  throughMembers?: number
 }
 
 export interface StageResult {

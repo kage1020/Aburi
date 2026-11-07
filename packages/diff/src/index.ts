@@ -30,6 +30,7 @@ export {
   matchStageId,
   matchStageLogicFingerprint,
   matchStageNameSignature,
+  type NameSignatureOptions,
   type SymbolPair,
 } from "./match"
 export { signatureSimilarity } from "./signature"
