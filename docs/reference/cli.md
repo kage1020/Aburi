@@ -22,7 +22,14 @@ a line for every file extracted as well, and `error` shows none of it. Its lines
 name no scan; `aburi diff` writes the base's before the head's. At `debug`, `aburi diff` also
 writes a `diff/stage4:` line for each Symbol, or pair of Symbols, it would not pair by name,
 naming the rule that stopped it. The `⚠` warnings are printed
-whatever the level. Any other value exits `2`.
+whatever the level. Any other value exits `2`. At `debug`, an error that ends the run with exit `1`
+or `3` is followed by its stack trace and those of its causes.
+
+On a terminal, stderr is coloured (warnings yellow, errors red, the log dim) and a progress line
+names the phase of each scan — `extracting 412/5002 files` — redrawn in place and erased before
+the results are printed. stdout is never coloured, so piping it gives the same bytes wherever you
+run. `--no-color` turns the colour off, before the command or after it, and `--ci` behaves as
+the `CI` variable does (below) for a CI that does not set it.
 
 An option that takes a value takes one. Given twice (`--config a.json --config b.json`), the
 command exits `2` and names it rather than keep one and drop the other without a word.
@@ -49,9 +56,9 @@ CI gates on `3`. A reader that stops early does not change the code:
 |---|---|
 | `ABURI_CONFIG` | Config file path. The `--config` flag wins over it. |
 | `ABURI_LOG_LEVEL` | The same as `--log-level`, which wins over it. A value other than the four levels is ignored. |
-| `CI` | The same as `aburi scan --no-timestamp`. |
-
-The CLI writes no colour, so `NO_COLOR` and `FORCE_COLOR` change nothing.
+| `CI` | CI mode: no progress line, no colour unless `FORCE_COLOR` is set, and `aburi scan` behaves as under `--no-timestamp`. The same as `--ci`. |
+| `NO_COLOR` | Set to anything but the empty string, no colour. |
+| `FORCE_COLOR` | Colour even when stderr is not a terminal, and in CI mode; `0` or `false` turns it off. It wins over `NO_COLOR`, and `--no-color` wins over it. It never brings the progress line, which is drawn only on a terminal outside CI mode. |
 
 ## Config discovery
 

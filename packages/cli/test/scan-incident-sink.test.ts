@@ -149,7 +149,15 @@ describe("aburi scan — the incident report on stderr", () => {
       "json",
     ])
     expect(code).toBe(EXIT.GATE)
-    expect(stderr).toBe(FOUR_KINDS_REPORTED.map((line) => `${line}\n`).join(""))
+    expect(stderr).toBe(
+      [
+        `warn: Skipped bad.stub: ${REFUSAL}`,
+        "warn: Skipped boom.stub: extraction threw — plugin exploded",
+        ...FOUR_KINDS_REPORTED,
+      ]
+        .map((line) => `${line}\n`)
+        .join(""),
+    )
   })
 
   it("puts the warnings above the summary they qualify, not below it", async () => {
@@ -163,9 +171,8 @@ describe("aburi scan — the incident report on stderr", () => {
       cwd: workspace.root,
     })
     const lines = merged.text().trimEnd().split("\n")
-    expect(lines[0]).toContain("contributed no Symbols")
-    expect(lines.findIndex((l) => l.includes("kept ·"))).toBeGreaterThan(
-      lines.findIndex((l) => l.includes("a plugin threw")),
-    )
+    const summary = lines.findIndex((l) => l.includes("kept ·"))
+    expect(lines.findIndex((l) => l.includes("contributed no Symbols"))).toBeLessThan(summary)
+    expect(lines.findIndex((l) => l.includes("a plugin threw"))).toBeLessThan(summary)
   })
 })

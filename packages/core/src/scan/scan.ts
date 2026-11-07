@@ -42,6 +42,14 @@ import type { UndeclaredVocabOccurrence } from "./vocab"
 
 export type { ExtractionFailure, ParseErrorRecord } from "./extract-files"
 
+/** Where a scan is, for a caller that shows it: the phases come in this order, each once. */
+export type ScanProgress =
+  | { readonly phase: "discovering" }
+  /** Sent before each file and once more when the last one is done, `done` counting up to `total`. */
+  | { readonly phase: "extracting"; readonly done: number; readonly total: number }
+  /** Language-server enrichment, call resolution, effect propagation and the Document. */
+  | { readonly phase: "resolving" }
+
 export interface ScanInput {
   workspaceRoot: string
   config: Config
@@ -56,6 +64,7 @@ export interface ScanInput {
   workspacePackages?: readonly WorkspacePackage[]
   generator?: { name: string; version: string }
   lspServerFactory?: ServerFactory
+  onProgress?: (progress: ScanProgress) => void
 }
 
 export interface ScanResult {
@@ -75,6 +84,7 @@ export interface ScanResult {
 export async function scan(input: ScanInput): Promise<ScanResult> {
   assertWorkspaceRootAbsolute(input.workspaceRoot)
   const logger = input.logger ?? silentLogger
+  const progress = input.onProgress ?? (() => {})
 
   const router = buildLanguageRouter(input.languages)
   const langDropPatterns = languageFileDropPatterns(input.languages)
@@ -89,6 +99,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   if (input.config.maxFileSizeBytes !== undefined) {
     discoverOptions.maxFileSizeBytes = input.config.maxFileSizeBytes
   }
+  progress({ phase: "discovering" })
   const discovered = await discoverFiles(discoverOptions)
 
   const extracted = await extractFiles({
@@ -101,7 +112,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     registry: input.registry,
     components: input.components ?? [],
     logger,
+    progress: (done, total) => progress({ phase: "extracting", done, total }),
   })
+  progress({ phase: "resolving" })
   const { symbols } = extracted
 
   symbols.sort(compareBy((symbol) => symbol.id))

@@ -7,7 +7,8 @@ describe("readEnv", () => {
       configPath: null,
       logLevel: null,
       noColor: false,
-      forceColor: false,
+      forceColor: null,
+      dumbTerminal: false,
       ci: false,
     })
   })
@@ -25,6 +26,12 @@ describe("readEnv", () => {
       { NO_COLOR: "", CI: " " },
       { noColor: false, ci: false },
     ],
+    [{ FORCE_COLOR: "" }, { forceColor: true }],
+    [{ FORCE_COLOR: "3" }, { forceColor: true }],
+    [{ FORCE_COLOR: "0" }, { forceColor: false }],
+    [{ FORCE_COLOR: " False " }, { forceColor: false }],
+    [{ TERM: "dumb" }, { dumbTerminal: true }],
+    [{ TERM: "xterm-256color" }, { dumbTerminal: false }],
   ])("reads %j as %j", (source, expected) => {
     expect(readEnv(source)).toMatchObject(expected)
   })

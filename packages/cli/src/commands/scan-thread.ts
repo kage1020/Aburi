@@ -1,6 +1,9 @@
 import { createRequire } from "node:module"
 import { parentPort, Worker, workerData } from "node:worker_threads"
+import type { ScanProgress } from "@aburi/core"
+import type { LogLevel } from "../env"
 import { CliError, type CliErrorCode, errorMessage, internalFault } from "../errors"
+import type { LogWrite } from "../logger"
 import type { WarnFn } from "../warn"
 import { runScan, type ScanOptions } from "./scan"
 import type { ScanReport } from "./scan-report"
@@ -11,15 +14,16 @@ type DataOnly<T> = {
 
 /**
  * Options either side of a diff scans with. The base's are cloned into a thread, so none may be a
- * function; `log` and `incidents` stay with the caller, which decides where a scan's lines go and
- * when its incidents are said.
+ * function; `log`, `progress` and `incidents` stay with the caller, which decides where a scan's
+ * lines go and when its incidents are said.
  */
-export type PortableScanOptions = DataOnly<Omit<ScanOptions, "log" | "incidents">>
+export type PortableScanOptions = DataOnly<Omit<ScanOptions, "log" | "progress" | "incidents">>
 
 export interface ThreadedScan {
   /** How a failure of the thread itself names the scan, as `base ref "main"`. */
   name: string
-  log: (line: string) => void
+  log: LogWrite
+  progress?: (progress: ScanProgress) => void
   warn: WarnFn
 }
 
@@ -41,8 +45,15 @@ type Thrown =
     }
   | { kind: "value"; text: string }
 
+interface ThreadData {
+  options: PortableScanOptions
+  /** Whether the caller shows progress, so that a thread nobody watches posts none. */
+  progress: boolean
+}
+
 type FromThread =
-  | { kind: "log"; line: string }
+  | { kind: "log"; line: string; level: LogLevel }
+  | { kind: "progress"; progress: ScanProgress }
   | { kind: "done"; report: ScanReport }
   | { kind: "failed"; thrown: Thrown }
 
@@ -51,13 +62,14 @@ const PHASE = " while scanning in a worker thread"
 const ON_THE_MAIN_THREAD =
   "Run with --no-parallel-scans (parallelScans: false) to scan it on the main thread."
 
-/** `runScan` on a thread of its own; its log lines reach `log` in the order it wrote them. */
+/** `runScan` on a thread of its own; its log lines and progress reach `scan` in the order sent. */
 export function scanInThread(
   options: PortableScanOptions,
   scan: ThreadedScan,
 ): Promise<ScanReport> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(scanWorkerPath(scan.name), { workerData: options })
+    const data: ThreadData = { options, progress: scan.progress !== undefined }
+    const worker = new Worker(scanWorkerPath(scan.name), { workerData: data })
     let settled = false
     const settle = (finish: () => void): void => {
       settled = true
@@ -68,7 +80,10 @@ export function scanInThread(
     worker.on("message", (message: FromThread) => {
       switch (message.kind) {
         case "log":
-          scan.log(message.line)
+          scan.log(message.line, message.level)
+          break
+        case "progress":
+          scan.progress?.(message.progress)
           break
         case "done":
           settle(() => resolve(message.report))
@@ -122,9 +137,13 @@ export function scanInThread(
 export function serveScan(): void {
   const port = parentPort
   if (port === null) throw internalFault(PHASE, "serveScan ran outside a worker thread", null)
-  const options = workerData as PortableScanOptions
+  const { options, progress } = workerData as ThreadData
   const send = (message: FromThread): void => port.postMessage(message)
-  runScan({ ...options, log: (line) => send({ kind: "log", line }) })
+  runScan({
+    ...options,
+    log: (line, level) => send({ kind: "log", line, level }),
+    ...(progress ? { progress: (sent) => send({ kind: "progress", progress: sent }) } : {}),
+  })
     .then((report) => send({ kind: "done", report }))
     .catch((error: unknown) => send({ kind: "failed", thrown: described(error) }))
 }

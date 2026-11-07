@@ -22,6 +22,15 @@ import { assertNever, CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError, type FailOnScope, formatTriggered } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
+import type { LogWrite } from "./logger"
+import { showDiffProgress, showScanProgress } from "./progress"
+import {
+  createTerminal,
+  type Terminal,
+  type TerminalMode,
+  terminalMode,
+  toneOfLevel,
+} from "./terminal"
 import { describeWorkspaceDetection, UNNAMEABLE_BECAUSE } from "./unresolved-report"
 import { VOCAB_DISCOVERED_FILENAME } from "./vocab-discovered"
 
@@ -41,6 +50,16 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
 
   const { version } = await readGeneratorInfo()
   const program = new Command()
+  const globals = () => program.opts<{ logLevel?: LogLevel; color?: boolean; ci?: boolean }>()
+  const ciMode = (): boolean => env.ci || globals().ci === true
+  const mode = (): TerminalMode =>
+    terminalMode({
+      env,
+      ci: ciMode(),
+      colourFlag: globals().color !== false,
+      isTerminal: (stderr as { isTTY?: unknown }).isTTY === true,
+    })
+  const terminal = createTerminal(stderr, { mode })
   program
     .name("aburi")
     .description("Render meaningful code structure as IR for review")
@@ -50,30 +69,51 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       "the run's log on stderr: debug | info | warn | error (default: ABURI_LOG_LEVEL, or warn); info adds the files scan removes, debug each file extracted and why diff left a Symbol unpaired, and error shows none of it",
       parseLogLevel,
     )
+    .option("--no-color", "no colour on stderr, whatever FORCE_COLOR says")
+    .option(
+      "--ci",
+      "CI mode where CI is not set: no progress line, no colour unless FORCE_COLOR, and scan as under --no-timestamp",
+    )
     .exitOverride()
     .configureOutput({
       writeOut: (str) => {
         stdout.write(str)
       },
       writeErr: (str) => {
-        stderr.write(str)
+        terminal.say(withoutFinalNewline(str))
+      },
+      outputError: (str) => {
+        terminal.say(withoutFinalNewline(str), "error")
       },
     })
     // Commander copies help settings into a subcommand when `.command()` creates it.
     .configureHelp({ showGlobalOptions: true })
 
   const warn = (message: string): void => {
-    stderr.write(`${message}\n`)
+    terminal.say(message, "warning")
   }
-  const logLevel = (): LogLevel | undefined =>
-    program.opts<{ logLevel?: LogLevel }>().logLevel ?? env.logLevel ?? undefined
+  const log: LogWrite = (line, level) => {
+    terminal.say(withoutFinalNewline(line), toneOfLevel(level))
+  }
+  /** A result on stdout, below a progress line erased for good. */
+  const out = (text: string): void => {
+    terminal.endProgress()
+    stdout.write(text)
+  }
+  /** `show`, when the progress line is shown at all, so that no scan reports to nothing. */
+  const progressTo = <T>(show: (terminal: Terminal) => (progress: T) => void) =>
+    mode().progress ? { progress: show(terminal) } : {}
+  const logLevel = (): LogLevel | undefined => globals().logLevel ?? env.logLevel ?? undefined
+  const failed = (error: unknown): ExitCode => handleError(error, terminal, logLevel() === "debug")
   let capturedExitCode: ExitCode = EXIT.SUCCESS
   const runCommand = (command: () => Promise<ExitCode | undefined>): (() => Promise<void>) => {
     return async () => {
       try {
         capturedExitCode = (await command()) ?? EXIT.SUCCESS
       } catch (error) {
-        capturedExitCode = handleError(error, stderr)
+        capturedExitCode = failed(error)
+      } finally {
+        terminal.endProgress()
       }
     }
   }
@@ -112,30 +152,30 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               respectGitignore: cmdOptions.respectGitignore,
             }),
           })
-          stdout.write(`✓ Wrote ${report.outputPath}\n`)
+          out(`✓ Wrote ${report.outputPath}\n`)
           if (report.overwrote) {
-            stderr.write(`⚠ Overwrote ${report.outputPath}; the config that was there is gone.\n`)
+            warn(`⚠ Overwrote ${report.outputPath}; the config that was there is gone.`)
           }
-          stdout.write(
+          out(
             `  managers: ${report.detectedManagers.join(", ") || "—"}\n` +
               `  languages: ${report.detectedLanguages.join(", ") || "—"}\n` +
               `  frameworks: ${report.detectedFrameworks.join(", ") || "—"}\n` +
               `  components: ${report.componentCount}\n`,
           )
           if (report.suggestedPlugins.length > 0) {
-            stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
+            out(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
           }
-          for (const line of describeWorkspaceDetection(report)) stderr.write(`⚠ ${line}\n`)
+          for (const line of describeWorkspaceDetection(report)) warn(`⚠ ${line}`)
           if (report.unmappedLanguages.length > 0) {
-            stderr.write(
+            warn(
               `⚠ No language plugin ships for: ${report.unmappedLanguages.join(", ")}. ` +
-                `"languages" is empty, so \`aburi scan\` has nothing to parse with — add a plugin ref to aburi.json.\n`,
+                `"languages" is empty, so \`aburi scan\` has nothing to parse with — add a plugin ref to aburi.json.`,
             )
           }
           if (report.unmappedFrameworks.length > 0) {
-            stderr.write(
+            warn(
               `⚠ No framework plugin ships for: ${report.unmappedFrameworks.join(", ")}. ` +
-                `Those components will be scanned without framework classification.\n`,
+                `Those components will be scanned without framework classification.`,
             )
           }
           return report.exitCode
@@ -197,22 +237,24 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
                   : undefined,
               respectGitignore: cmdOptions.respectGitignore,
               compact: cmdOptions.compact,
-              suppressTimestamp: cmdOptions.timestamp === false || env.ci ? true : undefined,
+              suppressTimestamp: cmdOptions.timestamp === false || ciMode() ? true : undefined,
               lsp: cmdOptions.lsp,
               strict: deriveStrict(cmdOptions),
               logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
+            log,
+            ...progressTo(showScanProgress),
             incidents: { warn },
           })
           const unnameable = report.unrepresentableFiles.length
-          stdout.write(
+          out(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files` +
               `${unnameable === 0 ? "" : ` · ${unnameable} unnameable`}\n`,
           )
-          stdout.write(`${report.callResolutionLine}\n`)
-          if (report.irPath !== null) stdout.write(`→ ${report.irPath}\n`)
-          if (report.workspaceMdPath !== null) stdout.write(`→ ${report.workspaceMdPath}\n`)
+          out(`${report.callResolutionLine}\n`)
+          if (report.irPath !== null) out(`→ ${report.irPath}\n`)
+          if (report.workspaceMdPath !== null) out(`→ ${report.workspaceMdPath}\n`)
           return report.exitCode
         })(),
     )
@@ -289,14 +331,16 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             warn,
+            log,
+            ...progressTo(showDiffProgress),
           })
-          stdout.write(`${report.summaryLine}\n`)
+          out(`${report.summaryLine}\n`)
           if (report.callResolutionLine !== null) {
-            stdout.write(`${report.callResolutionLine}\n`)
+            out(`${report.callResolutionLine}\n`)
           }
-          if (report.diffMdPath !== null) stdout.write(`→ ${report.diffMdPath}\n`)
+          if (report.diffMdPath !== null) out(`→ ${report.diffMdPath}\n`)
           if (report.triggered !== null) {
-            stderr.write(`${formatTriggered(report.triggered)}\n`)
+            terminal.say(formatTriggered(report.triggered), "error")
           }
           return report.exitCode
         })(),
@@ -338,31 +382,33 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
             warn,
+            log,
+            ...progressTo(showScanProgress),
           })
+          terminal.endProgress()
           switch (outcome.kind) {
             case "single":
             case "file":
               if (outcome.writtenTo === null) {
-                stdout.write(outcome.markdown)
-                if (!outcome.markdown.endsWith("\n")) stdout.write("\n")
+                out(outcome.markdown)
+                if (!outcome.markdown.endsWith("\n")) out("\n")
               } else {
-                stdout.write(`→ ${outcome.writtenTo}\n`)
+                out(`→ ${outcome.writtenTo}\n`)
               }
               break
             case "ambiguous":
-              stdout.write(`Multiple matches for "${argument}":\n`)
-              for (const candidate of outcome.candidates) stdout.write(`  ${candidate.id}\n`)
-              stdout.write("\nSpecify the full id to disambiguate.\n")
+              out(`Multiple matches for "${argument}":\n`)
+              for (const candidate of outcome.candidates) out(`  ${candidate.id}\n`)
+              out("\nSpecify the full id to disambiguate.\n")
               break
             case "not-found":
-              stderr.write(`No matches for "${argument}".\n`)
-              if (outcome.coverage !== null) {
-                stderr.write(`${coverageLine(outcome.coverage)}\n`)
-              }
+              terminal.say(`No matches for "${argument}".`, "error")
+              if (outcome.coverage !== null) warn(coverageLine(outcome.coverage))
               break
             case "unnameable":
-              stderr.write(
-                `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" ${UNNAMEABLE_BECAUSE[outcome.reason]}, so nothing Aburi writes can refer to it. Rename it.\n`,
+              terminal.say(
+                `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" ${UNNAMEABLE_BECAUSE[outcome.reason]}, so nothing Aburi writes can refer to it. Rename it.`,
+                "error",
               )
               break
             case "unknown": {
@@ -370,8 +416,9 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
                 outcome.namedBy === "id"
                   ? ", the file that id names, so it cannot say whether that Symbol exists."
                   : ", so it cannot say what that file declares."
-              stderr.write(
-                `Cannot answer "${argument}": this IR never analysed ${outcome.skipped.path} (${outcome.skipped.reason})${trailer}\n`,
+              terminal.say(
+                `Cannot answer "${argument}": this IR never analysed ${outcome.skipped.path} (${outcome.skipped.reason})${trailer}`,
+                "error",
               )
               break
             }
@@ -393,9 +440,13 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       }
       return EXIT.INPUT_ERROR
     }
-    return handleError(error, stderr)
+    return failed(error)
   }
   return capturedExitCode
+}
+
+function withoutFinalNewline(text: string): string {
+  return text.endsWith("\n") ? text.slice(0, -1) : text
 }
 
 function coverageLine(doubt: CoverageDoubt): string {
@@ -409,27 +460,49 @@ function isCommanderError(value: unknown): value is { code: string; message: str
   return errorCode(value)?.startsWith("commander.") === true
 }
 
-function handleError(error: unknown, stderr: NodeJS.WritableStream): ExitCode {
-  if (error instanceof FailOnParseError) {
-    stderr.write(`${error.message}\n`)
-    return EXIT.INPUT_ERROR
+function handleError(error: unknown, terminal: Terminal, debug: boolean): ExitCode {
+  terminal.endProgress()
+  const exitCode = exitCodeOf(error)
+  terminal.say(error instanceof Error ? error.message : String(error), "error")
+  // An exit-2 error is the invocation's: its message is the whole story.
+  if (debug && exitCode !== EXIT.INPUT_ERROR) {
+    const trace = stackTrace(error)
+    if (trace !== null) terminal.say(trace, "muted")
   }
-  if (error instanceof CliError) {
-    stderr.write(`${error.message}\n`)
-    switch (error.code) {
-      case "input-error":
-      case "config-error":
-        return EXIT.INPUT_ERROR
-      case "runtime-error":
-        return EXIT.RUNTIME
-      case "plugin-error":
-        return EXIT.GATE
+  return exitCode
+}
+
+function exitCodeOf(error: unknown): ExitCode {
+  if (error instanceof FailOnParseError) return EXIT.INPUT_ERROR
+  if (!(error instanceof CliError)) return EXIT.RUNTIME
+  switch (error.code) {
+    case "input-error":
+    case "config-error":
+      return EXIT.INPUT_ERROR
+    case "runtime-error":
+      return EXIT.RUNTIME
+    case "plugin-error":
+      return EXIT.GATE
+    default:
+      return assertNever(error.code, "CliError code")
+  }
+}
+
+/** The frames of `error`'s stack, then each cause's under a `caused by:` line. */
+function stackTrace(error: unknown): string | null {
+  const lines: string[] = []
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current !== undefined && !seen.has(current)) {
+    seen.add(current)
+    if (current !== error) {
+      lines.push(
+        `caused by: ${current instanceof Error ? `${current.name}: ${current.message}` : String(current)}`,
+      )
     }
+    if (!(current instanceof Error)) break
+    lines.push(...(current.stack ?? "").split("\n").filter((line) => /^\s+at /.test(line)))
+    current = current.cause
   }
-  if (error instanceof Error) {
-    stderr.write(`${error.message}\n`)
-    return EXIT.RUNTIME
-  }
-  stderr.write(`${String(error)}\n`)
-  return EXIT.RUNTIME
+  return lines.length === 0 ? null : lines.join("\n")
 }

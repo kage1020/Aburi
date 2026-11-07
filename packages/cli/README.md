@@ -71,6 +71,14 @@ Examples: `--fail-on removed`, `--fail-on changed:>5`, `--fail-on dropped-toggle
 A tripped clause prints `--fail-on <clause> tripped (observed: N <token>)` on stderr and names the
 Symbols it counted below it, one indented id per line, ten at most.
 
+## Terminal output
+
+stdout carries results and is never coloured. On a terminal, stderr colours warnings, errors and
+the log, and draws a progress line for each scan (`extracting 412/5002 files`), erased before
+the results are printed. `--no-color`, `NO_COLOR`, `FORCE_COLOR` (which wins over `NO_COLOR`)
+and CI mode (`CI` set, or `--ci`) decide the colour; the progress line is drawn only on a terminal
+outside CI mode. At `--log-level debug` an error that exits 1 or 3 is followed by its stack trace.
+
 ## Exit codes
 
 | Code | Meaning |

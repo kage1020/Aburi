@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { symbolIdFile, type UnnameableSite, unnameableSite } from "@aburi/core"
+import { type ScanProgress, symbolIdFile, type UnnameableSite, unnameableSite } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
@@ -9,6 +9,7 @@ import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { pathExists } from "../fs-probe"
 import { readIR } from "../ir-io"
+import type { LogWrite } from "../logger"
 import { writeOutputFile } from "../output-file"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
@@ -25,6 +26,8 @@ export interface ExplainOptions {
   noRescan?: boolean
   debugResolution?: boolean
   logLevel?: LogLevel
+  log?: LogWrite
+  progress?: (progress: ScanProgress) => void
   warn?: WarnFn
 }
 
@@ -253,6 +256,8 @@ async function readOrScanIR(
     format: "json",
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
     ...(options.logLevel === undefined ? {} : { logLevel: options.logLevel }),
+    ...(options.log === undefined ? {} : { log: options.log }),
+    ...(options.progress === undefined ? {} : { progress: options.progress }),
     ...(options.warn === undefined ? {} : { incidents: { warn: options.warn } }),
   }
   const report = await runScan(scanOptions)

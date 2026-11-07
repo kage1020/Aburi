@@ -2,7 +2,10 @@ export interface AburiEnv {
   configPath: string | null
   logLevel: LogLevel | null
   noColor: boolean
-  forceColor: boolean
+  /** `FORCE_COLOR`: on, off (`0`, `false`), or not set. */
+  forceColor: boolean | null
+  /** `TERM=dumb`: a terminal that takes no cursor movement and no colour. */
+  dumbTerminal: boolean
   ci: boolean
 }
 
@@ -22,9 +25,17 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): AburiEnv {
     configPath,
     logLevel,
     noColor: hasValue(source.NO_COLOR),
-    forceColor: hasValue(source.FORCE_COLOR),
+    forceColor: readForceColor(source.FORCE_COLOR),
+    dumbTerminal: source.TERM?.trim() === "dumb",
     ci: hasValue(source.CI),
   }
+}
+
+// Node's reading: an empty value forces colour on, as `1` does.
+function readForceColor(value: string | undefined): boolean | null {
+  if (value === undefined) return null
+  const word = value.trim().toLowerCase()
+  return word !== "0" && word !== "false"
 }
 
 function nonEmpty(value: string | undefined): string | undefined {

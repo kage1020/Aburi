@@ -30,6 +30,9 @@ controller, service, and repository reads as one section.
 
 **Output.** The JSON analysis, a workspace overview, per-component detail, the pull request diff, and per-symbol explain views.
 
+**Terminal.** Coloured warnings and errors and a progress line on an interactive terminal,
+honouring `NO_COLOR`, `FORCE_COLOR` and CI, with stdout left plain for pipes.
+
 **Delivery.** `@aburi/cli` on npm, and `@aburi/github-action` for pull request
 comments.
 
@@ -95,8 +98,6 @@ Nothing here is committed.
   declare, and which plugin owns each.
 - `--quiet` for `scan` and `diff`, and `aburi diff --filter`, narrowing the
   report to chosen statuses.
-- Colour and a progress line on an interactive terminal, honouring `NO_COLOR`
-  and `FORCE_COLOR`.
 - Browse the analysis in a web UI.
 
 ---

@@ -16,7 +16,7 @@ The single entry point to Aburi. Every capability is exposed through a subcomman
 
 Design principles:
 - **Easy to automate in CI**: stable exit codes, JSON output available, non-interactive by default
-- **Friendly to humans**: proper help; colored output and progress indication are planned (§10–§12)
+- **Friendly to humans**: proper help, and on a terminal coloured warnings and errors and a progress line, on stderr alone (§10)
 - **Follow Unix conventions**: stdout/stderr separation, long/short options, env vars
 
 ## 2. Command Overview
@@ -40,7 +40,8 @@ Available on every command, unless the row says otherwise:
 | `--cwd <path>` | — | (planned) Change the working directory (origin for config resolution) |
 | `--config <path>` | — | Explicitly specify the config file location (§13). Taken by `scan`, `diff` and `explain`, after the command; `aburi init` has none |
 | `--log-level <level>` | — | `debug` / `info` / `warn` / `error`: the lowest level of the run's `Logger` lines (§5.6) that reach stderr. Written before the command or after it, and listed in every command's `--help` among the global options |
-| `--no-color` | — | (planned) Disable colored output |
+| `--no-color` | — | Write no colour on stderr, whatever `FORCE_COLOR` says (§10.1). Global, like `--log-level` |
+| `--ci` | — | CI mode (§12) where the `CI` env is not set. Global, like `--log-level` |
 | `--help` | `-h` | Show command-specific help |
 
 The log level is resolved in this order, the first one set winning:
@@ -179,7 +180,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | `--discover` | The same as `--no-strict`, named for the workflow it serves. With `--strict`, exit 2 |
 | `--quiet` | (planned) Limit stdout to the census lines |
 | `--compact` | Compact the JSON to a single line |
-| `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implied by `CI` (§11). The IR carries no timestamp to omit ([`ir-schema.md`](./ir-schema.md) §1.1) |
+| `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implied by CI mode (§12). The IR carries no timestamp to omit ([`ir-schema.md`](./ir-schema.md) §1.1) |
 | `--lsp` / `--no-lsp` | Override `config.lsp.enabled` ([`lsp-enrichment.md`](./lsp-enrichment.md)). `--lsp` with no `lsp.servers` entry for a loaded language starts no server, and says so on stderr |
 | `--concurrency <n>` | (planned, §14.2) Parser concurrency |
 | `--respect-gitignore` / `--no-respect-gitignore` | Override `config.respectGitignore`. A pair rather than the negative alone, so that a run which typed neither is distinguishable from one that asked for the default — an override the caller did not spell must leave the config alone |
@@ -1138,8 +1139,8 @@ and left at the code the answer itself earned.
 
 | Stream | Use |
 |---|---|
-| stdout | Results (summary lines, JSON, Markdown body). Pipeable; the target of CI parsing |
-| stderr | Warnings, error messages, the run's log; progress and colored UI once they exist (planned) |
+| stdout | Results (summary lines, JSON, Markdown body). Pipeable; the target of CI parsing. Never coloured, whatever the terminal or the environment |
+| stderr | Warnings, error messages, the run's log, and on a terminal colour (§10.1) and a progress line (§10.2) |
 
 Example: `aburi diff main..HEAD > result.txt 2> log.txt`
 
@@ -1149,15 +1150,71 @@ would have been (§9).
 
 The `--json` flag of the planned `aburi vocab` would dedicate stdout to machine-readable JSON.
 
+### 10.1 Colour
+
+Colour is decided once per run, by the first rule that applies:
+
+1. `--no-color` → off
+2. `FORCE_COLOR` set: `0` or `false` → off; any other value, the empty one included → on
+3. `NO_COLOR` set to a non-empty value → off
+4. CI mode (§12) → off
+5. stderr is a terminal and `TERM` is not `dumb` → on
+6. Otherwise → off
+
+`FORCE_COLOR` wins over `NO_COLOR` as it does for Node itself: it is the one a user sets for a
+single run against a `NO_COLOR` exported for every program. With colour on:
+
+| Line | Colour |
+|---|---|
+| A warning: a `⚠` line, a `warn:` log line | Yellow |
+| An error that ends the run, a `--fail-on` clause that tripped, an `error:` log line | Red |
+| An `info:` or `debug:` log line, a stack trace (§10.3) | Dim |
+
+Each line opens and closes its own escape sequence (SGR `33`/`31`/`2`, the 16-colour set every
+colour terminal reads), so a line read on its own, through `grep` or a CI log viewer, leaves no
+colour open. `FORCE_COLOR`'s depth values (`2`, `3`) change nothing. The text inside the sequences
+is the text colour-off writes, so stripping them gives the same bytes.
+
+### 10.2 Progress line
+
+A progress line is shown when stderr is a terminal, `TERM` is not `dumb` and the run is not in CI
+mode. `FORCE_COLOR` does not force it, nor `--no-color` remove it: a log file has no line to redraw.
+It names the phase of each scan the command runs:
+
+```
+discovering files…
+extracting 412/5002 files
+resolving calls…
+```
+
+`aburi scan` and the rescan of `aburi explain` show their scan's phase. `aburi diff` in ref mode
+prefixes each scan's phase with its side, both sides on one line while the two scans run at once
+(`base: extracting 412/5002 files · head: extracting 380/5002 files`), and once the scans are
+done shows `comparing…`; in file mode it shows `comparing…` alone. `aburi init` shows none.
+
+The line is redrawn in place, a carriage return and an erase-line sequence before each draw, at
+most every 100 ms, and at once when a phase changes or the last file is extracted; it is cut to the terminal's width so it
+never wraps. Every other line on stderr is written above it: the progress line is erased, the
+line written and the progress line drawn again. It is erased for good before the command writes
+its results on stdout and before an error that ends the run, so nothing of it is left on the
+terminal afterwards.
+
+### 10.3 Stack traces
+
+At `--log-level debug`, an error that ends the run with exit `1` or `3` is followed by its stack
+trace, then by that of each error it was caused by, each under `caused by:`. At any other level,
+and for an error that exits `2`, which is the invocation's and not the code's, the message alone
+is written. CI mode changes neither.
+
 ## 11. Environment Variables
 
 | Variable | Meaning |
 |---|---|
 | `ABURI_CONFIG` | Config file path (equivalent to --config) |
 | `ABURI_LOG_LEVEL` | Equivalent to --log-level, which wins over it (§3), except that a value other than the four levels is ignored rather than refused |
-| `NO_COLOR` | (planned) If set, disable coloring (standard convention). Read today, with no effect: the CLI writes no colour |
-| `FORCE_COLOR` | (planned) If set, force coloring on (standard convention). Read today, with no effect |
-| `CI` | If set, `aburi scan` behaves as under `--no-timestamp`. The rest of CI mode (§12) is planned |
+| `NO_COLOR` | Set to a non-empty value, no colour on stderr (§10.1) |
+| `FORCE_COLOR` | Set, colour on stderr even off a terminal and in CI mode; `0` or `false`, no colour (§10.1). `--no-color` wins over it |
+| `CI` | If set, CI mode (§12) |
 
 Precedence: CLI flags > environment variables > config file.
 
@@ -1165,14 +1222,16 @@ git's own variables reach the git commands `aburi diff` runs, except `GIT_INDEX_
 
 ## 12. CI Mode
 
-**Planned**, apart from the timestamp: today `CI` only implies `aburi scan --no-timestamp` (§5.2),
-and there is no `--ci` flag. The switches below would apply when the `CI=true` env is detected:
+CI mode applies when the `CI` env is set (a non-blank value; `CI=true` on GitHub Actions), or under
+`--ci`, for a CI whose environment does not set it:
 
-- Suppress progress animations (final summary only)
-- Disable coloring (on if `FORCE_COLOR` is set)
-- Emit stack traces on errors (debug only)
+- No progress line (§10.2): a CI log keeps every byte written, and a redrawn line would fill it
+- No colour, unless `FORCE_COLOR` turns it on (§10.1)
+- `aburi scan` behaves as under `--no-timestamp` (§5.2), so a committed `aburi-vocab-discovered.json`
+  does not change on every run
 
-Can also be enabled via an explicit `--ci` flag (for CI environments where the env is not set).
+Nothing else changes: stdout, the artefacts, the exit code and the log level are those of the same
+run outside CI mode, and stack traces follow `--log-level` alone (§10.3).
 
 ## 13. Config Resolution Order
 
@@ -1266,7 +1325,6 @@ The pool would run on Node `worker_threads`, as the base scan of `aburi diff` al
 | `--quiet` on `scan` and `diff` | Census or glyph line alone (§5.2, §6.2) |
 | `aburi diff --filter` | Restrict the report to some statuses (§6.2) |
 | `--concurrency` on `aburi scan`, worker pool | §14.2 |
-| Colour, progress, CI mode | §10–§12 |
 | `aburi vocab list --json` extension | merged with discoverer output |
 
 None of these are implemented yet; see the [roadmap](../roadmap.md). The signatures are reserved to avoid future compatibility breaks.
@@ -1288,6 +1346,11 @@ Options:
                                      debug each file extracted and why diff left
                                      a Symbol unpaired, and error shows none of
                                      it
+  --no-color                         no colour on stderr, whatever FORCE_COLOR
+                                     says
+  --ci                               CI mode where CI is not set: no progress
+                                     line, no colour unless FORCE_COLOR, and
+                                     scan as under --no-timestamp
   -h, --help                         display help for command
 
 Commands:
@@ -1322,8 +1385,8 @@ a command's option, not a global one (§3).
 | CL12 | (planned) `aburi vocab who-owns <unknown>` | exit 1 |
 | CL13 | (planned) `aburi vocab list --json` | machine-readable JSON, exit 0 |
 | CL14 | (planned) Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
-| CL15 | (planned) `NO_COLOR=1 aburi scan` | No coloring |
-| CL16 | (planned) `CI=true aburi scan` | Progress animation suppressed |
+| CL15 | `NO_COLOR=1 aburi scan` with stderr on a terminal, over a workspace that draws a warning | No escape sequence on stderr; the progress line still drawn. `FORCE_COLOR=1` beside it colours the warning yellow, and `--no-color` beside that leaves it plain |
+| CL16 | `CI=true aburi scan`, or `aburi scan --ci`, with stderr on a terminal | No progress line and no colour, `discoveredAt` left out as under `--no-timestamp`; stdout and the exit code those of the run outside CI mode |
 | CL18 | `aburi scan --config ./custom.json` | Uses the specified config. `aburi --config ./custom.json scan` exits 2: `--config` is the command's option (§3) |
 | CL19 | `aburi explain <name>` where a plugin threw during the rescan | exit 3, incident lines on stderr |
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
@@ -1373,6 +1436,10 @@ a command's option, not a global one (§3).
 | CL59 | `aburi diff main..HEAD --parallel-scans`, where both scans finish, where a scan leaves a file out, where the base scan stops, where the head scan stops, and where both stop | The two scans are in flight at the same time, and the exit code, stdout, stderr (the per-file log in its place among the rest) and the report are those of the same run under `--no-parallel-scans`, which has only one in flight at a time; `runDiff` rejects with the same error either way. A base that stops ends the run with the base's error, whatever the head did, once the head has stopped, and leaves no temporary directory (§14.1) |
 | CL60 | `aburi diff main..HEAD --parallel-scans` where a plugin on the base's thread calls `process.exit(7)`, or throws from a timer | exit 1, stderr naming the base ref, what ended the thread and `--no-parallel-scans`; no worktree but the main checkout and no temporary directory left (§14.1) |
 | CL61 | `aburi diff --base <ir> --head <ir> --no-parallel-scans` | The exit code, stdout and stderr of the same run without it |
+| CL70 | `aburi scan` with stderr on a terminal, over a workspace that draws a warning, with stdout piped | stderr draws `discovering files…`, `extracting N/M files` up to `M/M` and `resolving calls…`, the warning on a line of its own above the progress line, and ends with the progress line erased; stdout byte for byte that of the run with stderr piped |
+| CL71 | `aburi diff main..HEAD --parallel-scans` with stderr on a terminal; `aburi diff --base <ir> --head <ir>` | The progress line names each scan's side, both sides on one line while both run, then `comparing…`, and leaves on the terminal what the run with stderr piped writes, stdout byte for byte the same. File mode draws `comparing…` alone |
+| CL72 | Any command with stderr piped, `TERM=dumb`, or both streams piped under `FORCE_COLOR=1` | No progress line; under `FORCE_COLOR=1` the warnings, errors and log lines coloured, and stderr with the escape sequences stripped byte for byte that of the run without it |
+| CL73 | `aburi explain <id> --ir <missing>` at `--log-level debug`; a run that fails with exit 1 at `--log-level debug` and at `warn` | The first: the message alone, exit 2. The second: at debug the message, then the stack trace and each `caused by:` one; at warn the message alone |
 
 ## 18. Design Decisions
 
