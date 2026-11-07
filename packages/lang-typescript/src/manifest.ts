@@ -1,10 +1,12 @@
 import { type LangManifest, PLUGIN_SCHEMA_URL } from "@aburi/types"
+import { TYPESCRIPT_LANGUAGE_ID } from "./qname"
 
 export const langTypescriptManifest: LangManifest = {
   $schema: PLUGIN_SCHEMA_URL,
   name: "lang-typescript",
   version: "0.0.0",
   type: "lang",
+  languageId: TYPESCRIPT_LANGUAGE_ID,
   engines: { aburi: "*" },
   provides: {
     effects: [],

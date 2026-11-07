@@ -78,6 +78,7 @@ export type {
   PluginManifest,
   Provides,
 } from "./generated/plugin"
+export { LANGUAGE_ID_PATTERN, RESERVED_LANGUAGE_IDS } from "./language-id"
 export type {
   BodyExtraction,
   CallCandidate,

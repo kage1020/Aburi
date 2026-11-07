@@ -148,17 +148,12 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
           symbol: candidate.id,
         })
       }
+      const symbolLanguage = extractLanguageFromId(candidate.id, language.manifest)
       const dropReason = decideDropReason(candidate, language, frameworks, frameworkCtx)
 
       if (dropReason !== null) {
         symbols.push(
-          buildDroppedSymbol(
-            candidate,
-            dropReason,
-            extractLanguageFromId(candidate.id),
-            component,
-            confidence,
-          ),
+          buildDroppedSymbol(candidate, dropReason, symbolLanguage, component, confidence),
         )
         continue
       }
@@ -174,7 +169,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         component,
         candidate,
         file,
-        language: extractLanguageFromId(candidate.id),
+        language: symbolLanguage,
         imports,
         dropCFilter,
         timeoutEvents,
@@ -193,7 +188,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       symbols.push(
         buildKeptSymbol({
           candidate,
-          language: extractLanguageFromId(candidate.id),
+          language: symbolLanguage,
           component,
           rules: body.rules,
           effects: classifiedEffects,

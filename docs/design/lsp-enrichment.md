@@ -491,7 +491,7 @@ Empirically derived from `typescript-language-server` on medium monorepos: warm 
 
 ### 14.7 Why `lsp.servers` is keyed by the language plugin's `languageId`
 
-One LSP server per language, not per plugin manifest. A hypothetical `@aburi/lang-python-experimental` and `@aburi/lang-python` share the same Pyright process. Keying by the language plugin's `languageId` (`ts` for TypeScript and JavaScript alike) matches the same convention used for Symbol id language prefixes ([`ir-schema.md`](./ir-schema.md) §3), keeping mental overhead down.
+One LSP server per language, not per plugin manifest. A hypothetical `@aburi/lang-python-experimental` and `@aburi/lang-python` both declare `py`, so whichever of the two a workspace loads (the registry refuses both at once, [`multi-language-id.md`](./multi-language-id.md) Rule L-1) uses the same Pyright entry. Keying by the language plugin's `languageId` (`ts` for TypeScript and JavaScript alike) matches the same convention used for Symbol id language prefixes ([`ir-schema.md`](./ir-schema.md) §3), keeping mental overhead down.
 
 ### 14.8 Why we do not fight `logic` fingerprint non-invariance
 

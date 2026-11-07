@@ -1,4 +1,4 @@
-import { makeCall, rule, symbolId } from "@aburi/test-support"
+import { errorFrom, makeCall, rule, symbolId } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CoreError, ZERO_FINGERPRINT } from "../../src"
@@ -114,11 +114,18 @@ describe("runFilePipeline — the Symbol record", () => {
     ])
   })
 
-  it("refuses a Symbol id that carries no language prefix", async () => {
-    const candidate = { ...stubCandidate("Fn"), id: symbolId("no-colon-here") }
-    const outcome = extractOneSymbol({ candidate })
-    await expect(outcome).rejects.toBeInstanceOf(CoreError)
-    await expect(outcome).rejects.toMatchObject({ code: "scan-plugin-misconfigured" })
+  it.each([
+    ["carries no language prefix", "no-colon-here", "does not carry a language prefix"],
+    [
+      "opens with a language other than the plugin's",
+      "py:src/a.stub#Fn",
+      'Symbol id "py:src/a.stub#Fn" opens with the language "py", but plugin "lang-stub" declares languageId "stub"',
+    ],
+  ])("refuses a Symbol id that %s, ending the run", async (_, id, message) => {
+    const candidate = { ...stubCandidate("Fn"), id: symbolId(id) }
+    const thrown = await errorFrom(CoreError, () => extractOneSymbol({ candidate }))
+    expect(thrown).toMatchObject({ code: "scan-plugin-misconfigured", value: id })
+    expect(thrown.message).toContain(message)
   })
 
   it("records a dropped Symbol without walking its body, and with a zero fingerprint", async () => {

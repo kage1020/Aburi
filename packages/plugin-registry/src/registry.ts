@@ -124,6 +124,7 @@ export class VocabRegistry implements VocabRegistryContract {
   readonly #extKindPrefixes = new Map<string, OwnedPrefix>()
   readonly #frameworks = new Map<string, FrameworkVocab>()
   readonly #derivedByPrefixes = new Map<string, OwnedPrefix>()
+  readonly #languages = new Map<string, PluginManifest>()
 
   register(manifest: PluginManifest): void {
     this.#register(manifest, null)
@@ -176,6 +177,7 @@ export class VocabRegistry implements VocabRegistryContract {
     for (const p of manifest.provides.derivedByPrefixes) {
       this.#derivedByPrefixes.set(p, { prefix: p, owner: manifest })
     }
+    if (manifest.languageId !== undefined) this.#languages.set(manifest.languageId, manifest)
   }
 
   #validateConflicts(m: PluginManifest): void {
@@ -228,6 +230,15 @@ export class VocabRegistry implements VocabRegistryContract {
       this.#derivedByPrefixes,
       "derivedby-prefix-overlap",
     )
+    const owner = m.languageId === undefined ? undefined : this.#languages.get(m.languageId)
+    if (owner !== undefined) {
+      raise(
+        `Language id "${m.languageId}" is already declared by plugin "${owner.name}".`,
+        "duplicate-id",
+        [owner.name, m.name],
+        owner.languageId,
+      )
+    }
   }
 
   /** `code` names the `register` check that should have kept a second match out. */

@@ -112,6 +112,85 @@ describe("an effects plugin's xPrefix", () => {
   })
 })
 
+describe("a lang manifest's languageId", () => {
+  const without = (manifest: PluginManifest): PluginManifest => {
+    const { languageId: _, ...rest } = manifest
+    return rest
+  }
+
+  it.each<[string, PluginManifest, string, string | undefined, string]>([
+    [
+      "a lang manifest that declares none",
+      without(langManifest()),
+      "manifest-invalid",
+      undefined,
+      'Plugin "lang-foo" (type lang) declares no languageId: a lang manifest names the ' +
+        '<language> token its Symbol ids open with, e.g. "ts".',
+    ],
+    [
+      "a languageId that is not a string",
+      { ...langManifest(), languageId: 7 as never },
+      "manifest-invalid",
+      undefined,
+      'Plugin "lang-foo" (type lang) declares no languageId: a lang manifest names the ' +
+        '<language> token its Symbol ids open with, e.g. "ts".',
+    ],
+    [
+      "an uppercase token",
+      langManifest({ languageId: "TS" }),
+      "manifest-invalid",
+      "TS",
+      'Plugin "lang-foo" declares languageId "TS", but a language token must match [a-z][a-z0-9]*.',
+    ],
+    [
+      "a token with a separator in it",
+      langManifest({ languageId: "ts_next" }),
+      "manifest-invalid",
+      "ts_next",
+      'Plugin "lang-foo" declares languageId "ts_next", but a language token must match ' +
+        "[a-z][a-z0-9]*.",
+    ],
+    [
+      "the reserved token slice",
+      langManifest({ languageId: "slice" }),
+      "reserved-namespace",
+      "slice",
+      'Plugin "lang-foo" declares languageId "slice", which is reserved: its Symbol ids would ' +
+        "read as ids of another kind.",
+    ],
+    [
+      "an effects manifest that declares one",
+      { ...effectsManifest(), languageId: "ts" },
+      "namespace-type-mismatch",
+      "ts",
+      'Plugin "effects-foo" (type effects) declares languageId "ts" but only lang-type plugins ' +
+        "own a language token.",
+    ],
+    [
+      "a framework manifest that declares one",
+      { ...frameworkManifest(), languageId: "ts" },
+      "namespace-type-mismatch",
+      "ts",
+      'Plugin "framework-foo" (type framework) declares languageId "ts" but only lang-type ' +
+        "plugins own a language token.",
+    ],
+  ])("refuses %s", async (_, manifest, code, value, message) => {
+    const err = await errorFrom(RegistryError, () => new VocabRegistry().register(manifest))
+    expect(err).toMatchObject({ code, plugins: [manifest.name], value })
+    expect(err.message).toBe(message)
+  })
+
+  it("reads a languageId inherited from a prototype as none", async () => {
+    const inherited = Object.assign(Object.create({ languageId: "ts" }), without(langManifest()))
+    const err = await errorFrom(RegistryError, () => new VocabRegistry().register(inherited))
+    expect(err.code).toBe("manifest-invalid")
+  })
+
+  it.each(["ts", "py", "slicer", "f90"])("accepts %s", (languageId) => {
+    expect(() => new VocabRegistry().register(langManifest({ languageId }))).not.toThrow()
+  })
+})
+
 describe("one manifest declaring an id twice", () => {
   it.each<[string, PluginManifest, string, string]>([
     [

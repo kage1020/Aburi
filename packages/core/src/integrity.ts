@@ -1,4 +1,4 @@
-import type { IR } from "@aburi/types"
+import { type IR, RESERVED_LANGUAGE_IDS } from "@aburi/types"
 import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError, type IntegrityViolation } from "./errors"
 import {
@@ -8,7 +8,6 @@ import {
   isSymbolId,
   posixSpellingViolation,
   posixWorkspaceRelativeViolation,
-  RESERVED_LANGUAGE_IDS,
 } from "./id"
 import { checkCallResolutionStatsCensus, checkSkippedFilesCensus } from "./integrity-census"
 import {

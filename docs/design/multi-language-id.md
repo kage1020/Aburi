@@ -41,7 +41,7 @@ The Symbol ID grammar in [ir-schema.md](./ir-schema.md) §3 is:
 
 The `<language>` token is the namespace boundary between languages. Two Symbols whose IDs differ only in `<language>` are two distinct Symbols with no implied relationship. The IR schema already treats them as such — `symbols[].id` is the primary key, and `dependencies[].from`/`to` are foreign keys into it.
 
-Rule L-1 (language token ownership): each `<language>` token is exclusively owned by exactly one language plugin. The token is declared as `LanguagePlugin.languageId` (short-form id: `ts`, `tsx`, `js`, `py`, `go`, `rs`, `scala`, ...) — deliberately not the manifest `name`, which is a plugin ref (`lang-typescript`) resolved as a module specifier and outside the `LanguageId` grammar of Rule L-3. Two plugins declaring the same token is a startup error, following the general duplicate-declaration behavior of [extension-vocab.md](./extension-vocab.md) §6.1: the run aborts with a manifest-conflict diagnostic pointing at both plugins. Ownership semantics reuse the exclusive sub-namespace framework of [extension-vocab.md](./extension-vocab.md) §5.3.
+Rule L-1 (language token ownership): each `<language>` token is exclusively owned by exactly one language plugin. The token is declared as the manifest's `languageId` (short-form id: `ts`, `tsx`, `js`, `py`, `go`, `rs`, `scala`, ...) — deliberately not the manifest `name`, which is a plugin ref (`lang-typescript`) resolved as a module specifier and outside the `LanguageId` grammar of Rule L-3. Two plugins declaring the same token is a startup error, following the general duplicate-declaration behavior of [extension-vocab.md](./extension-vocab.md) §6.1: the registry refuses the second manifest with `duplicate-id`, naming both plugins, and the run aborts before extraction. Declaring it in the manifest puts it behind the registry, which checks every manifest whatever language the plugin is written in; a field on the plugin object would be checked only by the TypeScript compiler, and only for a plugin written in TypeScript. Ownership semantics reuse the exclusive sub-namespace framework of [extension-vocab.md](./extension-vocab.md) §5.3.
 
 Rule L-2 (well-known tokens): the following short-form tokens are centrally reserved to their conventional languages and MAY NOT be re-owned: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `rs`, `java`, `kt`, `scala`, `hs`, `rb`, `php`, `cs`, `swift`. This list is additive; a new mainstream language may extend it in a follow-up PR.
 
@@ -213,8 +213,12 @@ Rule L-10 (config surface locality): no per-language section of the config contr
 
 | ID | Input | Expected |
 | --- | --- | --- |
-| ML1 | Two plugins both declare `languageId: "py"` | Startup aborts with manifest-conflict diagnostic naming both plugins |
-| ML2 | Plugin declares `language: "TS"` (uppercase) | Manifest rejected with "language token must match `[a-z][a-z0-9]*`" |
+| ML1 | Two plugins both declare `languageId: "py"` in their manifests | Startup aborts: the registry refuses the second with `duplicate-id`, naming both plugins |
+| ML2 | A manifest declares `languageId: "TS"` (uppercase) | Manifest rejected with "a language token must match `[a-z][a-z0-9]*`" (`manifest-invalid`); the schema refuses it too |
+| ML2a | A `type: "lang"` manifest declares no `languageId` | Refused at registration (`manifest-invalid`). The schema accepts it, so a manifest written before the field remains a valid v1 document |
+| ML2b | A `type: "effects"` or `type: "framework"` manifest declares a `languageId` | Refused by the schema, and at registration with `namespace-type-mismatch` |
+| ML2c | A manifest declares `languageId: "slice"` | Refused at registration with `reserved-namespace` (Rule L-11) |
+| ML2d | A language plugin whose manifest declares `ts` mints `py:src/a.py#f` | The run ends with `scan-plugin-misconfigured`, naming the id and the token the manifest declares |
 | ML3 | Files `foo/bar.ts` and `foo/bar.py` both define a symbol `Baz` | Two Symbols emitted: `ts:foo/bar.ts#Baz` and `py:foo/bar.py#Baz`, both present in `symbols[]` |
 | ML4 | Component with `languages: ["ts", "py"]`, roots contain both languages | Component record emitted with `languages: ["ts", "py"]`; both language plugins participate in extraction |
 | ML5 | TS `fetch("/orders")` and Python `@app.post("/orders")` in the same scan | Dependency edge emitted `{from: <ts-caller-id>, to: <py-handler-id>, via: "http", direction: "outbound"}` |

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { makeLanguageId } from "@aburi/core"
 import { git, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { CliError, DIFF_JSON_FILENAME, DIFF_MD_FILENAME, EXIT, runCli, runDiff } from "../src"
@@ -22,9 +23,8 @@ afterEach(() => {
  */
 function timedPlugin(body: string): string {
   return pluginModuleSource(
-    { ...LANG_MANIFEST, name: "lang-timed" },
-    `  languageId: "timed",
-  fileExtensions: [".timed"],
+    { ...LANG_MANIFEST, name: "lang-timed", languageId: makeLanguageId("timed") },
+    `  fileExtensions: [".timed"],
   capabilities: ${JSON.stringify(FAKE_LANGUAGE_PLUGIN.capabilities)},
   init: async () => {},
   parseFile: async (file) => {

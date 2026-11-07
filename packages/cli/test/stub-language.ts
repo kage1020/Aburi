@@ -1,5 +1,6 @@
 import { rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { makeLanguageId } from "@aburi/core"
 import { commitAll, initRepository } from "@aburi/test-support"
 import { LANG_MANIFEST, pluginModuleSource } from "./plugin-fakes"
 import { writeConfig, writeFileAt, writePackageJson } from "./workspace"
@@ -10,9 +11,8 @@ import { writeConfig, writeFileAt, writePackageJson } from "./workspace"
  * throws in extraction, `odd` emits an undeclared extKind and `twin` two Symbols with one id.
  */
 export const STUB_PLUGIN = pluginModuleSource(
-  { ...LANG_MANIFEST, name: "lang-stub" },
-  `  languageId: "stub",
-  fileExtensions: [".stub"],
+  { ...LANG_MANIFEST, name: "lang-stub", languageId: makeLanguageId("stub") },
+  `  fileExtensions: [".stub"],
   capabilities: {
     hasDecorators: false,
     hasGenerics: false,

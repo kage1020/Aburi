@@ -4,6 +4,7 @@ import type {
   Confidence,
   Effect,
   Symbol as IRSymbol,
+  LangManifest,
   LanguageId,
   OpaqueAstNode,
   Rule,
@@ -14,7 +15,7 @@ import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { makeLanguageId } from "../id"
 import { normalizeRuleStrings } from "../rule-text"
 
-export function extractLanguageFromId(id: string): LanguageId {
+export function extractLanguageFromId(id: string, minter: LangManifest): LanguageId {
   const colon = id.indexOf(":")
   if (colon <= 0) {
     throw new CoreError(
@@ -22,7 +23,14 @@ export function extractLanguageFromId(id: string): LanguageId {
       { code: "scan-plugin-misconfigured", value: id },
     )
   }
-  return makeLanguageId(id.slice(0, colon))
+  const language = makeLanguageId(id.slice(0, colon))
+  if (language !== minter.languageId) {
+    throw new CoreError(
+      `Symbol id "${id}" opens with the language "${language}", but plugin "${minter.name}" declares languageId "${minter.languageId}"; a language plugin mints ids in its own language.`,
+      { code: "scan-plugin-misconfigured", value: id },
+    )
+  }
+  return language
 }
 
 export function buildDroppedSymbol(

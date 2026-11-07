@@ -8,12 +8,11 @@ import {
 } from "../src/index"
 import { idsOf } from "./fixtures/ctx"
 
-describe("langTypescriptPlugin.languageId", () => {
+describe("the manifest's languageId", () => {
   it("is the prefix the plugin writes onto every Symbol id, not the manifest name", async () => {
     const ids = await idsOf("export function alpha() {}\n")
 
-    expect(langTypescriptPlugin.languageId).toBe("ts")
-    expect(langTypescriptPlugin.languageId).not.toBe(langTypescriptPlugin.manifest.name)
+    expect(langTypescriptPlugin.manifest.languageId).toBe("ts")
     expect(ids).toEqual(["ts:src/a.ts#alpha"])
   })
 })

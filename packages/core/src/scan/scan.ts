@@ -111,7 +111,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     workspaceRoot: input.workspaceRoot,
     fileContents: extracted.fileContents,
     lspConfig: input.config.lsp,
-    languageIds: input.languages.map((plugin) => plugin.languageId),
+    languageIds: input.languages.map((plugin) => plugin.manifest.languageId),
     logger,
   }
   if (input.lspServerFactory !== undefined) enrichmentInput.serverFactory = input.lspServerFactory
@@ -173,7 +173,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const workspace: IR["workspace"] = {
     root: ".",
     managers: [...(input.workspaceManagers ?? [])],
-    languages: uniqueSorted(input.languages.map((l) => l.languageId)),
+    languages: uniqueSorted(input.languages.map((l) => l.manifest.languageId)),
   }
 
   const ir: IR = {

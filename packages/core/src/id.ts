@@ -1,4 +1,10 @@
-import type { ComponentId, LanguageId, SymbolId } from "@aburi/types"
+import {
+  type ComponentId,
+  LANGUAGE_ID_PATTERN,
+  type LanguageId,
+  RESERVED_LANGUAGE_IDS,
+  type SymbolId,
+} from "@aburi/types"
 import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError, type CoreErrorCode } from "./errors"
 
@@ -7,10 +13,6 @@ export const DEFAULT_EXPORT_QNAME = "<default>"
 export const MODULE_SCOPE_QNAME = "<module>"
 
 const RESERVED_QNAMES: ReadonlySet<string> = new Set([DEFAULT_EXPORT_QNAME, MODULE_SCOPE_QNAME])
-
-const LANGUAGE_ID_PATTERN = /^[a-z][a-z0-9]*$/
-
-export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
 
 const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 

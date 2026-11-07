@@ -2,7 +2,7 @@ import { join } from "node:path"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { loadPluginManifest, parsePluginManifest, RegistryError } from "../src/index"
-import { langManifest } from "./fixtures/manifests"
+import { effectsManifest, frameworkManifest, langManifest } from "./fixtures/manifests"
 
 const VALID_MANIFEST = `{
   // valid effects plugin
@@ -35,6 +35,11 @@ describe("parsePluginManifest", () => {
     expect(m.type).toBe("effects")
   })
 
+  it("accepts a lang manifest that declares no languageId, which the registry then requires", () => {
+    const { languageId: _, ...written } = langManifest()
+    expect(parsePluginManifest(JSON.stringify(written), "inline").languageId).toBeUndefined()
+  })
+
   it("accepts a manifest naming the host the schema was served from before aburi.dev", () => {
     const earlier = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
     const manifest = { ...langManifest(), $schema: earlier }
@@ -59,9 +64,12 @@ describe("parsePluginManifest", () => {
       "a lang plugin declaring x-* effects",
       langManifest({ provides: { effects: [{ id: "x-foo:read", description: "x" }] } }),
     ],
+    ["a languageId outside the token grammar", langManifest({ languageId: "TS" })],
+    ["an effects plugin declaring a languageId", { ...effectsManifest(), languageId: "ts" }],
+    ["a framework plugin declaring a languageId", { ...frameworkManifest(), languageId: "ts" }],
   ])("refuses %s against the schema, naming the plugin and carrying ajv's errors", async (_, m) => {
     const caught = await refusalOf(JSON.stringify(m))
-    expect(caught).toMatchObject({ code: "manifest-invalid", plugins: ["lang-foo"] })
+    expect(caught).toMatchObject({ code: "manifest-invalid", plugins: [m.name] })
     expect(caught.message).toMatch(/^Plugin manifest at inline does not conform to /)
     expect(Array.isArray(caught.cause)).toBe(true)
   })

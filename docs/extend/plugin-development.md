@@ -79,11 +79,12 @@ computes a normalised AST string for fingerprinting.
 import type { LanguagePlugin, ParseResult, BodyExtraction } from "@aburi/types"
 
 class MyLangPlugin implements LanguagePlugin {
-  readonly manifest = myLangManifest
-  // The LanguageId you stamp on every Symbol id, and what lands in
-  // IR.workspace.languages. Must match `^[a-z][a-z0-9]*$`. The manifest name
+  // `myLangManifest.languageId` ("my") is the LanguageId you stamp on every
+  // Symbol id, and what lands in IR.workspace.languages. It must match
+  // `^[a-z][a-z0-9]*$`, no other loaded plugin may declare it, and an id
+  // opening with any other token ends the run. The manifest name
   // ("lang-mylang") is a plugin ref and cannot be used here.
-  readonly languageId = "my"
+  readonly manifest = myLangManifest
   readonly fileExtensions = [".my"] as const
   readonly capabilities = { /* boolean matrix */ }
 

@@ -25,6 +25,11 @@
       "pattern": "^[a-z][a-z0-9-]*$",
       "description": "(type=effects only) Identifier used as the x-<xPrefix> prefix for owned effect ids. Defaults to <name> with leading 'effects-' stripped. Example: name='effects-prisma' → xPrefix='prisma' → owned ids: 'x-prisma:*'."
     },
+    "languageId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$",
+      "description": "(type=lang only) The <language> token every Symbol id this plugin mints opens with (e.g., 'ts' for 'ts:src/a.ts#f'). No two loaded plugins may declare the same one, and 'slice' is reserved. The registry requires it of a type=lang manifest; the schema leaves it optional so that lang manifests written before the field remain valid v1 documents."
+    },
     "version": {
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$",
@@ -54,10 +59,11 @@
   },
   "allOf": [
     {
-      "description": "type=effects: only x-* effects/effectPrefixes allowed; no framework:*/fp:*/oop:*/meta:* extKinds. wasmHeapPerWorkerMB is lang-only and must be absent.",
+      "description": "type=effects: only x-* effects/effectPrefixes allowed; no framework:*/fp:*/oop:*/meta:* extKinds. languageId and wasmHeapPerWorkerMB are lang-only and must be absent.",
       "if": { "properties": { "type": { "const": "effects" } } },
       "then": {
         "properties": {
+          "languageId": false,
           "provides": {
             "type": "object",
             "properties": {
@@ -76,10 +82,11 @@
       }
     },
     {
-      "description": "type=framework: only framework:* extKinds; no x-* effects. wasmHeapPerWorkerMB is lang-only and must be absent.",
+      "description": "type=framework: only framework:* extKinds; no x-* effects. languageId and wasmHeapPerWorkerMB are lang-only and must be absent.",
       "if": { "properties": { "type": { "const": "framework" } } },
       "then": {
         "properties": {
+          "languageId": false,
           "provides": {
             "type": "object",
             "properties": {

@@ -1,3 +1,4 @@
+import { RESERVED_LANGUAGE_IDS } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { symbolIdParts } from "../src/id"
 import {
@@ -14,7 +15,6 @@ import {
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
-  RESERVED_LANGUAGE_IDS,
   type SymbolIdParts,
   symbolIdFile,
   symbolIdSeparatorSite,

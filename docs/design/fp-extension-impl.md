@@ -213,6 +213,7 @@ Example manifest fragment for a Scala plugin using individual enumeration for th
   "name": "lang-scala",
   "version": "1.0.0",
   "type": "lang",
+  "languageId": "scala",
   "engines": { "aburi": "^1.0.0" },
   "provides": {
     "effects": [],

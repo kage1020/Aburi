@@ -14,7 +14,6 @@ import {
   CoreError,
   languageFileDropPatterns,
   logicFingerprint,
-  makeLanguageId,
   serializeCanonical,
   writeCanonicalIR,
 } from "../../src"
@@ -89,8 +88,7 @@ describe("scan — the Document it assembles", () => {
 
   it("lists each language once, sorted, beside the workspace managers it was given", async () => {
     const other = stubLanguagePlugin({
-      manifest: langManifest("lang-other"),
-      languageId: makeLanguageId("other"),
+      manifest: langManifest("lang-other", "other"),
       fileExtensions: [".other"],
     })
     const managers = [{ tool: "pnpm", roots: ["apps/a"] }]

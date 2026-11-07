@@ -1,4 +1,4 @@
-import type { PluginManifest } from "@aburi/types"
+import { LANGUAGE_ID_PATTERN, type PluginManifest, RESERVED_LANGUAGE_IDS } from "@aburi/types"
 import {
   deriveXPrefix,
   isReserved,
@@ -16,6 +16,7 @@ export function validateManifestRules(m: PluginManifest, granted: string | null)
   validateReserved(m, granted)
   validateTypeNamespaces(m)
   validateXPrefix(m)
+  validateLanguageId(m)
   validateOwnDuplicates(m)
 }
 
@@ -115,6 +116,47 @@ function validateXPrefix(m: PluginManifest): void {
         p,
       )
     }
+  }
+}
+
+function validateLanguageId(m: PluginManifest): void {
+  // Own key only, like `type`: an inherited `languageId` is not one the manifest declares.
+  const declared: unknown = Object.hasOwn(m, "languageId") ? m.languageId : undefined
+  if (m.type !== "lang") {
+    if (declared === undefined) return
+    raise(
+      `Plugin "${m.name}" (type ${m.type}) declares languageId "${String(declared)}" but only ` +
+        `lang-type plugins own a language token.`,
+      "namespace-type-mismatch",
+      [m.name],
+      String(declared),
+    )
+  }
+  if (typeof declared !== "string") {
+    raise(
+      `Plugin "${m.name}" (type lang) declares no languageId: a lang manifest names the ` +
+        `<language> token its Symbol ids open with, e.g. "ts".`,
+      "manifest-invalid",
+      [m.name],
+    )
+  }
+  if (!LANGUAGE_ID_PATTERN.test(declared)) {
+    raise(
+      `Plugin "${m.name}" declares languageId "${declared}", but a language token must match ` +
+        `[a-z][a-z0-9]*.`,
+      "manifest-invalid",
+      [m.name],
+      declared,
+    )
+  }
+  if (RESERVED_LANGUAGE_IDS.has(declared)) {
+    raise(
+      `Plugin "${m.name}" declares languageId "${declared}", which is reserved: its Symbol ids ` +
+        `would read as ids of another kind.`,
+      "reserved-namespace",
+      [m.name],
+      declared,
+    )
   }
 }
 

@@ -1,5 +1,6 @@
-import { type CallEdge, computeWeaklyConnectedComponents, RESERVED_LANGUAGE_IDS } from "@aburi/core"
+import { type CallEdge, computeWeaklyConnectedComponents } from "@aburi/core"
 import {
+  RESERVED_LANGUAGE_IDS,
   representativeSymbol,
   type SliceId,
   type SliceRecord,

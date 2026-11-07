@@ -2,7 +2,7 @@ import { errorFrom } from "@aburi/test-support"
 import type { PluginManifest } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { RegistryError, VocabRegistry } from "../src/index"
-import { effectsManifest, frameworkManifest } from "./fixtures/manifests"
+import { effectsManifest, frameworkManifest, langManifest } from "./fixtures/manifests"
 
 const controller = { baseKind: "class", description: "x" } as const
 
@@ -44,6 +44,14 @@ describe("a manifest that claims what another plugin already owns", () => {
       "duplicate-id",
       "nestjs",
       'Framework "nestjs" is already declared by plugin "framework-a".',
+    ],
+    [
+      "a language id",
+      langManifest({ name: "lang-python", languageId: "py" }),
+      langManifest({ name: "lang-pyright", languageId: "py" }),
+      "duplicate-id",
+      "py",
+      'Language id "py" is already declared by plugin "lang-python".',
     ],
     [
       "an effect prefix",

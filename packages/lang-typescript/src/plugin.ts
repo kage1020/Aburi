@@ -18,13 +18,11 @@ import { extractSymbols } from "./extract-symbols"
 import { langTypescriptManifest } from "./manifest"
 import { normalizeAst } from "./normalize-ast"
 import { parseTypescriptFile, TYPESCRIPT_FILE_EXTENSIONS } from "./parser"
-import { TYPESCRIPT_LANGUAGE_ID } from "./qname"
 import { createTsconfigResolver } from "./tsconfig-paths"
 import { walkBody } from "./walk-body"
 
 class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   readonly manifest = langTypescriptManifest
-  readonly languageId = TYPESCRIPT_LANGUAGE_ID
   readonly fileExtensions: string[] = [...TYPESCRIPT_FILE_EXTENSIONS]
   readonly capabilities: LanguageCapabilities = {
     hasDecorators: true,

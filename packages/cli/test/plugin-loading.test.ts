@@ -162,6 +162,8 @@ describe("loadPlugins — frameworkHints", () => {
 })
 
 describe("loadPlugins — a manifest the registry refuses", () => {
+  const { languageId: _, ...withoutLanguageId } = FAKE_LANGUAGE_PLUGIN.manifest
+
   it.each<[string, Config, Record<string, unknown>, string, string]>([
     [
       "a reserved namespace",
@@ -184,6 +186,32 @@ describe("loadPlugins — a manifest the registry refuses", () => {
       },
       "effects-b",
       "duplicate-prefix",
+    ],
+    [
+      "a language token two plugins claim",
+      { languages: ["lang-fake", "lang-other"] },
+      {
+        "@aburi/lang-fake": { plugin: FAKE_LANGUAGE_PLUGIN },
+        "@aburi/lang-other": {
+          plugin: {
+            ...FAKE_LANGUAGE_PLUGIN,
+            manifest: { ...FAKE_LANGUAGE_PLUGIN.manifest, name: "lang-other" },
+          },
+        },
+      },
+      "lang-other",
+      "duplicate-id",
+    ],
+    [
+      "a language plugin whose manifest names no language token",
+      { languages: ["lang-fake"] },
+      {
+        "@aburi/lang-fake": {
+          plugin: { ...FAKE_LANGUAGE_PLUGIN, manifest: withoutLanguageId },
+        },
+      },
+      "lang-fake",
+      "manifest-invalid",
     ],
   ])(
     "reports %s as a fault of the plugin's config entry, keeping the registry's error as the cause",

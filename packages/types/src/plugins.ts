@@ -242,13 +242,12 @@ export interface LanguageCapabilities {
   hasJsDoc: boolean
 }
 
-export type LangManifest = PluginManifest & { type: "lang" }
+export type LangManifest = PluginManifest & { type: "lang"; languageId: LanguageId }
 export type EffectsManifest = PluginManifest & { type: "effects" }
 export type FrameworkManifest = PluginManifest & { type: "framework" }
 
 export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
   manifest: LangManifest
-  languageId: LanguageId
   /** Extension list (not glob), e.g. [".ts", ".tsx"]. */
   fileExtensions: string[]
   capabilities: LanguageCapabilities

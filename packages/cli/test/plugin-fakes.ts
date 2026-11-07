@@ -9,11 +9,9 @@ import {
   type PluginManifest,
 } from "@aburi/types"
 
-export const LANG_MANIFEST: LangManifest = {
+const FAKE_MANIFEST = {
   $schema: PLUGIN_SCHEMA_URL,
-  name: "lang-fake",
   version: "0.0.0",
-  type: "lang",
   engines: { aburi: "*" },
   provides: {
     effects: [],
@@ -23,17 +21,24 @@ export const LANG_MANIFEST: LangManifest = {
     derivedByPrefixes: [],
     frameworks: [],
   },
+} as const satisfies Omit<PluginManifest, "name" | "type">
+
+export const LANG_MANIFEST: LangManifest = {
+  ...FAKE_MANIFEST,
+  name: "lang-fake",
+  type: "lang",
+  languageId: makeLanguageId("fake"),
 }
 
 export const EFFECTS_MANIFEST: EffectsManifest = {
-  ...LANG_MANIFEST,
+  ...FAKE_MANIFEST,
   name: "effects-fake",
   type: "effects",
-  provides: { ...LANG_MANIFEST.provides, derivedByPrefixes: ["effects-plugin:fake"] },
+  provides: { ...FAKE_MANIFEST.provides, derivedByPrefixes: ["effects-plugin:fake"] },
 }
 
 export const FRAMEWORK_MANIFEST: FrameworkManifest = {
-  ...LANG_MANIFEST,
+  ...FAKE_MANIFEST,
   name: "framework-fake",
   type: "framework",
 }
@@ -49,7 +54,6 @@ ${members}
 
 export const FAKE_LANGUAGE_PLUGIN: LanguagePlugin = {
   manifest: LANG_MANIFEST,
-  languageId: makeLanguageId("fake"),
   fileExtensions: [".fake"],
   capabilities: {
     hasDecorators: false,
