@@ -20,6 +20,7 @@
     "aburi": "./dist/bin/aburi.mjs"
   },
   "imports": {
+    "#parse-worker": "./dist/parse-worker.mjs",
     "#scan-worker": "./dist/scan-worker.mjs"
   },
   "exports": {

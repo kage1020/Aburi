@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeLineTerminators } from "../../src/scan/extract-files"
+import { normalizeLineTerminators } from "../../src/scan/extract-file"
 import { scanStubs, stubLanguagePlugin, useStubWorkspace } from "../fixtures/plugins"
 
 describe("normalizeLineTerminators", () => {

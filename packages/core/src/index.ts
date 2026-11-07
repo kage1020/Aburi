@@ -119,6 +119,16 @@ export {
   DropCFilter,
   type DropCFilterInput,
 } from "./scan/drop-c"
+export {
+  createFileExtractor,
+  type ExtractionJob,
+  type ExtractionPlugins,
+  type FileExtraction,
+  type FileExtractor,
+  type FileOutcome,
+} from "./scan/extract-file"
+export type { ParsePool, ParsePoolFactory } from "./scan/extract-files"
+export type { ExtractionEvent, ExtractionLogLevel } from "./scan/extraction-events"
 export { describeJsonType, describeThrown, errorCode, isPluginSetFault } from "./scan/faults"
 export {
   type ExtractedFile,

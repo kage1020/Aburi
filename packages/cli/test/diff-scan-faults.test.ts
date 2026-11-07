@@ -59,7 +59,7 @@ describe("aburi diff — the two scans it ran", () => {
       exitCode: EXIT.GATE,
       faultedScans: ["base"],
       baseLine:
-        '⚠ base ref "main": extraction-failed (1) — a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.',
+        '⚠ base ref "main": extraction-failed (1) — a plugin threw while extracting, its Symbols could not enter the Document, or the parser worker extracting it ended. This is the reason the run does not exit clean.',
     },
   ])(
     "says each pluginOptions line, for a key that names no loaded plugin or a frameworkHints entry's plugin, once and unlabelled, and exits as it would without the keys, when the base holds $base",
@@ -106,7 +106,7 @@ describe("aburi diff — the two scans it ran", () => {
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
     expect(warnings).toContain(
-      '⚠ base ref "main": extraction-failed (1) — a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.',
+      '⚠ base ref "main": extraction-failed (1) — a plugin threw while extracting, its Symbols could not enter the Document, or the parser worker extracting it ended. This is the reason the run does not exit clean.',
     )
     expect(report.triggered).not.toBeNull()
     if (report.triggered !== null)

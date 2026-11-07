@@ -29,10 +29,13 @@ import {
 import { beforeEach, expect } from "vitest"
 import {
   buildDropCFilter,
+  createFileExtractor,
   type ExtractedFile,
+  type ExtractionPlugins,
   type FilePipelineInput,
   type FilePipelineResult,
   isStrict,
+  type ParsePoolFactory,
   runFilePipeline,
   type ScanInput,
   type ScanResult,
@@ -312,4 +315,26 @@ export function scanStubs(
     components: [],
     ...overrides,
   })
+}
+
+/**
+ * A parse pool of `size` extractors on this thread, each with plugins of its own as a worker's
+ * would be, handing file `fileId` to extractor `assign(fileId) % size`.
+ */
+export function extractorPool(
+  size: number,
+  plugins: () => ExtractionPlugins,
+  assign: (fileId: number) => number,
+): ParsePoolFactory {
+  return (job) => {
+    const extractors = Array.from({ length: size }, () => createFileExtractor(job, plugins()))
+    return {
+      extract: (fileId) => {
+        const extractor = extractors[assign(fileId) % size]
+        if (extractor === undefined) throw new Error(`no extractor for file ${fileId}`)
+        return extractor.extract(fileId)
+      },
+      close: async () => {},
+    }
+  }
 }

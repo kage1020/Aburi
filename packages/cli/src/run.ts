@@ -5,6 +5,7 @@ import {
   deriveFormat,
   deriveStrict,
   type OutputFormat,
+  parseConcurrency,
   parseFailOnScope,
   parseFormat,
   parseLogLevel,
@@ -170,6 +171,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       "--discover",
       `same as --no-strict: record undeclared values in ${VOCAB_DISCOVERED_FILENAME}`,
     )
+    .option(
+      "--concurrency <n>",
+      "parser workers extracting files (default: one fewer than the processors; 1: none)",
+      parseConcurrency,
+    )
     .action(
       (cmdOptions: {
         outputDir?: string
@@ -184,6 +190,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         lsp?: boolean
         strict?: boolean
         discover?: boolean
+        concurrency?: number
       }) =>
         runCommand(async () => {
           const report = await runScan({
@@ -200,6 +207,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               suppressTimestamp: cmdOptions.timestamp === false || env.ci ? true : undefined,
               lsp: cmdOptions.lsp,
               strict: deriveStrict(cmdOptions),
+              concurrency: cmdOptions.concurrency,
               logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
@@ -251,6 +259,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       "--no-parallel-scans",
       "scan the base and then the head, which uses less memory (default: at once, unless on a single CPU)",
     )
+    .option(
+      "--concurrency <n>",
+      "parser workers each scan extracts files on (default: the processors, shared by the scans; 1: none)",
+      parseConcurrency,
+    )
     .option("--config <path>", "config file path", parsePath)
     .action(
       (
@@ -265,6 +278,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           compact?: boolean
           maxBytes?: number
           parallelScans?: boolean
+          concurrency?: number
           config?: string
         },
       ) =>
@@ -285,6 +299,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               compact: cmdOptions.compact,
               maxBytes: cmdOptions.maxBytes,
               parallelScans: cmdOptions.parallelScans,
+              concurrency: cmdOptions.concurrency,
               logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
@@ -313,6 +328,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       "--debug-resolution",
       "append the per-call resolution table (forces a rescan; incompatible with --ir / --no-rescan)",
     )
+    .option(
+      "--concurrency <n>",
+      "parser workers the rescan extracts files on (default: one fewer than the processors; 1: none)",
+      parseConcurrency,
+    )
     .option("--config <path>", "config file path", parsePath)
     .action(
       (
@@ -322,6 +342,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           output?: string
           rescan?: boolean
           debugResolution?: boolean
+          concurrency?: number
           config?: string
         },
       ) =>
@@ -334,6 +355,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               outputPath: cmdOptions.output,
               noRescan: cmdOptions.rescan === undefined ? undefined : !cmdOptions.rescan,
               debugResolution: cmdOptions.debugResolution,
+              concurrency: cmdOptions.concurrency,
               logLevel: logLevel(),
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),

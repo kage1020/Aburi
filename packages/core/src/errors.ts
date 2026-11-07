@@ -19,6 +19,8 @@ export type CoreErrorCode =
   | "propagation-invariant-violated"
   | "lsp-config-invalid"
   | "scan-outcome-unhandled"
+  | "scan-file-unknown"
+  | "scan-extraction-out-of-order"
   | "receiver-hint-key-malformed"
   | "vocab-undeclared"
 

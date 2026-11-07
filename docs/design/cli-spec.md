@@ -162,7 +162,7 @@ Scans the workspace and generates the IR.
 aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
            [--strict|--no-strict] [--discover]
            [--compact] [--no-timestamp]
-           [--lsp|--no-lsp]
+           [--lsp|--no-lsp] [--concurrency <n>]
            [--respect-gitignore|--no-respect-gitignore]
            [--ignore <glob>] [--config <path>]
 ```
@@ -181,7 +181,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | `--compact` | Compact the JSON to a single line |
 | `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implied by `CI` (§11). The IR carries no timestamp to omit ([`ir-schema.md`](./ir-schema.md) §1.1) |
 | `--lsp` / `--no-lsp` | Override `config.lsp.enabled` ([`lsp-enrichment.md`](./lsp-enrichment.md)). `--lsp` with no `lsp.servers` entry for a loaded language starts no server, and says so on stderr |
-| `--concurrency <n>` | (planned, §14.2) Parser concurrency |
+| `--concurrency <n>` | How many parser workers extract the files (§14.2), `1` extracting every file on the main thread. Default: one fewer than the processors, clamped by free memory and by the size of the source. What the run writes, prints and exits with is the same at any value. Anything but a positive integer is exit 2 before anything is read |
 | `--respect-gitignore` / `--no-respect-gitignore` | Override `config.respectGitignore`. A pair rather than the negative alone, so that a run which typed neither is distinguishable from one that asked for the default — an override the caller did not spell must leave the config alone |
 | `--ignore <glob>` | Append to `config.ignore[]` (repeatable) |
 | `--config <path>` | The config file to read (§13) |
@@ -190,8 +190,8 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 
 1. Resolve the config
 2. Load plugins and build the registry
-3. Walk the workspace, parsing one file at a time (the worker pool of §14.2 is planned)
-4. Extraction pipeline: per file, extraction → framework classification → Symbol drop (category B) → body walk → effect classification and call drop (category C) → fingerprint; then, over the whole workspace, LSP enrichment when `lsp.enabled` → call resolution → effect propagation → the `logic` fingerprint again, now reading propagated effects → the IR's integrity check
+3. Walk the workspace, and hand each file to the parser workers, or extract each in turn on the main thread (§14.2)
+4. Extraction pipeline: per file, on the thread that extracts it, extraction → framework classification → Symbol drop (category B) → body walk → effect classification and call drop (category C) → fingerprint; then, over the whole workspace and on the main thread, once every file's extraction is folded in in file order, LSP enrichment when `lsp.enabled` → call resolution → effect propagation → the `logic` fingerprint again, now reading propagated effects → the IR's integrity check
 5. Write `<output-dir>/aburi.ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md` — the IR first, because every page is derived from it: a page that fails to render leaves the IR on disk rather than taking it down too, and an IR the serializer refuses leaves no pages beside it. A page that fails to render is a bug in Aburi (exit `1`, §9) and names the page; the scan's incidents are reported before the command ends, as they are after a clean run
    - **What this run does not write is removed**, once everything it writes is written, so the directory describes this run alone and not a mix of runs: the `aburi.ir.json` a `--format md` run leaves out, which `aburi explain --no-rescan` would otherwise answer from (§7.3); the `workspace.md` and every component page a `--format json` run leaves out; and, under any format, the page of a Component this IR does not hold — one renamed or removed since. A path that cannot be removed is refused like one that cannot be written, and so is a `components/` that cannot be listed or a page whose first line cannot be read. The message names the step that failed — `could not remove <artefact> at <path>`, `could not list the components directory at <path>`, `could not read the Markdown for component "<id>" at <path>` — and is exit `2` for a directory standing where a removed file would be, exit `1` for any other refusal. Each file `aburi scan` removes, the discovered-vocabulary record (§5.2) included, is logged as one `info:` line, `Removed <artefact> at <path>`, so the default level, `warn`, shows none of them (§5.6)
    - **Only Aburi's own files are removed.** The output directory, and `components/` in particular, may hold files of the caller's — a README, notes, Markdown a person wrote, a subdirectory — and those stay, as `components/` itself does. `aburi.ir.json` and `workspace.md` are recognised by name alone, as `aburi diff` recognises its report (§6.4), so a file of the caller's under either name is removed with them. A component page is recognised by name and content both, since its name is any Component id: a regular file directly in `components/`, named `<id>.md` for a valid Component id ([`ir-schema.md`](./ir-schema.md) §4), that opens with the heading the page opens with, `# Component: <id>` ([`markdown-projection.md`](./markdown-projection.md) §5.1), and a line ending, LF or CRLF alike. A file whose name is no Component id, or whose first line is anything else — another heading, or that heading with more on its line — is not one. Reading that line is part of removing the page: the scan reads only as many bytes as the heading and a CRLF take, reading again until it has them or the file ends, and a failure to read is refused the same way
@@ -258,7 +258,7 @@ A planned `--quiet` would print the census lines alone.
     public/data.js: 1100000 > 1048576
 ⚠ parse-failed (1) — the language plugin refused the source. Deterministic: fix the file, or the plugin.
     src/broken.ts: parse reported a non-recoverable error at 12:4 — unterminated string
-⚠ extraction-failed (1) — a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.
+⚠ extraction-failed (1) — a plugin threw while extracting, its Symbols could not enter the Document, or the parser worker extracting it ended. This is the reason the run does not exit clean.
     src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
 
@@ -625,6 +625,7 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, keeping sections most important first at their smallest (names only for a section of whole Symbols) and then growing the name lists back to full entries from the top ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped, and when the cap changed the report the uncapped one is written as `diff.full.md` beside it. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
 | `--compact` | Compact `diff.json` to a single line |
 | `--parallel-scans` / `--no-parallel-scans` | Whether the two scans run at once (§14.1). `--no-parallel-scans` runs the base and then the head, which uses less memory; `--parallel-scans` runs both at once even on one CPU. Neither: at once when the machine has two or more CPUs, one after the other on one. No effect with `--base/--head`, which scans nothing |
+| `--concurrency <n>` | How many parser workers each of the two scans extracts its files on (§14.2). Default: `aburi scan`'s, with the processors and the free memory halved between the two scans when they run at once (§14.1). No effect with `--base/--head`, which scans nothing, though anything but a positive integer is exit 2 there too |
 | `--config <path>` | The config file both scans read (§13, §6.4 step 3) |
 | `--quiet` | (planned) Limit stdout to the glyph line |
 
@@ -905,7 +906,7 @@ Shows details of a single Symbol / file / pattern match.
 
 ```
 aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--debug-resolution]
-              [--config <path>]
+              [--concurrency <n>] [--config <path>]
 ```
 
 ### 7.2 Arguments
@@ -945,6 +946,7 @@ than a name, and is looked up as any other path.
 | `--output <path>` | Write to a file (default: stdout). The directories the path names are created, as `--output-dir` creates its own; a path that cannot hold a file — it names a directory, or a file stands on its parent path — is exit 2 |
 | `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `<output-dir>/aburi.ir.json` — `config.output.dir` when the config names one, otherwise `out` — starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
 | `--no-rescan` | Exit `2` when the lookup above finds no IR, instead of scanning. Staleness is not examined: an IR that is found is read whatever its age. An `aburi scan --format md` removes the IR an earlier run left in its output directory (§5.3), so a scan that wrote only pages leaves none to be read in its place |
+| `--concurrency <n>` | How many parser workers the scan of §7.4 step 1 extracts its files on (§14.2), with `aburi scan`'s default. No effect when an IR is read, though anything but a positive integer is exit 2 there too |
 | `--config <path>` | The config file the rescan reads, and where `config.output.dir` comes from for the lookup above (§13) |
 | `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
 
@@ -1204,7 +1206,7 @@ deleted. Either is what §6.4 step 3 forbids.
 `aburi diff <base>..<head>` runs its two scans (§6.4 steps 3 and 4) at the same time: the base on a
 worker thread of its own, the head on the main thread. They are independent — each reads its own
 tree and writes its own IR, and the comparison starts once both exist — so this needs none of the
-work partitioning the parser pool would (§14.2, [`performance.md`](./performance.md) §4–§7), and the
+work partitioning the parser pool does (§14.2, [`performance.md`](./performance.md) §4–§7), and the
 IRs the comparison reads are the ones the scans would write one after the other. The run then takes
 about as long as its slower scan rather than both, and holds two scans in memory at once.
 
@@ -1212,8 +1214,9 @@ about as long as its slower scan rather than both, and holds two scans in memory
 is held to; `--parallel-scans` runs them at once on any machine. With neither, they run at once
 where `os.availableParallelism()` reports two or more CPUs and one after the other where it reports
 one, which is where a second thread would only take turns with the first. The option is a switch
-rather than a count, and is not named `--concurrency`: that name is reserved for the parser pool
-within a scan (§14.2), so that it can mean the same thing on `aburi diff` as on `aburi scan`.
+rather than a count, and is not named `--concurrency`: that name is the parser pool's within each
+scan (§14.2), and means the same thing on `aburi diff` as on `aburi scan`. Running together, each
+scan sizes its pool to half the machine.
 
 Running together changes nothing the run says or decides:
 
@@ -1239,21 +1242,45 @@ other failure:
 - the worker script cannot be found, as when a bundle inlines `@aburi/cli` and leaves the script
   behind.
 
-### 14.2 Parser concurrency for `aburi scan`
+### 14.2 Parser concurrency within a scan
 
-**Planned; not implemented.** `aburi scan` parses one file at a time and has no `--concurrency`
-flag, which exits 2 as an unknown option. The [roadmap](../roadmap.md) explains why the worker pool
-waits. This section reserves the interface:
+`aburi scan` extracts its files on a pool of worker threads, and so do the scans `aburi diff` and
+`aburi explain` run. [`performance.md`](./performance.md) specifies the pool; what the command line
+sees of it is this:
 
-- Parser concurrency for `aburi scan`: default = `max(1, CPU_count - 1)`
-- Override with `--concurrency <n>`
-- The effective concurrency is capped at `min(specified, floor(availableMemoryMB / wasmHeapPerWorkerMB))` ([`lang-plugin.md`](./lang-plugin.md) §8.1)
-  - A guard against crashes from exceeding the WASM heap budget
-  - The per-worker budget's source of truth is **`capabilities.wasmHeapPerWorkerMB` in the plugin manifest** (range: 16–4096 MiB; 256 MiB when undeclared)
-  - When multiple lang plugins coexist in the same run, the **maximum** of the declared values is used
-- On memory-constrained CI, `--concurrency 1` is recommended (for debugging)
+- `--concurrency <n>` sets how many workers extract the files. `1` starts none: every file is
+  extracted on the main thread, which is the reference the pool is held to. The value is a ceiling
+  that free memory still lowers, and it is capped at the file count.
+- Without it, the pool is one fewer than `os.availableParallelism()` reports, at least one;
+  clamped to `floor(availableMemoryMB / wasmHeapPerWorkerMB)`, `availableMemoryMB` being the free
+  memory the runtime reports; and to one worker for each 256 KiB of source, so a small workspace
+  is extracted on the main thread ([`performance.md`](./performance.md) Rule PF-2). The two scans
+  of `aburi diff` running at once (§14.1) halve the processors and the memory between them.
+  - The per-worker budget's source of truth is **`capabilities.wasmHeapPerWorkerMB` in the plugin
+    manifest** (range: 16–4096 MiB; 256 MiB when undeclared)
+    ([`lang-plugin.md`](./lang-plugin.md) §8.1)
+  - When multiple lang plugins coexist in the same run, the **maximum** of the declared values is
+    used, since any worker may be handed any file
+- At `--log-level debug`, a scan that starts workers, or was given `--concurrency` above 1, says
+  how many and from what: `scan: extracting on 3 parser workers (4 processors, 1200 files of
+  9600 KiB, 15000 MiB free at 256 MiB a worker)`.
 
-The pool would run on Node `worker_threads`, as the base scan of `aburi diff` already does (§14.1; [`performance.md`](./performance.md) Rule PF-1). Architecture details — pool sizing, work partitioning, serialization boundary, and byte-identical merge — are specified in [`performance.md`](./performance.md).
+The pool changes nothing the run writes, prints or exits with: the IR, the pages, the
+discovered-vocabulary record and the report are byte for byte those of `--concurrency 1`, and so
+are stdout, the exit code and stderr, but for the debug line above. Each file's log is said in file
+order, and a scan that stops at a file stops there as one thread does, saying nothing of the files
+after it.
+
+What has no single-thread counterpart is a worker that ends — a plugin that calls `process.exit()`,
+an error thrown outside the scan's own handling, a worker out of memory — and it costs the file the
+worker was extracting rather than the run. That file is withdrawn as a file whose extraction threw
+is ([`lang-plugin.md`](./lang-plugin.md) §7.2), with
+`Skipped <file>: the parser worker extracting it <what ended it>. Run with --concurrency 1 to extract every file on the main thread.`
+on stderr, and the scan exits `3`; the worker's next file is handed to another worker, and nothing already
+extracted is lost. A file whose extraction holds a value that cannot leave the worker is withdrawn the same way.
+The third worker to end in one scan ends the run with exit `1`, naming the three files, and so does
+a worker that cannot load the scan's plugins, `A parser worker failed: <error>`; both name
+`--concurrency 1`, which never starts a worker.
 
 ## 15. Planned Features
 
@@ -1265,7 +1292,6 @@ The pool would run on Node `worker_threads`, as the base scan of `aburi diff` al
 | `aburi vocab` | Query the extension vocabulary (§8) |
 | `--quiet` on `scan` and `diff` | Census or glyph line alone (§5.2, §6.2) |
 | `aburi diff --filter` | Restrict the report to some statuses (§6.2) |
-| `--concurrency` on `aburi scan`, worker pool | §14.2 |
 | Colour, progress, CI mode | §10–§12 |
 | `aburi vocab list --json` extension | merged with discoverer output |
 
@@ -1351,7 +1377,7 @@ a command's option, not a global one (§3).
 | CL37 | `aburi init --log-level debug` | exit 0: `init` accepts the flag, which has no per-file log there to govern |
 | CL38 | `aburi init --help`, `aburi scan --help`, `aburi diff --help` or `aburi explain --help` | `--log-level` listed under "Global Options" |
 | CL39 | `aburi diff … --fail-on changed --fail-on removed` over one changed Symbol, in either order; over a changed and a removed one, in either order | exit 3 in both orders, as `--fail-on changed,removed` gives, and `--fail-on removed --fail-on added`, or no `--fail-on` at all, exits 0; over both, the tripped line names the clause written first. An invalid occurrence beside a valid one (`--fail-on bogus --fail-on changed`, `--fail-on '' --fail-on changed`) exits 2 quoting that occurrence alone, before either IR is read and with an earlier report in the output directory left as it was. `runDiff` refuses `failOn: []` as it refuses `failOn: ""` |
-| CL40 | Any option that takes a value, other than `--ignore` and `--fail-on`, given twice on any command — `init --output`; `scan --output-dir`, `--format`, `--config`; `diff --base`, `--head`, `--output-dir`, `--format`, `--fail-on-scope`, `--max-bytes`, `--config`; `explain --ir`, `--output`, `--config`; and `--log-level`, before the command, after it, or once on each side — in either spelling (`--config=a.json --config a.json`), the same value twice included, and a second value the option refuses on its own (`scan --format json --format bogus`, `diff … --max-bytes 1000 --max-bytes 0`) | exit 2, `<option> is given more than once ("<first>", then "<second>"): pass one` on stderr, nothing on stdout, nothing written, and an earlier report left as it was. With the invalid value first (`scan --format bogus --format json`), that value's own error instead, at exit 2. `aburi scan --compact --compact` and `--no-timestamp --no-timestamp` run and exit 0; `--ignore a/** --ignore b/**` leaves out the files under both and exits 0; `--respect-gitignore` and `--no-respect-gitignore` together, in either order, over a config that sets `respectGitignore: false`: the one written last applies |
+| CL40 | Any option that takes a value, other than `--ignore` and `--fail-on`, given twice on any command — `init --output`; `scan --output-dir`, `--format`, `--concurrency`, `--config`; `diff --base`, `--head`, `--output-dir`, `--format`, `--fail-on-scope`, `--max-bytes`, `--concurrency`, `--config`; `explain --ir`, `--output`, `--concurrency`, `--config`; and `--log-level`, before the command, after it, or once on each side — in either spelling (`--config=a.json --config a.json`), the same value twice included, and a second value the option refuses on its own (`scan --format json --format bogus`, `diff … --max-bytes 1000 --max-bytes 0`) | exit 2, `<option> is given more than once ("<first>", then "<second>"): pass one` on stderr, nothing on stdout, nothing written, and an earlier report left as it was. With the invalid value first (`scan --format bogus --format json`), that value's own error instead, at exit 2. `aburi scan --compact --compact` and `--no-timestamp --no-timestamp` run and exit 0; `--ignore a/** --ignore b/**` leaves out the files under both and exits 0; `--respect-gitignore` and `--no-respect-gitignore` together, in either order, over a config that sets `respectGitignore: false`: the one written last applies |
 | CL41 | An empty value for any option that takes a path — `init --output`; `scan --output-dir`, `--config`; `diff --base`, `--head`, `--output-dir`, `--config`; `explain --ir`, `--output`, `--config` — in either spelling (`--output-dir=`) | exit 2, `error: option '<option> <path>' argument '' is invalid. a path must not be empty` on stderr, nothing on stdout, nothing written, and an earlier report left as it was |
 | CL42 | `aburi diff main..HEAD --base b.json`, or `aburi diff main..HEAD --head h.json` | exit 2, `<option> cannot be combined with a ref spec argument. Use one or the other.`, naming the option given |
 | CL43 | `aburi scan` after one Component was renamed and another removed | The page of each id the IR no longer holds is removed, with LF or CRLF line endings, and on a filesystem that returns a few bytes per read; nothing else in `components/` goes. A file beside them that is not such a page stays: another extension, a first line naming another id or none, the heading with more on its line, a name no Component id takes, the same page in a subdirectory, or a directory named like a page |
@@ -1373,6 +1399,11 @@ a command's option, not a global one (§3).
 | CL59 | `aburi diff main..HEAD --parallel-scans`, where both scans finish, where a scan leaves a file out, where the base scan stops, where the head scan stops, and where both stop | The two scans are in flight at the same time, and the exit code, stdout, stderr (the per-file log in its place among the rest) and the report are those of the same run under `--no-parallel-scans`, which has only one in flight at a time; `runDiff` rejects with the same error either way. A base that stops ends the run with the base's error, whatever the head did, once the head has stopped, and leaves no temporary directory (§14.1) |
 | CL60 | `aburi diff main..HEAD --parallel-scans` where a plugin on the base's thread calls `process.exit(7)`, or throws from a timer | exit 1, stderr naming the base ref, what ended the thread and `--no-parallel-scans`; no worktree but the main checkout and no temporary directory left (§14.1) |
 | CL61 | `aburi diff --base <ir> --head <ir> --no-parallel-scans` | The exit code, stdout and stderr of the same run without it |
+| CL62 | `aburi scan --concurrency N` for N ∈ {2, 3, more than there are files}, over files that fail to parse, throw, collide on an id and emit an undeclared value, strict and not; `aburi diff main..HEAD --concurrency 2`, with its scans at once and in turn | The exit code, stdout, the artefacts and stderr of `--concurrency 1`, but for the `scan: extracting on` debug line (§14.2) |
+| CL63 | `aburi scan --concurrency 2` where a plugin on a worker calls `process.exit(7)`, or throws from a microtask, while extracting one file, or leaves a function in that file's Symbol | exit 3; that file in `stats.skippedFiles` as `extraction-failed`, `Skipped <file>: ` and what happened on stderr, and every other file's Symbols in the IR (§14.2) |
+| CL64 | `aburi scan --concurrency 2` where workers end under three files | exit 1, stderr naming the three files and `--concurrency 1` |
+| CL65 | `aburi scan --concurrency 2` where a plugin throws when loaded on a worker | exit 1, `A parser worker failed: ` with the plugin's error and `--concurrency 1` on stderr |
+| CL66 | `aburi scan --concurrency` 0, -1, 1.5, `two` or a value past the largest safe integer; `runScan`, `runDiff` or `runExplain` with `concurrency` 0, -1, 1.5, `NaN` or 2⁵³ | exit 2 and `--concurrency must be a positive integer (got "<value>")` on stderr; the functions reject with that error, code `input-error`, before reading the workspace or an IR |
 
 ## 18. Design Decisions
 

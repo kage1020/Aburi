@@ -101,7 +101,7 @@ aburi init --with-suggestions --output config/aburi.jsonc
 aburi scan [--output-dir <dir>] [--format json|md|both] [--no-md|--no-json]
            [--ignore <glob>]... [--respect-gitignore | --no-respect-gitignore]
            [--strict | --no-strict | --discover] [--lsp | --no-lsp]
-           [--compact] [--no-timestamp] [--config <path>]
+           [--compact] [--no-timestamp] [--concurrency <n>] [--config <path>]
 ```
 
 Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
@@ -124,6 +124,7 @@ file removed.
 | `--discover` | The same as `--no-strict`. With `--strict`, exits `2`. |
 | `--lsp` / `--no-lsp` | Override `lsp.enabled` for this run. `--lsp` still needs a server under `lsp.servers` to talk to. |
 | `--compact` | JSON without indentation. |
+| `--concurrency <n>` | How many worker threads extract the files. By default one fewer than the processors, fewer when free memory or a small workspace calls for it; `1` extracts every file on the main thread. The output is the same at any value. |
 | `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implicit when `CI` is set. `aburi.ir.json` carries no timestamp either way. |
 | `--config <path>` | Use a different config file. |
 
@@ -222,6 +223,7 @@ scanning.
 | `--compact` | JSON without indentation. |
 | `--max-bytes <n>` | Cap `diff.md` at n bytes. See below. |
 | `--parallel-scans` / `--no-parallel-scans` | Whether the two scans run at once. By default they do on a machine with two or more CPUs, and run in turn on one. The output is the same either way; `--no-parallel-scans`, one at a time, uses less memory. |
+| `--concurrency <n>` | How many worker threads each scan extracts its files on, as for `aburi scan`. Two scans running at once share the processors and memory the default is sized to. |
 | `--config <path>` | Use a different config file. |
 
 In ref mode, a scan that did not finish cleanly exits `3` even with no
@@ -331,7 +333,7 @@ into `src/` counts, one moved into a test file does not. The default, `all`, cou
 
 ```
 aburi explain <target> [--ir <path>] [--output <path>] [--no-rescan] [--debug-resolution]
-              [--config <path>]
+              [--concurrency <n>] [--config <path>]
 ```
 
 Prints the full detail for one symbol. The target can be:
@@ -347,6 +349,7 @@ Prints the full detail for one symbol. The target can be:
 | `--ir <path>` | Read an existing analysis instead of scanning. |
 | `--output <path>` | Write to a file instead of stdout. Directories in the path are created if they are missing; a path that cannot hold a file — an existing directory, or a file sitting on its parent path — exits 2 and names it. |
 | `--no-rescan` | Fail rather than scanning when no analysis file is found. |
+| `--concurrency <n>` | How many worker threads the scan extracts its files on, as for `aburi scan`. No effect when an analysis file is read. |
 | `--debug-resolution` | Append a `## Call resolution` table: each call site, what it resolved to, and for an unresolved one the reason and the candidates. The analysis file does not keep the reasons, so it always scans, and with `--ir` or `--no-rescan` it exits `2`. |
 | `--config <path>` | Use a different config file. |
 

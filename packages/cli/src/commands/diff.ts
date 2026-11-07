@@ -29,6 +29,7 @@ import type { GitRunner } from "../git/runner"
 import { readIR } from "../ir-io"
 import { createLogger } from "../logger"
 import { createOutputDir, removeOutputFile, writeOutputFile } from "../output-file"
+import { requireWorkerCount } from "../parser-concurrency"
 import type { WarnFn } from "../warn"
 import { chooseInputs, type DiffInputs } from "./diff-inputs"
 import {
@@ -66,6 +67,8 @@ export interface DiffOptions {
   compact?: boolean
   maxBytes?: number
   parallelScans?: boolean
+  /** Parser workers for each of the two scans; undefined sizes them to the machine. */
+  concurrency?: number
   logLevel?: LogLevel
   git?: GitRunner
   warn?: WarnFn
@@ -95,6 +98,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       "input-error",
     )
   }
+  requireWorkerCount(options.concurrency)
   let pinned: PinnedConfig | null = null
   const pinConfigOnce = async (): Promise<PinnedConfig> => {
     pinned ??= await pinConfig(cwd, options.configPath)
@@ -116,6 +120,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     pinConfigOnce,
     warn,
     parallelScans: options.parallelScans,
+    concurrency: options.concurrency,
   })
 
   const generator = await readGeneratorInfo()

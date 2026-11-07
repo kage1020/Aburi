@@ -1,14 +1,22 @@
 import {
   decorator,
   importEdge,
+  noopRegistry,
   recordingLogger,
   spend,
   useScratchWorkspace,
 } from "@aburi/test-support"
-import type { Decorator, ImportEdge, ImportResolver, LanguagePlugin } from "@aburi/types"
+import type {
+  Decorator,
+  ImportEdge,
+  ImportResolver,
+  ImportResolverContext,
+  LanguagePlugin,
+} from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { splitAliasedImportName } from "../../src"
+import { type ParsePoolFactory, serializeCanonical, splitAliasedImportName } from "../../src"
 import {
+  extractorPool,
   fileCandidate,
   scanStubs,
   stubFrameworkPlugin,
@@ -69,9 +77,11 @@ const newRecorder = (): Recorder => ({ parsed: [], released: [], resolversCreate
 interface ModuleLanguage {
   recorder?: Recorder
   resolve?: (specifier: string) => Promise<readonly string[]>
-  createResolver?: () => ImportResolver
+  createResolver?: (ctx: ImportResolverContext) => ImportResolver
   /** A file whose parse throws. */
   unparsable?: string
+  /** Files whose trees cannot be released. */
+  unreleasable?: readonly string[]
   /** A file whose every parse takes this long. */
   slow?: { readonly path: string; readonly ms: number }
 }
@@ -93,13 +103,16 @@ function moduleLanguage(options: ModuleLanguage = {}): LanguagePlugin {
     },
     releaseTree: (tree) => {
       recorder.released.push(tree)
+      if (options.unreleasable?.includes((tree as { file: string }).file)) {
+        throw new Error("tree pinned")
+      }
     },
     extractSymbols: (_tree, ctx) => [
       fileCandidate(ctx.file.path, { decorators: [...(read(ctx.file.content).decorators ?? [])] }),
     ],
-    createImportResolver: () => {
+    createImportResolver: (ctx) => {
       recorder.resolversCreated++
-      return options.createResolver === undefined ? { resolve } : options.createResolver()
+      return options.createResolver === undefined ? { resolve } : options.createResolver(ctx)
     },
   })
 }
@@ -479,4 +492,106 @@ describe("scan — a language's import resolver that fails", () => {
       expect(logger.warnings).toEqual([expect.stringMatching(warning)])
     },
   )
+})
+
+describe("scan — extracted by several extractors, each with plugins of its own", () => {
+  const LATE_BARREL = "z/late-barrel.stub"
+  const UNPARSABLE = "libs/bad.stub"
+  const routes: Aliases = {
+    "@app/common": [BARREL],
+    "@app/bad": [UNPARSABLE],
+    "@app/late": [LATE_BARREL],
+  }
+  const modules: Modules = {
+    // Reaches a barrel discovered after it, whose edges no extractor has yet.
+    "a/early.stub": importsDecorate("@app/late"),
+    // Extracted before its importers, and every one of them reaches the same hop, which the
+    // resolver fails on.
+    [BARREL]: { imports: [reexporting("@broken/inner", "Decorate")] },
+    [UNPARSABLE]: {},
+    [CONSUMER]: importsDecorate("@app/common"),
+    "src/b.stub": importsDecorate("@app/common"),
+    "src/c.stub": importsDecorate("@app/bad"),
+    "src/d.stub": importsDecorate("@app/bad"),
+    "src/e.stub": importsDecorate("@broken/kit"),
+    "src/f.stub": importsDecorate("@app/late"),
+    [LATE_BARREL]: { imports: [reexporting("@vendor/kit", "Decorate")] },
+  }
+  // Like a build config read once per resolver, which says what is wrong with it the first time.
+  const resolver = (ctx: ImportResolverContext): ImportResolver => {
+    let warned = false
+    return {
+      resolve: async (specifier) => {
+        if (!warned) ctx.log.warn("tsconfig.json extends ./missing.json, which does not exist")
+        warned = true
+        if (specifier.startsWith("@broken/")) throw new Error("alias table corrupt")
+        return routes[specifier] ?? []
+      },
+    }
+  }
+  const language = (): LanguagePlugin =>
+    moduleLanguage({
+      createResolver: resolver,
+      unparsable: UNPARSABLE,
+      unreleasable: [BARREL, LATE_BARREL],
+    })
+
+  async function scanned(parsePool?: ParsePoolFactory) {
+    const logger = recordingLogger()
+    const result = await scanStubs(workspace.root, {
+      languages: [language()],
+      frameworks: [stubFrameworkPlugin()],
+      logger,
+      ...(parsePool === undefined ? {} : { parsePool }),
+    })
+    return {
+      ir: serializeCanonical(result.ir),
+      skipped: result.skipped,
+      treeReleaseFailures: result.treeReleaseFailures,
+      debugs: logger.debugs,
+      infos: logger.infos,
+      warnings: logger.warnings,
+      errors: logger.errors,
+    }
+  }
+
+  it("says each shared computation once, at the first file in the run that needed it", async () => {
+    await writeModules(modules)
+    const alone = await scanned()
+
+    expect(alone.warnings.filter((line) => line.startsWith("tsconfig.json"))).toHaveLength(1)
+    expect(alone.warnings.filter((line) => line.includes('"@broken/inner"'))).toHaveLength(1)
+    expect(alone.warnings).toContain(
+      "Plugin lang-stub: its import resolver failed 2 times over this run.",
+    )
+    expect(alone.treeReleaseFailures.map((failure) => failure.file)).toEqual([
+      LATE_BARREL,
+      BARREL,
+      LATE_BARREL,
+    ])
+    expect(
+      alone.debugs.filter((entry) => entry.message.includes(`${UNPARSABLE} gave no import edges`)),
+    ).toHaveLength(1)
+  })
+
+  it.each<[string, number, (fileId: number) => number]>([
+    ["two, taking turns", 2, (fileId) => fileId],
+    ["three, taking runs of two", 3, (fileId) => Math.floor(fileId / 2)],
+    ["one per file", Object.keys(modules).length, (fileId) => fileId],
+  ])("reports what one extractor does when %s share the files", async (_case, size, assign) => {
+    await writeModules(modules)
+    const alone = await scanned()
+    const pool = extractorPool(
+      size,
+      () => ({
+        languages: [language()],
+        frameworks: [stubFrameworkPlugin()],
+        effects: [],
+        registry: noopRegistry,
+      }),
+      assign,
+    )
+
+    expect(await scanned(pool)).toEqual(alone)
+  })
 })

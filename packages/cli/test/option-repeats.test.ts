@@ -26,6 +26,15 @@ describe("an option that takes one value, given twice", () => {
       ["scan", "--config", "a.json", "--config", "b.json"],
       repeated("--config", "a.json", "b.json"),
     ],
+    [["scan", "--concurrency", "2", "--concurrency", "0"], repeated("--concurrency", "2", "0")],
+    [
+      ["diff", "main..HEAD", "--concurrency", "2", "--concurrency", "3"],
+      repeated("--concurrency", "2", "3"),
+    ],
+    [
+      ["explain", "alpha", "--concurrency", "2", "--concurrency", "3"],
+      repeated("--concurrency", "2", "3"),
+    ],
     [
       ["diff", "--base", "a.json", "--base", "b.json", "--head", "c.json"],
       repeated("--base", "a.json", "b.json"),

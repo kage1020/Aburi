@@ -11,7 +11,7 @@ const REFUSAL = "parse reported a non-recoverable error at 12:4 — unterminated
 const PARSE_FAILED_ADVICE =
   "the language plugin refused the source. Deterministic: fix the file, or the plugin."
 const EXTRACTION_FAILED_ADVICE =
-  "a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean."
+  "a plugin threw while extracting, its Symbols could not enter the Document, or the parser worker extracting it ended. This is the reason the run does not exit clean."
 
 const FOUR_KINDS_OF_FILE = ["bad.stub", "boom.stub", "warn.stub", "ok.stub"]
 

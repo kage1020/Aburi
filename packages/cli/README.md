@@ -21,15 +21,18 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
   `--respect-gitignore` / `--no-respect-gitignore`, `--compact`,
   `--no-timestamp`, `--strict` / `--no-strict` / `--discover` (undeclared plugin
   vocabulary: exit 3, or keep it and write `aburi-vocab-discovered.json`),
-  `--lsp` / `--no-lsp` (override `lsp.enabled`). A config that loads no language
-  plugin exits 2.
+  `--lsp` / `--no-lsp` (override `lsp.enabled`), `--concurrency <n>` (worker
+  threads extracting the files: one fewer than the processors by default, fewer for
+  a small workspace or little free memory, `1` for none; the output is the same at
+  any value). A config that loads no language plugin exits 2.
 - **`aburi diff`** — two dispatch paths:
   - `<base>..<head>` — `git rev-parse --verify` on both refs, shallow-repo
     guard, `git worktree add --detach` to materialise base, scan both sides,
     diff. On two or more CPUs the two scans run at once, the base on a worker
     thread, with the output of running them in turn; `--no-parallel-scans` runs
     them in turn, which uses less memory, and `--parallel-scans` runs them at
-    once on one CPU. Rename collection failures warn on stderr rather than silently
+    once on one CPU; `--concurrency <n>` sizes each scan's worker threads, which
+    two scans running at once share the machine for. Rename collection failures warn on stderr rather than silently
     degrading `moved` to `removed + added`.
   - `--base <ir.json> --head <ir.json>` — file mode, skips git entirely.
   `--fail-on <spec>` supports the full grammar (see below) and returns

@@ -44,6 +44,7 @@ export interface RevisionScanContext {
   pinConfigOnce: () => Promise<PinnedConfig>
   warn: WarnFn
   parallelScans: boolean | undefined
+  concurrency: number | undefined
 }
 
 type ScanTarget = { side: "base"; ref: string } | { side: "head" }
@@ -68,6 +69,7 @@ export async function scanRevisions(
   const worktreeDir = resolve(worktreeParent, baseWorktreeLeaf(headWorkspaceRoot))
 
   const said = new Set<string>()
+  const together = context.parallelScans ?? availableParallelism() >= 2
   const optionsFor = (dir: string, outputDir: string): PortableScanOptions => ({
     cwd: dir,
     command: "diff",
@@ -78,6 +80,8 @@ export async function scanRevisions(
     ...(submoduleIgnore.length === 0 ? {} : { ignore: submoduleIgnore }),
     ...(context.compact === undefined ? {} : { compact: context.compact }),
     ...(context.logLevel === undefined ? {} : { logLevel: context.logLevel }),
+    ...(context.concurrency === undefined ? {} : { concurrency: context.concurrency }),
+    scansAtOnce: together ? 2 : 1,
   })
   const readBase = async (report: ScanReport): Promise<IR> => {
     reportScanIncidents(report, warn, labelFor({ side: "base", ref: spec.base }), said)
@@ -111,14 +115,13 @@ export async function scanRevisions(
     worktreeAdded = true
     const baseOptions = optionsFor(worktreeDir, resolve(tempParent, "base-out"))
     const headOptions = optionsFor(cwd, resolve(tempParent, "head-out"))
-    const scanned =
-      (context.parallelScans ?? availableParallelism() >= 2)
-        ? await scanTogether(baseOptions, headOptions, readBase, readHead, {
-            name: `base ref "${spec.base}"`,
-            log: writeToStderr,
-            warn,
-          })
-        : await scanInTurn(baseOptions, headOptions, readBase, readHead)
+    const scanned = together
+      ? await scanTogether(baseOptions, headOptions, readBase, readHead, {
+          name: `base ref "${spec.base}"`,
+          log: writeToStderr,
+          warn,
+        })
+      : await scanInTurn(baseOptions, headOptions, readBase, readHead)
     return { ...scanned, gitRenames }
   } finally {
     // Failures here only warn: a throw from `finally` would replace the error that ended the scan.

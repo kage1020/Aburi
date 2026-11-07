@@ -234,8 +234,9 @@ describe("aburi scan — a file withdrawn during extraction", () => {
 
     expect(code).toBe(EXIT.GATE)
     expect(stderr).toContain(
-      "⚠ extraction-failed (1) — a plugin threw while extracting, or its Symbols could not " +
-        "enter the Document. This is the reason the run does not exit clean.",
+      "⚠ extraction-failed (1) — a plugin threw while extracting, its Symbols could not enter " +
+        "the Document, or the parser worker extracting it ended. This is the reason the run does " +
+        "not exit clean.",
     )
     expect(stderr).toContain('    src/route.ts: qualified name "a\u{1F642}"')
   })

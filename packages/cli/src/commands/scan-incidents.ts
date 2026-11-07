@@ -26,7 +26,7 @@ const SKIP_REASON_ADVICE: Record<SkippedFile["reason"], string> = {
   "parse-timeout":
     "extraction ran past parseTimeoutMs. Machine-dependent: re-run, and raise the budget if it repeats.",
   "extraction-failed":
-    "a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.",
+    "a plugin threw while extracting, its Symbols could not enter the Document, or the parser worker extracting it ended. This is the reason the run does not exit clean.",
 }
 
 type SayIncident = (line: string) => void

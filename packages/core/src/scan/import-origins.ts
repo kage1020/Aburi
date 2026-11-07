@@ -2,7 +2,6 @@ import type {
   ImportEdge,
   ImportResolver,
   LanguagePlugin,
-  Logger,
   OpaqueAstNode,
   SourceFile,
   SymbolCandidate,
@@ -15,9 +14,9 @@ import {
   resolveRelativeSpecifier,
 } from "../callgraph-specifier"
 import { toNfc } from "../codepoints"
-import { countBy } from "../collections"
 import { decoratorReference, splitAliasedImportName } from "../import-edge"
 import type { DiscoveredFile } from "./discover"
+import { type ExtractionEvent, edgesReadOnce, eventLogger } from "./extraction-events"
 import { describeJsonType, describeThrown } from "./faults"
 import { normalizeImportEdge } from "./normalize"
 import { releaseParsedTree, type TreeReleaseFailure } from "./pipeline"
@@ -29,9 +28,8 @@ export interface ImportOriginsInput {
   workspaceRoot: string
   files: readonly DiscoveredFile[]
   router: LanguageRouter
-  logger: Logger
   loadSource(file: DiscoveredFile): Promise<SourceFile>
-  treeReleaseFailures: TreeReleaseFailure[]
+  record(event: ExtractionEvent): void
 }
 
 interface Hop {
@@ -41,12 +39,6 @@ interface Hop {
 
 /** Where a specifier leads: a workspace file, out of the workspace, or nowhere the resolver could say. */
 type Target = { readonly file: string } | "outside" | "fault"
-
-interface ResolverFault {
-  readonly plugin: string
-  readonly what: string
-  readonly error: unknown
-}
 
 const NAMESPACE = "*"
 
@@ -59,7 +51,6 @@ export class ImportOrigins {
   readonly #resolvers = new Map<Language, ImportResolver | "none" | "fault">()
   readonly #edges = new AsyncMemo<string, readonly ImportEdge[]>()
   readonly #targets = new AsyncMemo<string, Target>()
-  readonly #faults: ResolverFault[] = []
 
   constructor(input: ImportOriginsInput) {
     this.#input = input
@@ -92,26 +83,14 @@ export class ImportOrigins {
     })
   }
 
-  /** Warns once per plugin whose resolver failed more than once, after the first failure's warning. */
-  reportFaults(): void {
-    for (const [plugin, count] of countBy(this.#faults, (fault) => fault.plugin)) {
-      if (count > 1) {
-        this.#input.logger.warn(
-          `Plugin ${plugin}: its import resolver failed ${count} times over this run.`,
-        )
-      }
-    }
-  }
-
   async #externalOrigin(fromFile: string, specifier: string, name: string): Promise<string | null> {
     const visited = new Set<string>()
     let hop: Hop = { source: specifier, imported: name }
     let from = fromFile
     for (;;) {
       const source = hop.source
-      const target = await this.#targets.get(`${from}\0${source}`, () =>
-        this.#resolveTarget(from, source),
-      )
+      const key = `${from}\0${source}`
+      const target = await this.#targets.get(key, () => this.#resolveTarget(from, source, key))
       if (target === "fault") return null
       if (target === "outside") return isRelativeSpecifier(hop.source) ? null : hop.source
       // A namespace of a workspace module: which member the decorator reads is not carried here.
@@ -130,7 +109,7 @@ export class ImportOrigins {
     }
   }
 
-  async #resolveTarget(fromFile: string, specifier: string): Promise<Target> {
+  async #resolveTarget(fromFile: string, specifier: string, key: string): Promise<Target> {
     if (isRelativeSpecifier(specifier)) return this.#fileOrOutside(dirname(fromFile), specifier)
     const language = this.#input.router.route(fromFile)
     if (language === null) return "outside"
@@ -143,7 +122,12 @@ export class ImportOrigins {
         if (found !== null) return { file: found }
       }
     } catch (error) {
-      this.#fault(language, `its import resolver threw on "${specifier}" in ${fromFile}`, error)
+      this.#fault(
+        language,
+        `its import resolver threw on "${specifier}" in ${fromFile}`,
+        error,
+        `target\0${key}`,
+      )
       return "fault"
     }
     return "outside"
@@ -165,14 +149,24 @@ export class ImportOrigins {
 
   #createResolver(language: Language): ImportResolver | "none" | "fault" {
     if (typeof language.createImportResolver !== "function") return "none"
+    const plugin = language.manifest.name
+    const once = `resolver\0${plugin}`
     let created: unknown
     try {
       created = language.createImportResolver({
         workspaceRoot: this.#input.workspaceRoot,
-        log: this.#input.logger,
+        log: eventLogger((level, message, meta) =>
+          this.#input.record({
+            kind: "resolver-log",
+            plugin,
+            level,
+            message,
+            ...(meta === undefined ? {} : { meta }),
+          }),
+        ),
       })
     } catch (error) {
-      this.#fault(language, "creating its import resolver threw", error)
+      this.#fault(language, "creating its import resolver threw", error, once)
       return "fault"
     }
     if (isImportResolver(created)) return created
@@ -180,6 +174,7 @@ export class ImportOrigins {
       language,
       "createImportResolver returned no resolver",
       new TypeError(`expected an object with a resolve method, got ${describeJsonType(created)}`),
+      once,
     )
     return "fault"
   }
@@ -197,33 +192,34 @@ export class ImportOrigins {
     const discovered = this.#files.get(path)
     const language = this.#input.router.route(path)
     if (discovered === undefined || language === null) return []
+    const once = edgesReadOnce(path)
     try {
       const file = await this.#input.loadSource(discovered)
       const parsed = await language.parseFile(file)
       if (parsed.tree !== null) {
-        releaseParsedTree(language, parsed.tree, file, this.#input.treeReleaseFailures)
+        const failures: TreeReleaseFailure[] = []
+        releaseParsedTree(language, parsed.tree, file, failures)
+        for (const failure of failures) {
+          this.#input.record({ kind: "tree-release-failure", failure, once })
+        }
       }
       return parsed.imports.map(normalizeImportEdge)
     } catch (error) {
       // The file's own turn in the scan reports the fault; here it only ends the chain.
-      this.#input.logger.debug(
-        `scan/import-origins: ${path} gave no import edges: ${describeThrown(error)}`,
-      )
+      this.#input.record({
+        kind: "log",
+        level: "debug",
+        message: `scan/import-origins: ${path} gave no import edges: ${describeThrown(error)}`,
+        once,
+      })
       return []
     }
   }
 
-  #fault(language: Language, what: string, error: unknown): void {
+  #fault(language: Language, what: string, error: unknown, once: string): void {
     const plugin = language.manifest.name
-    const first = !this.#faults.some((fault) => fault.plugin === plugin)
-    this.#faults.push({ plugin, what, error })
     const message = `Plugin ${plugin}: ${what}: ${describeThrown(error)}.`
-    if (first) {
-      this.#input.logger.warn(
-        `${message} A name imported through one of its path aliases is attributed to the ` +
-          "specifier as written.",
-      )
-    } else this.#input.logger.debug(`scan/import-origins: ${message}`)
+    this.#input.record({ kind: "resolver-fault", plugin, message, once })
   }
 }
 

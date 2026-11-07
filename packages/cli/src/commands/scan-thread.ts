@@ -1,6 +1,7 @@
 import { createRequire } from "node:module"
 import { parentPort, Worker, workerData } from "node:worker_threads"
-import { CliError, type CliErrorCode, errorMessage, internalFault } from "../errors"
+import { CliError, errorMessage, internalFault } from "../errors"
+import { describedForThread, rebuiltFromThread, type ThreadThrown } from "../thread-errors"
 import type { WarnFn } from "../warn"
 import { runScan, type ScanOptions } from "./scan"
 import type { ScanReport } from "./scan-report"
@@ -23,28 +24,10 @@ export interface ThreadedScan {
   warn: WarnFn
 }
 
-type Thrown =
-  | {
-      kind: "cli"
-      message: string
-      code: CliErrorCode
-      stack: string | undefined
-      cause: unknown
-    }
-  | {
-      kind: "error"
-      name: string
-      message: string
-      stack: string | undefined
-      code: unknown
-      cause: unknown
-    }
-  | { kind: "value"; text: string }
-
 type FromThread =
   | { kind: "log"; line: string }
   | { kind: "done"; report: ScanReport }
-  | { kind: "failed"; thrown: Thrown }
+  | { kind: "failed"; thrown: ThreadThrown }
 
 const PHASE = " while scanning in a worker thread"
 
@@ -74,7 +57,7 @@ export function scanInThread(
           settle(() => resolve(message.report))
           break
         case "failed":
-          settle(() => reject(rebuilt(message.thrown)))
+          settle(() => reject(rebuiltFromThread(message.thrown)))
           break
         default:
           settle(() =>
@@ -126,7 +109,7 @@ export function serveScan(): void {
   const send = (message: FromThread): void => port.postMessage(message)
   runScan({ ...options, log: (line) => send({ kind: "log", line }) })
     .then((report) => send({ kind: "done", report }))
-    .catch((error: unknown) => send({ kind: "failed", thrown: described(error) }))
+    .catch((error: unknown) => send({ kind: "failed", thrown: describedForThread(error) }))
 }
 
 function scanWorkerPath(name: string): string {
@@ -140,63 +123,4 @@ function scanWorkerPath(name: string): string {
       { cause: error },
     )
   }
-}
-
-function described(error: unknown): Thrown {
-  if (error instanceof CliError) {
-    return {
-      kind: "cli",
-      message: error.message,
-      code: error.code,
-      stack: error.stack,
-      cause: ifCloneable(error.cause),
-    }
-  }
-  if (error instanceof Error) {
-    return {
-      kind: "error",
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-      code: ifCloneable((error as { code?: unknown }).code),
-      cause: ifCloneable(error.cause),
-    }
-  }
-  return { kind: "value", text: String(error) }
-}
-
-function ifCloneable(value: unknown): unknown {
-  try {
-    structuredClone(value)
-    return value
-  } catch {
-    return undefined
-  }
-}
-
-function rebuilt(thrown: Thrown): unknown {
-  switch (thrown.kind) {
-    case "cli":
-      return withStack(
-        new CliError(thrown.message, thrown.code, causeOf(thrown.cause)),
-        thrown.stack,
-      )
-    case "error": {
-      const error = withStack(new Error(thrown.message, causeOf(thrown.cause)), thrown.stack)
-      error.name = thrown.name
-      if (thrown.code !== undefined) Object.assign(error, { code: thrown.code })
-      return error
-    }
-    case "value":
-      return thrown.text
-  }
-}
-
-function causeOf(cause: unknown): { cause: unknown } | undefined {
-  return cause === undefined ? undefined : { cause }
-}
-
-function withStack<T extends Error>(error: T, stack: string | undefined): T {
-  if (stack !== undefined) error.stack = stack
-  return error
 }
