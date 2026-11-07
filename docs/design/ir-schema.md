@@ -499,18 +499,32 @@ The result of side-effect detection.
 
 A fixed set in `namespace:action` form. Only concepts that hold universally across any runtime/language.
 
-| Category | Values |
-|---|---|
-| `db.*` | `db.read`, `db.write`, `db.transaction`, `db.migration` |
-| `network.*` | `network.http`, `network.ws`, `network.rpc` |
-| `queue.*` | `queue.publish`, `queue.consume` |
-| `event.*` | `event.publish`, `event.subscribe` |
-| `fs.*` | `fs.read`, `fs.write` |
-| `state.*` | `state.mutate`, `collection.mutate` |
-| `time.*` | `time.now`, `time.timer` |
-| `random` | `random` |
-| `env.*` | `env.read`, `env.write` |
-| `process.*` | `process.exit`, `process.signal` |
+| Category | Value | Description |
+|---|---|---|
+| `db.*` | `db.read` | Database read |
+| | `db.write` | Database write |
+| | `db.transaction` | Database transaction |
+| | `db.migration` | Database schema migration |
+| `network.*` | `network.http` | HTTP request |
+| | `network.ws` | WebSocket connection or message |
+| | `network.rpc` | Remote procedure call |
+| `queue.*` | `queue.publish` | Message published to a queue |
+| | `queue.consume` | Message consumed from a queue |
+| `event.*` | `event.publish` | Event emitted |
+| | `event.subscribe` | Event listener registered |
+| `fs.*` | `fs.read` | File system read |
+| | `fs.write` | File system write |
+| `state.*` | `state.mutate` | Shared state mutated |
+| | `collection.mutate` | Collection mutated in place |
+| `time.*` | `time.now` | Current time read |
+| | `time.timer` | Timer scheduled |
+| `random` | `random` | Random value drawn |
+| `env.*` | `env.read` | Environment variable read |
+| | `env.write` | Environment variable written |
+| `process.*` | `process.exit` | Process exit |
+| | `process.signal` | Process signal sent or handled |
+
+The descriptions are what `aburi vocab` lists beside each id ([`cli-spec.md`](./cli-spec.md) §8).
 
 Within schema version `aburi.ir.v1`, this set is additive-only; deletion and semantic change are forbidden.
 

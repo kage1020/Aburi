@@ -239,16 +239,25 @@ interface VocabRegistry {
 
 `findEffect("x-acme:custom-action")` returns the entry with its description when `x-acme:custom-action` is individually enumerated; if it is covered only by prefix ownership, it returns the owning plugin's information with description=null.
 
-## 8. CLI (future use)
+## 8. CLI
 
-The planned `aburi vocab` subcommand ([`cli-spec.md`](./cli-spec.md) §8; not implemented):
+`aburi vocab` ([`cli-spec.md`](./cli-spec.md) §8) loads the configured plugins and `frameworkHints`
+entries, registers their manifests as a scan would, and lists what the registry then holds, the core
+effect ids included, without scanning:
 
 ```bash
 aburi vocab list                                       # show all vocab
-aburi vocab effects                                    # effect ids only
+aburi vocab effects                                    # effect ids and prefixes
+aburi vocab extkinds                                   # extKinds and prefixes
 aburi vocab plugins                                    # list plugins
 aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns this id
+aburi vocab list --json                                # the same, as JSON
 ```
+
+`who-owns` resolves a value through `findEffect`, `findExtKind`, `findFramework` and
+`findDerivedByOwner` (§7), so it answers as the extraction-time check would: an id a manifest
+enumerates resolves to its description, one only a prefix covers to the prefix's owner with no
+description.
 
 ## 9. Verifiable properties (test criteria)
 

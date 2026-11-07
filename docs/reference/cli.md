@@ -10,6 +10,7 @@ aburi <command> [flags]
 | [`scan`](#aburi-scan) | Analyse the workspace; write the JSON analysis and Markdown. |
 | [`diff`](#aburi-diff) | Compare two revisions; write the review report. |
 | [`explain`](#aburi-explain) | Print the detail for one symbol. |
+| [`vocab`](#aburi-vocab) | List the effect ids and extension kinds your plugins declare, and who owns each. |
 
 `-v` / `--version` and `-h` / `--help` work anywhere and exit `0`.
 
@@ -36,9 +37,9 @@ working directory.
 | Code | Meaning |
 |---|---|
 | `0` | Success, no gate tripped. |
-| `1` | Runtime failure: an I/O error (a write the disk refused to an output file says which command and which output; one refused on stdout or stderr ends the process there, with Node's own report and no cleanup; a file or directory the scan may not read is named), an unexpected exception, or `explain` found no match. |
+| `1` | Runtime failure: an I/O error (a write the disk refused to an output file says which command and which output; one refused on stdout or stderr ends the process there, with Node's own report and no cleanup; a file or directory the scan may not read is named), an unexpected exception, `explain` found no match, or `vocab who-owns` found no owner. |
 | `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on, a config that loads no language plugin. |
-| `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
+| `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. `vocab` exits `3` for a plugin that fails to load too. |
 
 CI gates on `3`. A reader that stops early does not change the code:
 `aburi diff main..HEAD | head -1` exits `0` or `3` as it would without the pipe.
@@ -369,13 +370,63 @@ aburi explain submitOrder --output docs/submitOrder.md
 
 ---
 
+## `aburi vocab`
+
+```
+aburi vocab list | effects | extkinds | plugins | who-owns <value>  [--json] [--config <path>]
+```
+
+Lists what a scan holds your plugins to: the core effect ids, and every effect id, extension kind,
+framework name and `derivedBy` prefix the plugins in your config declare. It loads the plugins the
+way `aburi scan` does, `frameworkHints` included, but scans nothing and runs no plugin code beyond
+importing it, so it works in a workspace with no sources and with no language plugin configured.
+
+| Subcommand | Prints |
+|---|---|
+| `list` | Every section below, plus `Frameworks` and `derivedBy prefixes`. |
+| `effects` | The core effect ids, then each plugin's effect ids and the prefixes it owns. |
+| `extkinds` | Each plugin's extension kinds, with their base kind, and the prefixes it owns. |
+| `plugins` | Each loaded plugin's name, version, type, and the config entry that loaded it. |
+| `who-owns <value>` | What owns the value in each vocabulary it belongs to, and how: listed by id, covered by a prefix, or core. |
+
+```
+$ aburi vocab effects
+core            db.read                          Database read
+…
+effects-nest    x-nest:lifecycle.on-module-init  NestJS OnModuleInit hook
+effects-prisma  (prefix x-prisma)
+
+$ aburi vocab who-owns x-prisma:invoice.create
+Vocabulary:  effect
+Plugin:      effects-prisma (v0.6.0)
+Type:        effects
+Listed in:   effects "./plugins/effects-prisma.mjs"
+Declaration: prefix x-prisma (provides.effectPrefixes[])
+```
+
+Rows follow your config: language plugins, then framework plugins, then effect plugins, then the
+`frameworkHints` entries, each list in the order you wrote it. A value can belong to more than one
+vocabulary, such as an extension kind under a framework plugin's `derivedBy` prefix, and
+`who-owns` prints a block for each. A value nothing owns exits `1`.
+
+| Flag | Effect |
+|---|---|
+| `--json` | Print one JSON object instead: the lists the table shows, keyed as a plugin manifest names them (`effects`, `effectPrefixes`, `extKinds`, …), or `{ "value", "owners" }` for `who-owns`. A core effect id has `"owner": null`. |
+| `--config <path>` | Use a different config file. |
+
+Both flags can go before the subcommand or after it. With no config file found, no plugin loads:
+the lists hold the core effect ids alone, and stderr says so. A plugin that fails to load exits
+`3`, as it does for `aburi scan`.
+
+---
+
 ## Programmatic use
 
 `@aburi/cli` exports every command as a function, so your tests and tooling can
 drive it without spawning a process:
 
 ```ts
-import { runCli, runInit, runScan, runDiff, runExplain } from "@aburi/cli"
+import { runCli, runInit, runScan, runDiff, runExplain, runVocab } from "@aburi/cli"
 import { parseFailOn, evaluateFailOn, EXIT } from "@aburi/cli"
 
 const code = await runCli({ argv, stdout, stderr, env, cwd })

@@ -6,7 +6,7 @@ References:
 - [`config.md`](./config.md) — config file resolution and CLI-flag overrides
 - [`diff-algorithm.md`](./diff-algorithm.md) — how inputs are supplied to `aburi diff`
 - [`markdown-projection.md`](./markdown-projection.md) — output Markdown conventions
-- [`extension-vocab.md`](./extension-vocab.md) — what `aburi vocab` (planned, §8) would query
+- [`extension-vocab.md`](./extension-vocab.md) — the vocabulary `aburi vocab` (§8) lists
 
 ---
 
@@ -26,7 +26,7 @@ aburi init                                  # generate config file
 aburi scan                                  # generate IR
 aburi diff <base>..<head>                   # compute diff
 aburi explain <id-or-pattern>               # show a single symbol/file
-aburi vocab list|effects|extkinds|plugins|who-owns   # (planned, §8) query extension vocabulary
+aburi vocab list|effects|extkinds|plugins|who-owns   # list the vocabulary the plugins declare
 aburi --version / aburi -v                  # version
 aburi --help / aburi -h                     # global help
 ```
@@ -1045,51 +1045,185 @@ exist". Reading an existing IR reaches this code by the second route only; no sc
 
 ## 8. `aburi vocab`
 
-**Planned; not implemented.** `aburi vocab` exits 2 as an unknown command today. This section
-reserves the interface: it would query the registered extension vocabulary.
+Lists the vocabulary a run of `aburi scan` would hold its plugins to: the core effect ids
+([`ir-schema.md`](./ir-schema.md) §9.1), and what each configured plugin's manifest declares
+([`extension-vocab.md`](./extension-vocab.md) §3). It reads the config as `aburi scan` does (§13),
+loads the plugins of `languages`, `frameworks` and `effects` and one per `frameworkHints` entry, and
+registers their manifests (§5.3 steps 1–2). It stops there: it walks no file, and calls no plugin's
+`init`, since a manifest is all it reads and `init` may need a workspace to read. It needs no
+language plugin either, so a config that lists only an effect plugin answers for that plugin. With
+no config found, no plugin loads; the lists hold the core effect ids alone, and stderr says so.
 
-### 8.1 Subcommands
+### 8.1 Signature
 
 ```
-aburi vocab list                            # all vocab
-aburi vocab effects                         # effect ids only
-aburi vocab extkinds                        # extKinds only
-aburi vocab plugins                         # plugin list
-aburi vocab who-owns <id>                   # the plugin that owns this id
+aburi vocab list                            # every vocabulary, and the plugins declaring it
+aburi vocab effects                         # effect ids and effect prefixes
+aburi vocab extkinds                        # extKinds and extKind prefixes
+aburi vocab plugins                         # the loaded plugins
+aburi vocab who-owns <id>                   # what owns this value, in each vocabulary it is in
 ```
 
-### 8.2 Common Options
+### 8.2 Options
 
 | Option | Meaning |
 |---|---|
-| `--json` | Machine-readable JSON output instead of a table |
+| `--json` | Write JSON to stdout instead of the table (§8.6) |
+| `--config <path>` | The config file to read (§13) |
+
+Both belong to `aburi vocab` and may be written before the subcommand or after it
+(`aburi vocab --json list`, `aburi vocab list --json`).
 
 ### 8.3 Exit Codes
 
 | code | Meaning |
 |---|---|
 | 0 | Success |
-| 1 | id not found (who-owns only) |
-| 2 | Subcommand missing or invalid |
+| 1 | `who-owns`: the value is in no vocabulary — no core effect id, and nothing a loaded plugin declares, enumerated or under a prefix |
+| 2 | Subcommand missing or unknown, `who-owns` without a value, an option given twice or a path given empty (§3), or a config error (§5.4). A `frameworkHints` entry the registry refuses is a config error, as for `aburi scan` |
+| 3 | A configured plugin that fails to import, or whose manifest the registry refuses, naming the config entry that loaded it (§5.4, CL49) |
 
-### 8.4 Output Examples
+### 8.4 Order
 
-`aburi vocab effects`:
+The core effect ids come first, in the order of [`ir-schema.md`](./ir-schema.md) §9.1. The plugins
+follow in the order they load: `languages`, then `frameworks`, then `effects`, each in config
+order, then the `frameworkHints` entries in config order. One plugin's entries keep its manifest's
+order, the values it enumerates before the prefixes it owns. The order is the config's rather than
+an alphabetical one so that `plugins` reads as `aburi.json` does, and every other list reads as
+`plugins` does.
+
+### 8.5 Table Output
+
+One row per entry, its owner first, in columns. A row leaves off its empty cells at the end, so no
+line ends in a space, and each cell but a row's last is padded to the widest cell in its column that
+another cell follows, so a row that ends early does not push the next column out. The owner of a
+core effect id is `core`, and a prefix is written `(prefix <prefix>)`, since it stands for every
+value under it ([`extension-vocab.md`](./extension-vocab.md) §3.2). A plugin listed twice, whose
+manifest registers again unchanged ([`extension-vocab.md`](./extension-vocab.md) V9), is one
+plugin, under the entry that loaded it first.
+
+`aburi vocab effects` — owner, id, description:
 ```
-core / db.read           — Database read operation
-core / db.write          — Database write operation
+core            db.read                          Database read
+core            db.write                         Database write
 ...
-effects-nest / x-nest:lifecycle.on-module-init      — NestJS OnModuleInit hook
-effects-prisma / (prefix x-prisma)                  — Prisma plugin namespace
+core            process.signal                   Process signal sent or handled
+effects-nest    x-nest:lifecycle.on-module-init  NestJS OnModuleInit hook
+effects-prisma  (prefix x-prisma)
 ```
 
-`aburi vocab who-owns x-nest:lifecycle.on-module-init`:
+`aburi vocab extkinds` — owner, id, base kind, description:
 ```
+framework-nestjs  framework:nestjs:controller  class  NestJS controller
+framework-nestjs  (prefix framework:nestjs)
+hint-acme         (prefix framework:hint:acme)
+```
+
+`aburi vocab plugins` — name, version, type, and the config entry that loaded it:
+```
+lang-typescript   0.6.0  lang       languages "lang-typescript"
+framework-nestjs  0.6.0  framework  frameworks "framework-nestjs"
+effects-nest      1.2.3  effects    effects "effects-nest"
+effects-prisma    0.6.0  effects    effects "./plugins/effects-prisma.mjs"
+hint-acme         0.0.0  framework  frameworkHints "acme"
+```
+
+A `frameworkHints` entry's plugin is the one the loader synthesises for it, `hint-<name>` at
+version `0.0.0` ([`config.md`](./config.md) §8.3).
+
+`aburi vocab list` writes five sections — `Plugins`, `Effects`, `extKinds`, `Frameworks` (owner,
+name) and `derivedBy prefixes` (owner, prefix) — each a title line and its rows indented by two
+spaces, a blank line between sections. A section with no row reads `  (none)`.
+
+`aburi vocab who-owns <id>` writes one block for each vocabulary the value is in — effect, extKind,
+framework name, derivedBy value — in that order, a blank line between blocks. One value can be in
+two: `framework:nestjs:controller` is an extKind and, under the plugin's `derivedByPrefixes`, a
+derivedBy value. Each block names the plugin and how its manifest covers the value, as the
+registry resolves it during a scan ([`extension-vocab.md`](./extension-vocab.md) §7): an id the
+manifest enumerates is `explicit` and carries its description, a value only a prefix covers names
+that prefix and has no description.
+
+```
+Vocabulary:  effect
 Plugin:      effects-nest (v1.2.3)
 Type:        effects
+Listed in:   effects "effects-nest"
 Declaration: explicit (provides.effects[])
 Description: NestJS OnModuleInit hook
 ```
+
+```
+Vocabulary:  effect
+Plugin:      effects-prisma (v0.6.0)
+Type:        effects
+Listed in:   effects "./plugins/effects-prisma.mjs"
+Declaration: prefix x-prisma (provides.effectPrefixes[])
+```
+
+A core effect id has no plugin to name:
+
+```
+Vocabulary:  effect
+Declaration: core vocabulary, owned by no plugin
+Description: Database read
+```
+
+An extKind the manifest enumerates adds `Base kind:   <kind>` after its declaration. A value in
+no vocabulary writes nothing to stdout and one line to stderr,
+`No owner for "<id>": it is no core effect id, and no loaded plugin declares it or a prefix over it.`
+
+### 8.6 JSON Output
+
+`--json` writes one JSON object to stdout, indented by two spaces and ending in a newline; the
+note that no config was found, and every error, still go to stderr (§10). Each subcommand writes
+the keys its table shows, named as the manifest names them, so a consumer that reads manifests
+reads these too:
+
+| Subcommand | Keys |
+|---|---|
+| `list` | `plugins`, `effects`, `effectPrefixes`, `extKinds`, `extKindPrefixes`, `frameworks`, `derivedByPrefixes` |
+| `effects` | `effects`, `effectPrefixes` |
+| `extkinds` | `extKinds`, `extKindPrefixes` |
+| `plugins` | `plugins` |
+| `who-owns` | `value`, `owners` |
+
+```jsonc
+{
+  "plugins": [
+    { "name": "effects-prisma", "version": "0.6.0", "type": "effects",
+      "listedIn": { "field": "effects", "ref": "effects-prisma" } }   // field: languages | frameworks | effects | frameworkHints
+  ],
+  "effects": [
+    { "id": "db.read", "description": "Database read", "owner": null },   // null: the core vocabulary
+    { "id": "x-nest:lifecycle.on-module-init", "description": "NestJS OnModuleInit hook", "owner": "effects-nest" }
+  ],
+  "effectPrefixes": [{ "prefix": "x-prisma", "owner": "effects-prisma" }],
+  "extKinds": [
+    { "id": "framework:nestjs:controller", "baseKind": "class", "description": "NestJS controller", "owner": "framework-nestjs" }
+  ],
+  "extKindPrefixes": [{ "prefix": "framework:nestjs", "owner": "framework-nestjs" }],
+  "frameworks": [{ "name": "nestjs", "owner": "framework-nestjs" }],
+  "derivedByPrefixes": [{ "prefix": "framework:nestjs", "owner": "framework-nestjs" }]
+}
+```
+
+`who-owns` writes `{ "value": "<id>", "owners": [...] }`, one entry per block of §8.5 in the same
+order, and `"owners": []` with exit `1` for a value in no vocabulary:
+
+```jsonc
+{
+  "vocabulary": "effect",            // effect | extKind | framework | derivedBy
+  "declaration": "prefix",           // core | explicit | prefix
+  "prefix": "x-prisma",              // null unless declaration is prefix
+  "description": null,               // null for a value only a prefix covers
+  "plugin": {                        // null for a core effect id; as a plugins[] entry otherwise
+    "name": "effects-prisma", "version": "0.6.0", "type": "effects",
+    "listedIn": { "field": "effects", "ref": "effects-prisma" }
+  }
+}
+```
+
+An extKind entry also carries `baseKind`, `null` when a prefix covers the value.
 
 ## 9. Exit Code Conventions (All Commands)
 
@@ -1147,7 +1281,8 @@ Either stream may lose its reader part way through (`| head -1`). That costs the
 that stream and nothing else: the other stream, the artefacts and the exit code are what they
 would have been (§9).
 
-The `--json` flag of the planned `aburi vocab` would dedicate stdout to machine-readable JSON.
+`aburi vocab --json` dedicates stdout to one JSON document (§8.6): what it says beside the
+answer, the note that no config was found included, goes to stderr.
 
 ## 11. Environment Variables
 
@@ -1262,7 +1397,6 @@ The pool would run on Node `worker_threads`, as the base scan of `aburi diff` al
 | `aburi watch` | Watch file changes and regenerate the IR |
 | `aburi doctor` | Consistency check of config / plugins |
 | `aburi serve` | LSP-like local server (IDE integration) |
-| `aburi vocab` | Query the extension vocabulary (§8) |
 | `--quiet` on `scan` and `diff` | Census or glyph line alone (§5.2, §6.2) |
 | `aburi diff --filter` | Restrict the report to some statuses (§6.2) |
 | `--concurrency` on `aburi scan`, worker pool | §14.2 |
@@ -1295,6 +1429,7 @@ Commands:
   scan [options]                     Generate IR from the current workspace
   diff [options] [refspec]           Compute the semantic diff between two IRs
   explain [options] <id-or-pattern>  Show a single Symbol's details
+  vocab [options]                    List the extension vocabulary and its owners
   help [command]                     display help for command
 ```
 
@@ -1319,8 +1454,8 @@ a command's option, not a global one (§3).
 | CL9 | `aburi diff main..HEAD --fail-on changed` with changes | exit 3 |
 | CL10 | `aburi diff` with missing arguments | exit 2 |
 | CL11 | `aburi explain <ambiguous>` | exit 2, candidate list on stdout |
-| CL12 | (planned) `aburi vocab who-owns <unknown>` | exit 1 |
-| CL13 | (planned) `aburi vocab list --json` | machine-readable JSON, exit 0 |
+| CL12 | `aburi vocab who-owns <unknown>`, with and without `--json` | exit 1, the `No owner` line on stderr; under `--json`, `{ "value": "<unknown>", "owners": [] }` on stdout |
+| CL13 | `aburi vocab list --json` | One JSON object on stdout holding the seven lists of §8.6, the core effect ids first with `owner: null`, exit 0 |
 | CL14 | (planned) Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
 | CL15 | (planned) `NO_COLOR=1 aburi scan` | No coloring |
 | CL16 | (planned) `CI=true aburi scan` | Progress animation suppressed |
@@ -1349,7 +1484,7 @@ a command's option, not a global one (§3).
 | CL35 | `aburi scan`, `aburi diff main..HEAD`, or `aburi explain <name>` with no IR on disk, where each scanned tree holds a file that fails to parse | One `warn:` line per scan naming that file, so two from `diff`, and the same at `--log-level info` or with an `ABURI_LOG_LEVEL` other than the four levels; none at `ABURI_LOG_LEVEL=error`; the per-file `debug:` lines as well at `ABURI_LOG_LEVEL=debug`; `--log-level`, before the command or after it, wins over the variable whichever of the two is the more verbose |
 | CL36 | `aburi scan --log-level loud` | exit 2 naming the four levels |
 | CL37 | `aburi init --log-level debug` | exit 0: `init` accepts the flag, which has no per-file log there to govern |
-| CL38 | `aburi init --help`, `aburi scan --help`, `aburi diff --help` or `aburi explain --help` | `--log-level` listed under "Global Options" |
+| CL38 | `aburi init --help`, `aburi scan --help`, `aburi diff --help`, `aburi explain --help`, `aburi vocab --help` or the `--help` of a `vocab` subcommand | `--log-level` listed under "Global Options" |
 | CL39 | `aburi diff … --fail-on changed --fail-on removed` over one changed Symbol, in either order; over a changed and a removed one, in either order | exit 3 in both orders, as `--fail-on changed,removed` gives, and `--fail-on removed --fail-on added`, or no `--fail-on` at all, exits 0; over both, the tripped line names the clause written first. An invalid occurrence beside a valid one (`--fail-on bogus --fail-on changed`, `--fail-on '' --fail-on changed`) exits 2 quoting that occurrence alone, before either IR is read and with an earlier report in the output directory left as it was. `runDiff` refuses `failOn: []` as it refuses `failOn: ""` |
 | CL40 | Any option that takes a value, other than `--ignore` and `--fail-on`, given twice on any command — `init --output`; `scan --output-dir`, `--format`, `--config`; `diff --base`, `--head`, `--output-dir`, `--format`, `--fail-on-scope`, `--max-bytes`, `--config`; `explain --ir`, `--output`, `--config`; and `--log-level`, before the command, after it, or once on each side — in either spelling (`--config=a.json --config a.json`), the same value twice included, and a second value the option refuses on its own (`scan --format json --format bogus`, `diff … --max-bytes 1000 --max-bytes 0`) | exit 2, `<option> is given more than once ("<first>", then "<second>"): pass one` on stderr, nothing on stdout, nothing written, and an earlier report left as it was. With the invalid value first (`scan --format bogus --format json`), that value's own error instead, at exit 2. `aburi scan --compact --compact` and `--no-timestamp --no-timestamp` run and exit 0; `--ignore a/** --ignore b/**` leaves out the files under both and exits 0; `--respect-gitignore` and `--no-respect-gitignore` together, in either order, over a config that sets `respectGitignore: false`: the one written last applies |
 | CL41 | An empty value for any option that takes a path — `init --output`; `scan --output-dir`, `--config`; `diff --base`, `--head`, `--output-dir`, `--config`; `explain --ir`, `--output`, `--config` — in either spelling (`--output-dir=`) | exit 2, `error: option '<option> <path>' argument '' is invalid. a path must not be empty` on stderr, nothing on stdout, nothing written, and an earlier report left as it was |
@@ -1373,6 +1508,10 @@ a command's option, not a global one (§3).
 | CL59 | `aburi diff main..HEAD --parallel-scans`, where both scans finish, where a scan leaves a file out, where the base scan stops, where the head scan stops, and where both stop | The two scans are in flight at the same time, and the exit code, stdout, stderr (the per-file log in its place among the rest) and the report are those of the same run under `--no-parallel-scans`, which has only one in flight at a time; `runDiff` rejects with the same error either way. A base that stops ends the run with the base's error, whatever the head did, once the head has stopped, and leaves no temporary directory (§14.1) |
 | CL60 | `aburi diff main..HEAD --parallel-scans` where a plugin on the base's thread calls `process.exit(7)`, or throws from a timer | exit 1, stderr naming the base ref, what ended the thread and `--no-parallel-scans`; no worktree but the main checkout and no temporary directory left (§14.1) |
 | CL61 | `aburi diff --base <ir> --head <ir> --no-parallel-scans` | The exit code, stdout and stderr of the same run without it |
+| CL62 | `aburi vocab who-owns` for an id a manifest enumerates, an id only an `effectPrefixes` entry covers, a core effect id, and an extKind a framework plugin's `derivedByPrefixes` also covers | exit 0. One block each: the first with `explicit` and the manifest's description, the second naming the prefix with no description, the third naming no plugin; the last two blocks, the extKind before the derivedBy value (§8.5) |
+| CL63 | `aburi vocab list` with no config found; with a config that lists an effect plugin alone, whose `init` throws | exit 0 both. The first lists the core effect ids alone and says on stderr that no config was found; the second lists that plugin's vocabulary, since nothing calls `init` and no language plugin is needed (§8) |
+| CL64 | `aburi vocab`, `aburi vocab nope`, `aburi vocab who-owns` with no value; `aburi vocab list` with a configured plugin that fails to import; with a `frameworkHints` entry the registry refuses | exit 2, 2, 2; exit 3 naming the config entry; exit 2 naming the hint (§8.3) |
+| CL65 | `aburi vocab plugins`, `effects` and `extkinds`, with and without `--json`, over plugins listed under `effects`, `languages` and `frameworkHints` in that order in the file | The plugins in the order `languages`, `effects`, `frameworkHints`, each row naming the config entry that loaded it; each plugin's values before its prefixes, columns aligned and no line ending in a space (§8.4–§8.5) |
 
 ## 18. Design Decisions
 
@@ -1401,7 +1540,9 @@ In the majority of cases without ID collisions there is 1 hit; ambiguity is an e
 
 ### 18.6 Why `aburi vocab` Is a Standalone Subcommand
 
-Planned (§8). Vocab is a query target independent of the IR. A standalone `aburi vocab` command has higher discoverability than a flag like `aburi scan --show-vocab` (it also appears on its own in the help output).
+Vocab is a query target independent of the IR. A standalone `aburi vocab` command has higher discoverability than a flag like `aburi scan --show-vocab` (it also appears on its own in the help output), and it answers without a scan: the question "may this plugin emit that value" is about the config, so it should not cost a walk of the workspace or need a language plugin to parse it.
+
+`who-owns` answers for every vocabulary at once rather than taking one as an argument, because the person asking holds a value read off an IR or a plugin's code, not the name of the list it belongs to; and a value can belong to two (§8.5).
 
 ### 18.7 Why Environment Variables Substitute for CLI Flags
 
@@ -1409,4 +1550,4 @@ In CI / Docker / Makefiles, configuring via env is easier than threading flags t
 
 ### 18.8 Why Planned Features Are Reserved
 
-Reserving the names `aburi watch` / `aburi doctor` / `aburi serve` / `aburi vocab` and the flags of §15 today prevents name collisions and compatibility breaks when they are added later. They are not implemented, but are documented.
+Reserving the names `aburi watch` / `aburi doctor` / `aburi serve` and the flags of §15 today prevents name collisions and compatibility breaks when they are added later. They are not implemented, but are documented.

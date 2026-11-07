@@ -4,7 +4,7 @@ The `aburi` command-line entry — wires
 [`@aburi/config`](../config) +
 [`@aburi/core`](../core) +
 [`@aburi/diff`](../diff) +
-[`@aburi/markdown-projection`](../markdown-projection) into the four subcommands
+[`@aburi/markdown-projection`](../markdown-projection) into the five subcommands
 defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 
 ## Subcommands
@@ -38,6 +38,10 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
   file path (all Symbols in the file, workspace-root-relative), or case-sensitive
   substring on `Symbol.name`. Ambiguous substring hits exit 2 with the candidate
   list. `--debug-resolution` rescans and appends the per-call resolution table.
+- **`aburi vocab`** — `list | effects | extkinds | plugins | who-owns <value>`: load the
+  configured plugins and `frameworkHints` without scanning, and list the core effect ids
+  beside what each manifest declares, or name what owns one value in each vocabulary it is
+  in (exit 1 when nothing does). `--json` writes one JSON object instead of the table.
 
 ## `--max-bytes`
 
@@ -88,7 +92,7 @@ pnpm exec aburi --version
 ```
 
 `@aburi/cli` also exports the same command handlers programmatically
-(`runInit`, `runScan`, `runDiff`, `runExplain`, `runCli`, `parseFailOn`,
+(`runInit`, `runScan`, `runDiff`, `runExplain`, `runVocab`, `runCli`, `parseFailOn`,
 `evaluateFailOn`, `DIFF_JSON_FILENAME`, `DIFF_MD_FILENAME`, …) so integration
 tests can drive the CLI without spawning a subprocess.
 

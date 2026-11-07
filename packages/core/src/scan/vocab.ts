@@ -1,6 +1,6 @@
 import type { Config, VocabRegistry } from "@aburi/types"
+import { isCoreEffectId } from "../core-effects"
 import { CoreError } from "../errors"
-import { isCoreEffectId } from "../integrity"
 import { describeThrown, errorCode } from "./faults"
 
 export interface UndeclaredVocabOccurrence {

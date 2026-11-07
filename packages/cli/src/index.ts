@@ -35,6 +35,20 @@ export type {
   StrayPluginOptions,
 } from "./commands/scan-report"
 export {
+  runVocab,
+  type VocabEffect,
+  type VocabExtKind,
+  type VocabFramework,
+  type VocabOptions,
+  type VocabOutcome,
+  type VocabOwner,
+  type VocabPlugin,
+  type VocabPrefix,
+  type VocabQuery,
+  type Vocabulary,
+  type VocabularyKind,
+} from "./commands/vocab"
+export {
   classifyConfigError,
   loadPinnedConfig,
   type PinnedConfig,
@@ -61,7 +75,13 @@ export {
 } from "./fail-on"
 export type { GitRunner } from "./git/runner"
 export { readIR } from "./ir-io"
-export { type LoadedPlugins, type LoadPluginsOptions, loadPlugins } from "./plugin-loader"
+export {
+  type LoadedPlugins,
+  type LoadPluginsOptions,
+  loadPlugins,
+  type PluginField,
+  type PluginListing,
+} from "./plugin-loader"
 export { type RunCliOptions, runCli } from "./run"
 export {
   type DiscoveredVocabItem,

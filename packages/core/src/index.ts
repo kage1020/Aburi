@@ -16,6 +16,7 @@ export {
   detectComponents,
 } from "./component"
 export { NPM_MANIFEST, readWorkspacePackages, type WorkspacePackage } from "./component-manifest"
+export { CORE_EFFECTS, type CoreEffect, isCoreEffectId } from "./core-effects"
 export {
   CoreError,
   type CoreErrorCode,
@@ -73,7 +74,7 @@ export {
   type ImportBinding,
   splitAliasedImportName,
 } from "./import-edge"
-export { assertIRIntegrity, checkIRIntegrity, isCoreEffectId } from "./integrity"
+export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
 export { checkDocumentShape, DOCUMENT_SUBJECT } from "./integrity-shape"
 export {
   type EnrichmentInput,

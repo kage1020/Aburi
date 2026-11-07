@@ -17,13 +17,21 @@ const PLUGIN_FIELDS = {
   effects: "effects",
 } as const satisfies Record<keyof LoadedPlugins & keyof Config, PluginManifest["type"]>
 
-type PluginField = keyof typeof PLUGIN_FIELDS
+export type PluginField = keyof typeof PLUGIN_FIELDS
 
 export interface LoadedPlugins {
   languages: LanguagePlugin[]
   frameworks: FrameworkPlugin[]
   effects: EffectPlugin[]
   registry: VocabRegistry
+  /** By manifest name. A plugin listed twice keeps its first entry, as the registry keeps it once. */
+  listedIn: Map<string, PluginListing>
+}
+
+/** The config entry a plugin was loaded from: a plugin ref, or a `frameworkHints` entry's name. */
+export interface PluginListing {
+  readonly field: PluginField | "frameworkHints"
+  readonly ref: string
 }
 
 export interface LoadPluginsOptions {
@@ -36,7 +44,13 @@ export interface LoadPluginsOptions {
 
 export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPlugins> {
   const registry = new VocabRegistry()
-  const loaded: LoadedPlugins = { languages: [], frameworks: [], effects: [], registry }
+  const loaded: LoadedPlugins = {
+    languages: [],
+    frameworks: [],
+    effects: [],
+    registry,
+    listedIn: new Map(),
+  }
   const importFn = options.importModule ?? defaultImport
   const pluginRefRoot = options.pluginRefRoot ?? options.workspaceRoot
   const refs = (Object.keys(PLUGIN_FIELDS) as PluginField[]).flatMap((field) =>
@@ -51,10 +65,17 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
     const plugin = pickPlugin(module, ref)
     registerManifest(registry, plugin.manifest, ref)
     routePlugin(plugin, field, loaded, ref)
+    if (!loaded.listedIn.has(plugin.manifest.name)) {
+      loaded.listedIn.set(plugin.manifest.name, { field, ref })
+    }
   }
   for (const plugin of options.syntheticPlugins ?? []) {
     registerHint(registry, plugin.manifest)
     loaded.frameworks.push(plugin)
+    loaded.listedIn.set(plugin.manifest.name, {
+      field: "frameworkHints",
+      ref: hintName(plugin.manifest),
+    })
   }
   return loaded
 }
@@ -109,14 +130,18 @@ export function windowsDriveRefusal(
   return null
 }
 
+/** A hint's synthesised manifest names the framework the `frameworkHints` entry is named after. */
+function hintName(manifest: PluginManifest): string {
+  return manifest.provides.frameworks[0] ?? manifest.name
+}
+
 function registerHint(registry: VocabRegistry, manifest: PluginManifest): void {
   try {
     registry.registerHint(manifest)
   } catch (error) {
     if (!(error instanceof RegistryError)) throw error
-    const [entry] = manifest.provides.frameworks
     throw new CliError(
-      `frameworkHints entry "${entry}" cannot be registered: ${error.message}`,
+      `frameworkHints entry "${hintName(manifest)}" cannot be registered: ${error.message}`,
       "config-error",
       { cause: error },
     )

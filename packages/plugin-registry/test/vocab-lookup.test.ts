@@ -1,6 +1,6 @@
 import { errorFrom } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { RegistryError, VocabRegistry } from "../src/index"
+import { isUnderPrefix, RegistryError, VocabRegistry } from "../src/index"
 import { effectsManifest, frameworkManifest, langManifest } from "./fixtures/manifests"
 
 const lang = langManifest({
@@ -78,6 +78,18 @@ describe("VocabRegistry lookups", () => {
     expect(reg.listEffects().map((e) => e.id)).toEqual(["x-prisma:create"])
     expect(reg.listExtKinds().map((e) => e.id)).toEqual(["fp:lens"])
     expect(reg.listFrameworks().map((f) => f.name)).toEqual(["nestjs"])
+  })
+})
+
+describe("isUnderPrefix", () => {
+  it.each([
+    ["x-acme", "x-acme", true],
+    ["x-acme:charge", "x-acme", true],
+    ["framework:acme:jobs:cron", "framework:acme", true],
+    ["x-acmex:charge", "x-acme", false],
+    ["framework:acme", "framework:acme:jobs", false],
+  ])("reads %j as under %j: %s, only at a segment boundary", (value, prefix, under) => {
+    expect(isUnderPrefix(value, prefix)).toBe(under)
   })
 })
 

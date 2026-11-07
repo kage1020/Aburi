@@ -183,10 +183,10 @@ describe("aburi --log-level", () => {
     expect(code).toBe(EXIT.SUCCESS)
   })
 
-  it.each(["init", "scan", "diff", "explain"])(
+  it.each(["init", "scan", "diff", "explain", "vocab", "vocab who-owns"])(
     "is listed among the global options of `aburi %s --help`",
     async (command) => {
-      const { code, stdout } = await runCliIn(workspace.root, [command, "--help"])
+      const { code, stdout } = await runCliIn(workspace.root, [...command.split(" "), "--help"])
       expect(code).toBe(EXIT.SUCCESS)
       expect(stdout).toMatch(/Global Options:\n[\s\S]*--log-level <level>/)
     },

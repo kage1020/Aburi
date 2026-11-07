@@ -70,6 +70,11 @@ Two plugins declaring the same `extKind` id make the registry throw at register
 time. We chose a loud failure over a silent takeover. `aburi scan` then exits `3`
 and names the entry in `aburi.json` that loaded the refused plugin.
 
+To see what the registry made of your manifest, list your plugin in `aburi.json`
+and run `aburi vocab list`, or `aburi vocab who-owns framework:mytool:widget` for
+one value: it names the plugin that owns it and whether by id or by prefix, as a
+scan would resolve it, without scanning.
+
 ## Language plugin
 
 Parses a file, extracts Symbols, walks bodies to collect Rules + Calls, and

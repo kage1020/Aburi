@@ -1,5 +1,6 @@
 import type { IR } from "@aburi/types"
 import { describeCodePoints, toNfc } from "./codepoints"
+import { isCoreEffectId } from "./core-effects"
 import { CoreError, type IntegrityViolation } from "./errors"
 import {
   isComponentId,
@@ -19,36 +20,6 @@ import {
 } from "./integrity-dependencies"
 import { checkArraySortOrder } from "./integrity-order"
 import { checkDocumentShape } from "./integrity-shape"
-
-const CORE_EFFECT_VOCAB: ReadonlySet<string> = new Set([
-  "db.read",
-  "db.write",
-  "db.transaction",
-  "db.migration",
-  "network.http",
-  "network.ws",
-  "network.rpc",
-  "queue.publish",
-  "queue.consume",
-  "event.publish",
-  "event.subscribe",
-  "fs.read",
-  "fs.write",
-  "state.mutate",
-  "collection.mutate",
-  "time.now",
-  "time.timer",
-  "random",
-  "env.read",
-  "env.write",
-  "process.exit",
-  "process.signal",
-])
-
-/** Whether `id` is one of the core effect ids, which no plugin owns and any may emit. */
-export function isCoreEffectId(id: string): boolean {
-  return CORE_EFFECT_VOCAB.has(id)
-}
 
 const CORE_KIND_ENUM: ReadonlySet<string> = new Set([
   "function",
@@ -315,7 +286,7 @@ function checkSymbolConfidenceEnum(ir: IR, out: IntegrityViolation[]): void {
 function checkEffectVocab(ir: IR, out: IntegrityViolation[]): void {
   for (const symbol of ir.symbols) {
     for (const effect of symbol.effects) {
-      if (CORE_EFFECT_VOCAB.has(effect.id)) continue
+      if (isCoreEffectId(effect.id)) continue
       if (PLUGIN_EFFECT_PATTERN.test(effect.id)) continue
       out.push({
         invariant: 7,

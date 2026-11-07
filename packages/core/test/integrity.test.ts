@@ -1,8 +1,15 @@
+import irSchema from "@aburi/schema/aburi.ir.v1.json" with { type: "json" }
 import { component, dependency, effect, makeIR } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeLanguageId } from "../src/id"
-import { assertIRIntegrity, CoreError, checkIRIntegrity, isCoreEffectId } from "../src/index"
+import {
+  assertIRIntegrity,
+  CORE_EFFECTS,
+  CoreError,
+  checkIRIntegrity,
+  isCoreEffectId,
+} from "../src/index"
 import { makeSymbol } from "./fixtures/ir"
 import { WORKSPACE_PATH_CASES } from "./fixtures/paths"
 
@@ -213,6 +220,15 @@ describe("isCoreEffectId", () => {
     ["db.upsert", false],
   ])("answers %j with %s: only the core vocabulary is ownerless", (id, core) => {
     expect(isCoreEffectId(id)).toBe(core)
+  })
+})
+
+describe("CORE_EFFECTS", () => {
+  it("is the schema's core EffectId enum, in its order, each id described", () => {
+    const [core] = irSchema.$defs.EffectId.oneOf
+
+    expect(CORE_EFFECTS.map((effect) => effect.id)).toEqual(core?.enum)
+    expect(CORE_EFFECTS.filter((effect) => effect.description.trim() === "")).toEqual([])
   })
 })
 

@@ -335,6 +335,7 @@ Each `frameworkHints` entry is internally registered as a single ad-hoc plugin:
 
 ```
 name: hint-<name>
+version: 0.0.0
 type: framework
 provides.extKindPrefixes:  each extKind value's namespace with "hint:" prepended
 provides.derivedByPrefixes: each derivedBy value's namespace, as written
