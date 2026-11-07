@@ -1,4 +1,5 @@
-import type { IR, NotComparedFile, SymbolId } from "@aburi/types"
+import { compareCodeUnit } from "@aburi/core"
+import type { IR, NotComparedFile, PluginRef, SymbolId } from "@aburi/types"
 import { EXIT } from "../exit-codes"
 import { joinCapped } from "../listing"
 import type { WarnFn } from "../warn"
@@ -27,6 +28,7 @@ export function warnAboutComparison(compared: ComparedDocuments, warn: WarnFn): 
   warnOnUnenumerableLosses(headIR, "head", warn)
   warnOnSymmetricLosses(compared.notCompared, warn)
   if (scans === null) {
+    warnOnPluginSetDifference(baseIR, headIR, warn)
     warnOnRecordedFaults({ base: baseIR, head: headIR }, warn)
     return
   }
@@ -77,6 +79,44 @@ function describeScanFault(report: ScanReport): string {
     case "below-floor":
       return `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed, below the floor the workspace set${alsoUnnameable}`
   }
+}
+
+// A ref diff loads the head's plugins for both scans, so only two stored IRs can disagree here.
+function warnOnPluginSetDifference(baseIR: IR, headIR: IR, warn: WarnFn): void {
+  const differences = pluginSetDifferences(baseIR.generator.plugins, headIR.generator.plugins)
+  if (differences.length === 0) return
+  warn(
+    `⚠ The base and head IRs were made with different plugins: ${differences.join("; ")}. ` +
+      `A Symbol whose effects, kind or role a plugin decides can be reported as changed for that alone. ` +
+      `Rescan both sides with one plugin set, or diff the two revisions (\`aburi diff <base>..<head>\`), which scans both with the head's plugins.`,
+  )
+}
+
+function pluginSetDifferences(base: readonly PluginRef[], head: readonly PluginRef[]): string[] {
+  const baseByName = new Map(base.map((plugin) => [plugin.name, plugin]))
+  const headByName = new Map(head.map((plugin) => [plugin.name, plugin]))
+  const names = [...new Set([...baseByName.keys(), ...headByName.keys()])].sort(compareCodeUnit)
+  return names.flatMap((name) => {
+    const before = baseByName.get(name)
+    const after = headByName.get(name)
+    if (after === undefined)
+      return before === undefined ? [] : [`${describePlugin(before)} only in base`]
+    if (before === undefined) return [`${describePlugin(after)} only in head`]
+    const changes = [
+      fieldChange("type", before.type, after.type),
+      fieldChange("version", before.version, after.version),
+      fieldChange("grammar", before.grammarRevision, after.grammarRevision),
+    ].filter((change) => change !== null)
+    return changes.length === 0 ? [] : [`${name} ${changes.join(", ")}`]
+  })
+}
+
+function describePlugin(plugin: PluginRef): string {
+  return `${plugin.name} ${plugin.version} (${plugin.type})`
+}
+
+function fieldChange(field: string, before: string | null, after: string | null): string | null {
+  return before === after ? null : `${field} ${before ?? "none"} → ${after ?? "none"}`
 }
 
 function warnOnRecordedFaults(irs: Record<DiffSide, IR>, warn: WarnFn): void {

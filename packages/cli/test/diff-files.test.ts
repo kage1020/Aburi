@@ -182,3 +182,101 @@ describe("aburi diff — the head's call-resolution census", () => {
     expect(stderr).toContain("no stats.callResolution")
   })
 })
+
+describe("aburi diff --base/--head over IRs made with different plugins", () => {
+  const TS = {
+    name: "lang-typescript",
+    type: "lang",
+    version: "0.6.0",
+    grammarRevision: "tree-sitter-typescript@0.23.2",
+  } as const
+  const PRISMA = {
+    name: "effects-prisma",
+    type: "effects",
+    version: "0.6.0",
+    grammarRevision: null,
+  } as const
+  const madeWith = (...plugins: IR["generator"]["plugins"]): IR => ({
+    ...EMPTY,
+    generator: { ...EMPTY.generator, plugins },
+  })
+  const pluginLines = (said: string) =>
+    said.split("\n").filter((line) => line.includes("different plugins"))
+
+  it.each([
+    [
+      "a plugin only the base loaded",
+      [TS, PRISMA],
+      [TS],
+      "effects-prisma 0.6.0 (effects) only in base",
+    ],
+    [
+      "a plugin only the head loaded",
+      [TS],
+      [TS, PRISMA],
+      "effects-prisma 0.6.0 (effects) only in head",
+    ],
+    [
+      "another version and grammar of one plugin",
+      [TS],
+      [{ ...TS, version: "0.7.0", grammarRevision: "tree-sitter-typescript@0.24.0" }],
+      "lang-typescript version 0.6.0 → 0.7.0, grammar tree-sitter-typescript@0.23.2 → tree-sitter-typescript@0.24.0",
+    ],
+  ])("names %s once, and diffs as it would without it", async (_, base, head, difference) => {
+    const { report, said } = await diffDocuments(
+      workspace.root,
+      madeWith(...base),
+      madeWith(...head),
+    )
+
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    expect(pluginLines(said)).toEqual([
+      `⚠ The base and head IRs were made with different plugins: ${difference}. ` +
+        "A Symbol whose effects, kind or role a plugin decides can be reported as changed for that alone. " +
+        "Rescan both sides with one plugin set, or diff the two revisions (`aburi diff <base>..<head>`), which scans both with the head's plugins.",
+    ])
+  })
+
+  it("lists every difference in one line, by plugin name", async () => {
+    const NEST = {
+      name: "framework-nestjs",
+      type: "framework",
+      version: "0.6.0",
+      grammarRevision: null,
+    } as const
+    const { said } = await diffDocuments(
+      workspace.root,
+      madeWith(TS, PRISMA),
+      madeWith({ ...TS, version: "0.7.0" }, NEST),
+    )
+
+    expect(pluginLines(said)).toHaveLength(1)
+    expect(pluginLines(said)[0]).toContain(
+      "effects-prisma 0.6.0 (effects) only in base; framework-nestjs 0.6.0 (framework) only in head; lang-typescript version 0.6.0 → 0.7.0.",
+    )
+  })
+
+  it("says nothing when both list the same plugins, in any order", async () => {
+    const { said } = await diffDocuments(workspace.root, madeWith(TS, PRISMA), madeWith(PRISMA, TS))
+
+    expect(pluginLines(said)).toEqual([])
+  })
+
+  it("writes the line to stderr, and nothing of it to diff.json", async () => {
+    const { base, head } = await writeIRs(workspace.root, madeWith(TS, PRISMA), madeWith(TS))
+
+    const { code, stderr } = await runCliIn(workspace.root, [
+      "diff",
+      "--base",
+      base,
+      "--head",
+      head,
+    ])
+
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(pluginLines(stderr)).toHaveLength(1)
+    expect(
+      await readFile(resolve(workspace.root, "out", DIFF_JSON_FILENAME), "utf8"),
+    ).not.toContain("effects-prisma")
+  })
+})

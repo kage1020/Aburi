@@ -1134,7 +1134,7 @@ If base/head share the same Component id but with different roots:
 If base has the effects-prisma plugin enabled and head does not:
 - What was db.write in base remains as calls in head
 - The Symbol's logic fingerprint changes, so it appears as "changed"
-- There is no mechanism to tell directly from the Diff that the cause is a plugin configuration difference. Both IRs record `generator.plugins[]`, but the diff does not compare the two lists yet (planned — see the [roadmap](../roadmap.md)). In ref mode the case does not arise: both scans load the head's plugins ([`cli-spec.md`](./cli-spec.md) §6.4 step 3)
+- Nothing in the Diff says the cause is a plugin configuration difference. `aburi diff --base --head` compares the `generator.plugins[]` both IRs record and names every difference on stderr ([`cli-spec.md`](./cli-spec.md) §6.6, CL62), which is where a reviewer reading the run learns it. In ref mode the case does not arise: both scans load the head's plugins ([`cli-spec.md`](./cli-spec.md) §6.4 step 3)
 
 ### 9.5 Massive moved counts
 
@@ -1256,7 +1256,7 @@ Symbols that are "move only" or "syntax only" need not be seen by reviewers. Col
 
 Component / Dependency changes are architecture-level changes. Mixing them with Symbol additions/removals hurts clarity. They are managed in separate top-level fields and given separate sections in the Markdown as well.
 
-### 11.8 Why plugin-configuration-difference detection is not yet supported
+### 11.8 Why a plugin-set difference is a warning, not a field of the Diff
 
 If base and head have different plugin sets, the same source yields different IRs. This is a difference in "observation", not "meaning".
-The diff currently works under the premise of "trusting the IR"; plugin differences will be handled by a separate mechanism, comparing the `generator.plugins[]` each IR already records. Reporting the result would need a field the diff schema does not have, so it is deferred — see the [roadmap](../roadmap.md).
+The diff works under the premise of "trusting the IR", so it does not discount a change it can trace to a plugin: it reports what the two documents say. The CLI compares the `generator.plugins[]` each IR records and warns on stderr when they differ ([`cli-spec.md`](./cli-spec.md) §6.6), which needs no schema change and reaches the reviewer reading the run. A field in `diff.json` would be an additive change to `aburi.diff.v1`, and is left until a consumer of the artefact needs it.

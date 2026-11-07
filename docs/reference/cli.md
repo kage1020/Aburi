@@ -209,7 +209,12 @@ absolute one (`/opt/plugins/x.mjs`) names the same file for both scans,
 whichever workspace root each has.
 
 **File mode** compares two `aburi.ir.json` files you already have. No git, no
-scanning.
+scanning. Each file records the plugins that made it, and when the two lists
+differ, `aburi diff` names each difference in one warning on stderr: a plugin
+only one side loaded, or one loaded at another version. An effect plugin only
+the base loaded leaves its effects on the base side alone, so every Symbol that
+carried one reads as changed. Rescan both with one plugin set, or diff the refs,
+whose two scans load the head's plugins.
 
 | Flag | Effect |
 |---|---|
