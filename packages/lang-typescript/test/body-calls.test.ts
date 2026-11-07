@@ -9,6 +9,8 @@ describe("the calls a body makes", () => {
   it.each([
     ["a member chain, as the chain it spells", "prisma.user.create()", ["prisma.user.create"]],
     ["the call nested in a call-only return", "return foo(bar())", ["foo", "bar"]],
+    ["a call ahead of the call in its argument", "a(b())", ["a", "b"]],
+    ["calls sharing a line, in the order written", "b.log(); a.save()", ["b.log", "a.save"]],
   ])("records %s", async (_label, body, targets) => {
     expect((await callsIn(body)).map((c) => c.target)).toEqual(targets)
   })

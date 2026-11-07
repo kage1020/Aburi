@@ -82,8 +82,12 @@ describe("runFilePipeline — list fields leave in line order", () => {
     },
   )
 
-  it("orders calls on one line by target, not by where the source wrote them", async () => {
+  it.each<[string, (symbol: IRSymbol) => string[], NonNullable<OneSymbolFile["effects"]>]>([
+    ["calls[]", (symbol) => symbol.calls.map((c) => c.target), []],
+    ["effects[]", (symbol) => symbol.effects.map((e) => e.target), [emitting]],
+  ])("keeps %s on one line in the order the plugin wrote them", async (_field, read, effects) => {
     const { symbols } = await extractOneSymbol({
+      effects,
       body: {
         rules: [],
         calls: [
@@ -93,7 +97,20 @@ describe("runFilePipeline — list fields leave in line order", () => {
         ],
       },
     })
-    expect(symbols[0]?.calls.map((c) => c.target)).toEqual(["first.hit", "second.hit", "third.hit"])
+    expect(read(symbols[0] as IRSymbol)).toEqual(["third.hit", "first.hit", "second.hit"])
+  })
+
+  it("moves the logic fingerprint when two effects on one line swap", async () => {
+    const logicOf = async (targets: readonly string[]) => {
+      const calls = targets.map((target) => makeCall({ target, line: 4 }))
+      const { symbols } = await extractOneSymbol({
+        effects: [emitting],
+        body: { rules: [], calls },
+      })
+      return symbols[0]?.fingerprint.logic
+    }
+
+    expect(await logicOf(["b.log", "a.save"])).not.toBe(await logicOf(["a.save", "b.log"]))
   })
 })
 

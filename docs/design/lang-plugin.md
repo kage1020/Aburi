@@ -479,7 +479,7 @@ A package entry in `extends` is found only where `node_modules` is installed. `a
 
 ### 5.1 Cooperation with effect plugins
 
-The language plugin's job ends at returning `CallCandidate[]`. The core queries the effect plugins in order for each call, and the result of the first plugin to return an `EffectClassification` is adopted.
+The language plugin's job ends at returning `CallCandidate[]`, in source order. The core queries the effect plugins in order for each call, and the result of the first plugin to return an `EffectClassification` is adopted. It sorts `effects[]` and `calls[]` by line and keeps the plugin's order among the entries of one line ([ir-schema.md](./ir-schema.md) §1), so that order reaches the IR and the `logic` fingerprint, which reads locally detected effects in it ([fingerprint.md](./fingerprint.md) §4.7). `@aburi/lang-typescript` writes a call before the calls inside it: `a(b())` gives `a`, then `b`.
 
 - A call for which every effect plugin returned null → stays in `Symbol.calls[]` (target/line/resolved=null)
 - A call classified by some effect plugin → goes into `Symbol.effects[]` and not into `Symbol.calls[]` (ir-schema §9.3)

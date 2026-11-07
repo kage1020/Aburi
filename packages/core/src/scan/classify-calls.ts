@@ -117,16 +117,7 @@ export function classifyCalls(input: ClassifyCallsInput): {
     }
   }
 
-  classifiedEffects.sort(byTargetThenLine)
-  survivingCalls.sort(byTargetThenLine)
+  // Left in the plugin's order, which is source order: the Symbol sorts by line with a stable sort,
+  // so two effects on one line keep the order they run in, which the `logic` fingerprint reads.
   return { effects: classifiedEffects, calls: survivingCalls, dynamicCallSites }
-}
-
-function byTargetThenLine(
-  a: { target: string; line?: number },
-  b: { target: string; line?: number },
-): number {
-  if (a.target < b.target) return -1
-  if (a.target > b.target) return 1
-  return (a.line ?? 0) - (b.line ?? 0)
 }

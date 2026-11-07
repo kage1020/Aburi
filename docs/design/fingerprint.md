@@ -184,7 +184,7 @@ The rule strings are the ones the IR holds, already in the ir-schema.md §8.2 fo
 
 `effects` is built in two segments, split on `Effect.propagated`, the one field besides `target` the input reads ([`effect-propagation.md`](./effect-propagation.md) §5.1):
 
-1. **Locally detected effects** (`propagated` absent or `false`), in input order (= call order = ascending `line`), one entry per effect: a target called twice is two entries.
+1. **Locally detected effects** (`propagated` absent or `false`), in input order (= call order: ascending `line`, and on one line the order the language plugin wrote the calls in), one entry per effect: a target called twice is two entries.
 2. **Propagated effects** (`propagated: true`), after every locally detected one, by `canonical(target)` alone: sorted ascending by UTF-16 code unit, each target once, and leaving out any target segment 1 already holds.
 
 Segment 2 is not read as the IR stores it. The IR orders that segment by `(id, target)` and merges it on that pair ([`effect-propagation.md`](./effect-propagation.md) §5.1, §8), and `id` is not part of the input (below), so reading it as stored would let an id change reorder a caller's targets, repeat one, or leave in place a target the caller's own effects already name. Each moves the `logic` of every transitive caller while the callee's own stays put (§4.5). Propagated entries have no call-site position, and propagation already merges their repeats, so this loses nothing §4.7 protects.
