@@ -1,5 +1,10 @@
-import type { SkippedFile, UnnameableRoot, UnrepresentableFile } from "@aburi/core"
-import { makeLanguageId } from "@aburi/core"
+import type {
+  IgnoredPublicApiReason,
+  SkippedFile,
+  UnnameableRoot,
+  UnrepresentableFile,
+} from "@aburi/core"
+import { makeComponentId, makeLanguageId } from "@aburi/core"
 import type { LspEnrichmentStats } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { ScanReport } from "../src"
@@ -357,6 +362,48 @@ describe("reportScanIncidents — LSP enrichment", () => {
     expect(lines).toEqual([
       "⚠ head: lsp.servers.typescript matches no loaded language plugin",
       "⚠ head: LSP requests: 10 issued · 0 timed out · 1 failed.",
+    ])
+  })
+})
+
+describe("reportScanIncidents — a package.json value that gave no publicApi entry", () => {
+  it.each<[IgnoredPublicApiReason, string, string]>([
+    ["package-directory", "./", "the package directory rather than a file"],
+    ["directory", "./lib/", "a directory rather than a file"],
+    ["absolute-path", "/dist/index.js", "an absolute path"],
+    [
+      "parent-segment",
+      "./src/../index.js",
+      'a path with a ".." segment, and an entry is the path as written, never one resolved from it',
+    ],
+    [
+      "drive-shaped-name",
+      "C:/dist/index.js",
+      "a path whose first segment reads as a Windows drive",
+    ],
+    [
+      "unspellable-name",
+      "dist\\index.js",
+      "a path holding a backslash, which no Document path can spell",
+    ],
+  ])("names the component, the manifest field and the value for %s", (reason, value, why) => {
+    const lines = incidentLinesFrom(
+      {
+        ignoredPublicApi: [
+          {
+            component: makeComponentId("demo"),
+            manifestPath: "pkgs/demo/package.json",
+            field: "main",
+            value,
+            reason,
+          },
+        ],
+      },
+      "base",
+    )
+
+    expect(lines).toEqual([
+      `⚠ base: Component "demo": pkgs/demo/package.json#main is ${JSON.stringify(value)}, ${why}, so it gives no publicApi entry.`,
     ])
   })
 })

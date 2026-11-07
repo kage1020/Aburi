@@ -13,9 +13,16 @@ export { countBy, groupBy } from "./collections"
 export {
   __testing as __testing_component,
   type DetectComponentsOptions,
+  type DetectComponentsResult,
   detectComponents,
+  type IgnoredPublicApi,
 } from "./component"
-export { NPM_MANIFEST, readWorkspacePackages, type WorkspacePackage } from "./component-manifest"
+export {
+  type IgnoredPublicApiReason,
+  NPM_MANIFEST,
+  readWorkspacePackages,
+  type WorkspacePackage,
+} from "./component-manifest"
 export {
   CoreError,
   type CoreErrorCode,

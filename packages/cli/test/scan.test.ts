@@ -16,6 +16,7 @@ import {
   listTree,
   TYPESCRIPT,
   writeConfig,
+  writeMonorepo,
   writePackageJson,
   writeTypeScriptWorkspace,
 } from "./workspace"
@@ -162,29 +163,60 @@ describe("aburi scan — what the caller and the config add", () => {
   })
 })
 
-describe("aburi scan — a package.json value that names the package directory", () => {
-  it.each<[string, Record<string, unknown>, string[] | undefined]>([
-    ['"main": "./"', { main: "./" }, undefined],
+describe("aburi scan — the public API a package.json declares", () => {
+  it("writes each entry from the workspace root, and the IR satisfies its schema", async () => {
+    await writeMonorepo(workspace.root)
+    await writePackageJson(resolve(workspace.root, "pkgs/app"), {
+      name: "app",
+      exports: { ".": "./src/a.ts" },
+    })
+
+    const report = await scan()
+
+    const ir = JSON.parse(await readFile(report.irPath ?? "", "utf8")) as IR
+    expect(ir.components.map((component) => component.publicApi)).toEqual([["pkgs/app/src/a.ts"]])
+    expect(irSchemaViolations(ir)).toEqual([])
+  })
+
+  it.each<[string, Record<string, unknown>, string[] | undefined, string]>([
+    [
+      '"main": "./"',
+      { main: "./" },
+      undefined,
+      'package.json#main is "./", the package directory rather than a file',
+    ],
     [
       'the folder mapping "./": "./" in exports',
       { exports: { ".": "./src/ok.js", "./": "./" } },
       ["src/ok.js"],
+      'package.json#exports["./"] is "./", the package directory rather than a file',
     ],
   ])(
-    "writes no publicApi entry for %s, and the IR satisfies its schema",
-    async (_value, manifest, publicApi) => {
+    "writes no publicApi entry for %s, says so on stderr, and exits 0",
+    async (_value, manifest, publicApi, line) => {
       await writePackageJson(workspace.root, { name: "scan-fixture", ...manifest })
 
-      const report = await scan()
+      const { code, stderr } = await runCliIn(workspace.root, ["scan", "--format", "json"])
 
-      expect(report.exitCode).toBe(EXIT.SUCCESS)
-      const ir = JSON.parse(await readFile(report.irPath ?? "", "utf8")) as {
-        components: { publicApi?: string[] }[]
-      }
+      expect(code).toBe(EXIT.SUCCESS)
+      expect(stderr).toBe(`⚠ Component "scan-fixture": ${line}, so it gives no publicApi entry.\n`)
+      const ir = JSON.parse(
+        await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+      ) as IR
       expect(ir.components.map((component) => component.publicApi)).toEqual([publicApi])
       expect(irSchemaViolations(ir)).toEqual([])
     },
   )
+
+  it("says nothing for a value the config's own components replace", async () => {
+    await writePackageJson(workspace.root, { name: "scan-fixture", main: "./lib/" })
+    await declaredComponent({ roots: ["."] })
+
+    const { code, stderr } = await runCliIn(workspace.root, ["scan", "--format", "json"])
+
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(stderr).toBe("")
+  })
 })
 
 describe("aburi scan — files saved with a byte order mark", () => {

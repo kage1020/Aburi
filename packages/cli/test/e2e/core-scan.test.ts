@@ -216,7 +216,7 @@ describe("scan — integration through real plugins", () => {
     )
     await workspace.writeSource("src/types.ts", "export interface Invoice {\n  id: string\n}\n")
 
-    const components = await detectComponents({ workspaceRoot: workspace.root })
+    const { components } = await detectComponents({ workspaceRoot: workspace.root })
     const result = await scanWorkspace({}, {}, { components })
 
     const parsed = JSON.parse(serializeCanonical(result.ir)) as {

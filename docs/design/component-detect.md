@@ -247,7 +247,7 @@ Detected frameworks are **only recorded in `Component.frameworks[]`**; the corre
 Read the paths `package.json` names:
 
 ```jsonc
-// package.json
+// packages/sdk/package.json
 {
   "exports": {
     ".": "./src/index.ts",
@@ -260,13 +260,14 @@ Read the paths `package.json` names:
 
 ```jsonc
 {
-  "publicApi": ["src/client.ts", "src/index.ts"]
+  "roots": ["packages/sdk"],
+  "publicApi": ["packages/sdk/src/client.ts", "packages/sdk/src/index.ts"]
 }
 ```
 
 Every string target of `exports`, through conditions and arrays, and `main`, `module`, `types` and `typings` are read, whether or not `exports` is present; the entries are their union, deduplicated and sorted.
 
-Each value is a path relative to the package directory, and its entry is written in one spelling: NFC, with no leading `./` however often it repeats, and no `.` or empty segment inside it, so `././src/index.ts`, `./src/./index.ts` and `src//index.ts` are all `src/index.ts`. These values contribute no entry:
+Each value is a path relative to the package directory, and its entry is that path written from the workspace root, as `roots[]` and every Symbol id are: the component's root, then the value in one spelling. That spelling is NFC, with no leading `./` however often it repeats, and no `.` or empty segment inside it, so `././src/index.ts`, `./src/./index.ts` and `src//index.ts` in `packages/sdk/package.json` are all `packages/sdk/src/index.ts`. A package at the workspace root (root `.`) adds no prefix: its entry is `src/index.ts`. These values contribute no entry:
 
 - the package directory itself: `""`, `"."`, `"./"`, `"./."`. `"main": "./"` is a legal npm value (it resolves to `./index.js`), and `"./": "./"` is the folder-mapping form of `exports` that Node accepted before subpath patterns
 - any other directory, which is a value whose last segment is empty or `.`: `"./lib/"`, `"./lib/."`, or the target of a folder mapping such as `"./lib/": "./lib/"`
@@ -275,6 +276,8 @@ Each value is a path relative to the package directory, and its entry is written
 - a value that is not a string, such as `"main": 42`
 
 An entry is the file the manifest names, not a file a resolver would find for it. `index.js` inside a directory is Node's lookup, and a folder mapping exports whatever the directory holds at the time; neither is a path the manifest wrote. An empty entry in particular would be no glob at all, and the schema refuses it.
+
+Detection reports every string value on that list beside the Components, naming the component, the manifest, where in it the value sits (`main`, or a place in `exports` such as `exports["./lib/"]` or `exports["."]["import"][0]`), the value and which of the cases above it is. `aburi scan` writes one line on stderr for each ([`cli-spec.md`](./cli-spec.md) §5.6), since a value that gives no entry otherwise leaves the IR looking like that of a package that declared nothing. A value that is not a string is not reported: `null` is how `exports` keeps a subpath private, and a number names no path at all.
 
 If no value gives an entry, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
 
@@ -390,7 +393,7 @@ Implementation guidance:
 | CD7 | `package.json#name = "@scope/billing"` | Component.id = "scope-billing", Component.name = "@scope/billing" |
 | CD8 | 2 workspaces generate the same id (both "shared") | Suffixes appended ("shared-apps" / "shared-packages"). Adding a third workspace elsewhere moves them only if it contends for one of those ids; where the path separates nothing, each id ends in a digest of its own `roots[0]` and adding a fourth leaves the first three byte-identical |
 | CD9 | `dependencies: {"@nestjs/core": "..."}` | frameworks = ["nestjs"] |
-| CD10 | `package.json#exports: {".": "./src/index.ts"}` | publicApi = ["src/index.ts"] |
+| CD10 | `packages/a/package.json#exports: {".": "./src/index.ts"}`, or the same at the workspace root | publicApi = ["packages/a/src/index.ts"], or ["src/index.ts"] |
 | CD11 | Autodetect finds nothing and there is no package.json | id = directory name (kebab-case), name = directory name |
 | CD12 | config.components overrides after autodetect | config wins ([`config.md`](./config.md) §6.1) |
 | CD13 | Both pnpm and nx detect the same workspace | Deduped into 1 Component |
@@ -434,6 +437,8 @@ Implementation guidance:
 | CD47 | `package.json#main: "./"`, or `exports: {".": "./src/ok.js", "./": "./"}` | No entry for the package directory: no `publicApi` key, or `publicApi = ["src/ok.js"]`. The IR satisfies its schema |
 | CD48 | `main`, `module`, `types` or `typings` set to `"."`, `"./."`, `"././"`, `"./lib/"`, `"./lib/."`, `"/"`, `"/dist/index.mjs"`, `"C:/dist/index.d.ts"`, `"a:index.js"`, `"../shared/index.d.ts"` or `"./src/../index.js"`, or to a value that is not a string; or an `exports` folder mapping `"./lib/": "./lib/"` | No entry for any of them |
 | CD49 | `main: "././dist/index.js"`, `module: "./dist/./index.js"` or `types: "dist//index.js"` | publicApi = ["dist/index.js"] for each |
+| CD51 | Each value of CD47 and CD48 that is a string, in `apps/web/package.json` of a component whose id collision resolution renames | Each is reported with that component's final id, `apps/web/package.json`, its place in the manifest (`main`, `exports["./"]`, `exports["./lib/"]`), the value, and its case: the package directory, another directory, an absolute path, a first segment that reads as a drive, a `..` segment, or a backslash |
+| CD52 | `exports: {"./internal/*": null}`, or `main: 42` | No entry and nothing reported |
 
 ## 11. Design decisions
 

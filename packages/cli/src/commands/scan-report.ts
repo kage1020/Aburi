@@ -1,4 +1,5 @@
 import type {
+  IgnoredPublicApi,
   SkippedFile,
   TreeReleaseFailure,
   UnnameableRoot,
@@ -61,6 +62,7 @@ export interface ScanReport {
   unnameableRoots: readonly UnnameableRoot[]
   fellBackToSingleComponent: boolean
   pluginNamedFrameworks: readonly PluginNamedFramework[]
+  ignoredPublicApi: readonly IgnoredPublicApi[]
   loadedPlugins: readonly string[]
   strayPluginOptions: readonly StrayPluginOptions[]
   exitCode: ExitCode

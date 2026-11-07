@@ -108,7 +108,11 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   requireLanguagePlugin(plugins.languages.length, loaded.source)
 
   const managers = await resolveManagers(config, workspaceRoot)
-  const components = await resolveComponents(config, workspaceRoot, plugins.languages)
+  const { components, ignoredPublicApi } = await resolveComponents(
+    config,
+    workspaceRoot,
+    plugins.languages,
+  )
   const workspacePackages = await resolveWorkspacePackages(workspaceRoot, managers, components)
   const fellBackToSingleComponent =
     declaredComponents(config) === undefined && managers.workspaces.length === 0
@@ -194,6 +198,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     unnameableRoots: managers.unnameableRoots,
     fellBackToSingleComponent,
     pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
+    ignoredPublicApi,
     loadedPlugins,
     strayPluginOptions: strayPluginOptions(config, loadedPlugins, loaded.syntheticPlugins),
     exitCode:

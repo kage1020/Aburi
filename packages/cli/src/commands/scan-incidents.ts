@@ -4,6 +4,7 @@ import {
   compareCodeUnit,
   describeCodePoints,
   groupBy,
+  type IgnoredPublicApiReason,
   type SkippedFile,
   type UnnameableFile,
 } from "@aburi/core"
@@ -43,6 +44,7 @@ export function reportScanIncidents(
   for (const line of describeWorkspaceDetection(report)) sayIncident(line)
   reportCoverageFault(report.coverageFault, sayIncident)
   reportPluginNamedFrameworks(report.pluginNamedFrameworks, sayIncident)
+  reportIgnoredPublicApi(report.ignoredPublicApi, sayIncident)
   reportStrayPluginOptions(report, warn, said)
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
@@ -187,6 +189,27 @@ function reportPluginNamedFrameworks(
         : `Write ${frameworkIds.map((id) => `"${id}"`).join(" or ")}.`
     sayIncident(
       `Component "${component}" lists "${value}" in frameworks, which names a plugin, not a framework; the IR carries it as written. ${fix}`,
+    )
+  }
+}
+
+const IGNORED_PUBLIC_API_BECAUSE: Record<IgnoredPublicApiReason, string> = {
+  "package-directory": "the package directory rather than a file",
+  directory: "a directory rather than a file",
+  "absolute-path": "an absolute path",
+  "parent-segment":
+    'a path with a ".." segment, and an entry is the path as written, never one resolved from it',
+  "drive-shaped-name": "a path whose first segment reads as a Windows drive",
+  "unspellable-name": "a path holding a backslash, which no Document path can spell",
+}
+
+function reportIgnoredPublicApi(
+  ignored: ScanReport["ignoredPublicApi"],
+  sayIncident: SayIncident,
+): void {
+  for (const { component, manifestPath, field, value, reason } of ignored) {
+    sayIncident(
+      `Component "${component}": ${manifestPath}#${field} is ${JSON.stringify(value)}, ${IGNORED_PUBLIC_API_BECAUSE[reason]}, so it gives no publicApi entry.`,
     )
   }
 }

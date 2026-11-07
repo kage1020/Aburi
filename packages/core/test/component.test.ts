@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { __testing_component, detectComponents } from "../src/index"
+import { __testing_component, detectComponents, type IgnoredPublicApiReason } from "../src/index"
 import { useWorkspaceTree } from "./fixtures/workspace"
 
 const tree = useWorkspaceTree("core-component")
@@ -12,7 +12,7 @@ describe("detectComponents", () => {
       await tree.writePackage(`packages/${name}`, { name })
     }
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.map((c) => `${c.roots[0]}=${c.id}`)).toEqual([
       "packages/alpha=alpha",
@@ -24,7 +24,7 @@ describe("detectComponents", () => {
   it("returns the workspace root as the one Component when no manager fires", async () => {
     await tree.writePackage(".", { name: "solo" })
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.map((c) => `${c.roots[0]}=${c.id}`)).toEqual([".=solo"])
   })
@@ -32,7 +32,7 @@ describe("detectComponents", () => {
   it("names a root that holds no manifest after its directory, kebab-cased", async () => {
     await tree.mkdir("Store Front")
 
-    const components = await detectComponents({ workspaceRoot: join(tree.root, "Store Front") })
+    const { components } = await detectComponents({ workspaceRoot: join(tree.root, "Store Front") })
 
     expect(components.map((c) => [c.id, c.name])).toEqual([["store-front", "Store Front"]])
   })
@@ -49,7 +49,7 @@ describe("detectComponents", () => {
   ])("writes description as an explicit null for %s", async (_layout, write) => {
     await write()
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components).toHaveLength(1)
     expect(Object.hasOwn(components[0] ?? {}, "description")).toBe(true)
@@ -62,9 +62,52 @@ describe("detectComponents", () => {
     await tree.writePackage("apps/billing", { name: "billing" })
     await tree.writeJson("apps/billing/project.json", { name: "billing-e2e" })
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.map((c) => `${c.roots[0]}=${c.id}`)).toEqual(["apps/billing=billing"])
+  })
+
+  it("reports a value that gave no publicApi entry under the id its component ends with", async () => {
+    await tree.writePnpmWorkspace("apps/*", "libs/*")
+    await tree.writePackage("apps/web", { name: "web", main: "./lib/" })
+    await tree.writePackage("libs/web", { name: "web", exports: { ".": "./", "./a": "./a.js" } })
+
+    const { components, ignoredPublicApi } = await detectComponents({ workspaceRoot: tree.root })
+
+    const idAt = (root: string) => components.find((c) => c.roots[0] === root)?.id
+    expect(ignoredPublicApi).toEqual([
+      {
+        component: idAt("apps/web"),
+        manifestPath: "apps/web/package.json",
+        field: "main",
+        value: "./lib/",
+        reason: "directory",
+      },
+      {
+        component: idAt("libs/web"),
+        manifestPath: "libs/web/package.json",
+        field: 'exports["."]',
+        value: "./",
+        reason: "package-directory",
+      },
+    ])
+    expect(new Set(ignoredPublicApi.map((value) => value.component)).size).toBe(2)
+  })
+
+  it("names the root package.json for a single project", async () => {
+    await tree.writePackage(".", { name: "solo", types: "/index.d.ts" })
+
+    const { ignoredPublicApi } = await detectComponents({ workspaceRoot: tree.root })
+
+    expect(ignoredPublicApi).toEqual([
+      {
+        component: "solo",
+        manifestPath: "package.json",
+        field: "types",
+        value: "/index.d.ts",
+        reason: "absolute-path",
+      },
+    ])
   })
 })
 
@@ -95,6 +138,8 @@ describe("frameworks from package.json dependencies", () => {
 describe("the public API from package.json", () => {
   const decomposed = "café".normalize("NFD")
   const composed = decomposed.normalize("NFC")
+  const collect = (manifest: Record<string, unknown>, root = ".") =>
+    __testing_component.collectPublicApi({ name: "lib", ...manifest }, root)
 
   it.each<[string, Record<string, unknown>, string[]]>([
     [
@@ -117,47 +162,15 @@ describe("the public API from package.json", () => {
       },
       ["dist/index.cjs", "dist/index.d.ts", "dist/index.mjs", "dist/legacy.d.ts"],
     ],
-    ["no path written with a backslash or left empty", { main: "dist\\index.js", types: "" }, []],
-    [
-      "no entry for a value naming the package directory",
-      { main: "./", module: ".", types: "./.", typings: "././" },
-      [],
-    ],
-    [
-      "no entry for a value naming a directory inside it",
-      { main: "./lib/", module: "./lib/.", types: "lib/", typings: "lib/." },
-      [],
-    ],
     [
       "the files of an exports map and not the folders it maps",
       { exports: { ".": "./src/ok.js", "./": "./", "./lib/": "./lib/" } },
       ["src/ok.js"],
     ],
     [
-      "no entry for a path that is absolute or leaves the package",
-      {
-        main: "/",
-        module: "/dist/index.mjs",
-        types: "C:/dist/index.d.ts",
-        typings: "../shared/index.d.ts",
-      },
-      [],
-    ],
-    ["no entry for a first segment read as a drive", { main: "a:index.js" }, []],
-    [
       "a first segment of two letters before a colon, which is no drive",
       { main: "ab:index.js" },
       ["ab:index.js"],
-    ],
-    [
-      "no entry for a `..` segment that stays inside the package",
-      { exports: { ".": "dist/../index.js" } },
-      [],
-    ],
-    [
-      "no entry for a value that is not a string",
-      { main: 42, module: true, types: {}, typings: null },
-      [],
     ],
     ["one entry for a repeated leading `./`", { main: "././dist/index.js" }, ["dist/index.js"]],
     ["one entry for an inner `.` segment", { module: "./dist/./index.js" }, ["dist/index.js"]],
@@ -167,7 +180,89 @@ describe("the public API from package.json", () => {
       { exports: { ".": `./src/${decomposed}.ts` }, main: `./src/${composed}.ts` },
       [`src/${composed}.ts`],
     ],
-  ])("collects %s", (_case, manifest, publicApi) => {
-    expect(__testing_component.collectPublicApi({ name: "lib", ...manifest })).toEqual(publicApi)
+  ])("collects %s", (_case, manifest, entries) => {
+    expect(collect(manifest).entries).toEqual(entries)
+  })
+
+  it("writes each entry from the workspace root, through the package's directory", () => {
+    const manifest = { exports: { ".": "./src/index.ts", "./*": "./src/*.ts" } }
+
+    expect(collect(manifest, "packages/a").entries).toEqual([
+      "packages/a/src/*.ts",
+      "packages/a/src/index.ts",
+    ])
+  })
+
+  it.each<[string, Record<string, unknown>, [string, string, IgnoredPublicApiReason][]]>([
+    [
+      "the package directory",
+      { main: "./", module: ".", types: "./.", typings: "" },
+      [
+        ["main", "./", "package-directory"],
+        ["module", ".", "package-directory"],
+        ["types", "./.", "package-directory"],
+        ["typings", "", "package-directory"],
+      ],
+    ],
+    [
+      "a directory inside it",
+      { main: "./lib/", module: "./lib/.", types: "lib/", typings: "lib/." },
+      [
+        ["main", "./lib/", "directory"],
+        ["module", "./lib/.", "directory"],
+        ["types", "lib/", "directory"],
+        ["typings", "lib/.", "directory"],
+      ],
+    ],
+    [
+      "the folders an exports map maps, named by where they sit in it",
+      { exports: { "./": "./", "./lib/": { import: ["./lib/"] } } },
+      [
+        ['exports["./"]', "./", "package-directory"],
+        ['exports["./lib/"]["import"][0]', "./lib/", "directory"],
+      ],
+    ],
+    [
+      "a path that is absolute or leaves the package",
+      {
+        main: "/",
+        module: "/dist/index.mjs",
+        types: "C:/dist/index.d.ts",
+        typings: "../shared/index.d.ts",
+      },
+      [
+        ["main", "/", "absolute-path"],
+        ["module", "/dist/index.mjs", "absolute-path"],
+        ["types", "C:/dist/index.d.ts", "drive-shaped-name"],
+        ["typings", "../shared/index.d.ts", "parent-segment"],
+      ],
+    ],
+    [
+      "a first segment read as a drive",
+      { main: "a:index.js" },
+      [["main", "a:index.js", "drive-shaped-name"]],
+    ],
+    [
+      "a `..` segment that stays inside the package",
+      { exports: "dist/../index.js" },
+      [["exports", "dist/../index.js", "parent-segment"]],
+    ],
+    [
+      "a backslash",
+      { exports: { ".": "dist\\index.js" } },
+      [['exports["."]', "dist\\index.js", "unspellable-name"]],
+    ],
+    [
+      "a value that is not a string, which is not a path written wrong",
+      { exports: { "./internal/*": null }, main: 42, module: true, types: {}, typings: null },
+      [],
+    ],
+  ])("gives no entry for %s, and says which value and why", (_case, manifest, ignored) => {
+    const publicApi = collect(manifest)
+
+    expect(publicApi.entries).toEqual([])
+    expect(publicApi.ignored).toEqual(
+      ignored.map(([field, value, reason]) => ({ field, value, reason })),
+    )
   })
 })

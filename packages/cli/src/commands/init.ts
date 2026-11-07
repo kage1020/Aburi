@@ -64,12 +64,11 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
       throw isUnreadableTree(error) ? detectionFailure(error) : error
     },
   )
-  let components: Awaited<ReturnType<typeof detectComponents>>
-  try {
-    components = await detectComponents({ workspaceRoot, respectGitignore })
-  } catch (error) {
-    throw detectionFailure(error)
-  }
+  const { components } = await detectComponents({ workspaceRoot, respectGitignore }).catch(
+    (error: unknown) => {
+      throw detectionFailure(error)
+    },
+  )
 
   const languageSet = new Set<string>()
   const frameworkSet = new Set<string>()

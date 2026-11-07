@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
-import { posixWorkspaceRelativeViolation } from "./id"
+import { unnameableSite } from "./id"
 import { compareCodeUnit } from "./order"
 import { describeThrown, isVanishedFile } from "./scan/faults"
 import { parseManifestJson } from "./workspace-fs"
@@ -140,38 +140,77 @@ export function collectFrameworks(manifest: NpmManifest | null): string[] {
   return [...out].sort(compareCodeUnit)
 }
 
-export function collectPublicApi(manifest: NpmManifest | null): string[] {
-  if (manifest === null) return []
+export type IgnoredPublicApiReason =
+  | "package-directory"
+  | "directory"
+  | "absolute-path"
+  | "parent-segment"
+  | "drive-shaped-name"
+  | "unspellable-name"
+
+/** A string `package.json` value that names no file inside the package, so it gives no entry. */
+export interface IgnoredPublicApiValue {
+  /** `main`, `module`, `types`, `typings`, or the place in `exports`: `exports["./lib/"]`. */
+  field: string
+  value: string
+  reason: IgnoredPublicApiReason
+}
+
+export interface PublicApi {
+  /** Workspace-relative, sorted. */
+  entries: string[]
+  ignored: IgnoredPublicApiValue[]
+}
+
+const TOP_LEVEL_PATH_FIELDS = ["main", "module", "types", "typings"] as const
+
+export function collectPublicApi(manifest: NpmManifest | null, root: string): PublicApi {
   const found = new Set<string>()
-  collectFromExports(manifest.exports, found)
-  for (const candidate of [manifest.main, manifest.module, manifest.types, manifest.typings]) {
-    const path = normalizePackagePath(candidate)
-    if (path !== null) found.add(path)
+  const ignored: IgnoredPublicApiValue[] = []
+  const take = (field: string, raw: unknown): void => {
+    if (typeof raw !== "string") return
+    const outcome = normalizePackagePath(raw)
+    if (typeof outcome === "string") found.add(root === "." ? outcome : `${root}/${outcome}`)
+    else ignored.push({ field, value: raw, reason: outcome.reason })
   }
-  return [...found].sort(compareCodeUnit)
+  if (manifest !== null) {
+    collectFromExports(manifest.exports, "exports", take)
+    for (const field of TOP_LEVEL_PATH_FIELDS) take(field, manifest[field])
+  }
+  return { entries: [...found].sort(compareCodeUnit), ignored }
 }
 
-function collectFromExports(value: unknown, out: Set<string>): void {
-  if (value === null || value === undefined) return
-  if (typeof value === "string") {
-    const path = normalizePackagePath(value)
-    if (path !== null) out.add(path)
-    return
-  }
+function collectFromExports(
+  value: unknown,
+  field: string,
+  take: (field: string, raw: unknown) => void,
+): void {
   if (Array.isArray(value)) {
-    for (const entry of value) collectFromExports(entry, out)
+    for (const [index, entry] of value.entries()) {
+      collectFromExports(entry, `${field}[${index}]`, take)
+    }
     return
   }
-  if (typeof value === "object") {
-    for (const entry of Object.values(value)) collectFromExports(entry, out)
+  if (typeof value === "object" && value !== null) {
+    for (const [key, entry] of Object.entries(value)) {
+      collectFromExports(entry, `${field}[${JSON.stringify(key)}]`, take)
+    }
+    return
   }
+  take(field, value)
 }
 
-function normalizePackagePath(raw: string | undefined | null): string | null {
-  if (typeof raw !== "string" || raw.startsWith("/")) return null
+function normalizePackagePath(raw: string): string | { reason: IgnoredPublicApiReason } {
+  if (raw.startsWith("/")) return { reason: "absolute-path" }
   const segments = toNfc(raw).split("/")
+  const kept = segments.filter((segment) => segment.length > 0 && segment !== ".")
+  if (kept.length === 0) return { reason: "package-directory" }
   const last = segments[segments.length - 1]
-  if (last === "" || last === ".") return null
-  const path = segments.filter((segment) => segment.length > 0 && segment !== ".").join("/")
-  return posixWorkspaceRelativeViolation(path) === null ? path : null
+  if (last === "" || last === ".") return { reason: "directory" }
+  const path = kept.join("/")
+  const site = unnameableSite(path)
+  if (site !== null) return { reason: site.reason }
+  // An entry is the value's own spelling, so `./src/../index.js` is refused though it stays inside.
+  if (kept.includes("..")) return { reason: "parent-segment" }
+  return path
 }

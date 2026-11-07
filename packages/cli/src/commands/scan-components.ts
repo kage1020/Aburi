@@ -2,6 +2,7 @@ import {
   buildComponentAttribution,
   CoreError,
   type CoreErrorCode,
+  type DetectComponentsResult,
   type DetectManagersResult,
   detectComponents,
   detectManagers,
@@ -47,10 +48,12 @@ export async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
   languages: readonly LanguagePlugin[],
-): Promise<Component[]> {
+): Promise<DetectComponentsResult> {
   const declared = declaredComponents(config)
   try {
-    if (declared !== undefined) return declared.map(componentFromConfig)
+    if (declared !== undefined) {
+      return { components: declared.map(componentFromConfig), ignoredPublicApi: [] }
+    }
     return await detectComponents({
       workspaceRoot,
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],

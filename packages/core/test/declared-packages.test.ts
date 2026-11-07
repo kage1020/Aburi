@@ -115,7 +115,7 @@ describe("a declared package is the directory that holds the manifest", () => {
     const { managers } = await detectManagers(tree.root)
     expect(managers).toEqual([{ tool: "pnpm", roots: [] }])
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
     expect(components).toHaveLength(1)
     expect(components[0]?.roots).toEqual(["."])
   })
@@ -158,7 +158,7 @@ describe("the workspace root as a declared component", () => {
     await tree.writeLanguageFiles("packages/app/src", ".ts")
     await tree.writePnpmWorkspace(".", "packages/*")
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.map((c) => c.id)).toEqual(["app", "root-pkg"])
     expect(components.find((c) => c.id === "root-pkg")?.roots).toEqual(["."])
@@ -169,7 +169,7 @@ describe("the workspace root as a declared component", () => {
     await tree.writeLanguageFiles("src", ".ts")
     await tree.writePnpmWorkspace(".")
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components).toHaveLength(1)
     expect(components[0]?.languages).toEqual(["ts"])
@@ -182,7 +182,7 @@ describe("the workspace root as a declared component", () => {
     await tree.writeLanguageFiles("packages/app/src", ".ts")
     await tree.writePnpmWorkspace(".", "packages/*")
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.find((c) => c.id === "app")?.languages).toEqual(["ts"])
     expect(components.find((c) => c.id === "root-pkg")?.languages).toEqual(["py", "ts"])
@@ -192,7 +192,7 @@ describe("the workspace root as a declared component", () => {
     await tree.writePackage("storefront", { private: true })
     await tree.writeSource("storefront/pnpm-workspace.yaml", 'packages:\n  - "."\n')
 
-    const components = await detectComponents({ workspaceRoot: join(tree.root, "storefront") })
+    const { components } = await detectComponents({ workspaceRoot: join(tree.root, "storefront") })
 
     expect(components).toHaveLength(1)
     expect(components[0]?.id).toBe("storefront")
@@ -210,7 +210,7 @@ describe("a link to a declared package directory", () => {
       join(tree.root, "packages", "alias"),
     )
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
     const attribute = buildComponentAttribution(components)
     const { files } = await discoverFiles({ workspaceRoot: tree.root, languageExtensions: [".ts"] })
     const owningRoots = files.map(

@@ -11,7 +11,7 @@ const tree = useWorkspaceTree("core-component-languages")
 async function languagesOfRoot(
   options: { ignore?: readonly string[]; respectGitignore?: boolean } = {},
 ): Promise<readonly string[]> {
-  const components = await detectComponents({ workspaceRoot: tree.root, ...options })
+  const { components } = await detectComponents({ workspaceRoot: tree.root, ...options })
   expect(components).toHaveLength(1)
   return components[0]?.languages ?? []
 }
@@ -19,7 +19,7 @@ async function languagesOfRoot(
 async function languagesById(
   options: { ignore?: readonly string[] } = {},
 ): Promise<Map<string, readonly string[]>> {
-  const components = await detectComponents({ workspaceRoot: tree.root, ...options })
+  const { components } = await detectComponents({ workspaceRoot: tree.root, ...options })
   return new Map(components.map((c) => [c.id as string, c.languages as readonly string[]]))
 }
 
@@ -185,7 +185,7 @@ describe("what the drop decision is relative to", () => {
     await tree.writePackage(`packages/${decomposed}`, { name: "caf" })
     await tree.writeLanguageFiles(`packages/${decomposed}/src`, ".go")
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components).toHaveLength(1)
     expect(components[0]?.languages).toEqual(["go"])

@@ -13,7 +13,7 @@ import { useWorkspaceTree } from "./fixtures/workspace"
 const tree = useWorkspaceTree("core-component-id")
 
 async function rootsToIds(): Promise<string[]> {
-  const components = await detectComponents({ workspaceRoot: tree.root })
+  const { components } = await detectComponents({ workspaceRoot: tree.root })
   return components.map((c) => `${c.roots[0]}=${c.id}`)
 }
 

@@ -14,7 +14,7 @@ async function writeDualDetectedWorkspace(): Promise<void> {
 }
 
 async function billing(): Promise<Component> {
-  const components = await detectComponents({ workspaceRoot: tree.root })
+  const { components } = await detectComponents({ workspaceRoot: tree.root })
   const found = components.find((component) => component.roots[0] === "apps/billing")
   if (found === undefined) {
     throw new Error(`no component at apps/billing: ${JSON.stringify(components)}`)
@@ -46,7 +46,7 @@ describe("a directory two detectors claim", () => {
     const component = await billing()
 
     expect(component.frameworks).toEqual(["nestjs"])
-    expect(component.publicApi).toEqual(["src/index.ts"])
+    expect(component.publicApi).toEqual(["apps/billing/src/index.ts"])
   })
 
   it("keeps the npm fields out of reach of a package manifest that declares nothing", async () => {
@@ -111,7 +111,7 @@ describe("a link to an nx project directory", () => {
     await outside.writeJson("project.json", { name: "ghost" })
     await linkDirectory(target(), join(tree.root, "apps", "alias"))
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.map((component) => component.roots[0])).toEqual(["apps/billing"])
   })
@@ -142,7 +142,7 @@ describe("a directory only nx claims", () => {
     expect(component.id).toBe("acme-billing-api")
     expect(component.name).toBe("@acme/billing-api")
     expect(component.frameworks).toEqual(["nestjs"])
-    expect(component.publicApi).toEqual(["src/index.ts"])
+    expect(component.publicApi).toEqual(["apps/billing/src/index.ts"])
   })
 
   it("reports no frameworks and no public API from the project file", async () => {
@@ -204,7 +204,7 @@ describe("a manifest that opens with a byte order mark", () => {
   ])("reads %s as it reads one without", async (_case, write, id) => {
     await write()
 
-    const components = await detectComponents({ workspaceRoot: tree.root })
+    const { components } = await detectComponents({ workspaceRoot: tree.root })
 
     expect(components.map((component) => component.id)).toEqual([id])
   })
@@ -243,6 +243,6 @@ describe("a manifest that cannot be read", () => {
     await tree.writeJson("nx.json", {})
     await tree.writeJson("apps/billing/project.json", { name: "billing-web" })
 
-    await expect(detectComponents({ workspaceRoot: tree.root })).resolves.toHaveLength(1)
+    expect((await detectComponents({ workspaceRoot: tree.root })).components).toHaveLength(1)
   })
 })
