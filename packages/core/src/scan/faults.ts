@@ -8,6 +8,7 @@ const PLUGIN_SET_FAULT_CODES: ReadonlySet<string> = new Set([
   "scan-plugin-misconfigured",
   "invalid-language-id",
   "vocab-undeclared",
+  "plugin-init-failed",
 ])
 
 /** Matched by code, not class: a plugin raises `vocab-undeclared` through the registry's own error. */

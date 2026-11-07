@@ -82,6 +82,7 @@ export default defineConfig({
           { text: "IR schema", link: "/design/ir-schema" },
           { text: "Multi-language ids", link: "/design/multi-language-id" },
           { text: "Language plugins", link: "/design/lang-plugin" },
+          { text: "Plugin processes", link: "/design/plugin-process" },
           { text: "Effect plugins", link: "/design/effect-plugin" },
           { text: "Extension vocabulary", link: "/design/extension-vocab" },
           { text: "FP extension vocabulary", link: "/design/fp-extension-impl" },

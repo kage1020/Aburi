@@ -52,6 +52,7 @@ status and delta for each from there.
 | `@aburi/markdown-projection` | Every Markdown view, and the `--fail-on` formatter. |
 | `@aburi/cli` | The four commands, git worktree handling, and exit codes. |
 | `@aburi/github-action` | A composite action wrapping the CLI, with marker-based comment upsert. |
+| `@aburi/plugin-process` | Runs a plugin's parser written in another language as a process of its own, over JSON-RPC on stdio. |
 | `@aburi/lang-*` | Language plugins. |
 | `@aburi/framework-*` | Framework plugins. |
 | `@aburi/effects-*` | Effects plugins. |

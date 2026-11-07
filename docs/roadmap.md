@@ -69,7 +69,9 @@ runs its two scans at once on a machine with two or more CPUs, so it takes about
 
 - **More languages.** Python and Go, with uv, poetry, cargo, and `go.work`
   workspace detection, and a single analysis spanning all of them in one
-  monorepo.
+  monorepo. A plugin can already run a parser written in its own language as a
+  [process of its own](./design/plugin-process.md), so these can use
+  `go/packages` or a Python type checker rather than syntax alone.
 - **More effects plugins.** Django, FastAPI, SQLAlchemy, GORM.
 - **Large monorepos.** A 1,000-file scan finishes in under 30 seconds
   single-threaded, so the [worker pool](./design/performance.md) would buy at

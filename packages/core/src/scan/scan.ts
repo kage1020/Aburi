@@ -34,6 +34,7 @@ import {
   uniqueSorted,
 } from "./document"
 import { type ExtractionFailure, extractFiles, type ParseErrorRecord } from "./extract-files"
+import { withPluginLifecycle } from "./lifecycle"
 import type { TreeReleaseFailure } from "./pipeline"
 import { buildLanguageRouter } from "./route"
 import { markTestFiles } from "./test-files"
@@ -91,17 +92,27 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   }
   const discovered = await discoverFiles(discoverOptions)
 
-  const extracted = await extractFiles({
-    workspaceRoot: input.workspaceRoot,
-    files: discovered.files,
-    router,
-    config: input.config,
-    frameworks: input.frameworks,
-    effects: input.effects,
-    registry: input.registry,
-    components: input.components ?? [],
-    logger,
-  })
+  const extracted = await withPluginLifecycle(
+    [...input.languages, ...input.frameworks, ...input.effects],
+    {
+      registry: input.registry,
+      config: input.config,
+      workspaceRoot: input.workspaceRoot,
+      log: logger,
+    },
+    () =>
+      extractFiles({
+        workspaceRoot: input.workspaceRoot,
+        files: discovered.files,
+        router,
+        config: input.config,
+        frameworks: input.frameworks,
+        effects: input.effects,
+        registry: input.registry,
+        components: input.components ?? [],
+        logger,
+      }),
+  )
   const { symbols } = extracted
 
   symbols.sort(compareBy((symbol) => symbol.id))

@@ -45,13 +45,16 @@ The responsibility is confined to a pure function "callee → effect classificat
 
 ```
 1. The registry validates the manifest and loads the plugin
-2. plugin.init() is called with ctx (registry/config)
+2. plugin.init(ctx) is called, once per scan, before the scan's first plugin call
 3. Each time a language plugin extracts CallCandidate[] in walkBody:
      for each call, the enabled effect plugins are invoked in config order
        plugin.classify(call, ctx) → EffectClassification | null
      the result of the first plugin to return non-null is adopted (§5)
-4. After all files, plugin.cleanup?() is called
+4. After the scan's last plugin call, plugin.cleanup?() is called
 ```
+
+The order of the calls, and what a failing `init` or `cleanup` does, are the language plugin's
+([`lang-plugin.md`](./lang-plugin.md) §3).
 
 ## 4. Interface
 

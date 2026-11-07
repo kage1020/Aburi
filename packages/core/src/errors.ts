@@ -21,6 +21,7 @@ export type CoreErrorCode =
   | "scan-outcome-unhandled"
   | "receiver-hint-key-malformed"
   | "vocab-undeclared"
+  | "plugin-init-failed"
 
 export interface IntegrityViolation {
   invariant: number

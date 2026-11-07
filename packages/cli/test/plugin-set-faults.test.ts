@@ -15,14 +15,14 @@ const REFUSE_THROUGH_REGISTRY = `ctx.registry.assertEffectDeclared("x-foo:write"
 const REFUSED = 'Effect id "x-foo:write" is not declared by any registered plugin.'
 
 /** A TypeScript workspace making one call, which an effects plugin running `classify` sees. */
-async function writeWorkspace(classify: string): Promise<void> {
+async function writeWorkspace(classify: string, init = "async () => {}"): Promise<void> {
   await writeConfig(workspace.root, { ...TYPESCRIPT, effects: ["./effects-foo.mjs"] })
   await workspace.writeSource("src/a.ts", "function g() {}\nexport function f() {\n  g()\n}\n")
   await workspace.writeSource(
     "effects-foo.mjs",
     pluginModuleSource(
       { ...EFFECTS_MANIFEST, name: "effects-foo" },
-      `  init: async () => {},
+      `  init: ${init},
   classify: (call, ctx) => {
     ${classify}
   },`,
@@ -73,6 +73,19 @@ describe("aburi scan — a fault in the plugin set raised while classifying", ()
 
     expect(code, stderr).toBe(EXIT.SUCCESS)
     expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(true)
+  })
+})
+
+describe("aburi scan — a plugin whose init fails", () => {
+  it("exits 3 naming the plugin and its reason, writing nothing", async () => {
+    await writeWorkspace("return null", 'async () => { throw new Error("python3 is not on PATH") }')
+
+    const { code, stdout, stderr } = await runCliIn(workspace.root, ["scan", "--format", "json"])
+
+    expect(code, stderr).toBe(EXIT.GATE)
+    expect(stderr).toContain('Plugin "effects-foo" failed to initialize: python3 is not on PATH')
+    expect(stdout).toBe("")
+    expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(false)
   })
 })
 

@@ -177,6 +177,45 @@ as broken instead of the plugin. The code decides, not the class: a refusal from
 the same way.
 :::
 
+### A parser in another language
+
+`init` and `cleanup` bracket each scan: every plugin's `init` is awaited before
+the first file is read, and every `cleanup` runs after the last plugin call,
+newest first, even when a fault ends the scan. An `init` that throws ends the
+scan with exit `3`, naming your plugin, so it is the place to fail when a tool
+you need is missing.
+
+That is what lets a plugin use a parser or type checker written in Python, Go or
+anything else. [`@aburi/plugin-process`](https://github.com/kage1020/Aburi/tree/main/packages/plugin-process)
+runs it as one process per scan and sends it JSON-RPC requests over stdio:
+
+```ts
+import { createPluginProcess, type PluginProcess } from "@aburi/plugin-process"
+
+let parser: PluginProcess
+
+// in the plugin object
+async init(ctx) {
+  parser = createPluginProcess({ command: "python3", args: ["-m", "my_parser"], cwd: ctx.workspaceRoot })
+},
+async cleanup() {
+  await parser.close()
+},
+async parseFile(file) {
+  const tree = (await parser.request("parse", file)) as MyTree
+  return { tree, errors: tree.errors, imports: tree.imports }
+},
+```
+
+The process reads one request per line from stdin and writes one answer per line
+to stdout, `{"jsonrpc":"2.0","id":<id>,"result":<tree>}`, and exits when stdin
+closes. The tree is yours: `extractSymbols`, `walkBody` and `normalizeAst` read
+the JSON it answered with. A request that fails — an error answer, a crash, no
+answer within `timeoutMs` — throws from `parseFile`, so that one file is
+withdrawn, and the next request starts a fresh process. The
+[plugin process contract](../design/plugin-process.md) has the protocol and every
+way a request can fail.
+
 ## Framework plugin
 
 Classifies a `SymbolCandidate` into a framework-owned `extKind` and optionally
