@@ -1,5 +1,5 @@
 import { component, decorator, dependency, effect, makeIR, rule } from "@aburi/test-support"
-import type { Effect, IR } from "@aburi/types"
+import type { DeclinedCall, Effect, IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { checkIRIntegrity } from "../src/index"
 import { makeSymbol, type SymbolOverrides } from "./fixtures/ir"
@@ -20,6 +20,10 @@ function localEffect(target: string, line: number): Effect {
 
 function propagatedEffect(id: string, target: string): Effect {
   return effect({ id, target, plugin: "p", propagated: true, derivedFrom: ["ts:src/b.ts#callee"] })
+}
+
+function declinedAt(target: string, line: number, plugin = "p"): DeclinedCall {
+  return { symbolId: FOO, target, line, plugin, reason: "r" }
 }
 
 describe("checkIRIntegrity — ordering", () => {
@@ -83,6 +87,20 @@ describe("checkIRIntegrity — ordering", () => {
         }),
       `symbols[id=${FOO}].effects[]/propagated(id,target)`,
     ],
+    [
+      "stats.declinedCalls[] by (symbolId, line, target, plugin)",
+      () => {
+        const ir = withSymbol({
+          calls: [
+            { target: "b", line: 2, resolved: null },
+            { target: "a", line: 3, resolved: null },
+          ],
+        })
+        ir.stats.declinedCalls = [declinedAt("a", 3), declinedAt("b", 2)]
+        return ir
+      },
+      "stats.declinedCalls[]",
+    ],
   ])("reports %s out of order", (_what, build, subject) => {
     expect(orderViolations(build()).map((v) => v.subject)).toEqual([subject])
   })
@@ -124,6 +142,12 @@ describe("checkIRIntegrity — ordering", () => {
         propagatedEffect("db.write", "a"),
       ],
     })
+    ir.stats.declinedCalls = [
+      declinedAt("a", 3, "p"),
+      declinedAt("a", 3, "q"),
+      declinedAt("a", 3, "q"),
+      declinedAt("b", 3, "p"),
+    ]
     expect(checkIRIntegrity(ir)).toEqual([])
   })
 })

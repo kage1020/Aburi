@@ -1,4 +1,4 @@
-import type { IR } from "@aburi/types"
+import type { DeclinedCall, IR, Symbol as IRSymbol } from "@aburi/types"
 import type { IntegrityViolation } from "./errors"
 
 export function checkSkippedFilesCensus(ir: IR, out: IntegrityViolation[]): void {
@@ -76,4 +76,27 @@ export function checkCallResolutionStatsCensus(ir: IR, out: IntegrityViolation[]
       message: `bucket counts sum to ${bucketed} but totalCalls - resolvedCalls is ${stats.totalCalls - stats.resolvedCalls}`,
     })
   }
+}
+
+export function checkDeclinedCallsStayCalls(ir: IR, out: IntegrityViolation[]): void {
+  const declined = ir.stats.declinedCalls
+  if (declined === undefined) return
+  const symbols = new Map<string, IRSymbol>(ir.symbols.map((symbol) => [symbol.id, symbol]))
+  for (const entry of declined) {
+    const message = declinedCallFault(entry, symbols.get(entry.symbolId))
+    if (message !== null) out.push({ invariant: 22, subject: "stats.declinedCalls", message })
+  }
+}
+
+function declinedCallFault(entry: DeclinedCall, owner: IRSymbol | undefined): string | null {
+  const where = `${entry.target} (L${entry.line}) [${entry.plugin}]`
+  if (owner === undefined)
+    return `${where} names "${entry.symbolId}", which is not a Symbol in symbols[]`
+  if (owner.dropped) {
+    return `${where} names the dropped Symbol "${entry.symbolId}", which carries no calls`
+  }
+  if (owner.calls.some((call) => call.line === entry.line && call.target === entry.target)) {
+    return null
+  }
+  return `${where} is not among the calls[] of "${entry.symbolId}"; a call no plugin classified stays a call`
 }

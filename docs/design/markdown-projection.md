@@ -1041,6 +1041,8 @@ The title carries the confidence badge when the Symbol's `confidence` is not `hi
 
 A framework registration that names middleware gets a `## Middleware` section between Signature and Rules, holding the names in the order they run on one line, as the component page's **Middleware** line does (§5.2).
 
+A Symbol that makes a call an effect plugin declined to classify ([`effect-plugin.md`](./effect-plugin.md) §4.5) gets a `## Declined effects` section between Effects and Calls. It has one line for each `stats.declinedCalls` entry that names the Symbol, ordered by line, then target, then plugin: `` - `client.user.byId.query` (L12) [effects-trpc]: `effects-plugin:trpc:server-file-query` ``. The call is also listed under Calls, because a declined call is still a call. The section is the Symbol's view of the IR's record, so `aburi explain --no-rescan` shows it as well.
+
 The default output of `aburi explain` is stdout; `--output <path>` writes to a file.
 
 When a dropped symbol is explained:

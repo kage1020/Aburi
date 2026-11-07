@@ -8,10 +8,16 @@ import {
   type ClassifyContext,
   COMPUTED_TARGET_SEGMENT,
   type EffectClassification,
+  type EffectDecline,
 } from "@aburi/types"
 import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 import { hasPrismaImport } from "./imports"
-import { isPrismaReadMethod, isPrismaTransactionMethod, isPrismaWriteMethod } from "./methods"
+import {
+  isPrismaRawQueryMethod,
+  isPrismaReadMethod,
+  isPrismaTransactionMethod,
+  isPrismaWriteMethod,
+} from "./methods"
 import {
   classificationConfidence,
   namesPrismaClient,
@@ -22,7 +28,7 @@ import {
 export function classifyPrismaCall(
   call: CallCandidate,
   ctx: ClassifyContext,
-): EffectClassification | null {
+): EffectClassification | EffectDecline | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_PRISMA_PLUGIN_NAME, filePath: ctx.file.path }
 
   const { segments, last: method } = assertNonEmptySegments(call.target, origin)
@@ -38,6 +44,11 @@ export function classifyPrismaCall(
       confidence: classificationConfidence(segments.at(-2), call, PRISMA_TRANSACTION_MAX_ARGUMENTS),
       derivedBy: `${EFFECTS_PRISMA_DERIVED_BY_PREFIX}:tx`,
     }
+  }
+
+  // Whether raw SQL reads or writes is in the SQL, which no call site spells.
+  if (isPrismaRawQueryMethod(method) && segments.length >= 2) {
+    return { declined: `${EFFECTS_PRISMA_DERIVED_BY_PREFIX}:raw-query` }
   }
 
   // `<client>.<model>.<verb>`: two-segment calls are `router.create(...)` and friends.

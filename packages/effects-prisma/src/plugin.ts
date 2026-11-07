@@ -2,6 +2,7 @@ import type {
   CallCandidate,
   ClassifyContext,
   EffectClassification,
+  EffectDecline,
   EffectPlugin,
   PluginContext,
 } from "@aburi/types"
@@ -13,7 +14,7 @@ class PrismaEffectsPlugin implements EffectPlugin {
 
   async init(_ctx: PluginContext): Promise<void> {}
 
-  classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | null {
+  classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | EffectDecline | null {
     return classifyPrismaCall(call, ctx)
   }
 }

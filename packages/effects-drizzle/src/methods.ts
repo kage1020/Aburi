@@ -74,3 +74,6 @@ export const DRIZZLE_FLUENT_ROOT_METHODS: ReadonlySet<DrizzleReadMethod | Drizzl
     ...DRIZZLE_READ_METHODS_LIST,
     ...DRIZZLE_WRITE_METHODS_LIST,
   ])
+
+/** `db.execute(sql\`…\`)`: a statement the call site does not say is a read or a write. */
+export const DRIZZLE_RAW_SQL_METHOD = "execute"

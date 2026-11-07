@@ -2,6 +2,7 @@ import type {
   CallCandidate,
   ClassifyContext,
   EffectClassification,
+  EffectDecline,
   EffectPlugin,
 } from "@aburi/types"
 import { CoreError } from "../errors"
@@ -37,7 +38,7 @@ export function classifyWithTimeout(
   ctx: ClassifyContext,
   location: ClassifyWithTimeoutContext,
   options: ClassifyWithTimeoutOptions = {},
-): EffectClassification | null {
+): EffectClassification | EffectDecline | null {
   const budget = clampTimeout(options.timeoutMs ?? DEFAULT_CLASSIFY_TIMEOUT_MS)
   const start = performance.now()
   const result = plugin.classify(call, ctx)
@@ -50,7 +51,7 @@ export function classifyWithTimeout(
       () => undefined,
     )
     throw new CoreError(
-      `Effect plugin "${plugin.manifest.name}" returned a Promise from classify(), which breaks its sync contract: classify() must return an EffectClassification or null.`,
+      `Effect plugin "${plugin.manifest.name}" returned a Promise from classify(), which breaks its sync contract: classify() must return an EffectClassification, an EffectDecline or null.`,
       { code: "scan-plugin-misconfigured", value: plugin.manifest.name },
     )
   }

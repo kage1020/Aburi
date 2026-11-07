@@ -82,7 +82,7 @@ describe("classifyDrizzleCall — receiver and arguments decide the tier", () =>
     ["db.transaction", 2],
   ])("keeps %s with %i argument(s) at high", (target, argumentCount) => {
     const literalArgs = Array.from({ length: argumentCount }, () => null)
-    expect(classify(target, { argumentCount, literalArgs })?.confidence).toBe("high")
+    expect(classify(target, { argumentCount, literalArgs })).toMatchObject({ confidence: "high" })
   })
 
   it.each([
@@ -160,8 +160,6 @@ describe("classifyDrizzleCall — calls that are not Drizzle's", () => {
     ["select", "a bare identifier"],
     ["insert", "a bare identifier"],
     ["transaction", "a bare identifier"],
-    ["db.execute", "raw SQL, which may read or write"],
-    ["this.db.execute", "raw SQL, which may read or write"],
     ["db.someHelper", "a method outside the vocabulary"],
     ["db.prepare", "a method outside the vocabulary"],
     ["db.query.users.findUnique", "Prisma's verb on the query API"],
@@ -169,6 +167,23 @@ describe("classifyDrizzleCall — calls that are not Drizzle's", () => {
     ["db.query.findMany", "a query terminal without a table segment"],
   ])("returns null for %s — %s", (target) => {
     expect(classify(target, { argumentCount: 1 })).toBeNull()
+  })
+
+  it.each(["db.execute", "this.db.execute", "tx.execute", "this.database.execute"])(
+    "declines %s — whether raw SQL reads or writes is in the SQL",
+    (target) => {
+      expect(classify(target, { argumentCount: 1 })).toEqual({
+        declined: "effects-plugin:drizzle:raw-sql",
+      })
+    },
+  )
+
+  it.each([
+    ["command.execute", 1, "a receiver no Drizzle client is named"],
+    ["db.execute", 0, "no statement"],
+    ["db.select.from.execute", 0, "a prepared chain, whose root the select already classified"],
+  ])("declines nothing for %s with %i argument(s) — %s", (target, argumentCount) => {
+    expect(classify(target, { argumentCount })).toBeNull()
   })
 })
 

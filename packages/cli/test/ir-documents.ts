@@ -1,5 +1,5 @@
 import { makeIR, makeSymbol, recordingLogger } from "@aburi/test-support"
-import type { IR, Symbol as IRSymbol, SkippedFile } from "@aburi/types"
+import type { DeclinedCall, IR, Symbol as IRSymbol, SkippedFile } from "@aburi/types"
 import { type DiffOptions, IR_JSON_FILENAME, runDiff } from "../src"
 import { writeFileAt, writeIRs, writePackageJson } from "./workspace"
 
@@ -19,6 +19,7 @@ export interface DocumentShape {
   skipped?: readonly SkippedFile[]
   /** Files a document predating `stats.skippedFiles` lost without naming them. */
   unnamedLosses?: number
+  declinedCalls?: readonly DeclinedCall[]
 }
 
 export function documentWith(shape: DocumentShape): IR {
@@ -33,6 +34,7 @@ export function documentWith(shape: DocumentShape): IR {
       ...(shape.skipped === undefined
         ? {}
         : { skippedFiles: [...shape.skipped].sort(byKey((f) => f.path)) }),
+      ...(shape.declinedCalls === undefined ? {} : { declinedCalls: [...shape.declinedCalls] }),
     },
   }
 }

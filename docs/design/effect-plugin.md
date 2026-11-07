@@ -48,8 +48,8 @@ The responsibility is confined to a pure function "callee → effect classificat
 2. plugin.init() is called with ctx (registry/config)
 3. Each time a language plugin extracts CallCandidate[] in walkBody:
      for each call, the enabled effect plugins are invoked in config order
-       plugin.classify(call, ctx) → EffectClassification | null
-     the result of the first plugin to return non-null is adopted (§5)
+       plugin.classify(call, ctx) → EffectClassification | EffectDecline | null
+     the first classification is adopted; a call none classifies keeps its declines (§5)
 4. After all files, plugin.cleanup?() is called
 ```
 
@@ -66,7 +66,7 @@ interface EffectPlugin {
   cleanup?(): Promise<void>
 
   // effect classification (ideally implemented as a pure function)
-  classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | null
+  classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | EffectDecline | null
 
   // optional: additions to drop-list category C (implemented by logger-oriented plugins only)
   dropCallees?: string[]                     // identifier path prefixes (e.g. "pino", "winston")
@@ -128,22 +128,48 @@ interface EffectClassification {
 
 The returned `effectId` must fall under **the manifest's `provides.effects[].id` or `provides.effectPrefixes[]`**. The registry detects violations at extraction time and raises an error.
 
+### 4.5 `EffectDecline`
+
+```ts
+interface EffectDecline {
+  declined: string                           // e.g. "effects-plugin:trpc:server-file-query"
+}
+```
+
+`null` says "not mine". A decline says "mine, and I will not say which effect": the call has the library's shape, but the plugin cannot classify it soundly. The official plugins decline three shapes:
+
+| Plugin | Call | `declined` | Why it cannot classify |
+|---|---|---|---|
+| `effects-trpc` | a procedure call ending in `.query()`, in a file that imports `@trpc/server` as well as a tRPC client | `effects-plugin:trpc:server-file-query` | the router's builder (`publicProcedure.input(schema).query(resolver)`) is spelled like a client call (`client.user.byId.query()`), and nothing in the callee tells them apart |
+| `effects-prisma` | `$queryRaw`, `$queryRawUnsafe`, `$queryRawTyped`, `$executeRaw`, `$executeRawUnsafe` or `$runCommandRaw` called on a receiver, in a file that imports Prisma | `effects-plugin:prisma:raw-query` | raw SQL can read or write, and the statement is not in the callee |
+| `effects-drizzle` | `.execute(statement)` with an argument, on a receiver whose name is a Drizzle client's (`db`, `tx`, `this.database`), in a file that imports Drizzle | `effects-plugin:drizzle:raw-sql` | as for Prisma |
+
+The core records the decline in `stats.declinedCalls[]` (ir-schema.md §2): the plugin, the owner Symbol, the call's `target` and `line`, and `declined` as the entry's `reason`. Without it, a call the plugin chose to leave unclassified and a call no plugin recognized look the same in the IR. `aburi explain` lists a Symbol's entries under `## Declined effects` (markdown-projection.md §7).
+
+`declined` is the plugin's reason, in the plugin's words. Spell it as `derivedBy` is spelled, `effects-plugin:<plugin>:<reason>`, so that a reader can tell which plugin wrote it and two runs over the same code write the same string. It must be a string that is not empty and not only whitespace; any other value fails the run with `scan-plugin-misconfigured`, naming the plugin (EP14b). The Document holds it in Unicode NFC, like every string it contains (ir-schema.md §1.2).
+
 ## 5. Classification Algorithm
 
 ### 5.1 first-match-wins
 
 ```
 for each call in symbol.calls:
+  declines = []
   for each effect_plugin in config-order:
     result = effect_plugin.classify(call, ctx)
-    if result !== null:
+    if result is an EffectClassification:
       assign call to effects[] with result
       break    # subsequent plugins are not invoked
+    if result is an EffectDecline:
+      declines += (effect_plugin, result.declined)    # not a match: the next plugin is still asked
   else:
     leave call in calls[]
+    record declines in stats.declinedCalls[]
 ```
 
 Plugins earlier in config order take priority. Placing a project-specific plugin above the standard plugins lets it take precedence.
+
+A decline does not end the dispatch. A plugin lower in the order that does classify the call wins it, and the declines are discarded: the call reached `effects[]`, so no effect is missing (EP14a). Only a call that stays in `calls[]` keeps its declines, one entry for each plugin that declined it.
 
 ### 5.1.1 Budget for classify()
 
@@ -152,11 +178,12 @@ The core times each plugin's `classify(call, ctx)` invocation against a **per-ca
 - Override: `config.classifyTimeoutMs` (default `50`, min `10`, max `5000`)
   - For plugins containing an SQL parser, raising it to 200-500ms is realistic
   - No per-plugin override (a single config value shared by all plugins)
-- Budget exceeded → the classification is **kept**, exactly as if the call had been fast: a non-null answer moves the call to `effects[]` (EP6); a `null` passes the call to the next plugin in config order (EP4) and leaves it in `calls[]` when no plugin claims it (EP5). A kept answer meets the vocabulary check like any other (EP1), so an undeclared id ends a strict run whether or not its call was slow. `classify()` is synchronous, so the clock is read after it returns: the work is already done, and discarding the answer would save nothing while making the IR depend on how busy the machine was. A cold first call (module initialisation, JIT, a GC pause) is the usual overrun
+- Budget exceeded → the classification is **kept**, exactly as if the call had been fast: a classification moves the call to `effects[]` (EP6); a `null` or a decline passes the call to the next plugin in config order (EP4) and leaves it in `calls[]` when no plugin claims it (EP5, EP14). A kept answer meets the vocabulary check like any other (EP1), so an undeclared id ends a strict run whether or not its call was slow. `classify()` is synchronous, so the clock is read after it returns: the work is already done, and discarding the answer would save nothing while making the IR depend on how busy the machine was. A cold first call (module initialisation, JIT, a GC pause) is the usual overrun
 - **Overrun recording**: each overrun (plugin, Symbol, budget) is recorded in `stats.effectClassifyTimeouts[]`, and the CLI's scan prints their count as one warning (`N effect classification(s) ran past the per-call budget; their results were kept.`)
   - An overrun changes this record and nothing else in the Document: `effects[]`, `calls[]` and every fingerprint are what they would have been had the call been fast. The parse budget is different in kind: a file over `parseTimeoutMs` is left out of the Document altogether (lang-plugin.md §7.1.2)
   - CI can compare `effectClassifyTimeouts` across runs to spot plugin performance regressions
 - Plugin implementations must be synchronous: a `classify()` that returns a Promise fails the run (`scan-plugin-misconfigured`)
+- A decline costs no more than a `null`: the plugin returns a value, and the core writes nothing until the call is known to stay in `calls[]`. A plugin can decline every call in a large workspace without a log line per call
 
 The budget does not stop a slow plugin — nothing can interrupt a synchronous call — it names one. A plugin that overruns on every call shows up in the stats, call by call, and the remedy is the plugin's.
 
@@ -176,7 +203,7 @@ A single effectId is adopted via first-match-wins. Multiple classification remai
 
 Priority control such as "the Prisma plugin should return `x-prisma:create` instead of `db.write`, so place it above the generic plugin that returns core db.*" is done via config order.
 
-Conversely, when a higher-priority plugin wants to defer specific calls to lower ones, it simply returns `null` and the call flows down.
+Conversely, when a higher-priority plugin wants to defer specific calls to lower ones, it returns `null` and the call flows down. A decline flows down in the same way. The difference is what remains when no plugin below claims the call: after a `null` nothing remains, and after a decline the plugin's reason remains in `stats.declinedCalls[]` (§4.5).
 
 ### 5.4 Receiver identification and confidence
 
@@ -404,7 +431,10 @@ export const plugin: EffectPlugin = {
 | EP10 | classify returns `confidence: 'low'` | Symbol.effects[].confidence = "low" goes into the IR as-is |
 | EP11 | a call matching a plugin's shared-vocabulary shape on a receiver the plugin cannot identify (§5.4) | the effect is still recorded, at `confidence: "medium"` — not `high`, and not dropped |
 | EP12 | a call whose shape no signature in the plugin's vocabulary takes: a literal first argument, or no argument to a method that requires one (§5.4 item 1) | `null` (EP5), whatever the receiver: the call stays in `Symbol.calls[]` and the file keeps its Symbols. Not EP3a — the candidate is well formed, so this is a classification decision, not an input-contract violation |
-| EP13 | classify returns after running past `classifyTimeoutMs` (§5.1.1) | its answer is used as if it had been fast — EP6 for a classification, EP5 for `null`, and EP4 still decides the order — and the overrun is one `stats.effectClassifyTimeouts` entry. `effects[]`, `calls[]` and the fingerprints do not depend on whether this classification overran its budget |
+| EP13 | classify returns after running past `classifyTimeoutMs` (§5.1.1) | its answer is used as if it had been fast — EP6 for a classification, EP5 for `null`, EP14 for a decline, and EP4 still decides the order — and the overrun is one `stats.effectClassifyTimeouts` entry. `effects[]`, `calls[]` and the fingerprints do not depend on whether this classification overran its budget |
+| EP14 | classify returns `{ declined: reason }` (§4.5) and no later plugin classifies the call | the call stays in `Symbol.calls[]` (EP5), and `stats.declinedCalls[]` gains one entry: `plugin`, `symbolId`, `target`, `line`, and the reason. Neither `effects[]`, `calls[]` nor any fingerprint differs from a `null` |
+| EP14a | a plugin declines a call and a later plugin classifies it | the later plugin's classification is used (EP6), and no `stats.declinedCalls[]` entry is written for that call |
+| EP14b | `declined` is empty, only whitespace, or not a string | the run fails with `scan-plugin-misconfigured`, naming the plugin |
 
 ## 11. Design Decisions
 
@@ -417,6 +447,8 @@ The `classify(call, ctx) → result` shape:
 - Never touches the AST directly, so it is unaffected by internal implementation changes in language plugins
 
 To preserve the responsibility split of the whole extraction pipeline, effects stick strictly to "classification".
+
+A decline (§4.5) is a return value, not a log line. A plugin could also report why it skipped a call through a `Logger` on `ClassifyContext`, but three things count against it. Logging is a side effect that EP2 would have to allow. The line goes to a terminal, not to the IR that a reviewer, `aburi diff` and a CI job read. And the logger would be called inside the scan's innermost loop, once per call, within a 50ms budget. A returned reason keeps `classify()` pure, is stored in the IR next to the call it is about, and costs one object.
 
 ### 11.2 Choosing first-match-wins
 

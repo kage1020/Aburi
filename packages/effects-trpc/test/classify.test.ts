@@ -33,8 +33,8 @@ describe("classifyTrpcCall — client procedure calls", () => {
 
   it("over-qualifies the path when the client sits behind a multi-segment receiver", () => {
     expect(
-      classifyTrpcCall(makeCall({ target: "api.trpc.user.byId.query" }), clientCtx)?.derivedBy,
-    ).toBe("effects-plugin:trpc:query:trpc.user.byId")
+      classifyTrpcCall(makeCall({ target: "api.trpc.user.byId.query" }), clientCtx),
+    ).toMatchObject({ derivedBy: "effects-plugin:trpc:query:trpc.user.byId" })
   })
 
   it.each([
@@ -51,16 +51,20 @@ describe("classifyTrpcCall — client procedure calls", () => {
 
 describe("classifyTrpcCall — a file that imports @trpc/server too", () => {
   it.each(["client.user.byId.query", "publicProcedure.input.query", "t.procedure.query"])(
-    "returns null for %s — `query` is the router's own builder verb there",
+    "declines %s — `query` is the router's own builder verb there",
     (target) => {
-      expect(classifyTrpcCall(makeCall({ target }), bothCtx)).toBeNull()
+      expect(classifyTrpcCall(makeCall({ target }), bothCtx)).toEqual({
+        declined: "effects-plugin:trpc:server-file-query",
+      })
     },
   )
 
   it.each(["client.user.create.mutate", "client.onAdd.subscribe", "trpc.post.list.useQuery"])(
     "still classifies %s, which the router does not spell",
     (target) => {
-      expect(classifyTrpcCall(makeCall({ target }), bothCtx)?.effectId).toBe("network.rpc")
+      expect(classifyTrpcCall(makeCall({ target }), bothCtx)).toMatchObject({
+        effectId: "network.rpc",
+      })
     },
   )
 })

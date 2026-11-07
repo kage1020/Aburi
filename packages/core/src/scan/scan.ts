@@ -162,6 +162,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     skipped,
     symbols: propagatedSymbols,
     timeoutEvents: extracted.timeoutEvents,
+    declinedCalls: extracted.declinedCalls,
     propagation: propagation.stats,
     lspEnrichment:
       enrichment.stats === undefined

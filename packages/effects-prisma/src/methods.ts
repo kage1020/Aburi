@@ -43,3 +43,22 @@ export function isPrismaWriteMethod(name: string): name is PrismaWriteMethod {
 export function isPrismaTransactionMethod(name: string): name is PrismaTransactionMethod {
   return name === PRISMA_TRANSACTION_METHOD
 }
+
+const PRISMA_RAW_QUERY_METHODS_LIST = [
+  "$queryRaw",
+  "$queryRawUnsafe",
+  "$queryRawTyped",
+  "$executeRaw",
+  "$executeRawUnsafe",
+  "$runCommandRaw",
+] as const
+
+export type PrismaRawQueryMethod = (typeof PRISMA_RAW_QUERY_METHODS_LIST)[number]
+
+export const PRISMA_RAW_QUERY_METHODS: ReadonlySet<PrismaRawQueryMethod> = new Set(
+  PRISMA_RAW_QUERY_METHODS_LIST,
+)
+
+export function isPrismaRawQueryMethod(name: string): name is PrismaRawQueryMethod {
+  return (PRISMA_RAW_QUERY_METHODS as ReadonlySet<string>).has(name)
+}

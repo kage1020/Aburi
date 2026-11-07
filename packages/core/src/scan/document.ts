@@ -1,6 +1,7 @@
 import type {
   CallResolutionStats,
   Component,
+  DeclinedCall,
   Dependency,
   EffectClassifyTimeout,
   EffectPlugin,
@@ -13,7 +14,7 @@ import type {
 } from "@aburi/types"
 import { dependencyKey } from "../call-site"
 import type { CallEdge } from "../callgraph"
-import { compareBy, compareCodeUnit } from "../order"
+import { compareBy, compareCodeUnit, compareDeclinedCalls } from "../order"
 import type { PropagationStats } from "../propagate"
 import type { SkippedFile } from "./discover"
 import type { ClassifyTimeoutEvent } from "./timeout"
@@ -24,6 +25,7 @@ export interface BuildStatsInput {
   skipped: readonly SkippedFile[]
   symbols: readonly IR["symbols"][number][]
   timeoutEvents: readonly ClassifyTimeoutEvent[]
+  declinedCalls: readonly DeclinedCall[]
   propagation: PropagationStats
   lspEnrichment?: LspEnrichmentStats | undefined
   callResolution: CallResolutionStats
@@ -49,6 +51,8 @@ export function buildStats(input: BuildStatsInput): Stats {
       }),
     )
   }
+  if (input.declinedCalls.length > 0)
+    stats.declinedCalls = [...input.declinedCalls].sort(compareDeclinedCalls)
   if (input.lspEnrichment !== undefined) {
     stats.lspEnrichment = input.lspEnrichment
   }

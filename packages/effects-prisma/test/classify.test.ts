@@ -63,7 +63,7 @@ describe("classifyPrismaCall — receiver identification", () => {
     "container.services.prisma.user.findMany",
     "tx.user.create",
   ])("keeps %s, a receiver Prisma is written with, at high", (target) => {
-    expect(classifyPrismaCall(makeCall({ target }), ctx)?.confidence).toBe("high")
+    expect(classifyPrismaCall(makeCall({ target }), ctx)).toMatchObject({ confidence: "high" })
   })
 
   it("still classifies an unrecognized receiver, at medium — recall is not the price", () => {
@@ -83,12 +83,12 @@ describe("classifyPrismaCall — receiver identification", () => {
   })
 
   it("applies the same tiering to $transaction", () => {
-    expect(classifyPrismaCall(makeCall({ target: "prisma.$transaction" }), ctx)?.confidence).toBe(
-      "high",
-    )
-    expect(classifyPrismaCall(makeCall({ target: "queue.$transaction" }), ctx)?.confidence).toBe(
-      "medium",
-    )
+    expect(classifyPrismaCall(makeCall({ target: "prisma.$transaction" }), ctx)).toMatchObject({
+      confidence: "high",
+    })
+    expect(classifyPrismaCall(makeCall({ target: "queue.$transaction" }), ctx)).toMatchObject({
+      confidence: "medium",
+    })
   })
 
   it("returns null for a delegate verb called with a literal — no delegate takes one", () => {
@@ -162,13 +162,30 @@ describe("classifyPrismaCall — calls that are not Prisma's", () => {
     ["queue.upsert", "a two-segment call reusing a delegate verb"],
     ["prisma.user.executeRaw", "a method outside the delegate surface"],
     ["prisma.user.someHelper", "a method outside the delegate surface"],
-    ["prisma.$queryRaw", "a raw SQL escape"],
-    ["prisma.$executeRaw", "a raw SQL escape"],
-    ["prisma.$queryRawUnsafe", "a raw SQL escape"],
     ["prisma.$transactional", "a near-miss of $transaction"],
     ["$transaction", "$transaction with no client"],
   ])("returns null for %s — %s", (target) => {
     expect(classifyPrismaCall(makeCall({ target }), ctx)).toBeNull()
+  })
+
+  it.each([
+    "prisma.$queryRaw",
+    "prisma.$queryRawUnsafe",
+    "prisma.$queryRawTyped",
+    "this.prisma.$executeRaw",
+    "tx.$executeRawUnsafe",
+    "prisma.$runCommandRaw",
+  ])("declines %s — whether it reads or writes is in the query it is handed", (target) => {
+    expect(classifyPrismaCall(makeCall({ target, argumentCount: 1 }), ctx)).toEqual({
+      declined: "effects-plugin:prisma:raw-query",
+    })
+  })
+
+  it("declines no raw query without a client, or in a file that imports no Prisma", () => {
+    expect(classifyPrismaCall(makeCall({ target: "$queryRaw" }), ctx)).toBeNull()
+    expect(
+      classifyPrismaCall(makeCall({ target: "prisma.$queryRaw" }), makeCtx({ imports: [] })),
+    ).toBeNull()
   })
 })
 

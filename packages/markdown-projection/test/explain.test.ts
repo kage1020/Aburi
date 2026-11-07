@@ -9,7 +9,7 @@ import {
   sig,
   symbolId,
 } from "@aburi/test-support"
-import type { UnresolvedCallDiagnostic } from "@aburi/types"
+import type { DeclinedCall, UnresolvedCallDiagnostic } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectSymbolExplain } from "../src"
 import { droppedSymbol } from "./fixtures"
@@ -236,5 +236,72 @@ describe("projectSymbolExplain — ## Call resolution", () => {
     const withoutContext = projectSymbolExplain(caller())
     expect(withoutContext).not.toContain("Call resolution")
     expect(projectSymbolExplain(caller(), { dependencies: [] })).toBe(withoutContext)
+  })
+})
+
+describe("projectSymbolExplain — ## Declined effects", () => {
+  const owner = makeSymbol({
+    id: CALLER_ID,
+    name: "Ctl.route",
+    effects: [
+      effect({
+        id: "network.rpc",
+        target: "client.user.create.mutate",
+        plugin: "effects-trpc",
+        line: 4,
+      }),
+    ],
+    calls: [
+      call({ target: "client.user.byId.query", line: 9 }),
+      call({ target: "db.execute", line: 3 }),
+    ],
+  })
+  const declined = (
+    target: string,
+    line: number,
+    plugin: string,
+    reason: string,
+    symbol: string = CALLER_ID,
+  ): DeclinedCall => ({ symbolId: symbolId(symbol), target, line, plugin, reason })
+
+  it("names each call this Symbol's plugins declined, by line, after its effects", () => {
+    const md = projectSymbolExplain(owner, {
+      declinedCalls: [
+        declined(
+          "client.user.byId.query",
+          9,
+          "effects-trpc",
+          "effects-plugin:trpc:server-file-query",
+        ),
+        declined("db.execute", 3, "effects-drizzle", "effects-plugin:drizzle:raw-sql"),
+        declined("db.execute", 3, "effects-custom", "raw `sql`"),
+        declined("other.call", 1, "effects-trpc", "elsewhere", "ts:src/other.ts#other"),
+      ],
+    })
+    expect(headings(md)).toEqual([
+      "## Effects",
+      "## Declined effects",
+      "## Calls",
+      "## Fingerprint",
+    ])
+    expect(sectionOf(md, "## Declined effects")).toEqual([
+      "## Declined effects",
+      "",
+      "- `db.execute` (L3) [effects-custom]: `` raw `sql` ``",
+      "- `db.execute` (L3) [effects-drizzle]: `effects-plugin:drizzle:raw-sql`",
+      "- `client.user.byId.query` (L9) [effects-trpc]: `effects-plugin:trpc:server-file-query`",
+      "",
+    ])
+  })
+
+  it.each([
+    [
+      "no decline names this Symbol",
+      { declinedCalls: [declined("x", 1, "effects-trpc", "r", "ts:src/o.ts#o")] },
+    ],
+    ["the IR records no declines", {}],
+  ])("is left out when %s", (_, context) => {
+    expect(projectSymbolExplain(owner, context)).toBe(projectSymbolExplain(owner))
+    expect(projectSymbolExplain(owner, context)).not.toContain("## Declined effects")
   })
 })

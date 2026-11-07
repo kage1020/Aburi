@@ -152,6 +152,11 @@
           "items": { "$ref": "#/$defs/EffectClassifyTimeout" },
           "description": "Records effect classifications that ran longer than classifyTimeoutMs. Each one's classification is kept, so an overrun changes this record and nothing else in the Document. Class B: writers omit the key when nothing overran rather than emitting []; non-empty entries are kept as a performance log."
         },
+        "declinedCalls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/DeclinedCall" },
+          "description": "Calls an effect plugin recognised and declined to classify, which no plugin then classified: each stays in its Symbol's calls[], and this record says who left it there and why. Class B: writers omit the key when no declined call stayed in calls[], rather than emitting []."
+        },
         "effectPropagation": {
           "$ref": "#/$defs/EffectPropagationStats",
           "description": "Counters produced by the effect-propagation pass. Always present so a run with zero propagated effects still reports the SCC shape it observed."
@@ -405,6 +410,39 @@
           "type": "integer",
           "minimum": 1,
           "description": "The classifyTimeoutMs value in effect: the budget the call ran past."
+        }
+      }
+    },
+
+    "DeclinedCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugin", "symbolId", "target", "line", "reason"],
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Effect plugin manifest name whose classify() declined the call."
+        },
+        "symbolId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Id of the Symbol that makes the call."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The call's target, as the Symbol's calls[] entry spells it."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The call's line, as the Symbol's calls[] entry records it."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the plugin declined, in its own words, e.g. 'effects-plugin:trpc:server-file-query'."
         }
       }
     },

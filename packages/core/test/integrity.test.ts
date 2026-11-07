@@ -407,6 +407,22 @@ describe("checkIRIntegrity — Unicode normalization", () => {
         ir.dependencies = [dependency({ from: "a", to: decomposed, via: "import" })]
       },
     ],
+    ...(["target", "reason"] as const).map((field): [string, (ir: IR) => void] => [
+      `stats.declinedCalls[].${field}`,
+      (ir) => {
+        ir.symbols = [
+          makeSymbol("ts:src/a.ts#foo", { calls: [{ target: "q", line: 1, resolved: null }] }),
+        ]
+        const declined = {
+          symbolId: "ts:src/a.ts#foo",
+          target: "q",
+          line: 1,
+          plugin: "p",
+          reason: "r",
+        }
+        ir.stats.declinedCalls = [{ ...declined, [field]: decomposed }]
+      },
+    ]),
   ])("reports %s", (_what, build) => {
     expect(violationsOf(irWith(build), 19)).toHaveLength(1)
   })

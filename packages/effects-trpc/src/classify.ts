@@ -1,5 +1,10 @@
 import { assertNonEmptySegments, type PluginInputOrigin } from "@aburi/plugin-registry/plugin-input"
-import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
+import type {
+  CallCandidate,
+  ClassifyContext,
+  EffectClassification,
+  EffectDecline,
+} from "@aburi/types"
 import { EFFECTS_TRPC_DERIVED_BY_PREFIX, EFFECTS_TRPC_PLUGIN_NAME } from "./constants"
 import { hasTrpcClientImport, hasTrpcServerImport } from "./imports"
 import {
@@ -16,7 +21,7 @@ const MIN_CLIENT_SEGMENTS = 3
 export function classifyTrpcCall(
   call: CallCandidate,
   ctx: ClassifyContext,
-): EffectClassification | null {
+): EffectClassification | EffectDecline | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_TRPC_PLUGIN_NAME, filePath: ctx.file.path }
 
   const { segments, last: terminal } = assertNonEmptySegments(call.target, origin)
@@ -26,11 +31,12 @@ export function classifyTrpcCall(
   const clientPath = segments[0] === "this" ? segments.slice(1) : segments
   if (clientPath.length < MIN_CLIENT_SEGMENTS) return null
 
+  // The router's own builder (`publicProcedure.input(schema).query(resolver)`) is spelled alike.
   if (
     terminal === SERVER_AMBIGUOUS_TERMINAL &&
     hasTrpcServerImport(ctx.file.imports, ctx.file.path)
   )
-    return null
+    return { declined: `${EFFECTS_TRPC_DERIVED_BY_PREFIX}:server-file-query` }
 
   const family = terminalFamily(terminal)
   if (family === null) return null

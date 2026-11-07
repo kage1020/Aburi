@@ -3,8 +3,10 @@ import type {
   CallCandidate,
   ComponentId,
   Config,
+  DeclinedCall,
   Decorator,
   Effect,
+  EffectDecline,
   EffectPlugin,
   ImportEdge,
   LanguageId,
@@ -16,6 +18,7 @@ import type {
   VocabRegistry,
 } from "@aburi/types"
 import { makeCallSiteKey } from "../call-site"
+import { CoreError } from "../errors"
 import type { DropCFilter } from "./drop-c"
 import { normalizeCallStrings } from "./normalize"
 import {
@@ -50,10 +53,12 @@ export function classifyCalls(input: ClassifyCallsInput): {
   effects: Effect[]
   calls: Call[]
   dynamicCallSites: string[]
+  declinedCalls: DeclinedCall[]
 } {
   const classifiedEffects: Effect[] = []
   const survivingCalls: Call[] = []
   const dynamicCallSites: string[] = []
+  const declinedCalls: DeclinedCall[] = []
   const owner: OwnerSummary = {
     id: input.candidate.id,
     kind: input.candidate.kind,
@@ -76,6 +81,7 @@ export function classifyCalls(input: ClassifyCallsInput): {
     }
 
     let classified = false
+    const declines: DeclinedCall[] = []
     for (const effect of input.effects) {
       const timeoutOptions: ClassifyWithTimeoutOptions = {
         onTimeout: (event) => {
@@ -91,6 +97,16 @@ export function classifyCalls(input: ClassifyCallsInput): {
         timeoutOptions,
       )
       if (result === null) continue
+      if (isDecline(result)) {
+        declines.push({
+          plugin: effect.manifest.name,
+          symbolId: input.candidate.id,
+          target: call.target,
+          line: call.line,
+          reason: declineReason(result, effect),
+        })
+        continue
+      }
       input.vocab.effect({
         value: result.effectId,
         plugin: effect.manifest.name,
@@ -110,6 +126,7 @@ export function classifyCalls(input: ClassifyCallsInput): {
       break
     }
     if (!classified) {
+      declinedCalls.push(...declines)
       survivingCalls.push({ target: call.target, line: call.line, resolved: null })
       if (call.dynamicReceiver === true) {
         dynamicCallSites.push(makeCallSiteKey(input.file.path, call.line, call.target))
@@ -119,7 +136,20 @@ export function classifyCalls(input: ClassifyCallsInput): {
 
   classifiedEffects.sort(byTargetThenLine)
   survivingCalls.sort(byTargetThenLine)
-  return { effects: classifiedEffects, calls: survivingCalls, dynamicCallSites }
+  return { effects: classifiedEffects, calls: survivingCalls, dynamicCallSites, declinedCalls }
+}
+
+function isDecline(result: object): result is EffectDecline {
+  return Object.hasOwn(result, "declined")
+}
+
+function declineReason(decline: EffectDecline, effect: EffectPlugin): string {
+  const reason: unknown = decline.declined
+  if (typeof reason === "string" && reason.trim().length > 0) return reason.normalize("NFC")
+  throw new CoreError(
+    `Effect plugin "${effect.manifest.name}" declined a call with no reason: \`declined\` must be a non-empty string.`,
+    { code: "scan-plugin-misconfigured", value: effect.manifest.name },
+  )
 }
 
 function byTargetThenLine(

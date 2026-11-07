@@ -1,7 +1,7 @@
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { dependencyKey } from "./call-site"
 import type { IntegrityViolation } from "./errors"
-import { compareCodeUnit } from "./order"
+import { compareCodeUnit, compareDeclinedCalls } from "./order"
 
 export function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   assertSorted(
@@ -18,6 +18,14 @@ export function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
     (ir.stats.skippedFiles ?? []).map((f) => f.path),
     "stats.skippedFiles[]",
     out,
+  )
+  reportFirstDescent(
+    ir.stats.declinedCalls ?? [],
+    compareDeclinedCalls,
+    "stats.declinedCalls[]",
+    out,
+    (prev, curr) =>
+      `${prev.symbolId} ${prev.target} (L${prev.line}) [${prev.plugin}] precedes ${curr.symbolId} ${curr.target} (L${curr.line}) [${curr.plugin}]`,
   )
   assertSorted(
     ir.dependencies.map((d) => dependencyKey(d.from, d.to, d.via)),

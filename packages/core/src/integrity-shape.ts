@@ -147,6 +147,14 @@ const EFFECT_PROPAGATION_STATS: RecordSpec = {
 
 const EFFECT_CLASSIFY_TIMEOUT: RecordSpec = { plugin: str, symbolId: str, timeoutMs: num }
 
+const DECLINED_CALL: RecordSpec = {
+  plugin: str,
+  symbolId: str,
+  target: str,
+  line: num,
+  reason: str,
+}
+
 const LSP_HINT_REJECTIONS: RecordSpec = {
   unparseableHover: num,
   ownerClassNotFound: num,
@@ -194,6 +202,7 @@ const STATS: RecordSpec = {
   droppedSymbols: num,
   effectPropagation: record(EFFECT_PROPAGATION_STATS),
   effectClassifyTimeouts: optional(recordArray(EFFECT_CLASSIFY_TIMEOUT)),
+  declinedCalls: optional(recordArray(DECLINED_CALL)),
   lspEnrichment: optional(record(LSP_ENRICHMENT_STATS)),
   callResolution: optional(record(CALL_RESOLUTION_STATS)),
   skippedFiles: optional(recordArray(SKIPPED_FILE)),

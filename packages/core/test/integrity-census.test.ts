@@ -1,5 +1,5 @@
 import { makeIR } from "@aburi/test-support"
-import type { CallResolutionStats, IR } from "@aburi/types"
+import type { CallResolutionStats, DeclinedCall, IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { checkIRIntegrity } from "../src/index"
 import { makeSymbol } from "./fixtures/ir"
@@ -156,4 +156,74 @@ describe("checkIRIntegrity — skippedFiles census", () => {
       expect(invariantsBroken(list)).toContain(invariant)
     },
   )
+})
+
+describe("checkIRIntegrity — every declined call stayed a call", () => {
+  const OWNER = "ts:src/a.ts#owner"
+  const declined: DeclinedCall = {
+    symbolId: OWNER,
+    target: "client.user.byId.query",
+    line: 4,
+    plugin: "effects-trpc",
+    reason: "effects-plugin:trpc:server-file-query",
+  }
+
+  function documentDeclining(entry: DeclinedCall, owner = makeSymbol(OWNER, { calls: [] })): IR {
+    const ir = makeIR({ symbols: [owner] })
+    ir.stats.declinedCalls = [entry]
+    return ir
+  }
+
+  function stayViolations(ir: IR): string[] {
+    return checkIRIntegrity(ir)
+      .filter((violation) => violation.invariant === 22)
+      .map((violation) => violation.message)
+  }
+
+  it("accepts a decline whose call the owner's calls[] holds", () => {
+    const owner = makeSymbol(OWNER, {
+      calls: [{ target: declined.target, line: declined.line, resolved: null }],
+    })
+    expect(checkIRIntegrity(documentDeclining(declined, owner))).toEqual([])
+  })
+
+  it.each<[string, DeclinedCall, ReturnType<typeof makeSymbol>, string]>([
+    [
+      "a Symbol the Document does not hold",
+      { ...declined, symbolId: "ts:src/a.ts#gone" },
+      makeSymbol(OWNER),
+      'client.user.byId.query (L4) [effects-trpc] names "ts:src/a.ts#gone", which is not a Symbol in symbols[]',
+    ],
+    [
+      "a dropped Symbol",
+      declined,
+      makeSymbol(OWNER, { dropped: true, dropReason: "pure DTO" }),
+      'client.user.byId.query (L4) [effects-trpc] names the dropped Symbol "ts:src/a.ts#owner", which carries no calls',
+    ],
+    [
+      "a call on another line",
+      declined,
+      makeSymbol(OWNER, { calls: [{ target: declined.target, line: 5, resolved: null }] }),
+      'client.user.byId.query (L4) [effects-trpc] is not among the calls[] of "ts:src/a.ts#owner"; a call no plugin classified stays a call',
+    ],
+    [
+      "a call the owner records as an effect",
+      declined,
+      makeSymbol(OWNER, {
+        effects: [
+          {
+            id: "network.rpc",
+            target: declined.target,
+            line: 4,
+            plugin: "p",
+            confidence: "high",
+            derivedBy: "d",
+          },
+        ],
+      }),
+      'client.user.byId.query (L4) [effects-trpc] is not among the calls[] of "ts:src/a.ts#owner"; a call no plugin classified stays a call',
+    ],
+  ])("flags a decline naming %s", (_what, entry, owner, message) => {
+    expect(stayViolations(documentDeclining(entry, owner))).toEqual([message])
+  })
 })

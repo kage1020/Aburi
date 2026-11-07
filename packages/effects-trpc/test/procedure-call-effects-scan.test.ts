@@ -1,6 +1,6 @@
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { scanWith } from "@aburi/test-harness"
-import { symbolNamed, useScratchWorkspace } from "@aburi/test-support"
+import { irSchemaViolations, symbolNamed, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { trpcEffectsPlugin } from "../src/index"
 
@@ -137,5 +137,54 @@ describe("scan — tRPC procedure calls", () => {
 
     expect(result.ir.symbols.flatMap((s) => s.calls.map((c) => c.target))).toContain(procedureCall)
     expect(result.ir.symbols.flatMap((s) => s.effects)).toEqual([])
+    expect(result.ir.stats.declinedCalls).toBeUndefined()
+  })
+
+  it("names each query it declines in a file that colocates a client with a router", async () => {
+    await workspace.writeSource(
+      "src/server.ts",
+      [
+        'import { createTRPCClient } from "@trpc/client"',
+        'import { initTRPC } from "@trpc/server"',
+        "",
+        "const t = initTRPC.create()",
+        "",
+        "export function buildRouter() {",
+        "  return t.router({ ping: t.procedure.query(() => 'pong') })",
+        "}",
+        "",
+        "export async function warmUp(client: ReturnType<typeof createTRPCClient>) {",
+        "  await client.health.ping.query()",
+        "  await client.health.reset.mutate()",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+
+    expect(result.ir.stats.declinedCalls).toEqual([
+      {
+        plugin: "effects-trpc",
+        symbolId: "ts:src/server.ts#buildRouter",
+        target: "t.procedure.query",
+        line: 7,
+        reason: "effects-plugin:trpc:server-file-query",
+      },
+      {
+        plugin: "effects-trpc",
+        symbolId: "ts:src/server.ts#warmUp",
+        target: "client.health.ping.query",
+        line: 11,
+        reason: "effects-plugin:trpc:server-file-query",
+      },
+    ])
+    expect(symbolNamed(result, "warmUp").calls.map((c) => c.target)).toContain(
+      "client.health.ping.query",
+    )
+    expect(symbolNamed(result, "warmUp").effects.map((e) => e.target)).toEqual([
+      "client.health.reset.mutate",
+    ])
+    expect(irSchemaViolations(result.ir)).toEqual([])
   })
 })

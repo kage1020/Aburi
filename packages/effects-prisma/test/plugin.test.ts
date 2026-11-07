@@ -24,7 +24,7 @@ describe("PrismaEffectsPlugin", () => {
     const ctx = makeCtx({ imports: [makePrismaImport()] })
     const call = makeCall({ target: "prisma.invoice.upsert" })
     const result = prismaEffectsPlugin.classify(call, ctx)
-    expect(result?.effectId).toBe("db.write")
+    expect(result).toMatchObject({ effectId: "db.write" })
     expect(new PrismaEffectsPlugin().classify(call, ctx)).toEqual(result)
   })
 

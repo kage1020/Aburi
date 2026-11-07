@@ -27,9 +27,13 @@ survives and is anchored to the query origin line.
 ### Raw SQL and other unclassified surfaces
 
 `.execute()` is intentionally **not** classified — a raw SQL call can be
-either a read or a write, and statically distinguishing them would require SQL
-parsing (out of the current scope). This mirrors how `@aburi/effects-prisma`
-treats `$queryRaw` / `$executeRaw`.
+either a read or a write, and which one is in the SQL, not in the call site.
+On a receiver named like a Drizzle client (`db.execute(sql…)`,
+`tx.execute(…)`), the plugin declines it instead: the call stays in `calls[]`
+and the IR's `stats.declinedCalls` lists it under
+`effects-plugin:drizzle:raw-sql`, which `aburi explain` shows under the Symbol's
+`## Declined effects`. This mirrors how `@aburi/effects-prisma` treats
+`$queryRaw` / `$executeRaw`.
 
 `.$count()` and CTE builders (`db.with(sq).select().from(...)`) are also not
 in the current vocab — the CTE case still works transparently because

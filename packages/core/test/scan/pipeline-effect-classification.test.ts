@@ -1,7 +1,8 @@
-import { makeCall, spend } from "@aburi/test-support"
+import { errorFrom, makeCall, spend } from "@aburi/test-support"
 import type { CallCandidate, ClassifyContext, Decorator, EffectClassification } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../../src/call-site"
+import { CoreError } from "../../src/errors"
 import {
   extractOneSymbol,
   stubCandidate,
@@ -113,6 +114,75 @@ describe("runFilePipeline — effect classification", () => {
     })
 
     expect(result.dynamicCallSites).toEqual([makeCallSiteKey("test.stub", 3, "make().run")])
+  })
+
+  describe("a call a plugin declines", () => {
+    const declining = stubEffectsPlugin("effects-wary", (call) =>
+      call.target.endsWith(".query") ? { declined: "effects-wary:ambiguous-query" } : null,
+    )
+
+    it("stays in calls[], recorded with the plugin's reason, and later plugins are still asked", async () => {
+      const asked: string[] = []
+      const result = await extractOneSymbol({
+        effects: [
+          declining,
+          stubEffectsPlugin("effects-next", (call) => {
+            asked.push(call.target)
+            return null
+          }),
+        ],
+        body: bodyCalling(
+          makeCall({ target: "client.user.query", line: 3 }),
+          makeCall({ target: "helper.run", line: 4 }),
+        ),
+      })
+
+      expect(result.symbols[0]?.calls.map((call) => call.target)).toEqual([
+        "client.user.query",
+        "helper.run",
+      ])
+      expect(result.declinedCalls).toEqual([
+        {
+          plugin: "effects-wary",
+          symbolId: "stub:test.stub#Fn",
+          target: "client.user.query",
+          line: 3,
+          reason: "effects-wary:ambiguous-query",
+        },
+      ])
+      expect(asked).toEqual(["client.user.query", "helper.run"])
+    })
+
+    it("is not recorded once a later plugin classifies it", async () => {
+      const result = await extractOneSymbol({
+        effects: [
+          declining,
+          stubEffectsPlugin("effects-sure", () => ({
+            effectId: "network.rpc",
+            confidence: "high",
+            derivedBy: "effects-sure:rpc",
+          })),
+        ],
+        body: bodyCalling(makeCall({ target: "client.user.query", line: 3 })),
+      })
+
+      expect(result.symbols[0]?.effects.map((effect) => effect.plugin)).toEqual(["effects-sure"])
+      expect(result.declinedCalls).toEqual([])
+    })
+
+    it.each([
+      ["an empty reason", ""],
+      ["a blank reason", "  "],
+      ["a reason that is not a string", 7 as never],
+    ])("ends the run for %s, a fault in the plugin", async (_label, declined) => {
+      const error = await errorFrom(CoreError, () =>
+        extractOneSymbol({
+          effects: [stubEffectsPlugin("effects-mute", () => ({ declined }))],
+          body: bodyCalling(makeCall({ target: "client.user.query" })),
+        }),
+      )
+      expect(error).toMatchObject({ code: "scan-plugin-misconfigured", value: "effects-mute" })
+    })
   })
 
   it("hands the effect plugin each owner decorator's receiver, and none for a bare one", async () => {

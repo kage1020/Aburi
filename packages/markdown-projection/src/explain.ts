@@ -1,5 +1,11 @@
-import type { Dependency, Symbol as IRSymbol, UnresolvedCallDiagnostic } from "@aburi/types"
+import type {
+  DeclinedCall,
+  Dependency,
+  Symbol as IRSymbol,
+  UnresolvedCallDiagnostic,
+} from "@aburi/types"
 import {
+  callRowText,
   compareStrings,
   effectRow,
   groupedCallRows,
@@ -19,6 +25,8 @@ import {
 export interface ProjectSymbolExplainContext {
   dependencies?: readonly Dependency[]
   unresolvedCalls?: readonly UnresolvedCallDiagnostic[]
+  /** The IR's `stats.declinedCalls`; the rows naming this Symbol are rendered. */
+  declinedCalls?: readonly DeclinedCall[]
 }
 
 export function projectSymbolExplain(
@@ -87,6 +95,18 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
     lines.push("")
   }
 
+  const declined = (context.declinedCalls ?? [])
+    .filter((d) => d.symbolId === symbol.id)
+    .sort(compareDeclinedCalls)
+  if (declined.length > 0) {
+    lines.push("## Declined effects")
+    lines.push("")
+    for (const d of declined) {
+      lines.push(`- ${callRowText(d)} [${d.plugin}]: ${inlineCode(d.reason)}`)
+    }
+    lines.push("")
+  }
+
   if (symbol.calls.length > 0) {
     lines.push("## Calls")
     lines.push("")
@@ -148,6 +168,10 @@ function renderCallResolution(
   }
   lines.push("")
   return lines
+}
+
+function compareDeclinedCalls(a: DeclinedCall, b: DeclinedCall): number {
+  return a.line - b.line || compareStrings(a.target, b.target) || compareStrings(a.plugin, b.plugin)
 }
 
 function collectCallers(symbol: IRSymbol, dependencies: readonly Dependency[]): string[] {

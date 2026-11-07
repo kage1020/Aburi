@@ -3,11 +3,17 @@ import {
   hasLiteralFirstArgument,
   type PluginInputOrigin,
 } from "@aburi/plugin-registry/plugin-input"
-import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
+import type {
+  CallCandidate,
+  ClassifyContext,
+  EffectClassification,
+  EffectDecline,
+} from "@aburi/types"
 import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, EFFECTS_DRIZZLE_PLUGIN_NAME } from "./constants"
 import { hasDrizzleImport } from "./imports"
 import {
   DRIZZLE_FLUENT_ROOT_METHODS,
+  DRIZZLE_RAW_SQL_METHOD,
   isDrizzleQueryMethod,
   isDrizzleReadMethod,
   isDrizzleTransactionMethod,
@@ -15,12 +21,12 @@ import {
   maxArgumentsFor,
   minArgumentsFor,
 } from "./methods"
-import { classificationConfidence } from "./receivers"
+import { classificationConfidence, namesDrizzleClient } from "./receivers"
 
 export function classifyDrizzleCall(
   call: CallCandidate,
   ctx: ClassifyContext,
-): EffectClassification | null {
+): EffectClassification | EffectDecline | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_DRIZZLE_PLUGIN_NAME, filePath: ctx.file.path }
 
   const { segments, last: method } = assertNonEmptySegments(call.target, origin)
@@ -77,6 +83,16 @@ export function classifyDrizzleCall(
       confidence: classificationConfidence(clientSegment, call, maxArgumentsFor(method)),
       derivedBy: `${EFFECTS_DRIZZLE_DERIVED_BY_PREFIX}:tx`,
     }
+  }
+
+  // Whether raw SQL reads or writes is in the SQL, which no call site spells.
+  if (
+    method === DRIZZLE_RAW_SQL_METHOD &&
+    call.argumentCount > 0 &&
+    clientSegment !== undefined &&
+    namesDrizzleClient(clientSegment)
+  ) {
+    return { declined: `${EFFECTS_DRIZZLE_DERIVED_BY_PREFIX}:raw-sql` }
   }
 
   return null

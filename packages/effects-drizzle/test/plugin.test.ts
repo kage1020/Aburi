@@ -24,7 +24,7 @@ describe("DrizzleEffectsPlugin", () => {
     const ctx = makeCtx({ imports: [makeDrizzleImport()] })
     const call = makeCall({ target: "db.insert", argumentCount: 1 })
     const result = drizzleEffectsPlugin.classify(call, ctx)
-    expect(result?.effectId).toBe("db.write")
+    expect(result).toMatchObject({ effectId: "db.write" })
     expect(new DrizzleEffectsPlugin().classify(call, ctx)).toEqual(result)
   })
 

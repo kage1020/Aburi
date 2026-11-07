@@ -2,6 +2,7 @@ import type {
   BodyExtraction,
   ComponentId,
   Config,
+  DeclinedCall,
   EffectPlugin,
   ExtractionContext,
   FrameworkClassifyContext,
@@ -38,6 +39,7 @@ export interface ExtractedFile extends FileOutcomeCommon {
   imports: readonly ImportEdge[]
   timeoutEvents: readonly ClassifyTimeoutEvent[]
   dynamicCallSites: readonly string[]
+  declinedCalls: readonly DeclinedCall[]
 }
 
 export interface ParseFailedFile extends FileOutcomeCommon {
@@ -127,6 +129,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
 
     const symbols: IRSymbol[] = []
     const dynamicCallSites: string[] = []
+    const declinedCalls: DeclinedCall[] = []
 
     const frameworkCtx: FrameworkClassifyContext = { ...extractCtx, imports }
 
@@ -186,8 +189,10 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         effects: classifiedEffects,
         calls: keptCalls,
         dynamicCallSites: fileDynamicCallSites,
+        declinedCalls: fileDeclinedCalls,
       } = classifyCalls(classifyCallsInput)
       dynamicCallSites.push(...fileDynamicCallSites)
+      declinedCalls.push(...fileDeclinedCalls)
 
       const normalized = language.normalizeAst(candidate)
       symbols.push(
@@ -215,6 +220,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       imports,
       timeoutEvents,
       dynamicCallSites,
+      declinedCalls,
     }
   } finally {
     if (parseResult.tree !== null) {

@@ -24,7 +24,7 @@ describe("TrpcEffectsPlugin", () => {
     const ctx = makeCtx({ imports: [makeTrpcClientImport()] })
     const call = makeCall({ target: "client.user.create.mutate", argumentCount: 1 })
     const result = trpcEffectsPlugin.classify(call, ctx)
-    expect(result?.effectId).toBe("network.rpc")
+    expect(result).toMatchObject({ effectId: "network.rpc" })
     expect(new TrpcEffectsPlugin().classify(call, ctx)).toEqual(result)
   })
 

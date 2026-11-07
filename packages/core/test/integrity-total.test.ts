@@ -69,6 +69,9 @@ function richIR(): IR {
     },
   }
   ir.stats.effectClassifyTimeouts = [{ plugin: "p", symbolId: "ts:src/a.ts#foo", timeoutMs: 10 }]
+  ir.stats.declinedCalls = [
+    { plugin: "p", symbolId: "ts:src/a.ts#foo", target: "helper", line: 4, reason: "r" },
+  ]
   return ir
 }
 
