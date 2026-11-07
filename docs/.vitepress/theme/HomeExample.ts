@@ -67,7 +67,7 @@ export default () =>
       }),
       pane({
         label: "aburi diff main..HEAD",
-        file: "out/diff.md",
+        file: ".aburi/diff.md",
         lines: REPORT_LINES,
         foot: "Ready to paste into a pull request",
         accent: true,

@@ -3,11 +3,18 @@ import { resolve } from "node:path"
 import { call, errorFrom, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, EXIT, FailOnParseError, runDiff } from "../src"
+import {
+  DEFAULT_OUTPUT_DIRNAME,
+  DIFF_JSON_FILENAME,
+  DIFF_MD_FILENAME,
+  EXIT,
+  FailOnParseError,
+  runDiff,
+} from "../src"
 import { pathExists } from "../src/fs-probe"
 import { diffDocuments, documentWith } from "./ir-documents"
 import { runCliIn } from "./run-cli"
-import { filesUnder, writeEarlierReports, writeIRs } from "./workspace"
+import { defaultOutput, filesUnder, writeEarlierReports, writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-files")
 
@@ -30,8 +37,8 @@ describe("aburi diff --base/--head", () => {
 
     expect(report.exitCode).toBe(EXIT.SUCCESS)
     expect(report.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
-    expect(report.diffJsonPath).toBe(resolve(workspace.root, "out", DIFF_JSON_FILENAME))
-    expect(report.diffMdPath).toBe(resolve(workspace.root, "out", DIFF_MD_FILENAME))
+    expect(report.diffJsonPath).toBe(defaultOutput(workspace.root, DIFF_JSON_FILENAME))
+    expect(report.diffMdPath).toBe(defaultOutput(workspace.root, DIFF_MD_FILENAME))
     expect(await readFile(report.diffJsonPath ?? "", "utf8")).toMatch(/"added"\s*:\s*1/)
     expect(await readFile(report.diffMdPath ?? "", "utf8")).toContain("Added")
   })
@@ -51,7 +58,7 @@ describe("aburi diff --base/--head", () => {
   it.each([[[]], [""]])(
     "refuses --fail-on %j, a gate with no clause, before it removes an earlier report",
     async (failOn) => {
-      const earlier = await writeEarlierReports(workspace.root, ["out"])
+      const earlier = await writeEarlierReports(workspace.root, [DEFAULT_OUTPUT_DIRNAME])
 
       const error = await errorFrom(FailOnParseError, () =>
         runDiff({ cwd: workspace.root, base: "missing.json", head: "also.json", failOn }),
@@ -89,8 +96,8 @@ describe("aburi diff --base/--head", () => {
     await expect(runDiff({ cwd: workspace.root, base: paths.base, head: missing })).rejects.toThrow(
       `Failed to read IR file "${missing}"`,
     )
-    expect(await pathExists(resolve(workspace.root, "out", DIFF_MD_FILENAME))).toBe(false)
-    expect(await pathExists(resolve(workspace.root, "out", DIFF_JSON_FILENAME))).toBe(false)
+    expect(await pathExists(defaultOutput(workspace.root, DIFF_MD_FILENAME))).toBe(false)
+    expect(await pathExists(defaultOutput(workspace.root, DIFF_JSON_FILENAME))).toBe(false)
   })
 
   it.each([
@@ -99,7 +106,7 @@ describe("aburi diff --base/--head", () => {
   ] as const)(
     "leaves only what --format %s writes of an earlier capped report, beside the caller's own file",
     async (format, written) => {
-      await workspace.writeSource("out/notes.md", "# Notes\n")
+      await workspace.writeSource(`${DEFAULT_OUTPUT_DIRNAME}/notes.md`, "# Notes\n")
       const { report: capped } = await diffDocuments(workspace.root, EMPTY, ADDED_FOO, {
         maxBytes: 10,
       })
@@ -107,7 +114,7 @@ describe("aburi diff --base/--head", () => {
 
       await diffDocuments(workspace.root, EMPTY, ADDED_FOO, { format })
 
-      expect((await readdir(resolve(workspace.root, "out"))).sort()).toEqual(
+      expect((await readdir(defaultOutput(workspace.root))).sort()).toEqual(
         [...written, "notes.md"].sort(),
       )
     },

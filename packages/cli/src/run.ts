@@ -147,7 +147,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .description("Generate IR from the current workspace")
     .option(
       "--output-dir <path>",
-      "output directory (default: config.output.dir, or out)",
+      "output directory (default: config.output.dir, or .aburi)",
       parsePath,
     )
     .option("--format <format>", "json | md | both (default: both)", parseFormat)
@@ -225,7 +225,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--head <path>", "head IR file", parsePath)
     .option(
       "--output-dir <path>",
-      "output directory (default: config.output.dir, or out)",
+      "output directory (default: config.output.dir, or .aburi)",
       parsePath,
     )
     .option("--format <format>", "json | md | both", parseFormat, "both")

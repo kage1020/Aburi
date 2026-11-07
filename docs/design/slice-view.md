@@ -18,7 +18,7 @@ References:
 
 The horizontal L0 / L1 / L2 views of [`overview.md`](./overview.md) §3.1 group Symbols by **kind** (Controllers with Controllers, Services with Services). This is the right shape for reading a codebase on first contact, but the wrong shape for reading a **pull request** — a single feature addition typically cuts vertically through Controller → Service → Repository → Migration and scatters across every horizontal band.
 
-[`overview.md`](./overview.md) §3.2 states the intent verbatim: **"cluster the set of changed symbols into connected components over the call graph and display them as vertical slices (per feature). It is derived from the same L3 IR."** This document specifies how that clustering is performed, how the resulting clusters are identified and ordered, and how they are projected into `out/diff.md`.
+[`overview.md`](./overview.md) §3.2 states the intent verbatim: **"cluster the set of changed symbols into connected components over the call graph and display them as vertical slices (per feature). It is derived from the same L3 IR."** This document specifies how that clustering is performed, how the resulting clusters are identified and ordered, and how they are projected into `.aburi/diff.md`.
 
 The pass consumes the output of `aburi diff` (paired Symbols with `status`) plus the `CallEdge[]` from both the base and the head IR ([`call-resolution.md`](./call-resolution.md) §7). It produces a list of Slice records (§11) that the Markdown projection renders in a new `## 🧵 Slice View` section (§12). The existing flat status sections in [`diff-algorithm.md`](./diff-algorithm.md) §7.2 remain unchanged; the Slice View is **additional**, not a replacement — see §14.10 for why.
 
@@ -37,7 +37,7 @@ paired symbols + status + delta
   ↓ slice clustering                          ← THIS PASS
 paired symbols + status + delta + slices[]
   ↓ Markdown projection (§7.2 of diff-algorithm.md + §12 of this document)
-out/diff.md
+.aburi/diff.md
 ```
 
 **Why a diff pass and not an IR pass.** [`effect-propagation.md`](./effect-propagation.md) §2 runs on the IR (its output is a shape of the IR itself, `Symbol.effects[]`). Slice View, by contrast, is defined **only** on the changed-Symbol set of a specific PR — it has no meaning at `aburi scan` time when there is no base to compare against. Running it as an IR pass would either produce an artifact that changes on every scan of the workspace (defeating [`overview.md`](./overview.md) §2 "diff stability") or force one arbitrary baseline. Neither is acceptable. Placement in the diff pipeline localizes the pass to exactly the moment its inputs are meaningful.
@@ -328,7 +328,7 @@ Adding an optional top-level array is a non-breaking schema change under [`ir-sc
 
 ### 12.1 Where it appears
 
-A new section `## 🧵 Slice View` is added to `out/diff.md`, positioned between `## 🔧 Logic changes` and `## ➕ Added` in the fixed section order of [`diff-algorithm.md`](./diff-algorithm.md) §7.2 / [`markdown-projection.md`](./markdown-projection.md) §6.1:
+A new section `## 🧵 Slice View` is added to `.aburi/diff.md`, positioned between `## 🔧 Logic changes` and `## ➕ Added` in the fixed section order of [`diff-algorithm.md`](./diff-algorithm.md) §7.2 / [`markdown-projection.md`](./markdown-projection.md) §6.1:
 
 ```
 ## ⚠ API changes
@@ -407,7 +407,7 @@ Each member in the Slice View rendering IS the same Symbol that appears in the c
 
 ### 12.5 Empty Slice View
 
-Per §9.4, if `slices[]` is empty the entire `## 🧵 Slice View` section is omitted from `out/diff.md`. Emitting a heading with an empty body would be visual noise.
+Per §9.4, if `slices[]` is empty the entire `## 🧵 Slice View` section is omitted from `.aburi/diff.md`. Emitting a heading with an empty body would be visual noise.
 
 ### 12.6 Unresolved-call markers
 
@@ -504,7 +504,7 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 
 | ID | Input | Expected |
 |---|---|---|
-| SV19 | Zero-Node PR (only `moved` and `unchanged`) | `slices: []` in JSON; `## 🧵 Slice View` section omitted from `out/diff.md` (§9.4, §12.5) |
+| SV19 | Zero-Node PR (only `moved` and `unchanged`) | `slices: []` in JSON; `## 🧵 Slice View` section omitted from `.aburi/diff.md` (§9.4, §12.5) |
 | SV20 | Some singleton and some multi-member Slices | Multi-member Slices rendered first, then the "Standalone changes" fold (§12.3) |
 | SV21 | Cross-language PR (TS + Python nodes) | Two disjoint singleton-or-multi Slices per language; no cross-language edges attempted (§5.5, §14.13) |
 | SV22 | Any output | `aburi.diff.v1.json` validates unchanged against the schema (§11.3) |
@@ -596,9 +596,9 @@ The `--fail-on` surface stays exactly as [`cli-spec.md`](./cli-spec.md) §6.7 li
 
 Slice View is defined on the **changed** Symbol set, which does not exist without a base. An "always-on" workspace-level Slice View would either need to invent a synthetic baseline (an empty workspace? the first commit?) or produce artifacts that shift with every scan of an unmodified workspace. Either option violates diff stability or produces meaningless output. Restricting the pass to `aburi diff` matches the shape of the reviewer's question.
 
-### 14.9 Why a `## 🧵 Slice View` section in `out/diff.md`, not a separate `out/slices.md`
+### 14.9 Why a `## 🧵 Slice View` section in `.aburi/diff.md`, not a separate `.aburi/slices.md`
 
-[`markdown-projection.md`](./markdown-projection.md) §2 establishes "1 artifact = 1 file" (workspace.md, per-component.md, diff.md, per-symbol/*.md). A separate `out/slices.md` would break that pattern for a view that is a re-grouping of the same diff, not a new artifact. Reviewers paste `diff.md` into a PR comment; splitting Slice View out would either force a second paste or leave it out of the PR comment entirely, defeating the reason for the Markdown projection.
+[`markdown-projection.md`](./markdown-projection.md) §2 establishes "1 artifact = 1 file" (workspace.md, per-component.md, diff.md, per-symbol/*.md). A separate `.aburi/slices.md` would break that pattern for a view that is a re-grouping of the same diff, not a new artifact. Reviewers paste `diff.md` into a PR comment; splitting Slice View out would either force a second paste or leave it out of the PR comment entirely, defeating the reason for the Markdown projection.
 
 ### 14.10 Slice View is additional, not a replacement
 

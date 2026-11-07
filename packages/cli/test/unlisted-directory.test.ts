@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { clearListingFaults, useScratchWorkspace } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { EXIT, IR_JSON_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
-import { TYPESCRIPT, writeConfig } from "./workspace"
+import { defaultOutput, TYPESCRIPT, writeConfig } from "./workspace"
 
 const faults = await vi.hoisted(async () =>
   (await import("@aburi/test-support")).emptyListingFaults(),
@@ -88,7 +88,7 @@ describe("a directory the scan cannot list", () => {
     expect(code, stderr).toBe(EXIT.SUCCESS)
     expect(faults.refused).toContain(locked)
     const ir = JSON.parse(
-      await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+      await readFile(defaultOutput(workspace.root, IR_JSON_FILENAME), "utf8"),
     ) as IR
     expect(ir.symbols.map((symbol) => symbol.id)).toEqual(["ts:src/a.ts#a"])
   })

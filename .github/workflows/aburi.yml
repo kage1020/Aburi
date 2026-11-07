@@ -51,20 +51,22 @@ jobs:
       - name: Hand the comment to the companion workflow
         id: handoff
         if: >-
-          always() && hashFiles('out/diff.md') != ''
+          always() && hashFiles('.aburi/diff.md') != ''
           && steps.aburi.outputs.comment-id == ''
           && (steps.aburi.outputs.cli-exit-code == '0' || steps.aburi.outputs.cli-exit-code == '3')
         run: |
           set -euo pipefail
-          echo "This pull request's own run posted no comment; aburi-comment.yml posts it." > out/comment-pending
+          echo "This pull request's own run posted no comment; aburi-comment.yml posts it." > .aburi/comment-pending
           echo "written=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload the report
-        if: always() && hashFiles('out/diff.md') != ''
+        if: always() && hashFiles('.aburi/diff.md') != ''
         uses: actions/upload-artifact@v7
         with:
           name: aburi-diff
-          path: out/
+          path: .aburi/
+          # The report directory is itself a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
           retention-days: 14
 
       - name: Say what becomes of the comment

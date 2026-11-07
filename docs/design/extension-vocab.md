@@ -397,7 +397,7 @@ Aburi core treats this internally as an **ad-hoc plugin** and auto-registers the
 aburi scan --discover
 ```
 
-- Even when plugin extraction emits values not declared in the registry, this is not an error: a warning is issued and the value is recorded in `out/aburi-vocab-discovered.json`
+- Even when plugin extraction emits values not declared in the registry, this is not an error: a warning is issued and the value is recorded in `.aburi/aburi-vocab-discovered.json`
 - The developer inspects the record and decides whether to promote entries into the manifest
 - The CI default is strict (no `--discover`); discover is recommended for local development only
 

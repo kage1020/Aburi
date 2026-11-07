@@ -108,11 +108,12 @@ resolved, and the arrows name what was written:
 ```
 184 kept · 63 dropped · 212 files
 calls 1043 · resolved 917 · unresolved 126 (external 108 · dynamic 14 · no-match 4)
-→ /home/you/shop/out/aburi.ir.json
-→ /home/you/shop/out/workspace.md
+→ /home/you/shop/.aburi/aburi.ir.json
+→ /home/you/shop/.aburi/workspace.md
 ```
 
-Three things land in `out/`:
+Three things land in `.aburi/`, which ignores itself: the first scan writes a `.gitignore`
+into it, so nothing needs adding to yours.
 
 | File | What it is |
 |---|---|
@@ -134,10 +135,10 @@ The glyph line is the summary — added, removed, changed, moved, moved+changed:
 ```
 +2 -1 ~3 ↔0 ⤴0
 calls 1043 · resolved 917 · unresolved 126 (external 108 · dynamic 14 · no-match 4)
-→ /home/you/shop/out/diff.md
+→ /home/you/shop/.aburi/diff.md
 ```
 
-`out/diff.md` is the report you hand to a reviewer, and `out/diff.json` sits
+`.aburi/diff.md` is the report you hand to a reviewer, and `.aburi/diff.json` sits
 beside it. A tripped `--fail-on` clause prints the reason on stderr, with the Symbols
 that tripped it, and exits `3`, which is what CI gates on:
 

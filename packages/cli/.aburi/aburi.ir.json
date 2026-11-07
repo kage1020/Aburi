@@ -1,0 +1,92 @@
+{
+  "$schema": "https://aburi.dev/schema/aburi.ir.v1.json",
+  "components": [
+    {
+      "description": null,
+      "id": "aburi-output-dir-d-kvybg",
+      "languages": ["ts"],
+      "name": "aburi-output-dir-dKvybg",
+      "roots": ["."]
+    }
+  ],
+  "dependencies": [],
+  "generator": {
+    "name": "aburi",
+    "plugins": [
+      {
+        "grammarRevision": "pending@0.0.0",
+        "name": "lang-typescript",
+        "type": "lang",
+        "version": "0.0.0"
+      }
+    ],
+    "version": "0.6.0"
+  },
+  "stats": {
+    "callResolution": {
+      "resolvedCalls": 0,
+      "totalCalls": 0,
+      "unresolved": {
+        "ambiguous": 0,
+        "dynamic": 0,
+        "external": 0,
+        "localScope": 0,
+        "noMatch": 0
+      }
+    },
+    "droppedSymbols": 0,
+    "effectPropagation": {
+      "maxSccSize": 1,
+      "propagatedEffectCount": 0,
+      "sccCount": 1,
+      "symbolsWithPropagatedEffects": 0
+    },
+    "keptSymbols": 1,
+    "parsedFiles": 1,
+    "totalFiles": 1
+  },
+  "symbols": [
+    {
+      "calls": [],
+      "component": "aburi-output-dir-d-kvybg",
+      "confidence": "high",
+      "decorators": [],
+      "derivedBy": ["export-keyword"],
+      "dropReason": null,
+      "dropped": false,
+      "effects": [],
+      "extKind": null,
+      "fingerprint": {
+        "api": "c4e4ca03bded",
+        "logic": "a0af04270155",
+        "syntax": "ad060af1f6cc"
+      },
+      "id": "ts:src/a.ts#alpha",
+      "kind": "function",
+      "language": "ts",
+      "name": "alpha",
+      "rules": [],
+      "signature": {
+        "async": false,
+        "generator": false,
+        "inputs": [],
+        "outputs": [],
+        "throws": [],
+        "typeParameters": []
+      },
+      "source": {
+        "endColumn": null,
+        "endLine": 1,
+        "file": "src/a.ts",
+        "startColumn": null,
+        "startLine": 1
+      },
+      "visibility": "public"
+    }
+  ],
+  "workspace": {
+    "languages": ["ts"],
+    "managers": [],
+    "root": "."
+  }
+}

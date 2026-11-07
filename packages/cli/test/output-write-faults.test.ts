@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   CliError,
   COMPONENTS_DIRNAME,
+  DEFAULT_OUTPUT_DIRNAME,
   DIFF_FULL_MD_FILENAME,
   DIFF_JSON_FILENAME,
   DIFF_MD_FILENAME,
@@ -78,13 +79,13 @@ describe("aburi scan with an --output-dir that cannot hold the outputs", () => {
 
   it("names the workspace Markdown when a directory stands where it would go", async () => {
     await writeTypeScriptWorkspace(workspace.root, "write-fixture")
-    await mkdir(under("out", WORKSPACE_MD_FILENAME), { recursive: true })
+    await mkdir(under(DEFAULT_OUTPUT_DIRNAME, WORKSPACE_MD_FILENAME), { recursive: true })
 
     const { code, stderr } = await run("scan", "--format", "md")
 
     expect(code).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi scan could not write the workspace Markdown to ${under("out", WORKSPACE_MD_FILENAME)}`,
+      `aburi scan could not write the workspace Markdown to ${under(DEFAULT_OUTPUT_DIRNAME, WORKSPACE_MD_FILENAME)}`,
     )
     expect(stderr).toContain("--output-dir")
   })
@@ -96,13 +97,13 @@ describe("aburi scan with an --output-dir that cannot hold the outputs", () => {
     "names %s, which --format %s does not write, when a directory stands in its place",
     async (artefact, format, filename) => {
       await writeTypeScriptWorkspace(workspace.root, "write-fixture")
-      await mkdir(under("out", filename), { recursive: true })
+      await mkdir(under(DEFAULT_OUTPUT_DIRNAME, filename), { recursive: true })
 
       const { code, stderr } = await run("scan", "--format", format)
 
       expect(code).toBe(EXIT.INPUT_ERROR)
       expect(stderr).toContain(
-        `aburi scan could not remove ${artefact} at ${under("out", filename)}`,
+        `aburi scan could not remove ${artefact} at ${under(DEFAULT_OUTPUT_DIRNAME, filename)}`,
       )
       expect(stderr).toContain("a directory stands where an earlier run's file would be")
       expect(stderr).toContain("--output-dir")
@@ -112,18 +113,18 @@ describe("aburi scan with an --output-dir that cannot hold the outputs", () => {
   it("keeps the IR an earlier run wrote when --format md stops at a page it cannot write", async () => {
     await writeTypeScriptWorkspace(workspace.root, "write-fixture")
     expect((await run("scan", "--format", "json")).code).toBe(EXIT.SUCCESS)
-    const earlier = await readFile(under("out", IR_JSON_FILENAME), "utf8")
-    await mkdir(under("out", WORKSPACE_MD_FILENAME))
+    const earlier = await readFile(under(DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME), "utf8")
+    await mkdir(under(DEFAULT_OUTPUT_DIRNAME, WORKSPACE_MD_FILENAME))
 
     const { code } = await run("scan", "--format", "md")
 
     expect(code).toBe(EXIT.INPUT_ERROR)
-    expect(await readFile(under("out", IR_JSON_FILENAME), "utf8")).toBe(earlier)
+    expect(await readFile(under(DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME), "utf8")).toBe(earlier)
   })
 
   it("names the component whose Markdown could not be written", async () => {
     await writeTypeScriptWorkspace(workspace.root, "write-fixture")
-    const componentMd = under("out", COMPONENTS_DIRNAME, "write-fixture.md")
+    const componentMd = under(DEFAULT_OUTPUT_DIRNAME, COMPONENTS_DIRNAME, "write-fixture.md")
     await mkdir(componentMd, { recursive: true })
 
     const { code, stderr } = await run("scan", "--format", "md")
@@ -172,7 +173,7 @@ describe("aburi scan into a place the machine refuses", () => {
     async (_, mode, flags, failed, name) => {
       await writeTypeScriptWorkspace(workspace.root, "write-fixture")
       expect((await run("scan")).code).toBe(EXIT.SUCCESS)
-      const components = under("out", COMPONENTS_DIRNAME)
+      const components = under(DEFAULT_OUTPUT_DIRNAME, COMPONENTS_DIRNAME)
       await chmod(components, mode)
 
       const { code, stderr } = await run("scan", ...flags).finally(() => chmod(components, 0o700))
@@ -187,8 +188,11 @@ describe("aburi scan into a place the machine refuses", () => {
     "reports a page it may not read as a runtime failure naming the step and the path",
     async () => {
       await writeTypeScriptWorkspace(workspace.root, "write-fixture")
-      const stale = under("out", COMPONENTS_DIRNAME, "stale.md")
-      await workspace.writeSource(`out/${COMPONENTS_DIRNAME}/stale.md`, "# Component: stale\n")
+      const stale = under(DEFAULT_OUTPUT_DIRNAME, COMPONENTS_DIRNAME, "stale.md")
+      await workspace.writeSource(
+        `${DEFAULT_OUTPUT_DIRNAME}/${COMPONENTS_DIRNAME}/stale.md`,
+        "# Component: stale\n",
+      )
       await chmod(stale, 0o200)
 
       const { code, stderr } = await run("scan")
@@ -262,13 +266,13 @@ describe("aburi diff with an --output-dir that cannot hold the outputs", () => {
   ])(
     "names %s an earlier run left when a directory stands in its place",
     async (artefact, filename, flags) => {
-      await mkdir(under("out", filename), { recursive: true })
+      await mkdir(under(DEFAULT_OUTPUT_DIRNAME, filename), { recursive: true })
 
       const { code, stderr } = await run("diff", ...(await documents()), ...flags)
 
       expect(code).toBe(EXIT.INPUT_ERROR)
       expect(stderr).toContain(
-        `aburi diff could not remove ${artefact} at ${under("out", filename)}`,
+        `aburi diff could not remove ${artefact} at ${under(DEFAULT_OUTPUT_DIRNAME, filename)}`,
       )
       expect(stderr).toContain("a directory stands where an earlier run's file would be")
       expect(stderr).toContain("--output-dir")

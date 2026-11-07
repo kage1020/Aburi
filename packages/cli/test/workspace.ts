@@ -1,9 +1,19 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, posix, relative, resolve, sep } from "node:path"
 import { CONFIG_SCHEMA_URL, type IR } from "@aburi/types"
-import { DIFF_FULL_MD_FILENAME, DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../src"
+import {
+  DEFAULT_OUTPUT_DIRNAME,
+  DIFF_FULL_MD_FILENAME,
+  DIFF_JSON_FILENAME,
+  DIFF_MD_FILENAME,
+} from "../src"
 
 export const TYPESCRIPT = { languages: ["lang-typescript"] }
+
+/** A path under the directory a command writes to when neither a flag nor the config names one. */
+export function defaultOutput(root: string, ...segments: string[]): string {
+  return resolve(root, DEFAULT_OUTPUT_DIRNAME, ...segments)
+}
 
 export async function writeFileAt(root: string, rel: string, content: string): Promise<void> {
   const path = resolve(root, rel)

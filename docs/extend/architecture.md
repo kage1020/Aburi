@@ -6,7 +6,7 @@ want to use the tool, start with the [guide](../guide/what-is-aburi.md).
 ## One artifact, many views
 
 Everything Aburi produces comes from a single JSON document,
-`out/aburi.ir.json`, the intermediate representation, or IR. It is the only
+`.aburi/aburi.ir.json`, the intermediate representation, or IR. It is the only
 thing the pipeline writes. The Markdown reports, the diff, and `explain` all
 derive from it afterwards.
 

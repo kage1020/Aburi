@@ -2,7 +2,7 @@ import { mkdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { EXIT, type ExitCode, IR_JSON_FILENAME } from "../src"
+import { DEFAULT_OUTPUT_DIRNAME, EXIT, type ExitCode, IR_JSON_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
 import { TYPESCRIPT, writeConfig, writePackageJson } from "./workspace"
 
@@ -118,7 +118,8 @@ async function runIn(command: "scan" | "init") {
   await workspace.writeSource("pnpm-workspace.yaml", 'packages:\n  - "*"\n')
   if (command === "scan") await writeConfig(workspace.root, TYPESCRIPT)
   const run = await runCliIn(workspace.root, [command])
-  const written = command === "scan" ? `out/${IR_JSON_FILENAME}` : "aburi.json"
+  const written =
+    command === "scan" ? `${DEFAULT_OUTPUT_DIRNAME}/${IR_JSON_FILENAME}` : "aburi.json"
   const { components } = JSON.parse(await readFile(resolve(workspace.root, written), "utf8")) as {
     components: { roots: string[] }[]
   }

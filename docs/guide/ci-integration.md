@@ -198,7 +198,7 @@ The CLI has no opinion about your platform. Run it and read the exit code.
 aburi diff "origin/${BASE_BRANCH}..HEAD" --fail-on 'removed,changed:>20'
 ```
 
-`out/diff.md` is the report. Post it wherever your platform takes Markdown.
+`.aburi/diff.md` is the report. Post it wherever your platform takes Markdown.
 
 `aburi.ir.json` carries no timestamp, so identical commits produce identical bytes.
 With the `CI` environment variable set, `aburi-vocab-discovered.json` leaves out its

@@ -2,12 +2,12 @@ import { rename } from "node:fs/promises"
 import { resolve } from "node:path"
 import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { EXIT, IR_JSON_FILENAME, runExplain, runScan } from "../src"
+import { DEFAULT_OUTPUT_DIRNAME, EXIT, IR_JSON_FILENAME, runExplain, runScan } from "../src"
 import { pathExists } from "../src/fs-probe"
 import { symbolFor, writeScannedWorkspace } from "./ir-documents"
 import { runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
-import { TYPESCRIPT, writeConfig } from "./workspace"
+import { defaultOutput, TYPESCRIPT, writeConfig } from "./workspace"
 
 const workspace = useScratchWorkspace("explain-scan")
 
@@ -81,7 +81,7 @@ describe("aburi explain with no IR on disk — the scan it runs", () => {
     const outcome = await runExplain({ cwd: workspace.root, argument: "ok_stub" })
 
     expect(outcome.kind).toBe("single")
-    expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(true)
+    expect(await pathExists(defaultOutput(workspace.root, IR_JSON_FILENAME))).toBe(true)
     for (const page of [scanned.workspaceMdPath, ...scanned.componentMdPaths]) {
       expect(await pathExists(page ?? "")).toBe(true)
     }
@@ -98,7 +98,7 @@ describe("aburi explain with no IR on disk — the scan it runs", () => {
 
 describe("aburi explain with an IR on disk", () => {
   it.each([
-    ["the one scan wrote", "out", []],
+    ["the one scan wrote", DEFAULT_OUTPUT_DIRNAME, []],
     ["named with --ir", "pinned", ["--ir", "pinned/aburi.ir.json"]],
   ])("reports none of the incidents of the scan that wrote %s", async (_, outputDir, flags) => {
     await writeStubWorkspace(workspace.root, ["boom.stub", "ok.stub"])
@@ -136,7 +136,7 @@ describe("aburi explain --debug-resolution", () => {
       /--debug-resolution needs a fresh scan .* cannot be combined with --no-rescan/,
     ],
     [
-      { irPath: "out/aburi.ir.json" },
+      { irPath: `${DEFAULT_OUTPUT_DIRNAME}/aburi.ir.json` },
       /--debug-resolution needs a fresh scan .* cannot read an existing --ir file/,
     ],
   ])(

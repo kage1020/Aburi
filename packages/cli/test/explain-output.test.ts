@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 import { CliError, EXIT, runExplain } from "../src"
 import { symbolFor, writeScannedWorkspace } from "./ir-documents"
 import { writeStubWorkspace } from "./stub-language"
-import { writeFileAt } from "./workspace"
+import { defaultOutput, writeFileAt } from "./workspace"
 
 const workspace = useScratchWorkspace("explain-output")
 
@@ -35,7 +35,7 @@ describe("aburi explain --output", () => {
   it("leaves an earlier file alone when it has no answer to write", async () => {
     const lost: SkippedFile = { path: "src/route.ts", reason: "parse-failed" }
     await writeScannedWorkspace(workspace.root, { symbols: [GET_USER], skipped: [lost] })
-    const output = resolve(workspace.root, "out/explain.md")
+    const output = defaultOutput(workspace.root, "explain.md")
     await writeFile(output, "# a previous answer\n", "utf8")
 
     const outcome = await runExplain({

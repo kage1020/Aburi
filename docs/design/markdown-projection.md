@@ -19,7 +19,7 @@ The projection is **deterministic**: the same IR always produces the same Markdo
 ## 2. Output file layout
 
 ```
-out/
+.aburi/
 ├─ workspace.md                       # L0 monorepo overview
 ├─ components/
 │  ├─ billing.md                      # L1 + L2 (all symbols of the billing component)
@@ -500,7 +500,7 @@ The 3 axes on one line via `<sub>`:
 
 Symbols whose fingerprint is all zeros (dropped) do not emit a fingerprint line, and neither does a `diff.md` entry for an added, removed or unknown Symbol: with one revision, the hashes have nothing to be compared with (MP19).
 
-## 6. Diff Markdown — `out/diff.md`
+## 6. Diff Markdown — `.aburi/diff.md`
 
 The output of `aburi diff`. Its primary use case is pasting into PR comments.
 
@@ -875,7 +875,7 @@ When `aburi diff` runs, a one-line summary is printed to stdout:
 +5 -3 ~12 ↔2 ⤴1   (added / removed / changed / moved / moved+changed)
 ```
 
-It points to `out/diff.md` for the details.
+It points to `.aburi/diff.md` for the details.
 
 ### 6.4 Size cap (`maxBytes`)
 
@@ -997,7 +997,7 @@ prepends ([`github-action.md`](./github-action.md) §5.2).
 
 ## 7. `aburi explain <id>` — single Symbol
 
-Renders L2 standalone. Written to `out/symbols/<sanitized-id>.md` or to `stdout`.
+Renders L2 standalone. Written to `.aburi/symbols/<sanitized-id>.md` or to `stdout`.
 
 ````md
 # `InvoiceService.createInvoice` *(method)*
@@ -1057,7 +1057,7 @@ When a dropped symbol is explained:
 
 ## 8. Sanitization
 
-File names under `out/symbols/<id>.md` sanitize the symbol id:
+File names under `.aburi/symbols/<id>.md` sanitize the symbol id:
 - `:` → `-`
 - `/` → `-`
 - `#` → `-`
@@ -1076,7 +1076,7 @@ The hash algorithm is the same as for fingerprints:
 
 ## 9. Mermaid diagrams (optional)
 
-Emitted in the L0 `workspace.md` `## Component dependencies` section (see §4.2). Slice View has its own `## 🧵 Slice View` section within `out/diff.md`; see [`slice-view.md`](./slice-view.md) §12 for the rendering conventions.
+Emitted in the L0 `workspace.md` `## Component dependencies` section (see §4.2). Slice View has its own `## 🧵 Slice View` section within `.aburi/diff.md`; see [`slice-view.md`](./slice-view.md) §12 for the rendering conventions.
 
 - `graph LR` (left → right) is used for Component dependencies
 - every component in `ir.components` renders as a node, including isolated ones with no incident edges

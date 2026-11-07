@@ -1,11 +1,10 @@
-import { resolve } from "node:path"
 import { commitAll, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { DIFF_JSON_FILENAME, EXIT, IR_JSON_FILENAME } from "../src"
 import { pathExists } from "../src/fs-probe"
 import { EFFECTS_MANIFEST, pluginModuleSource } from "./plugin-fakes"
 import { runCliIn } from "./run-cli"
-import { TYPESCRIPT, writeConfig } from "./workspace"
+import { defaultOutput, TYPESCRIPT, writeConfig } from "./workspace"
 
 const workspace = useScratchWorkspace("plugin-set-faults")
 
@@ -63,7 +62,7 @@ describe("aburi scan — a fault in the plugin set raised while classifying", ()
     expect(code, stderr).toBe(EXIT.GATE)
     expect(stderr).toContain(says)
     expect(stdout).toBe("")
-    expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(false)
+    expect(await pathExists(defaultOutput(workspace.root, IR_JSON_FILENAME))).toBe(false)
   })
 
   it("exits 0 for the same plugin classifying the call as nothing", async () => {
@@ -72,7 +71,7 @@ describe("aburi scan — a fault in the plugin set raised while classifying", ()
     const { code, stderr } = await runCliIn(workspace.root, ["scan", "--format", "json"])
 
     expect(code, stderr).toBe(EXIT.SUCCESS)
-    expect(await pathExists(resolve(workspace.root, "out", IR_JSON_FILENAME))).toBe(true)
+    expect(await pathExists(defaultOutput(workspace.root, IR_JSON_FILENAME))).toBe(true)
   })
 })
 
@@ -90,6 +89,6 @@ describe("every command that scans — a value refused through a plugin's regist
     expect(code, stderr).toBe(EXIT.GATE)
     expect(stderr).toContain(REFUSED)
     expect(stdout).toBe("")
-    expect(await pathExists(resolve(workspace.root, "out", filename))).toBe(false)
+    expect(await pathExists(defaultOutput(workspace.root, filename))).toBe(false)
   })
 })

@@ -1,9 +1,8 @@
 import { readdir, readFile } from "node:fs/promises"
-import { resolve } from "node:path"
 import { errorFrom, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { CliError, IR_JSON_FILENAME, runScan, WORKSPACE_MD_FILENAME } from "../src"
-import { writeTypeScriptWorkspace } from "./workspace"
+import { defaultOutput, writeTypeScriptWorkspace } from "./workspace"
 
 const FAILURE = "Maximum call stack size exceeded"
 
@@ -30,7 +29,7 @@ beforeEach(async () => {
   await writeTypeScriptWorkspace(workspace.root, "projection-failure-fixture")
 })
 
-const written = () => readdir(resolve(workspace.root, "out"))
+const written = () => readdir(defaultOutput(workspace.root))
 
 describe("a Markdown projection that throws", () => {
   it("leaves the IR when the first page fails, because the IR is written before any page", async () => {
@@ -41,7 +40,7 @@ describe("a Markdown projection that throws", () => {
     expect(await written()).toContain(IR_JSON_FILENAME)
     expect(await written()).not.toContain(WORKSPACE_MD_FILENAME)
     const ir = JSON.parse(
-      await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+      await readFile(defaultOutput(workspace.root, IR_JSON_FILENAME), "utf8"),
     ) as { components: unknown[] }
     expect(ir.components.length).toBeGreaterThan(0)
   })

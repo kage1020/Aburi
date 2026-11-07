@@ -57,7 +57,7 @@ fetches only the blobs a checkout touches. Reruns reuse the clones.
 ## What the harness does per repo
 
 1. Check the clone out at the pinned `head`, and `git clean -xfd` it — keeping
-   `out/` and `aburi.json`, which are the harness's own and have to outlive the
+   `.aburi/` and `aburi.json`, which are the harness's own and have to outlive the
    checkout.
 2. Run `aburi init` (measured) and keep what it detected.
 3. Rewrite the detected plugin refs to `file://` URLs for this checkout's built

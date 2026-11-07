@@ -93,7 +93,7 @@
         "dir": {
           "type": "string",
           "minLength": 1,
-          "default": "out",
+          "default": ".aburi",
           "description": "Where scan and diff write their artifacts, and where explain reads the IR back from. Resolved against the working directory, as --output-dir is; --output-dir wins when both are given. May be absolute, which is why this is not a RelativePath."
         }
       }
@@ -101,7 +101,7 @@
     "strict": {
       "type": "boolean",
       "default": true,
-      "description": "If true, undeclared vocab emitted by plugins aborts extraction. If false, warnings are written to out/aburi-vocab-discovered.json."
+      "description": "If true, undeclared vocab emitted by plugins aborts extraction. If false, warnings are written to aburi-vocab-discovered.json in the output directory."
     },
     "maxFileSizeBytes": {
       "type": "integer",

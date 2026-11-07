@@ -1,11 +1,10 @@
 import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
 import { symbolNamed, useScratchWorkspace } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { EXIT, IR_JSON_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
-import { TYPESCRIPT, writeConfig as writeConfigAt } from "./workspace"
+import { defaultOutput, TYPESCRIPT, writeConfig as writeConfigAt } from "./workspace"
 
 const workspace = useScratchWorkspace("framework-hints")
 
@@ -20,7 +19,7 @@ async function scan(): Promise<{ exitCode: number; output: string }> {
 
 async function scanned(name: string): Promise<IRSymbol> {
   const ir = JSON.parse(
-    await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+    await readFile(defaultOutput(workspace.root, IR_JSON_FILENAME), "utf8"),
   ) as IR
   return symbolNamed({ ir }, name)
 }

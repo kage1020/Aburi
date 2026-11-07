@@ -8,7 +8,7 @@ import { documentWith } from "./ir-documents"
 import { FAKE_LANGUAGE_PLUGIN, LANG_MANIFEST, pluginModuleSource } from "./plugin-fakes"
 import { MemStream, runCliIn } from "./run-cli"
 import { writeStubRepository } from "./stub-language"
-import { writeFileAt, writeIRs } from "./workspace"
+import { defaultOutput, writeFileAt, writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-concurrency")
 
@@ -110,7 +110,7 @@ async function diffWith(flag: string) {
     })
     const report = await Promise.all(
       [DIFF_JSON_FILENAME, DIFF_MD_FILENAME].map((name) =>
-        readFile(resolve(workspace.root, "out", name), "utf8").catch(() => null),
+        readFile(defaultOutput(workspace.root, name), "utf8").catch(() => null),
       ),
     )
     return { code, stdout: stdout.text(), said: stderr.chunks, report }

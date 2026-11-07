@@ -9,9 +9,9 @@ snapshot-test outputs without stubbing side effects.
 
 | Function | Emits | Consumer |
 |---|---|---|
-| `projectWorkspace(ir, options?)` | L0 workspace overview (component list + dependency edges); `options.suppressTimestamp` mirrors the CLI's `--no-timestamp` for reproducible snapshots. | `out/workspace.md` |
-| `projectComponent({ component, symbols, dependencies })` | L1 + L2 component detail (public API surface + module logic). The single-argument form makes it explicit that the caller must have pre-filtered `symbols` / `dependencies` to the ones belonging to `component`. | `out/components/<id>.md` |
-| `projectDiff(diff, { maxBytes?, fullReportLocation? })` | Review-facing PR summary (added / removed / changed / moved with confidence badges), optionally capped to a byte budget; `fullReportLocation` names where the uncapped report is, for the note a capped one carries | `out/diff.md`, PR comment |
+| `projectWorkspace(ir, options?)` | L0 workspace overview (component list + dependency edges); `options.suppressTimestamp` mirrors the CLI's `--no-timestamp` for reproducible snapshots. | `.aburi/workspace.md` |
+| `projectComponent({ component, symbols, dependencies })` | L1 + L2 component detail (public API surface + module logic). The single-argument form makes it explicit that the caller must have pre-filtered `symbols` / `dependencies` to the ones belonging to `component`. | `.aburi/components/<id>.md` |
+| `projectDiff(diff, { maxBytes?, fullReportLocation? })` | Review-facing PR summary (added / removed / changed / moved with confidence badges), optionally capped to a byte budget; `fullReportLocation` names where the uncapped report is, for the note a capped one carries | `.aburi/diff.md`, PR comment |
 | `projectSymbolExplain(symbol)` | Per-Symbol detail (rules / effects / calls / dropped fold-out) | `aburi explain` stdout |
 
 Also exports the `formatFailOnClause` / `formatFailOnTriggered` helpers that

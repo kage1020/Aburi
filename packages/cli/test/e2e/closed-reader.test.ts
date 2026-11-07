@@ -3,7 +3,8 @@ import { open, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { commitAll, gitTestEnv, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { EXIT, type ExitCode } from "../../src"
+import { DEFAULT_OUTPUT_DIRNAME, EXIT, type ExitCode } from "../../src"
+import { defaultOutput } from "../workspace"
 import {
   CLI_BIN,
   linkedWorktrees,
@@ -23,7 +24,7 @@ useBuiltBin()
 beforeEach(async () => {
   await workspace.writeSource("package.json", '{"name":"demo","private":true}\n')
   await workspace.writeSource("aburi.json", '{"languages":["lang-typescript"]}\n')
-  await workspace.writeSource(".gitignore", "out/\n")
+  await workspace.writeSource(".gitignore", `${DEFAULT_OUTPUT_DIRNAME}/\n`)
   await workspace.writeSource("src/one.ts", ONE)
   // A recoverable parse error puts lines on stderr for each command below, without moving its code.
   await workspace.writeSource("src/broken.ts", "export function broken(): number { return 1 + }\n")
@@ -39,9 +40,9 @@ afterEach(async () => {
 
 async function runFromScratch(argv: readonly string[], unread: OutputStream | null = null) {
   // `explain` answers from the IR an earlier run left, and then has no scan to report on.
-  await rm(join(workspace.root, "out"), { recursive: true, force: true })
+  await rm(defaultOutput(workspace.root), { recursive: true, force: true })
   const run = await runBin(workspace.root, argv, gitTestEnv(workspace.root), unread)
-  const written = await readdir(join(workspace.root, "out"), { recursive: true })
+  const written = await readdir(defaultOutput(workspace.root), { recursive: true })
   return { ...run, written: written.sort() }
 }
 

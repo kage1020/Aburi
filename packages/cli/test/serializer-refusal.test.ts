@@ -1,10 +1,9 @@
 import { readdir } from "node:fs/promises"
-import { resolve } from "node:path"
 import { errorFrom, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it, vi } from "vitest"
 import { CliError, runDiff, runScan } from "../src"
 import { documentWith } from "./ir-documents"
-import { writeIRs, writeTypeScriptWorkspace } from "./workspace"
+import { defaultOutput, writeIRs, writeTypeScriptWorkspace } from "./workspace"
 
 const REFUSAL = "serializeCanonical at $.symbols[0]: keys render identically after NFC"
 
@@ -38,7 +37,7 @@ describe("a document the serializer refuses", () => {
 
     expect(error.code).toBe("config-error")
     expect(error.message).toBe(
-      `Failed to serialize the IR for ${resolve(workspace.root, "out", "aburi.ir.json")}: ${REFUSAL}`,
+      `Failed to serialize the IR for ${defaultOutput(workspace.root, "aburi.ir.json")}: ${REFUSAL}`,
     )
   })
 
@@ -47,7 +46,7 @@ describe("a document the serializer refuses", () => {
 
     await errorFrom(CliError, () => runScan({ cwd: workspace.root }))
 
-    expect(await readdir(resolve(workspace.root, "out"))).toEqual([])
+    expect(await readdir(defaultOutput(workspace.root))).toEqual([".gitignore"])
   })
 
   it("is aburi diff's input error the same way", async () => {
@@ -60,7 +59,7 @@ describe("a document the serializer refuses", () => {
 
     expect(error.code).toBe("config-error")
     expect(error.message).toBe(
-      `Failed to serialize the diff for ${resolve(workspace.root, "out", "diff.json")}: ${REFUSAL}`,
+      `Failed to serialize the diff for ${defaultOutput(workspace.root, "diff.json")}: ${REFUSAL}`,
     )
   })
 })

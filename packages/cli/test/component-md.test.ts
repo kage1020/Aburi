@@ -1,9 +1,8 @@
 import { readdir, readFile, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { COMPONENTS_DIRNAME, EXIT, runScan } from "../src"
-import { TYPESCRIPT, writeConfig, writePackageJson } from "./workspace"
+import { COMPONENTS_DIRNAME, DEFAULT_OUTPUT_DIRNAME, EXIT, runScan } from "../src"
+import { defaultOutput, TYPESCRIPT, writeConfig, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("component-md")
 
@@ -30,7 +29,7 @@ describe("out/components/<id>.md", () => {
 
     expect(report.exitCode).toBe(EXIT.SUCCESS)
     const page = (id: string) =>
-      readFile(resolve(workspace.root, "out", COMPONENTS_DIRNAME, `${id}.md`), "utf8")
+      readFile(defaultOutput(workspace.root, COMPONENTS_DIRNAME, `${id}.md`), "utf8")
     const api = await page("api")
     expect(api).toContain("# Component: api")
     expect(api).toMatch(/\*\*Symbols\*\*: [1-9]\d* kept/)
@@ -45,7 +44,7 @@ describe("out/components/<id>.md", () => {
 })
 
 describe("out/components/ after Components are renamed or removed", () => {
-  const inComponents = (name: string) => resolve(workspace.root, "out", COMPONENTS_DIRNAME, name)
+  const inComponents = (name: string) => defaultOutput(workspace.root, COMPONENTS_DIRNAME, name)
   const pages = async () => (await readdir(inComponents("."))).sort()
 
   async function scanDeclaring(rootById: Record<string, string>): Promise<void> {
@@ -94,7 +93,7 @@ describe("out/components/ after Components are renamed or removed", () => {
     ["a directory named like a page", "zeta.md/notes.md", "# Component: zeta\n"],
   ])("keeps %s beside the pages", async (_, name, contents) => {
     await scanDeclaring(BEFORE)
-    await workspace.writeSource(`out/${COMPONENTS_DIRNAME}/${name}`, contents)
+    await workspace.writeSource(`${DEFAULT_OUTPUT_DIRNAME}/${COMPONENTS_DIRNAME}/${name}`, contents)
 
     await scanDeclaring(AFTER)
 

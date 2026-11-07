@@ -1,6 +1,6 @@
 import { mkdir, open, readdir, rm, writeFile } from "node:fs/promises"
-import { dirname } from "node:path"
-import { OUTPUT_DIR_SOURCES } from "./artifact-paths"
+import { dirname, join } from "node:path"
+import { OUTPUT_DIR_GITIGNORE, OUTPUT_DIR_SOURCES } from "./artifact-paths"
 import { CliError, errorCode, errorMessage } from "./errors"
 import { ABSENT_ERRNOS } from "./fs-probe"
 
@@ -90,11 +90,33 @@ async function unlessAbsent<T>(
   }
 }
 
-export async function createOutputDir(command: OutputCommand, path: string): Promise<void> {
+/**
+ * Only the default directory, and only when this run created it, is Aburi's to mark ignored: one
+ * that was already there is the user's, and another place may be one they mean to commit.
+ */
+export async function createOutputDir(
+  command: OutputCommand,
+  path: string,
+  isDefault = false,
+): Promise<void> {
+  let created: string | undefined
   try {
-    await mkdir(path, { recursive: true })
+    created = await mkdir(path, { recursive: true })
   } catch (error) {
     throw cannot("write", { command, artefact: "the output directory", path }, error)
+  }
+  if (!isDefault || created === undefined) return
+  const gitignore = join(path, ".gitignore")
+  try {
+    await writeFile(gitignore, OUTPUT_DIR_GITIGNORE, { encoding: "utf8", flag: "wx" })
+  } catch (error) {
+    // Something put a .gitignore there after the mkdir, and it is not this run's to replace.
+    if (errorCode(error) === "EEXIST") return
+    throw cannot(
+      "write",
+      { command, artefact: "the output directory's .gitignore", path: gitignore },
+      error,
+    )
   }
 }
 

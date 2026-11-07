@@ -1,11 +1,10 @@
 import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import type { IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { EXIT, IR_JSON_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
-import { TYPESCRIPT, writeConfig, writePackageJson } from "./workspace"
+import { defaultOutput, TYPESCRIPT, writeConfig, writePackageJson } from "./workspace"
 
 const workspace = useScratchWorkspace("gitignore-override")
 
@@ -54,7 +53,7 @@ describe("aburi scan — whether .gitignore is honoured", () => {
 
     expect(code, stderr).toBe(EXIT.SUCCESS)
     const ir = JSON.parse(
-      await readFile(resolve(workspace.root, "out", IR_JSON_FILENAME), "utf8"),
+      await readFile(defaultOutput(workspace.root, IR_JSON_FILENAME), "utf8"),
     ) as IR
     expect(ir.symbols.map((symbol) => symbol.id).sort()).toEqual([...symbols].sort())
   })

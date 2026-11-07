@@ -105,8 +105,8 @@ Config is version-controlled; when regenerating a past IR, the operational rule 
 
 ```bash
 aburi init                       # generate config (autodetect: workspace manager / framework / language)
-aburi scan                       # generate full IR → out/aburi.ir.json + out/workspace.md + out/components/*.md
-aburi diff <base>..<head>        # semantic diff → out/diff.md (for pasting as a PR comment)
+aburi scan                       # generate full IR → .aburi/aburi.ir.json + .aburi/workspace.md + .aburi/components/*.md
+aburi diff <base>..<head>        # semantic diff → .aburi/diff.md (for pasting as a PR comment)
 aburi explain <file-or-symbol>   # L2 Markdown for a single symbol to stdout
 ```
 

@@ -7,7 +7,7 @@ import { DIFF_FULL_MD_FILENAME, DIFF_MD_FILENAME, EXIT, runDiff } from "../src"
 import { pathExists } from "../src/fs-probe"
 import { diffDocuments, documentWith } from "./ir-documents"
 import { runCliIn } from "./run-cli"
-import { writeIRs } from "./workspace"
+import { defaultOutput, writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-max-bytes")
 
@@ -119,7 +119,7 @@ describe("aburi diff --max-bytes on the command line", () => {
 
     expect(code).toBe(EXIT.SUCCESS)
     expect(
-      await markdownBytes(resolve(workspace.root, "out", DIFF_MD_FILENAME)),
+      await markdownBytes(defaultOutput(workspace.root, DIFF_MD_FILENAME)),
     ).toBeLessThanOrEqual(2000)
   })
 

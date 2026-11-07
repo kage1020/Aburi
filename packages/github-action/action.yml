@@ -51,7 +51,7 @@ inputs:
       Where `aburi diff` writes `diff.json` and `diff.md` (forwarded to `--output-dir`): a relative
       value is relative to `working-directory`, an absolute one is used as it is. Must not be empty.
     required: false
-    default: "out"
+    default: ".aburi"
   format:
     description: "`json | md | both`. Must include `md` when `comment: true`; the action verifies this."
     required: false

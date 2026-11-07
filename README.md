@@ -58,7 +58,7 @@ the same report, and you can gate CI on any category it counts:
 pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-next @aburi/framework-react
 
 pnpm exec aburi init                # detect the project, write aburi.json
-pnpm exec aburi scan                # analyse the workspace → out/
+pnpm exec aburi scan                # analyse the workspace → .aburi/
 pnpm exec aburi diff main..HEAD --fail-on 'removed,changed:>20'
 ```
 

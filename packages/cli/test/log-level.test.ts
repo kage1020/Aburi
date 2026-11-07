@@ -1,11 +1,10 @@
-import { resolve } from "node:path"
 import { fp, makeSymbol, useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { COMPONENTS_DIRNAME, EXIT, VOCAB_DISCOVERED_FILENAME, WORKSPACE_MD_FILENAME } from "../src"
 import { documentWith } from "./ir-documents"
 import { runCliIn } from "./run-cli"
 import { writeStubRepository, writeStubWorkspace } from "./stub-language"
-import { writeIRs } from "./workspace"
+import { defaultOutput, writeIRs } from "./workspace"
 
 const workspace = useScratchWorkspace("log-level")
 
@@ -131,7 +130,7 @@ describe("aburi scan — the log of the files it removes", () => {
   ])("gives %s", async (_, flags, shown) => {
     await writeStubWorkspace(workspace.root, ["ok.stub"])
     expect((await runCliIn(workspace.root, ["scan", "--discover"])).code).toBe(EXIT.SUCCESS)
-    const out = (...segments: string[]) => resolve(workspace.root, "out", ...segments)
+    const out = (...segments: string[]) => defaultOutput(workspace.root, ...segments)
     const removed = [
       `info: Removed the discovered-vocabulary record at ${out(VOCAB_DISCOVERED_FILENAME)}\n`,
       `info: Removed the workspace Markdown at ${out(WORKSPACE_MD_FILENAME)}\n`,

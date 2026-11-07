@@ -31,7 +31,7 @@ async function ensureClone(repo, workDir) {
     await git(["clone", "--filter=blob:none", "--no-checkout", repo.url, dir])
   }
   await git(["checkout", "--force", "--detach", repo.head], dir)
-  await git(["clean", "-xfd", "--exclude=out", "--exclude=aburi.json"], dir)
+  await git(["clean", "-xfd", "--exclude=.aburi", "--exclude=aburi.json"], dir)
   return dir
 }
 
@@ -113,7 +113,7 @@ async function measureRepo(repo, options) {
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`)
 
   const runs = []
-  const irPath = resolve(dir, "out/aburi.ir.json")
+  const irPath = resolve(dir, ".aburi/aburi.ir.json")
   let lastStderr = ""
   for (let i = 0; i < options.warmup + options.runs; i++) {
     await rm(irPath, { force: true })

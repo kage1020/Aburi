@@ -27,7 +27,7 @@ prefixing a marker, and never decides what is worth failing on — `--fail-on` i
 | `fail-on` | *(empty)* | Forwarded to `--fail-on` verbatim. Empty runs report-only. |
 | `fail-on-scope` | *(empty)* | Forwarded to `--fail-on-scope` verbatim (cli-spec.md §6.7). Empty passes no flag, which counts every change. |
 | `config` | *(empty)* | Forwarded to `--config`. |
-| `output-dir` | `out` | Forwarded to `--output-dir`, always, because the action reads `diff.md` back. A workspace that sets `config.output.dir` must set this to match. Relative to `working-directory`, or absolute; how the comment step finds the file either way is §4. Empty is exit 2. |
+| `output-dir` | `.aburi` | Forwarded to `--output-dir`, always, because the action reads `diff.md` back. A workspace that sets `config.output.dir` must set this to match. Relative to `working-directory`, or absolute; how the comment step finds the file either way is §4. Empty is exit 2. |
 | `format` | `both` | Forwarded to `--format`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Where the CLI runs, and — under `cli: workspace` — where it is resolved from. |
 | `cli` | `dlx` | Resolution mode. §3. |
@@ -271,7 +271,7 @@ So the work splits across two workflows, which is what this repository does:
 
 | | Runs as | Does |
 |---|---|---|
-| [`aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml) | `pull_request`, read-only on a fork | Analyses the head, gates the check, uploads `out/` as the `aburi-diff` artifact |
+| [`aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml) | `pull_request`, read-only on a fork | Analyses the head, gates the check, uploads `.aburi/` as the `aburi-diff` artifact, hidden files included since the directory is one |
 | [`aburi-comment.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi-comment.yml) | `workflow_run`, base repository | Downloads that artifact and upserts the comment |
 
 Three things make the second half safe to give a writable token:

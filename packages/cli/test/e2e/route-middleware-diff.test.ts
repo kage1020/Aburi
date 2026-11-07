@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises"
-import { join } from "node:path"
 import { commitAll, gitTestEnv, initRepository, useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it } from "vitest"
-import { EXIT } from "../../src"
+import { DEFAULT_OUTPUT_DIRNAME, EXIT } from "../../src"
+import { defaultOutput } from "../workspace"
 import { removeWorktreeTempDirs, runBin, useBuiltBin } from "./bin"
 
 const workspace = useScratchWorkspace("route-middleware")
@@ -26,7 +26,7 @@ beforeEach(async () => {
     "aburi.json",
     '{"languages":["lang-typescript"],"frameworks":["framework-express"]}\n',
   )
-  await workspace.writeSource(".gitignore", "out/\n")
+  await workspace.writeSource(".gitignore", `${DEFAULT_OUTPUT_DIRNAME}/\n`)
   await workspace.writeSource("src/routes.ts", routes("requireAdmin"))
   await initRepository(workspace.root)
   await commitAll(workspace.root, "c1")
@@ -44,7 +44,7 @@ describe("aburi diff — a route that loses its middleware", () => {
     )
     expect(run.code, run.stderr).toBe(EXIT.GATE)
 
-    const report = await readFile(join(workspace.root, "out", "diff.md"), "utf8")
+    const report = await readFile(defaultOutput(workspace.root, "diff.md"), "utf8")
     expect(report).toContain("- middleware removed: `requireAdmin`")
     expect(report).not.toContain("Syntax-only changes")
   })

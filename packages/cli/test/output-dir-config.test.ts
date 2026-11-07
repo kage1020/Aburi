@@ -1,7 +1,10 @@
+import { mkdir, readdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import configSchema from "@aburi/schema/aburi.config.v1.json" with { type: "json" }
 import {
   commitAll,
   errorFrom,
+  git,
   initRepository,
   recordingLogger,
   useScratchWorkspace,
@@ -13,6 +16,7 @@ import {
   DIFF_JSON_FILENAME,
   EXIT,
   IR_JSON_FILENAME,
+  OUTPUT_DIR_GITIGNORE,
   resolveOutputDir,
   runDiff,
   runExplain,
@@ -42,8 +46,14 @@ async function writeBrokenConfig(): Promise<void> {
 
 const under = (...segments: string[]) => resolve(workspace.root, ...segments)
 
+const EMPTY = documentWith({ symbols: [] })
+
 describe("resolveOutputDir", () => {
   const absolute = resolve("/elsewhere/artifacts")
+
+  it("falls back to the default the config schema states", () => {
+    expect(DEFAULT_OUTPUT_DIRNAME).toBe(configSchema.properties.output.properties.dir.default)
+  })
 
   it.each<[string, string | undefined, string | undefined, string]>([
     ["/work", undefined, undefined, resolve("/work", DEFAULT_OUTPUT_DIRNAME)],
@@ -91,8 +101,6 @@ describe("aburi scan — where it writes", () => {
 })
 
 describe("aburi diff — where it writes", () => {
-  const EMPTY = documentWith({ symbols: [] })
-
   it("writes diff.json where the config says", async () => {
     await configuredWith("artifacts")
     const { base, head } = await writeIRs(workspace.root, EMPTY, EMPTY)
@@ -292,5 +300,97 @@ describe("aburi explain — where it reads", () => {
     })
 
     expect(outcome.exitCode).toBe(EXIT.SUCCESS)
+  })
+})
+
+describe("the default output directory — keeping itself out of git", () => {
+  const gitignoreIn = (...segments: string[]) => readFile(under(...segments, ".gitignore"), "utf8")
+  const scanInto = (outputDir: string | undefined) =>
+    runScan({
+      cwd: workspace.root,
+      format: "json",
+      ...(outputDir === undefined ? {} : { outputDir }),
+    })
+
+  it.each<[string, () => Promise<unknown>]>([
+    ["aburi scan", () => scanInto(undefined)],
+    [
+      "aburi diff",
+      async () => {
+        const { base, head } = await writeIRs(workspace.root, EMPTY, EMPTY)
+        return runDiff({ cwd: workspace.root, base, head, warn: () => {} })
+      },
+    ],
+    ["aburi explain's rescan", () => runExplain({ cwd: workspace.root, argument: "alpha" })],
+  ])("gives the directory %s creates a .gitignore that ignores all of it", async (_, run) => {
+    await configuredWith(undefined)
+    await writeAlpha()
+
+    await run()
+
+    expect(await gitignoreIn(DEFAULT_OUTPUT_DIRNAME)).toBe(OUTPUT_DIR_GITIGNORE)
+  })
+
+  it("leaves git status clean after a scan, with no .gitignore of the user's naming it", async () => {
+    await initRepository(workspace.root)
+    await configuredWith(undefined)
+    await writeAlpha()
+    await commitAll(workspace.root)
+
+    await runScan({ cwd: workspace.root })
+
+    expect(await git(["status", "--porcelain", "--untracked-files=all"], workspace.root)).toBe("")
+  })
+
+  it.each<[string, () => string | undefined, string | undefined]>([
+    ["--output-dir names it", () => DEFAULT_OUTPUT_DIRNAME, undefined],
+    ["--output-dir names it by its absolute path", () => under(DEFAULT_OUTPUT_DIRNAME), undefined],
+    ["the config names it", () => undefined, `./${DEFAULT_OUTPUT_DIRNAME}/`],
+  ])("gives the default directory the same .gitignore when %s", async (_, outputDir, dir) => {
+    await configuredWith(dir)
+    await writeAlpha()
+
+    await scanInto(outputDir())
+
+    expect(await gitignoreIn(DEFAULT_OUTPUT_DIRNAME)).toBe(OUTPUT_DIR_GITIGNORE)
+  })
+
+  it.each<[string, string | undefined, string | undefined, string]>([
+    ["--output-dir", "artifacts", undefined, "artifacts"],
+    ["the config", undefined, "artifacts", "artifacts"],
+    [
+      "--output-dir, by the default's name",
+      `nested/${DEFAULT_OUTPUT_DIRNAME}`,
+      undefined,
+      `nested/${DEFAULT_OUTPUT_DIRNAME}`,
+    ],
+  ])("writes no .gitignore into another directory %s names", async (_, outputDir, dir, written) => {
+    await configuredWith(dir)
+    await writeAlpha()
+
+    await scanInto(outputDir)
+
+    expect(await readdir(under(written))).toEqual([IR_JSON_FILENAME])
+  })
+
+  it("writes no .gitignore into a default directory that was already there", async () => {
+    await configuredWith(undefined)
+    await writeAlpha()
+    await mkdir(under(DEFAULT_OUTPUT_DIRNAME))
+
+    await scanInto(undefined)
+
+    expect(await readdir(under(DEFAULT_OUTPUT_DIRNAME))).toEqual([IR_JSON_FILENAME])
+  })
+
+  it("keeps a .gitignore the user rewrote across later runs", async () => {
+    await configuredWith(undefined)
+    await writeAlpha()
+    await scanInto(undefined)
+    await writeFileAt(under(DEFAULT_OUTPUT_DIRNAME), ".gitignore", "*.md\n")
+
+    await runScan({ cwd: workspace.root })
+
+    expect(await gitignoreIn(DEFAULT_OUTPUT_DIRNAME)).toBe("*.md\n")
   })
 })

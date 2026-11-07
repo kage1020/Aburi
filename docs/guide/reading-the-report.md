@@ -1,6 +1,6 @@
 # Reading the report
 
-`aburi diff` writes `out/diff.md`. This page walks you through it, from the top
+`aburi diff` writes `.aburi/diff.md`. This page walks you through it, from the top
 line down.
 
 ## The summary line
@@ -218,14 +218,14 @@ plugin installed, and it will keep showing up until you change the cause.
 
 `aburi scan` writes two more documents, useful outside pull request review.
 
-**`out/workspace.md`** covers the repository at a glance: components and their
+**`.aburi/workspace.md`** covers the repository at a glance: components and their
 roots, the most common effects, and any files the scan could not read. Hand this
 one to a new joiner. Its Component dependencies graph draws an arrow from one
 component to another wherever a file in the first imports the second, by a
 relative path or by its package name. A CommonJS `require()` call is not an
 import, so it draws no arrow.
 
-**`out/components/<id>.md`** covers one component in full. Every kept symbol,
+**`.aburi/components/<id>.md`** covers one component in full. Every kept symbol,
 grouped by file, with its boundaries, signature, rules, effects, and calls.
 
 ```md

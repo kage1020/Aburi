@@ -1,11 +1,10 @@
 import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, runScan, VOCAB_DISCOVERED_FILENAME } from "../src"
 import { runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
-import { listTree } from "./workspace"
+import { defaultOutput, listTree } from "./workspace"
 
 const workspace = useScratchWorkspace("strict-vocab")
 
@@ -15,12 +14,12 @@ function scanWith(...flags: string[]) {
 
 async function readRecord(): Promise<unknown> {
   return JSON.parse(
-    await readFile(resolve(workspace.root, "out", VOCAB_DISCOVERED_FILENAME), "utf8"),
+    await readFile(defaultOutput(workspace.root, VOCAB_DISCOVERED_FILENAME), "utf8"),
   )
 }
 
 function listOutputs(): Promise<string[]> {
-  return listTree(resolve(workspace.root, "out"))
+  return listTree(defaultOutput(workspace.root))
 }
 
 const ODD_TWICE = {
@@ -55,6 +54,7 @@ describe("aburi scan, strict by default", () => {
     expect((await runCliIn(workspace.root, ["scan"])).code).toBe(EXIT.SUCCESS)
     const earlier = await listOutputs()
     expect(earlier).toEqual([
+      ".gitignore",
       "aburi.ir.json",
       "components",
       "components/stub-fixture.md",
@@ -130,7 +130,7 @@ describe("aburi scan with strict off", () => {
     const report = await runScan({
       cwd: workspace.root,
       command: "diff",
-      outputDir: resolve(workspace.root, "out"),
+      outputDir: defaultOutput(workspace.root),
       format: "json",
     })
 

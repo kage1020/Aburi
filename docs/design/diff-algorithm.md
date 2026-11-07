@@ -51,9 +51,9 @@ Using a git worktree allows generating the base IR while keeping head intact, so
 <output-dir>/diff.full.md  # diff.md without its size cap, only when --max-bytes shortened it
 ```
 
-`<output-dir>` is `--output-dir`, then `config.output.dir`, then `out` — resolved against the
+`<output-dir>` is `--output-dir`, then `config.output.dir`, then `.aburi` — resolved against the
 working directory in every case. The filenames are the contract; the rest of this document
-writes them as `out/diff.json` / `out/diff.md`, which is the default run. `diff.full.md` exists
+writes them as `.aburi/diff.json` / `.aburi/diff.md`, which is the default run. `diff.full.md` exists
 only beside a `diff.md` whose size cap changed it, and every other run removes it
 ([`cli-spec.md`](./cli-spec.md) §6.3).
 
@@ -1002,7 +1002,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
 
 ## 7. Output formats
 
-### 7.1 Diff result JSON (`out/diff.json`)
+### 7.1 Diff result JSON (`.aburi/diff.json`)
 
 ```jsonc
 {
@@ -1060,7 +1060,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
 
 `status: "unchanged"` is not included in the output (counted in the summary only).
 
-### 7.2 Markdown projection (`out/diff.md`)
+### 7.2 Markdown projection (`.aburi/diff.md`)
 
 A format intended for pasting into PR comments. [`markdown-projection.md`](./markdown-projection.md) §6 specifies it, with an example of each section.
 

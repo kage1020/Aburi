@@ -2,8 +2,15 @@ import { cp, readFile, rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { errorFrom, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { CliError, EXIT, IR_JSON_FILENAME, runExplain, runScan } from "../src"
-import { TYPESCRIPT, writeConfig, writeFileAt, writeMonorepo } from "./workspace"
+import {
+  CliError,
+  DEFAULT_OUTPUT_DIRNAME,
+  EXIT,
+  IR_JSON_FILENAME,
+  runExplain,
+  runScan,
+} from "../src"
+import { defaultOutput, TYPESCRIPT, writeConfig, writeFileAt, writeMonorepo } from "./workspace"
 
 const workspace = useScratchWorkspace("output-anchor")
 
@@ -15,7 +22,7 @@ async function monorepo(): Promise<{ mono: string; app: string }> {
   return { mono, app }
 }
 
-const irUnder = (directory: string) => resolve(directory, "out", IR_JSON_FILENAME)
+const irUnder = (directory: string) => defaultOutput(directory, IR_JSON_FILENAME)
 
 function explainAlpha(cwd: string) {
   const log = recordingLogger()
@@ -70,8 +77,8 @@ describe("aburi explain — finding the IR aburi scan wrote", () => {
   it("stops at the workspace root rather than reading an IR from outside it", async () => {
     const { mono, app } = await monorepo()
     await runScan({ cwd: mono, format: "json" })
-    await cp(resolve(mono, "out"), resolve(workspace.root, "out"), { recursive: true })
-    await rm(resolve(mono, "out"), { recursive: true })
+    await cp(defaultOutput(mono), defaultOutput(workspace.root), { recursive: true })
+    await rm(defaultOutput(mono), { recursive: true })
 
     const error = await errorFrom(CliError, () => explainAlpha(app))
 
@@ -85,7 +92,7 @@ describe("aburi explain — finding the IR aburi scan wrote", () => {
     const outcome = await runExplain({
       cwd: app,
       argument: "alpha",
-      irPath: `out/${IR_JSON_FILENAME}`,
+      irPath: `${DEFAULT_OUTPUT_DIRNAME}/${IR_JSON_FILENAME}`,
       noRescan: true,
     })
 

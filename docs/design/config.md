@@ -70,7 +70,7 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
 
   // Output destination
   "output": {
-    "dir": "out"
+    "dir": ".aburi"
   },
 
   // Execution mode
@@ -382,15 +382,17 @@ A refused entry is a config error (exit 2) naming the entry, since the entry is 
 ```jsonc
 {
   "output": {
-    "dir": "out"
+    "dir": ".aburi"
   }
 }
 ```
 
-- `dir` (default `"out"`): output destination for IR/Markdown. It fills the same slot as
+- `dir` (default `".aburi"`): output destination for IR/Markdown. It fills the same slot as
   `--output-dir`, which wins when both are given, and it resolves against the working
-  directory exactly as that flag does — so writing the default `"out"` explicitly changes
-  nothing, which is what a schema `default` has to mean. An absolute value names one
+  directory exactly as that flag does — so writing the default `".aburi"` explicitly changes
+  nothing, which is what a schema `default` has to mean: the `.gitignore` a run gives the
+  default directory when it creates it ([`cli-spec.md`](./cli-spec.md) §5.3) goes by the place,
+  not by whether the config spelled it out. An absolute value names one
   directory from wherever the command is run.
 
 Future addition candidates:
@@ -509,7 +511,7 @@ writes it down, mapping each detected language and framework to the first-party 
 | C7b | `"AcmeInternal": { "drop": true }` on a class decorated `@AcmeInternal()` | `dropped: true`, `dropReason` `frameworkHints "acme-framework": @AcmeInternal` |
 | C7c | `frameworks: ["framework-nestjs"]` and `"*Handler"` on a NestJS `@Controller()` class named `UsersHandler` | NestJS's classification; the hint applies only to classes no configured plugin recognized |
 | C7d | Two entries writing `framework:acme:a` and `framework:acme:b` | Exit 2 naming the second entry |
-| C8 | Extracting undeclared vocab with `strict: false` | Warning only; recorded in `out/aburi-vocab-discovered.json` |
+| C8 | Extracting undeclared vocab with `strict: false` | Warning only; recorded in `.aburi/aburi-vocab-discovered.json` |
 | C9 | Passing CLI `--strict` | Overrides config `strict: false` |
 | C10 | A `pluginOptions` key that names no loaded plugin, misspelled (`effects-prsima` beside `effects: ["effects-prisma"]`) or not enabled; and, alongside, a loaded plugin's name and the `hint-acme` of a `frameworkHints` entry named `acme` | Exit code unchanged; one warning per key, in config order: `pluginOptions["effects-prsima"] names no loaded plugin (loaded: lang-typescript, effects-prisma, hint-acme).` for the unmatched one, `pluginOptions["hint-acme"] names the plugin built from the frameworkHints entry "acme", which takes no options; write its rules in that entry.` for the hint plugin's. Nothing for the loaded plugin's name |
 | C11 | `minParsedFileRatio` omitted, and a scan that parsed some files and lost others | Exit 0 |

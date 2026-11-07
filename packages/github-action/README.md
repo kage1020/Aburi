@@ -76,7 +76,7 @@ uses the alias.
 | `fail-on` | *(empty)* | Forwarded to `--fail-on`; see [the CLI reference](https://aburi.dev/reference/cli) for the grammar. Empty = report only. |
 | `fail-on-scope` | *(empty)* | Forwarded to `--fail-on-scope`: `non-test` leaves the Symbols of the config's `testFiles` out of the gate, `all` counts them. Empty passes no flag, which counts them. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.jsonc`. |
-| `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
+| `output-dir` | `.aburi` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Directory to run the CLI from. |
 | `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). See [Choosing `cli`](#choosing-cli). |
@@ -230,15 +230,17 @@ jobs:
       # a report that is missing or partial.
       - name: Hand the comment to the companion workflow
         if: >-
-          always() && hashFiles('out/diff.md') != ''
+          always() && hashFiles('.aburi/diff.md') != ''
           && steps.aburi.outputs.comment-id == ''
           && (steps.aburi.outputs.cli-exit-code == '0' || steps.aburi.outputs.cli-exit-code == '3')
-        run: echo "posted by the companion" > out/comment-pending
+        run: echo "posted by the companion" > .aburi/comment-pending
       - uses: actions/upload-artifact@v7
-        if: always() && hashFiles('out/diff.md') != ''
+        if: always() && hashFiles('.aburi/diff.md') != ''
         with:
           name: aburi-diff
-          path: out/
+          path: .aburi/
+          # `.aburi/` is a dot-directory, which upload-artifact leaves out unless told otherwise.
+          include-hidden-files: true
 ```
 
 The companion runs on `workflow_run`, checks out **this repository** for the upsert script — not

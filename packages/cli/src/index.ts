@@ -5,6 +5,7 @@ export {
   DIFF_JSON_FILENAME,
   DIFF_MD_FILENAME,
   IR_JSON_FILENAME,
+  OUTPUT_DIR_GITIGNORE,
   resolveOutputDir,
   WORKSPACE_MD_FILENAME,
 } from "./artifact-paths"
