@@ -1,8 +1,7 @@
-import { component, dependency, makeSymbol, symbolAt, zeroFp } from "@aburi/test-support"
+import { component, dependency, makeSymbol, sectionOf, symbolAt, zeroFp } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { droppedFoldout, ProjectionInvariantError } from "../src"
 import { componentPage, droppedSymbol } from "./fixtures"
-import { sectionOf } from "./markdown"
 
 describe("projectComponent — header", () => {
   it("names the component and counts kept and dropped Symbols", () => {

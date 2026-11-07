@@ -1,10 +1,12 @@
 import {
   changed,
   dependency,
+  headings,
   makeDiff,
   makeSymbol,
   moved,
   movedChanged,
+  sectionOf,
   sliceOf,
   symbolAt,
   symbolId,
@@ -14,7 +16,7 @@ import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { namedSymbol, projectChanges, relocated } from "./fixtures"
-import { bytes, headings, noteOf, sectionOf } from "./markdown"
+import { bytes, noteOf } from "./markdown"
 
 const HEADING = "## 🧪 Test files"
 

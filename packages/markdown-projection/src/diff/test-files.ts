@@ -29,29 +29,36 @@ export interface TestDependencies {
 
 /**
  * An edge carries no mark, but a call edge that comes or goes moves its caller's calls, so the
- * caller is one of the changes the fold lists, and the edge goes with it.
+ * caller is one of the changes the fold lists, and the edge goes with it: into the fold when the
+ * caller is among `listedTestChanges`, and out of the report when a status filter left it out.
  */
 export function splitDependencies(
   dependencies: DiffResult["dependencies"],
   testChanges: readonly SymbolChange[],
+  listedTestChanges: readonly SymbolChange[] = testChanges,
 ): { kept: DiffResult["dependencies"]; inTests: TestDependencies } {
-  const callers = new Set<DependencyEndpoint>()
-  for (const change of testChanges) {
-    callers.add(representativeSymbol(change).id)
-    if ("before" in change) callers.add(change.before.id)
-  }
-  const inTests = (d: Dependency) => callers.has(d.from)
+  const fromTest = calledFrom(testChanges)
+  const fromListed = calledFrom(listedTestChanges)
   return {
     kept: {
       ...dependencies,
-      added: dependencies.added.filter((d) => !inTests(d)),
-      removed: dependencies.removed.filter((d) => !inTests(d)),
+      added: dependencies.added.filter((d) => !fromTest(d)),
+      removed: dependencies.removed.filter((d) => !fromTest(d)),
     },
     inTests: {
-      added: dependencies.added.filter(inTests),
-      removed: dependencies.removed.filter(inTests),
+      added: dependencies.added.filter(fromListed),
+      removed: dependencies.removed.filter(fromListed),
     },
   }
+}
+
+function calledFrom(changes: readonly SymbolChange[]): (dependency: Dependency) => boolean {
+  const callers = new Set<DependencyEndpoint>()
+  for (const change of changes) {
+    callers.add(representativeSymbol(change).id)
+    if ("before" in change) callers.add(change.before.id)
+  }
+  return (dependency) => callers.has(dependency.from)
 }
 
 export function renderTestFiles(

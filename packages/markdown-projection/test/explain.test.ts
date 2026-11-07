@@ -4,8 +4,10 @@ import {
   dependency,
   effect,
   fp,
+  headings,
   makeSymbol,
   rule,
+  sectionOf,
   sig,
   symbolId,
 } from "@aburi/test-support"
@@ -13,7 +15,6 @@ import type { UnresolvedCallDiagnostic } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectSymbolExplain } from "../src"
 import { droppedSymbol } from "./fixtures"
-import { headings, sectionOf } from "./markdown"
 
 const CALLER_ID = symbolId("ts:src/ctl.ts#Ctl.route")
 

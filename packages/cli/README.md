@@ -18,8 +18,8 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 - **`aburi scan`** — load config, resolve plugins, run `@aburi/core` scan,
   emit IR JSON + workspace / component Markdown. `--format json|md|both`,
   `--ignore <glob>` (repeatable),
-  `--respect-gitignore` / `--no-respect-gitignore`, `--compact`,
-  `--no-timestamp`, `--strict` / `--no-strict` / `--discover` (undeclared plugin
+  `--respect-gitignore` / `--no-respect-gitignore`, `--compact`, `--quiet` (the census
+  lines alone on stdout), `--no-timestamp`, `--strict` / `--no-strict` / `--discover` (undeclared plugin
   vocabulary: exit 3, or keep it and write `aburi-vocab-discovered.json`),
   `--lsp` / `--no-lsp` (override `lsp.enabled`). A config that loads no language
   plugin exits 2.
@@ -33,7 +33,9 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
     degrading `moved` to `removed + added`.
   - `--base <ir.json> --head <ir.json>` — file mode, skips git entirely.
   `--fail-on <spec>` supports the full grammar (see below) and returns
-  `EXIT.GATE = 3` when a clause trips.
+  `EXIT.GATE = 3` when a clause trips. `--filter <statuses>` lists only those statuses'
+  changes in `diff.md`, with a note saying how many it left out; `diff.json`, the glyph line
+  and `--fail-on` still read every change. `--quiet` prints the glyph line alone.
 - **`aburi explain`** — three-arm dispatch: full Symbol id (`ts:src/foo.ts#Foo.bar`),
   file path (all Symbols in the file, workspace-root-relative), or case-sensitive
   substring on `Symbol.name`. Ambiguous substring hits exit 2 with the candidate

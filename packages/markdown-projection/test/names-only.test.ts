@@ -4,18 +4,20 @@ import {
   component,
   emptySummary,
   fp,
+  headings,
   makeDiff,
   makeSymbol,
   moved,
   movedChanged,
   rule,
+  sectionOf,
   symbolId,
 } from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolChange, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { namedSymbol, projectChanges, relocated, symbolWithBody } from "./fixtures"
-import { bytes, headings, noteOf, sectionOf } from "./markdown"
+import { bytes, noteOf } from "./markdown"
 
 const pad = (i: number, width = 4) => String(i).padStart(width, "0")
 

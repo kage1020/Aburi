@@ -2,6 +2,7 @@ import {
   type DiffResult,
   representativeSymbol,
   type SymbolChange,
+  type SymbolChangeStatus,
   type SymbolId,
 } from "@aburi/types"
 import { assertNever } from "./errors"
@@ -203,6 +204,32 @@ function counts(token: FailOnToken, change: SymbolChange): boolean {
   }
 }
 
+/** The statuses a clause on `token` can count a change of. */
+export function statusesCounted(token: FailOnToken): readonly SymbolChangeStatus[] {
+  switch (token) {
+    case "added":
+    case "changed":
+    case "moved":
+    case "moved+changed":
+    case "dropped-toggled":
+    case "unknown":
+      return [token]
+    case "removed":
+    case "removed:duplicate":
+      return ["removed"]
+    case "dropped-toggled:to-dropped":
+    case "dropped-toggled:to-kept":
+      return ["dropped-toggled"]
+    case "api-changed":
+    case "logic-changed":
+    case "syntax-changed":
+    case "confidence-changed":
+      return ["changed", "moved+changed"]
+    default:
+      return assertNever(token, "FailOnToken")
+  }
+}
+
 function deltaMoved(
   change: SymbolChange,
   axis: "apiChanged" | "logicChanged" | "syntaxChanged" | "confidenceChanged",
@@ -234,8 +261,12 @@ function inScope(scope: FailOnScope, change: SymbolChange): boolean {
   return scope === "all" || representativeSymbol(change).inTestFile !== true
 }
 
+export function formatClause(clause: FailOnClause): string {
+  return clause.threshold === null ? clause.token : `${clause.token}:>${clause.threshold}`
+}
+
 export function formatTriggered({ clause, observed, symbols, scope }: TrippedClause): string {
-  const rendered = clause.threshold === null ? clause.token : `${clause.token}:>${clause.threshold}`
+  const rendered = formatClause(clause)
   const named = symbols.slice(0, MAX_LISTED).map((id) => `  ${id}`)
   const unnamed = symbols.length - named.length
   const where = scope === "all" ? "" : " outside test files"

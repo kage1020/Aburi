@@ -125,7 +125,11 @@ export {
   isIRSchemaURL,
   PLUGIN_SCHEMA_URL,
 } from "./schema-urls"
-export { representativeSymbol } from "./symbol-change"
+export {
+  representativeSymbol,
+  SYMBOL_CHANGE_STATUSES,
+  type SymbolChangeStatus,
+} from "./symbol-change"
 export {
   CALL_ARGUMENT_FUNCTION_DERIVED_BY,
   COMPUTED_TARGET_SEGMENT,

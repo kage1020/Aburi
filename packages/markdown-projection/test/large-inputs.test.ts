@@ -5,6 +5,7 @@ import {
   makeDiff,
   makeIR,
   makeSymbol,
+  sectionOf,
   sliceId,
   symbolId,
   zeroFp,
@@ -12,7 +13,6 @@ import {
 import type { IR, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectComponent, projectDiff, projectWorkspace } from "../src"
-import { sectionOf } from "./markdown"
 
 const LARGE = 200_000
 

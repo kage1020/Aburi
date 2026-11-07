@@ -8,6 +8,7 @@ import {
   makeIR,
   makeSymbol,
   rule,
+  sectionOf,
   sig,
   symbolId,
 } from "@aburi/test-support"
@@ -33,7 +34,7 @@ import {
   namedSymbol,
   projectChanges,
 } from "./fixtures"
-import { sectionOf, shownText } from "./markdown"
+import { shownText } from "./markdown"
 
 const THROWN_TEMPLATE = `new Error(\`unknown kind: \${k}\`)`
 const CACHE_KEY_TEMPLATE = `redis.get(\`k:\${id}\`)`

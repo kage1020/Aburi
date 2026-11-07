@@ -1,8 +1,7 @@
-import { component, dependency, makeIR } from "@aburi/test-support"
+import { component, dependency, makeIR, sectionOf } from "@aburi/test-support"
 import type { Dependency } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { MERMAID_NODE_LIMIT, projectWorkspace } from "../src"
-import { sectionOf } from "./markdown"
 
 const HEADING = "## Component dependencies"
 const billing = component({ id: "billing", name: "Billing" })

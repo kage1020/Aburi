@@ -995,6 +995,37 @@ will say is missed by exactly the length of the last name.
 Action passes 65507 by default: the 65536-byte limit less the 29-byte marker line the upsert
 prepends ([`github-action.md`](./github-action.md) §5.2).
 
+### 6.5 Status filter (`statuses`)
+
+`projectDiff(diff, { statuses })` lists only the Symbol changes whose `status` is one of
+`statuses`, a non-empty list of the seven ([`diff-algorithm.md`](./diff-algorithm.md) §4). An empty
+list, or a value that is no status, is refused (`RangeError`): a report filtered to nothing would
+read as a diff that found nothing. Absent, every change is listed.
+
+- **The sections of Symbol changes** — API changes through Syntax-only changes, and Test files —
+  are built from the kept changes alone, so a section none of them reaches is left out as an
+  empty section always is.
+- **The Slice View** keeps a Slice when one of its members is a kept change outside test code,
+  and draws it whole: a Slice is the feature a change cuts through, and its other members are
+  how the kept one is reached. It is the rule test code already follows (§6.1), applied to the
+  filter as well.
+- **Component changes, Dependency changes and Not compared** are not Symbol changes, and are
+  listed in full. An edge from a test caller goes with its caller, as §6.1 has it: into Test files
+  when the filter keeps the caller's change, and out of the report when it does not, rather than
+  into Dependency changes.
+- **The Summary line** counts every change, and so does its `· N in test files`: it is the diff's
+  account, and the filter is the reader's view of it.
+
+When the filter leaves a change out, a note directly under the Summary says what is listed and how
+much is not, ahead of the size cap's note when there is one:
+
+```md
+> ℹ **Only `added` and `removed` changes are listed.** 12 other Symbol changes are left out of this report; the Summary counts them.
+```
+
+A filter that leaves nothing out writes no note. The note counts against `maxBytes` (§6.4), which
+caps the filtered document.
+
 ## 7. `aburi explain <id>` — single Symbol
 
 Renders L2 standalone. Written to `out/symbols/<sanitized-id>.md` or to `stdout`.

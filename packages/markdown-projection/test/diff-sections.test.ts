@@ -3,10 +3,12 @@ import {
   component,
   dependency,
   emptySummary,
+  headings,
   makeDiff,
   makeSymbol,
   moved,
   movedChanged,
+  sectionOf,
   sliceId,
   symbolId,
 } from "@aburi/test-support"
@@ -14,7 +16,6 @@ import type { SymbolChange, SymbolDelta, SymbolDroppedToggled, SymbolId } from "
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectDiffSummaryLine } from "../src"
 import { namedSymbol, projectChanges, relocated } from "./fixtures"
-import { headings, sectionOf } from "./markdown"
 
 describe("projectDiff — section order", () => {
   it("writes every section in importance order", () => {

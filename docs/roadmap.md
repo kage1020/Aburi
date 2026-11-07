@@ -24,7 +24,8 @@ controller that reaches `prisma.invoice.create` through a service carries the
 
 **Diff.** All seven statuses (`added`, `removed`, `moved`, `changed`,
 `moved+changed`, `dropped-toggled`, and `unknown` for a file one revision could
-not read), a `--fail-on` gate, and Slice View, which
+not read), a `--fail-on` gate, a `--filter` that narrows the report to chosen
+statuses, and Slice View, which
 clusters changed symbols along the call graph so a feature cutting through
 controller, service, and repository reads as one section.
 
@@ -93,8 +94,6 @@ Nothing here is committed.
   different plugins, from the plugin list each one records.
 - `aburi vocab`, listing the effect ids and extension kinds the loaded plugins
   declare, and which plugin owns each.
-- `--quiet` for `scan` and `diff`, and `aburi diff --filter`, narrowing the
-  report to chosen statuses.
 - Colour and a progress line on an interactive terminal, honouring `NO_COLOR`
   and `FORCE_COLOR`.
 - Browse the analysis in a web UI.

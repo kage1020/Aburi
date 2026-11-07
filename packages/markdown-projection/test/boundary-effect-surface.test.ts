@@ -1,8 +1,7 @@
-import { decorator, effect, makeSymbol } from "@aburi/test-support"
+import { decorator, effect, makeSymbol, sectionOf } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { componentPage } from "./fixtures"
-import { sectionOf } from "./markdown"
 
 const write = effect({ id: "db.write", target: "prisma.invoice.create", plugin: "effects-prisma" })
 

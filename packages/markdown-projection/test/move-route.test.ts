@@ -1,9 +1,16 @@
-import { changed, makeDiff, moved, movedChanged, sliceId, symbolAt } from "@aburi/test-support"
+import {
+  changed,
+  makeDiff,
+  moved,
+  movedChanged,
+  sectionOf,
+  sliceId,
+  symbolAt,
+} from "@aburi/test-support"
 import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
 import { projectChanges } from "./fixtures"
-import { sectionOf } from "./markdown"
 
 const renamedInFile = moved(
   symbolAt("src/output-file.ts", "isADirectory", 40),

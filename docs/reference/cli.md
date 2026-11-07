@@ -101,7 +101,7 @@ aburi init --with-suggestions --output config/aburi.jsonc
 aburi scan [--output-dir <dir>] [--format json|md|both] [--no-md|--no-json]
            [--ignore <glob>]... [--respect-gitignore | --no-respect-gitignore]
            [--strict | --no-strict | --discover] [--lsp | --no-lsp]
-           [--compact] [--no-timestamp] [--config <path>]
+           [--compact] [--quiet] [--no-timestamp] [--config <path>]
 ```
 
 Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
@@ -124,6 +124,7 @@ file removed.
 | `--discover` | The same as `--no-strict`. With `--strict`, exits `2`. |
 | `--lsp` / `--no-lsp` | Override `lsp.enabled` for this run. `--lsp` still needs a server under `lsp.servers` to talk to. |
 | `--compact` | JSON without indentation. |
+| `--quiet` | Print the two census lines alone on stdout, not the path of each file written. stderr is unchanged. |
 | `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implicit when `CI` is set. `aburi.ir.json` carries no timestamp either way. |
 | `--config <path>` | Use a different config file. |
 
@@ -131,6 +132,7 @@ file removed.
 aburi scan
 aburi scan --format json --compact --output-dir dist/aburi
 aburi scan --ignore 'src/generated/**'
+aburi scan --quiet
 ```
 
 ### Files that produce nothing
@@ -220,6 +222,8 @@ scanning.
 | `--output-dir <dir>` | Where to write. Falls back to `output.dir`, then `out`. Created if missing; a path a file already stands on exits `2` and names it. Any `diff.json`, `diff.md` or `diff.full.md` already there is removed before the comparison starts, so a run that fails leaves no earlier report to be mistaken for its own. |
 | `--format <fmt>` | `json`, `md`, or `both`. |
 | `--compact` | JSON without indentation. |
+| `--filter <statuses>` | List only these statuses' changes in `diff.md`. See below. |
+| `--quiet` | Print the glyph line (`+5 -3 ~12 ↔2 ⤴1`) alone on stdout. stderr, the files written and the exit code are unchanged. |
 | `--max-bytes <n>` | Cap `diff.md` at n bytes. See below. |
 | `--parallel-scans` / `--no-parallel-scans` | Whether the two scans run at once. By default they do on a machine with two or more CPUs, and run in turn on one. The output is the same either way; `--no-parallel-scans`, one at a time, uses less memory. |
 | `--config <path>` | Use a different config file. |
@@ -269,6 +273,38 @@ no flag at all.
 ```bash
 aburi diff main..HEAD --max-bytes 65507
 ```
+
+### `--filter`
+
+`--filter` narrows `diff.md` to the changes of the statuses you name, comma-separated:
+`added`, `removed`, `changed`, `moved`, `moved+changed`, `dropped-toggled`, `unknown`.
+
+```bash
+aburi diff main..HEAD --filter added,removed
+```
+
+It narrows that file and nothing else. The Summary line counts every change, and a note under it
+says how many the filter left out:
+
+```
+> ℹ **Only `added` and `removed` changes are listed.** 12 other Symbol changes are left out of this report; the Summary counts them.
+```
+
+A Slice that holds a change you kept is drawn whole, its other members included, so a call
+path is not cut in two. Component changes, dependency changes and Not compared are listed in
+full. `diff.json` keeps every change, and so does the glyph line on stdout.
+
+`--fail-on` counts every change too, whatever the filter: a display option does not decide
+whether the build fails. So `--filter added --fail-on removed` still exits `3` on a removal, and
+because `diff.md` would not list the removal, it warns on stderr first:
+
+```
+⚠ --fail-on removed counts removed changes, which --filter leaves out of diff.md.
+```
+
+An empty value, an empty segment (`added,`) and a word that is no status, `removed:duplicate`
+among them, exit `2`. Under `--format json` there is no `diff.md` to narrow, and `--filter`
+warns that it does nothing.
 
 ### `--fail-on` grammar
 

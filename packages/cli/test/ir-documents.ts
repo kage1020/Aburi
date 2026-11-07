@@ -1,5 +1,5 @@
 import { makeIR, makeSymbol, recordingLogger } from "@aburi/test-support"
-import type { IR, Symbol as IRSymbol, SkippedFile } from "@aburi/types"
+import type { Dependency, IR, Symbol as IRSymbol, SkippedFile } from "@aburi/types"
 import { type DiffOptions, IR_JSON_FILENAME, runDiff } from "../src"
 import { writeFileAt, writeIRs, writePackageJson } from "./workspace"
 
@@ -16,6 +16,7 @@ export function symbolFor(id: string, file?: string): IRSymbol {
 
 export interface DocumentShape {
   symbols: readonly IRSymbol[]
+  dependencies?: readonly Dependency[]
   skipped?: readonly SkippedFile[]
   /** Files a document predating `stats.skippedFiles` lost without naming them. */
   unnamedLosses?: number
@@ -23,7 +24,10 @@ export interface DocumentShape {
 
 export function documentWith(shape: DocumentShape): IR {
   const lost = shape.skipped?.length ?? shape.unnamedLosses ?? 0
-  const document = makeIR({ symbols: [...shape.symbols].sort(byKey((s) => s.id)) })
+  const document = makeIR({
+    symbols: [...shape.symbols].sort(byKey((s) => s.id)),
+    dependencies: [...(shape.dependencies ?? [])],
+  })
   return {
     ...document,
     stats: {

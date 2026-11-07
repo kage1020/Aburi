@@ -75,6 +75,25 @@ describe("aburi scan — a workspace that declares nothing", () => {
     expect(lines[0]).toMatch(/^0 kept · 0 dropped · \d+ files$/)
     expect(lines[1]).toBe("calls 0 · resolved 0 · unresolved 0")
   })
+
+  it.each(["both", "json", "md"])(
+    "prints the census lines alone under --quiet --format %s",
+    async (format) => {
+      const loud = await runCliIn(workspace.root, ["scan", "--format", format])
+      const quiet = await runCliIn(workspace.root, ["scan", "--format", format, "--quiet"])
+
+      expect(loud.stdout).toContain("→ ")
+      expect(quiet.code).toBe(EXIT.SUCCESS)
+      expect(quiet.stdout).toBe(
+        loud.stdout
+          .split("\n")
+          .slice(0, 2)
+          .map((line) => `${line}\n`)
+          .join(""),
+      )
+      expect(quiet.stderr).toBe(loud.stderr)
+    },
+  )
 })
 
 describe("aburi scan — what the caller and the config add", () => {

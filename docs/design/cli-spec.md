@@ -161,7 +161,7 @@ Scans the workspace and generates the IR.
 ```
 aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
            [--strict|--no-strict] [--discover]
-           [--compact] [--no-timestamp]
+           [--compact] [--no-timestamp] [--quiet]
            [--lsp|--no-lsp]
            [--respect-gitignore|--no-respect-gitignore]
            [--ignore <glob>] [--config <path>]
@@ -177,7 +177,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | `--no-json` | Drops the IR JSON output. Alone, equivalent to `--format md`. With `--no-md`, or with any `--format` that would have written JSON (`json`, `both`), exit 2 |
 | `--strict` / `--no-strict` | Override `config.strict` ([`config.md`](./config.md) §10). Strict stops at the first undeclared value with exit 3; off, the scan keeps every such value and writes `aburi-vocab-discovered.json` into the output directory ([`extension-vocab.md`](./extension-vocab.md) §11.5.1), an empty list included. A strict scan that completes removes a record an earlier run left, so no completed `scan` leaves one naming values that are declared now. `aburi diff` has neither flag: its scans take strictness from `config.strict` alone (CL8b) |
 | `--discover` | The same as `--no-strict`, named for the workflow it serves. With `--strict`, exit 2 |
-| `--quiet` | (planned) Limit stdout to the census lines |
+| `--quiet` | Limit stdout to the census lines, leaving out the `→` line of each artefact (§5.5). stderr is unchanged: the warnings say what the census cannot, and `--log-level` (§3) is what quiets the run's log |
 | `--compact` | Compact the JSON to a single line |
 | `--no-timestamp` | Omit `discoveredAt` from `aburi-vocab-discovered.json`. Implied by `CI` (§11). The IR carries no timestamp to omit ([`ir-schema.md`](./ir-schema.md) §1.1) |
 | `--lsp` / `--no-lsp` | Override `config.lsp.enabled` ([`lsp-enrichment.md`](./lsp-enrichment.md)). `--lsp` with no `lsp.servers` entry for a loaded language starts no server, and says so on stderr |
@@ -238,7 +238,13 @@ The kept/dropped line is followed by the call-resolution census in the same form
 uses (§6.6), then one `→` line per artefact written: the IR, and `workspace.md` when the format
 writes Markdown. The component pages beside it are not listed one by one.
 
-A planned `--quiet` would print the census lines alone.
+`--quiet` prints the census lines alone, two lines whatever the format, for a script that reads
+the counts and knows where the artefacts go:
+
+```
+542 kept · 87 dropped · 1234 files
+calls 1310 · resolved 1203 · unresolved 107 (external 30 · dynamic 60 · ambiguous 3 · no-match 14)
+```
 
 ### 5.6 stderr (Warnings)
 
@@ -619,14 +625,14 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | `--head <path>` | Head IR file path (instead of a ref) |
 | `--output-dir <path>` | Destination for diff.json / diff.md / diff.full.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
-| `--filter <kinds>` | (planned) Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
+| `--filter <statuses>` | List only the Symbol changes of these statuses in `diff.md`, comma-separated from `added`, `removed`, `changed`, `moved`, `moved+changed`, `dropped-toggled` and `unknown` (§6.8). `diff.json`, the glyph line and `--fail-on` still read every change |
 | `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates). Repeatable: each occurrence adds its clauses after the earlier ones' (§6.7) |
 | `--fail-on-scope <all\|non-test>` | Which changes every `--fail-on` clause counts: all of them (default), or those whose Symbol is not test code (§6.7) |
 | `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, keeping sections most important first at their smallest (names only for a section of whole Symbols) and then growing the name lists back to full entries from the top ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped, and when the cap changed the report the uncapped one is written as `diff.full.md` beside it. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
 | `--compact` | Compact `diff.json` to a single line |
 | `--parallel-scans` / `--no-parallel-scans` | Whether the two scans run at once (§14.1). `--no-parallel-scans` runs the base and then the head, which uses less memory; `--parallel-scans` runs both at once even on one CPU. Neither: at once when the machine has two or more CPUs, one after the other on one. No effect with `--base/--head`, which scans nothing |
 | `--config <path>` | The config file both scans read (§13, §6.4 step 3) |
-| `--quiet` | (planned) Limit stdout to the glyph line |
+| `--quiet` | Limit stdout to the glyph line, leaving out the call-resolution census and the `→` line (§6.6). stderr is unchanged, the `--fail-on` lines included |
 
 ### 6.3 Arguments
 
@@ -801,7 +807,7 @@ someone else's incident, on documents the caller pinned deliberately. `DiffRepor
 is `null` in this mode rather than empty, because "ran no scan" is not the same answer as "ran
 two clean scans".
 
-A planned `--quiet` would print the glyph line alone:
+`--quiet` prints the glyph line alone, `· ?N unknown` included when there is one:
 ```
 +5 -3 ~12 ↔2 ⤴1
 ```
@@ -896,6 +902,38 @@ A tripped clause names the Symbols it counted on stderr, under its line and inde
 A red check that said only `removed tripped` sent its reader to the report to find which removal, and on a pull request whose removals were expected left nothing to say why the gate fired but a comment. The first line keeps its form, so a script reading it reads it as before.
 
 A Symbol whose extraction confidence moved is `changed` even when no fingerprint did ([`diff-algorithm.md`](./diff-algorithm.md) §4), so `--fail-on changed` fires on it. A plugin can decide confidence from a file-level signal (the Express plugin reads whether the file imports `express`), so one edit can move every Symbol in a file at once. A gate that should not fire on that writes the axes it cares about (`--fail-on api-changed,logic-changed`, which a confidence-only change does not trip) and, where a mass shift should still be noticed, a threshold on the confidence axis (`confidence-changed:>20`).
+
+### 6.8 `--filter`
+
+`--filter <statuses>` narrows what `diff.md` lists to the Symbol changes of the statuses named,
+and narrows nothing else:
+
+- **`diff.md`** lists those changes alone, in every section that lists Symbol changes, as
+  [`markdown-projection.md`](./markdown-projection.md) §6.5 sets out. Its Summary line counts
+  every change still, and a note under it says how many changes the filter left out. The Slice
+  View keeps a Slice that holds a change the filter keeps and draws it whole. Component changes,
+  Dependency changes and Not compared are not Symbol changes and are listed in full: the last is
+  what says the comparison was incomplete, which no filter should hide.
+- **`diff.json`** holds every change, as it does under `--max-bytes`: it is the document to query
+  in full, and a consumer that wants a subset filters `symbols[]` by `status`.
+- **The glyph line** on stdout counts every change, as the Summary line does.
+- **`--fail-on`** counts every change, whatever the filter. A display option must not decide
+  whether a gate trips: `--filter added --fail-on removed` still exits `3` on a removal. Since the
+  report would then not list what tripped it, a `--fail-on` clause that counts only statuses the
+  filter leaves out is warned about on stderr, once, before the diff is computed:
+  `⚠ --fail-on removed counts removed changes, which --filter leaves out of diff.md.` A delta axis
+  counts `changed` and `moved+changed`, and is warned about only when the filter keeps neither.
+- **`--max-bytes`** caps the filtered report, note included, and `diff.full.md` is the filtered
+  report without the cap.
+
+The value is one or more statuses separated by commas, in any order, a status written twice
+counting once. An empty value, an empty segment (`added,`) or a word that is no status exits `2`
+before either IR is read, naming the statuses there are. `--filter` takes one value (§3); under
+`--format json`, which writes no `diff.md`, it is warned about as having nothing to narrow.
+
+`removed:duplicate` and the direction tokens of `dropped-toggled` are `--fail-on`'s and not
+statuses: the filter selects whole sections' worth of entries, and a removed duplicate is listed
+with the other removals (`markdown-projection.md` §6.1).
 
 ## 7. `aburi explain`
 
@@ -1263,8 +1301,6 @@ The pool would run on Node `worker_threads`, as the base scan of `aburi diff` al
 | `aburi doctor` | Consistency check of config / plugins |
 | `aburi serve` | LSP-like local server (IDE integration) |
 | `aburi vocab` | Query the extension vocabulary (§8) |
-| `--quiet` on `scan` and `diff` | Census or glyph line alone (§5.2, §6.2) |
-| `aburi diff --filter` | Restrict the report to some statuses (§6.2) |
 | `--concurrency` on `aburi scan`, worker pool | §14.2 |
 | Colour, progress, CI mode | §10–§12 |
 | `aburi vocab list --json` extension | merged with discoverer output |
@@ -1321,7 +1357,7 @@ a command's option, not a global one (§3).
 | CL11 | `aburi explain <ambiguous>` | exit 2, candidate list on stdout |
 | CL12 | (planned) `aburi vocab who-owns <unknown>` | exit 1 |
 | CL13 | (planned) `aburi vocab list --json` | machine-readable JSON, exit 0 |
-| CL14 | (planned) Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
+| CL14 | `aburi scan --quiet \| wc -l` | `2`: the census lines alone, whatever the format, with no escape sequences |
 | CL15 | (planned) `NO_COLOR=1 aburi scan` | No coloring |
 | CL16 | (planned) `CI=true aburi scan` | Progress animation suppressed |
 | CL18 | `aburi scan --config ./custom.json` | Uses the specified config. `aburi --config ./custom.json scan` exits 2: `--config` is the command's option (§3) |
@@ -1373,6 +1409,10 @@ a command's option, not a global one (§3).
 | CL59 | `aburi diff main..HEAD --parallel-scans`, where both scans finish, where a scan leaves a file out, where the base scan stops, where the head scan stops, and where both stop | The two scans are in flight at the same time, and the exit code, stdout, stderr (the per-file log in its place among the rest) and the report are those of the same run under `--no-parallel-scans`, which has only one in flight at a time; `runDiff` rejects with the same error either way. A base that stops ends the run with the base's error, whatever the head did, once the head has stopped, and leaves no temporary directory (§14.1) |
 | CL60 | `aburi diff main..HEAD --parallel-scans` where a plugin on the base's thread calls `process.exit(7)`, or throws from a timer | exit 1, stderr naming the base ref, what ended the thread and `--no-parallel-scans`; no worktree but the main checkout and no temporary directory left (§14.1) |
 | CL61 | `aburi diff --base <ir> --head <ir> --no-parallel-scans` | The exit code, stdout and stderr of the same run without it |
+| CL66 | `aburi diff … --quiet` | stdout the glyph line alone, `· ?N unknown` included when the diff has one; the same artefacts, stderr and exit code as without it |
+| CL67 | `aburi diff … --filter added,removed` over a diff holding added, removed and changed Symbols, and a Slice joining an added Symbol to a changed one | `diff.md` lists the added and removed Symbols and no changed one, the Slice drawn whole, with the Summary line and the glyph line counting all three and a note naming how many changes it left out; `diff.json` byte for byte the one without `--filter` |
+| CL68 | `aburi diff … --filter added --fail-on removed` over a removal | exit 3, the clause's lines on stderr, and before them the warning that `--filter` leaves the `removed` changes out of `diff.md`. `--filter added,changed --fail-on api-changed` warns about nothing |
+| CL69 | `aburi diff … --filter ""`, `--filter added,`, `--filter renamed`, `--filter removed:duplicate`; `--filter added --format json` | exit 2 for each of the first four, before either IR is read, naming the statuses; the last exits 0 with the warning that `--filter` has nothing to narrow |
 
 ## 18. Design Decisions
 

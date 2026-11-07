@@ -1,4 +1,13 @@
-import { call, changed, componentId, decorator, effect, rule, sig } from "@aburi/test-support"
+import {
+  call,
+  changed,
+  componentId,
+  decorator,
+  effect,
+  rule,
+  sectionOf,
+  sig,
+} from "@aburi/test-support"
 import type {
   ArrayDelta,
   Symbol as IRSymbol,
@@ -8,7 +17,6 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { LONG_CONDITION, namedSymbol, projectChanges, renamedPair } from "./fixtures"
-import { sectionOf } from "./markdown"
 
 function none(): ArrayDelta {
   return { added: [], removed: [], modified: [] }
