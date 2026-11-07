@@ -1,5 +1,11 @@
 # @aburi/markdown-projection
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies: `@aburi/types@0.7.0`
+
 ## 0.5.0
 
 ### Minor Changes
