@@ -1,4 +1,6 @@
+import { symbolId } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
+import { matchStageDroppedWeak } from "../src"
 import { changesBetween, diffSymbols, dropped } from "./helpers"
 
 describe("a key several dropped Symbols carry is not evidence of a pairing", () => {
@@ -152,5 +154,31 @@ describe("a conflict between the two keys", () => {
   ])("is settled the same in either order when %s", (_, base, head, expected) => {
     expect(changesBetween(base, head)).toEqual([expected])
     expect(changesBetween([...base].reverse(), [...head].reverse())).toEqual([expected])
+  })
+})
+
+describe("a dropped tree larger than one call can take as arguments", () => {
+  // V8 refuses a call of more than about 125,000 arguments, so the tree has to pass that; a slow
+  // runner takes tens of seconds over it.
+  it("pairs every Symbol of a moved tree of 130,000", { timeout: 120_000 }, () => {
+    const count = 130_000
+    const template = dropped("gen/index.ts", "f")
+    const tree = (dir: string) => {
+      const source = { ...template.source, file: `gen/${dir}/index.ts` }
+      return Array.from({ length: count }, (_, i) => ({
+        ...template,
+        id: symbolId(`ts:${source.file}#f${i}`),
+        name: `f${i}`,
+        source,
+      }))
+    }
+
+    const { matched, remainingBase, remainingHead } = matchStageDroppedWeak(
+      tree("old"),
+      tree("new"),
+    )
+
+    expect(matched).toHaveLength(count)
+    expect([remainingBase.length, remainingHead.length]).toEqual([0, 0])
   })
 })
