@@ -4,7 +4,8 @@ import { CliError } from "./errors"
 
 export async function resolveWorkspaceRoot(cwd: string): Promise<string> {
   try {
-    return await detectWorkspaceRoot({ cwd })
+    // The environment git is spawned with, so the root is the top of the tree git sees.
+    return await detectWorkspaceRoot({ cwd, env: process.env })
   } catch (error) {
     if (error instanceof CoreError && error.code === "workspace-root-not-found") {
       return resolve(cwd)

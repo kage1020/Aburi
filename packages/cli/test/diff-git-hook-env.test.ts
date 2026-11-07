@@ -137,6 +137,25 @@ describe("aburi diff on a repository only the environment names", () => {
     expect(result.summaryLine).toMatch(/^\+1 -0 ~0 /)
   })
 
+  it.each<[string, string | undefined]>([
+    ["named by GIT_WORK_TREE", "home"],
+    ["implied by GIT_DIR alone, run from it", undefined],
+  ])(
+    "roots the head at the work tree %s, though a marker sits above it",
+    async (_, workTreeVariable) => {
+      await writeFileAt(workspace.root, "pnpm-workspace.yaml", "packages: []\n")
+      vi.stubEnv(
+        "GIT_WORK_TREE",
+        workTreeVariable === undefined ? undefined : resolve(workspace.root, workTreeVariable),
+      )
+
+      const result = await diffFrom(workTree)
+
+      expect(result.exitCode).toBe(EXIT.SUCCESS)
+      expect(result.summaryLine).toMatch(/^\+1 -0 ~0 ↔0 ⤴0/)
+    },
+  )
+
   it("diagnoses a mistyped ref as one, which takes GIT_WORK_TREE to see the work tree", async () => {
     await expect(diffFrom(workTree, "nosuchref..HEAD")).rejects.toThrow(
       "no such revision in this repository",

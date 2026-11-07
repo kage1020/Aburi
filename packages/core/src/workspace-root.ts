@@ -1,5 +1,5 @@
-import { open, readFile, stat } from "node:fs/promises"
-import { dirname, isAbsolute, join, resolve, sep } from "node:path"
+import { open, readFile, realpath, stat } from "node:fs/promises"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { stripUtf8Bom } from "./codepoints"
 import { CoreError } from "./errors"
 import { isVanishedFile } from "./scan/faults"
@@ -27,6 +27,13 @@ type RootMarker =
 
 export interface DetectWorkspaceRootOptions {
   cwd?: string
+  /**
+   * The variables git finds a repository through when its working tree holds no `.git`.
+   * `GIT_WORK_TREE` is a root the walk stops at, as at a `.git`; `GIT_DIR` without it makes the
+   * start the root when the walk meets no `.git`, since git then takes the directory it runs in as
+   * the top of the working tree.
+   */
+  env?: { readonly GIT_DIR?: string | undefined; readonly GIT_WORK_TREE?: string | undefined }
 }
 
 export async function detectWorkspaceRoot(
@@ -35,17 +42,28 @@ export async function detectWorkspaceRoot(
   const startRaw = options.cwd ?? process.cwd()
   const start = isAbsolute(startRaw) ? startRaw : resolve(process.cwd(), startRaw)
 
+  const workTree = nonEmpty(options.env?.GIT_WORK_TREE)
+  const workTreeNames = workTree === null ? new Set<string>() : await spellingsOf(workTree, start)
+
   let dir = start
   let outermost: string | null = null
   let failure: MarkerFailure | null = null
+  let stopped = false
   while (true) {
     const probe = await probeDirectoryMarkers(dir)
     if (probe.marker !== null) outermost = dir
     if (failure === null && probe.failure !== null) failure = { dir, cause: probe.failure }
-    if (probe.marker === REPOSITORY_MARKER) break
+    if (probe.marker === REPOSITORY_MARKER || workTreeNames.has(dir)) {
+      outermost = dir
+      stopped = true
+      break
+    }
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent
+  }
+  if (!stopped && workTree === null && nonEmpty(options.env?.GIT_DIR) !== null) {
+    outermost = start
   }
   if (outermost === null) {
     throw new CoreError(
@@ -55,6 +73,31 @@ export async function detectWorkspaceRoot(
   }
   if (failure !== null && isAtOrBelow(failure.dir, outermost)) throw failure.cause
   return outermost
+}
+
+function nonEmpty(value: string | undefined): string | null {
+  return value === undefined || value.length === 0 ? null : value
+}
+
+/**
+ * The spellings of `GIT_WORK_TREE` the walk from `start` can meet: as resolved, and as the ancestor
+ * of `start` that is the same directory once links and letter case are resolved.
+ */
+async function spellingsOf(workTree: string, start: string): Promise<Set<string>> {
+  const resolved = resolve(start, workTree)
+  const spellings = new Set([resolved])
+  let below: string
+  try {
+    below = relative(await realpath(resolved), await realpath(start))
+  } catch (cause) {
+    if (isVanishedFile(cause)) return spellings
+    throw cause
+  }
+  if (isAbsolute(below) || below === ".." || below.startsWith(`..${sep}`)) return spellings
+  let ancestor = start
+  for (const segment of below.split(sep)) if (segment.length > 0) ancestor = dirname(ancestor)
+  spellings.add(ancestor)
+  return spellings
 }
 
 interface MarkerFailure {

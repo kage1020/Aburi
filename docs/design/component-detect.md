@@ -48,6 +48,8 @@ Walk from cwd toward parents. The workspace root is the first directory holding 
 
 If markers are found at multiple levels, the outer one wins: a sub-project's `package.json` inside a monorepo does not shrink the workspace to that sub-project. The walk does not go past a `.git`, so a repository nested under another marker is a workspace of its own (§11.1).
 
+A working tree whose repository is kept elsewhere has no `.git`, so the walk reads the two variables git finds it through, as the `aburi` process has them. `GIT_WORK_TREE`, resolved against the directory `aburi` runs in, is a root the walk stops at as it does at a `.git`; the walk meets it under its own spelling or as the ancestor that is the same directory once links and letter case are resolved. A `.git` below it still stops the walk first. `GIT_DIR` without `GIT_WORK_TREE` makes the directory `aburi` runs in the root, since git takes that directory as the top of its working tree, but only when the walk meets no `.git` at all: a hook exports `GIT_DIR` and may run `aburi` from a package directory below the `.git` it belongs to. `core.worktree` is not read; a repository that sets it has a `.git` file in its working tree.
+
 ### 2.2 Component extraction
 
 Each detector receives the workspace root and determines whether a marker it can handle exists. If so, it returns zero or more "workspace candidates".
@@ -451,7 +453,7 @@ A monorepo whose root is the directory holding its `.git` is unaffected; a submo
 
 The file walks keep the same boundary from the other side: discovery, the language census and the nx search list nothing in a directory below the workspace root that holds a `.git` ([`drop-list.md` §10.8](./drop-list.md)). So the checkout around each of these layouts does not read it either: the main checkout's scan leaves a worktree at `.worktrees/feat` out, and the head scan leaves out the base worktree under an in-repository `TMPDIR`.
 
-The stop is a `.git` on disk, not git's own repository discovery. `GIT_DIR` and `GIT_WORK_TREE` are not consulted, so a working tree whose repository is kept elsewhere has no `.git` to stop at, and the walk climbs from it as it does outside a repository.
+The stop is a `.git` on disk, or the working tree git's environment names (§2.1), rather than git's own repository discovery, which would cost a `git` process for every command and fail outside a repository. A working tree whose repository is kept elsewhere — `GIT_DIR=~/.dotfiles.git GIT_WORK_TREE=~` — is the fourth layout: before the walk read those variables, the head scan climbed past it to any marker above, while the base worktree, which `git worktree add` gives a `.git` file, rooted at itself, and every Symbol read as moved under the work tree's name.
 
 The stop bounds the root walk only. Config discovery still climbs to the filesystem root ([`cli-spec.md`](./cli-spec.md) §13), so a worktree under `.worktrees/feat` roots at itself while still reading the main checkout's `aburi.json`, whose `ignore`, `components[].roots` and relative plugin refs then resolve against the worktree.
 

@@ -1,8 +1,8 @@
 import { chmod } from "node:fs/promises"
 import { join, relative } from "node:path"
-import { errorFrom } from "@aburi/test-support"
+import { errorFrom, linkDirectory } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { CoreError, detectWorkspaceRoot } from "../src/index"
+import { CoreError, type DetectWorkspaceRootOptions, detectWorkspaceRoot } from "../src/index"
 import { useWorkspaceTree } from "./fixtures/workspace"
 
 const tree = useWorkspaceTree("core-workspace-root")
@@ -104,6 +104,72 @@ describe("the walk upward", () => {
     await tree.writeSource("vendor/lib/.git", "")
 
     expect(await rootFrom("vendor", "lib", "src")).toBe(tree.root)
+  })
+})
+
+describe("a working tree git finds through the environment", () => {
+  const rootUnder = (env: NonNullable<DetectWorkspaceRootOptions["env"]>, ...segments: string[]) =>
+    detectWorkspaceRoot({ cwd: join(tree.root, ...segments), env })
+
+  async function workTreeBelowMarker(): Promise<string> {
+    await tree.writeSource("pnpm-workspace.yaml", "packages: []")
+    await tree.writeSource(
+      "outer/wt/package.json",
+      JSON.stringify({ name: "demo", workspaces: [] }),
+    )
+    await tree.mkdir("outer/wt/src")
+    return join(tree.root, "outer", "wt")
+  }
+
+  it.each<[string, (workTree: string) => string, string[]]>([
+    ["from the work tree", (workTree) => workTree, ["outer", "wt"]],
+    ["from below it", (workTree) => workTree, ["outer", "wt", "src"]],
+    ["named relative to the start, as git resolves it", () => "..", ["outer", "wt", "src"]],
+  ])("roots at GIT_WORK_TREE, though a marker sits above it, %s", async (_, name, start) => {
+    const workTree = await workTreeBelowMarker()
+
+    expect(await rootUnder({ GIT_WORK_TREE: name(workTree) }, ...start)).toBe(workTree)
+  })
+
+  it("roots at GIT_WORK_TREE spelled through a link, under the name the walk meets it by", async () => {
+    const workTree = await workTreeBelowMarker()
+    await linkDirectory(workTree, join(tree.root, "alias"))
+
+    const env = { GIT_WORK_TREE: join(tree.root, "alias") }
+    expect(await rootUnder(env, "outer", "wt", "src")).toBe(workTree)
+  })
+
+  it("still stops at a repository nested inside GIT_WORK_TREE", async () => {
+    const workTree = await workTreeBelowMarker()
+    await tree.mkdir("outer/wt/vendor/lib/.git")
+
+    const env = { GIT_WORK_TREE: workTree }
+    expect(await rootUnder(env, "outer", "wt", "vendor", "lib")).toBe(
+      join(workTree, "vendor", "lib"),
+    )
+  })
+
+  it.each<[string, NonNullable<DetectWorkspaceRootOptions["env"]>]>([
+    ["a GIT_WORK_TREE the start is not inside", { GIT_WORK_TREE: "/nowhere/else" }],
+    ["an empty GIT_WORK_TREE and GIT_DIR", { GIT_WORK_TREE: "", GIT_DIR: "" }],
+  ])("climbs past the work tree for %s", async (_, env) => {
+    await workTreeBelowMarker()
+
+    expect(await rootUnder(env, "outer", "wt", "src")).toBe(tree.root)
+  })
+
+  it("roots at the start under GIT_DIR alone, which git takes as the top of its work tree", async () => {
+    await workTreeBelowMarker()
+
+    const env = { GIT_DIR: join(tree.root, "repo.git") }
+    expect(await rootUnder(env, "outer", "wt", "src")).toBe(join(tree.root, "outer", "wt", "src"))
+  })
+
+  it("stops at a `.git` above the start under GIT_DIR alone, as a hook run from a package does", async () => {
+    await tree.mkdir(".git")
+    await tree.mkdir("packages/app")
+
+    expect(await rootUnder({ GIT_DIR: ".git" }, "packages", "app")).toBe(tree.root)
   })
 })
 
