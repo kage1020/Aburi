@@ -129,10 +129,27 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
     expect(ruleRow(rule({ type: "guard", line: 1, condition: past }))[0]).toBe("- guard (L1):")
   })
 
-  it("names an empty payload instead of rendering a row that trails off", () => {
-    expect(ruleRow(rule({ type: "guard", line: 5, condition: "" }))).toEqual([
-      "- guard: (empty) (L5)",
-    ])
+  it.each([
+    ["guard", { type: "guard", condition: "" }],
+    ["switch", { type: "switch", condition: "" }],
+    ["throw", { type: "throw", what: "" }],
+    ["return", { type: "return", expr: "" }],
+  ] as const)(
+    "names an empty %s payload instead of rendering a row that trails off",
+    (type, payload) => {
+      expect(ruleRow(rule({ ...payload, line: 5 }))).toEqual([`- ${type}: (empty) (L5)`])
+    },
+  )
+
+  it.each([
+    ["guard", { type: "guard", condition: null }, "condition"],
+    ["throw", { type: "throw", what: null }, "what"],
+    ["return", { type: "return", expr: null }, "expr"],
+    ["loop", { type: "loop", loopKind: null }, "loopKind"],
+  ] as const)("refuses a %s rule whose payload is missing", (_, payload, field) => {
+    expect(() => ruleRow(rule({ ...payload, line: 5 }))).toThrow(
+      expect.objectContaining({ name: "ProjectionInvariantError", field }),
+    )
   })
 
   it("does not let a template literal close the span early", () => {

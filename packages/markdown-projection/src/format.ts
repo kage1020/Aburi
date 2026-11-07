@@ -180,13 +180,13 @@ export function ruleRow(rule: Rule): string[] {
     case "guard":
     case "switch":
     case "match":
-      return payloadRow(type, requireField(rule, "condition"), line)
+      return payloadRow(type, requireNonNull(rule, "condition"), line)
     case "throw":
-      return payloadRow(type, requireField(rule, "what"), line)
+      return payloadRow(type, requireNonNull(rule, "what"), line)
     case "return":
-      return payloadRow(type, requireField(rule, "expr"), line)
+      return payloadRow(type, requireNonNull(rule, "expr"), line)
     case "loop": {
-      const loopKind = inlineCode(requireField(rule, "loopKind"))
+      const loopKind = inlineCode(requireNonNull(rule, "loopKind"))
       return [`- ${ruleRowText({ type, payload: null, loopKind, line })}`]
     }
     case "try":
@@ -228,7 +228,9 @@ export class ProjectionInvariantError extends Error {
   }
 }
 
-function requireField(rule: Rule, field: "condition" | "what" | "expr" | "loopKind"): string {
+// Unlike `dropReason`, these fields carry no `minLength` in the schema, so an empty payload is a
+// valid document and renders; only a missing one is refused.
+function requireNonNull(rule: Rule, field: "condition" | "what" | "expr" | "loopKind"): string {
   const value = rule[field]
   if (value === null || value === undefined) {
     throw new ProjectionInvariantError(field, `Rule(type=${rule.type}, line=${rule.line})`)
