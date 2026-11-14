@@ -24,7 +24,8 @@ and the README. Then install the sibling's runtime dependencies (`@aburi/types`,
 versions in:
 
 ```bash
-pnpm --filter @aburi/<name> add '@aburi/types@workspace:*' '@aburi/plugin-registry@workspace:*'
+pnpm --filter @aburi/<name> add '@aburi/types@workspace:*' '@aburi/plugin-registry@workspace:*'  # effects
+pnpm --filter @aburi/<name> add '@aburi/types@workspace:*' '@aburi/core@workspace:*'             # framework
 pnpm --filter @aburi/<name> add -D '@aburi/lang-typescript@workspace:*' '@aburi/test-support@workspace:*' \
   '@aburi/test-harness@workspace:*' @types/node tsdown typescript vitest
 ```
