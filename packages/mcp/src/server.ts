@@ -116,7 +116,7 @@ export function createAburiServer(options: AburiServerOptions): AburiServer {
 
   const scanTree = async (signal: AbortSignal): Promise<Scan | CallToolResult> => {
     const output = outputDirectory("scan")
-    const scanned = await run(["scan", "--output-dir", output, "--quiet", ...config], signal)
+    const scanned = await run(["scan", "--output-dir", output, ...config], signal)
     const read = await componentsOf(scanned, output, signal)
     if (!("components" in read)) {
       await remove(output)
@@ -180,7 +180,7 @@ export function createAburiServer(options: AburiServerOptions): AburiServer {
         serially(async () => {
           const scan = await scanTree(ctx.mcpReq.signal)
           if ("content" in scan) return scan
-          return answered(scan.run.stdout, [scan.run], {
+          return answered(censusOf(scan.run.stdout), [scan.run], {
             scan: scan.id,
             components: [...scan.components],
           })
@@ -451,6 +451,17 @@ function described(runs: readonly AburiRun[]) {
     exitCode: run.exitCode,
     stderr: run.stderr,
   }))
+}
+
+/**
+ * What `aburi scan` printed less the `→ <path>` line of each file it wrote, which name the server's
+ * own directory: filtered rather than run with `--quiet`, which a workspace CLI before 0.8 lacks.
+ */
+function censusOf(stdout: string): string {
+  return stdout
+    .split(/(?<=\n)/)
+    .filter((line) => !line.startsWith("→ "))
+    .join("")
 }
 
 function answered(

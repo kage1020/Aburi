@@ -412,6 +412,30 @@ ${writes}
     }
   })
 
+  it("answers scan with the census lines of a workspace aburi that knows no --quiet", async () => {
+    await writeRepository(workspace)
+    await installWorkspaceCli(
+      workspace,
+      `import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+if (process.argv.includes("--quiet")) {
+  process.stderr.write("error: unknown option '--quiet'\\n")
+  process.exit(2)
+}
+const output = process.argv[process.argv.indexOf("--output-dir") + 1]
+mkdirSync(output, { recursive: true })
+writeFileSync(join(output, "aburi.ir.json"), '{"components":[{"id":"api"}]}')
+process.stdout.write("1 kept · 0 dropped · 1 files\\ncalls 0\\n→ " + join(output, "aburi.ir.json") + "\\n")
+`,
+    )
+    const client = await connected()
+    const scanned = await call(client, "scan")
+
+    expect(scanned.isError).toBe(false)
+    expect(scanned.text).toBe("1 kept · 0 dropped · 1 files\ncalls 0\n")
+    expect(scanned.structured.components).toEqual(["api"])
+  })
+
   it("runs the aburi the workspace installed, when it has one", async () => {
     await writeRepository(workspace)
     const bin = await installWorkspaceCli(

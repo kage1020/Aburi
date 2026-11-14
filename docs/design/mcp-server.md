@@ -88,7 +88,7 @@ replaces the answer.
 
 | Tool | Input | Runs | Answers with |
 |---|---|---|---|
-| `scan` | — | `aburi scan --output-dir <a directory of its own> --quiet` | The run's stdout (the census lines, §5.5 of cli-spec), the id of the scan, and its Components' ids |
+| `scan` | — | `aburi scan --output-dir <a directory of its own>` | The run's stdout (the census lines, §5.5 of cli-spec), the id of the scan, and its Components' ids |
 | `workspace` | `scan`? | A `scan`, when no `scan` is named | That scan's `workspace.md` |
 | `component` | `id`, `scan`? | Likewise | That scan's `components/<id>.md`: the Component's public API, its Symbols and the effects they reach |
 | `explain` | `target`, `scan`? | Likewise, then `aburi explain <target> --ir <that scan's IR>` | The run's stdout: the Symbol's, or the file's, Markdown, or the candidates an ambiguous `target` matches |
