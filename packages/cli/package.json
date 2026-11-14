@@ -71,6 +71,7 @@
     "@aburi/test-support": "workspace:*",
     "@types/node": "catalog:",
     "tsdown": "catalog:",
+    "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
