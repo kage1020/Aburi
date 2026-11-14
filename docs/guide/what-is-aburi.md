@@ -1,3 +1,7 @@
+---
+description: "What Aburi is: a CLI that reads two revisions of a TypeScript or JavaScript codebase and reports what the change did, as Markdown a CI can gate on."
+---
+
 # What is Aburi?
 
 Aburi is a command-line tool that reads your source code and tells you what a

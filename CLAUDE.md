@@ -53,7 +53,9 @@ Private packages:
   diff, plugin-registry and test-support and never on a plugin (plugins are passed in), so the plugins,
   lang-typescript and the CLI may devDepend on it; core, diff, plugin-registry and test-support may not.
 - `@aburi/examples` (`examples/`) — the docs Showcase; its build runs `aburi diff` over each example.
-- `@aburi/docs` (`docs/`) — the VitePress site. Its `build` builds the packages it renders first.
+- `@aburi/docs` (`docs/`) — the VitePress site. Its `build` builds the packages it renders first. A
+  Worker (`docs/worker/`) fronts its assets and answers `Accept: text/markdown` with the Markdown copy
+  vitepress-plugin-llms writes beside each page (`/` gets `llms.txt`); its tests need no build.
 - `@aburi/benchmark-public-repos` (`benchmarks/public-repos/`) — measures `scan` and `diff` on pinned
   public repositories; run by hand or by `benchmark.yml`. Its report helpers have unit tests.
 - `@aburi/changelog` — the changelog functions `.changeset/config.json` names, which write every

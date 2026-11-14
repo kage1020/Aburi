@@ -1,3 +1,7 @@
+---
+description: "The aburi.json settings people change in practice: excluded files, test code, plugins, components, noisy helpers and in-house framework hints."
+---
+
 # Configuration
 
 `aburi init` writes an `aburi.json` at your workspace root, and for most

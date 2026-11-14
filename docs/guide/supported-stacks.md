@@ -1,3 +1,7 @@
+---
+description: "The language, framework and effects plugins Aburi ships: TypeScript and JavaScript, NestJS, Next.js, Express, React, tRPC, Prisma, Drizzle."
+---
+
 # Supported stacks
 
 Aburi ships as a small CLI plus plugins. Install the ones that match your

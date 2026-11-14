@@ -1,3 +1,7 @@
+---
+description: "How Aburi is built: one IR and its views, the pipeline from scan to report, the packages and the schemas."
+---
+
 # Architecture
 
 This page is for people working *on* Aburi, or writing a plugin for it. If you

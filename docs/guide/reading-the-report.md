@@ -1,3 +1,7 @@
+---
+description: "How to read an aburi diff report: the summary line, its sections, one entry, a Slice, confidence and gaps."
+---
+
 # Reading the report
 
 `aburi diff` writes `.aburi/diff.md`. This page walks you through it, from the top

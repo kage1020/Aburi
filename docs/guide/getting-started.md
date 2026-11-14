@@ -1,3 +1,7 @@
+---
+description: "Install the Aburi CLI and plugins, write aburi.json with aburi init, and run your first semantic diff."
+---
+
 # Getting started
 
 Five minutes from install to your first semantic diff. You need Node.js 24 or

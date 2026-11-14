@@ -1,22 +1,34 @@
 import { defineConfig } from "vitepress"
+import llmstxt from "vitepress-plugin-llms"
 import { readShowcase } from "../showcase/showcase.ts"
+import { DESCRIPTION, pageHead, REPOSITORY, SITE } from "./head.ts"
+import { LLMS_TXT } from "./llms.ts"
 
 export default defineConfig({
   title: "Aburi",
-  description:
-    "Semantic IR extraction for high-level code review — read PRs at the level of business logic, not raw diffs.",
+  description: DESCRIPTION,
   lang: "en-US",
   lastUpdated: true,
   cleanUrls: true,
   sitemap: {
-    hostname: "https://aburi.dev",
+    hostname: SITE,
   },
+  vite: {
+    plugins: [
+      llmstxt({
+        domain: SITE,
+        customLLMsTxtTemplate: LLMS_TXT,
+      }),
+    ],
+  },
+  transformHead: ({ pageData }) => pageHead(pageData.relativePath),
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["link", { rel: "icon", type: "image/png", sizes: "32x32", href: "/brand/favicon-32.png" }],
     ["link", { rel: "icon", type: "image/png", sizes: "16x16", href: "/brand/favicon-16.png" }],
     ["link", { rel: "apple-touch-icon", href: "/brand/apple-touch-icon.png" }],
     ["meta", { name: "theme-color", content: "#B87514" }],
+    ["meta", { property: "og:type", content: "website" }],
     ["meta", { property: "og:title", content: "Aburi" }],
     [
       "meta",
@@ -25,10 +37,9 @@ export default defineConfig({
         content: "Semantic IR extraction for high-level code review.",
       },
     ],
-    ["meta", { property: "og:url", content: "https://aburi.dev" }],
-    ["meta", { property: "og:image", content: "https://aburi.dev/brand/og.png" }],
+    ["meta", { property: "og:image", content: `${SITE}/brand/og.png` }],
     ["meta", { name: "twitter:card", content: "summary_large_image" }],
-    ["meta", { name: "twitter:image", content: "https://aburi.dev/brand/og.png" }],
+    ["meta", { name: "twitter:image", content: `${SITE}/brand/og.png` }],
   ],
   themeConfig: {
     logo: { light: "/brand/mark.svg", dark: "/brand/mark-dark.svg", alt: "Aburi" },
@@ -49,7 +60,7 @@ export default defineConfig({
           { text: "Supported stacks", link: "/guide/supported-stacks" },
           { text: "Configuration", link: "/guide/configuration" },
           { text: "CI integration", link: "/guide/ci-integration" },
-          { text: "AI coding agents", link: "/guide/ai-agents" },
+          { text: "MCP server for AI agents", link: "/guide/ai-agents" },
         ],
       },
       {
@@ -104,11 +115,11 @@ export default defineConfig({
         ],
       },
     ],
-    socialLinks: [{ icon: "github", link: "https://github.com/aburi-dev/Aburi" }],
+    socialLinks: [{ icon: "github", link: REPOSITORY }],
     search: { provider: "local" },
     outline: { level: [2, 3] },
     editLink: {
-      pattern: "https://github.com/aburi-dev/Aburi/edit/main/docs/:path",
+      pattern: `${REPOSITORY}/edit/main/docs/:path`,
       text: "Edit this page on GitHub",
     },
     footer: {

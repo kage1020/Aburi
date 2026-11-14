@@ -1,3 +1,7 @@
+---
+description: "Every aburi command and flag: init, scan, diff, explain, vocab, exit codes and the --fail-on grammar."
+---
+
 # CLI reference
 
 ```

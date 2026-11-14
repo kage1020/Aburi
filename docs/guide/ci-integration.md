@@ -1,3 +1,7 @@
+---
+description: "Run aburi diff in CI: the GitHub Action, the pull request comment, and the --fail-on gate."
+---
+
 # CI integration
 
 Running Aburi in CI does two things: it puts the report where reviewers will see

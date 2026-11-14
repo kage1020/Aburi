@@ -7,12 +7,18 @@
   "scripts": {
     "dev": "turbo run build \"--filter=@aburi/docs^...\" && node scripts/copy-schema.mjs && vitepress dev",
     "build": "turbo run build \"--filter=@aburi/docs^...\" && node scripts/copy-schema.mjs && vitepress build",
-    "preview": "vitepress preview"
+    "preview": "vitepress preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@aburi/examples": "workspace:*",
     "@aburi/schema": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
     "vitepress": "2.0.0-alpha.21",
+    "vitepress-plugin-llms": "^1.15.0",
+    "vitest": "catalog:",
     "vue": "^3.5.44"
   }
 }

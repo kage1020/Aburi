@@ -5,6 +5,12 @@
     "build": {
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**"],
       "outputs": [".vitepress/dist/**", "public/schema/**"]
+    },
+    "test": {
+      "dependsOn": []
+    },
+    "typecheck": {
+      "dependsOn": []
     }
   }
 }

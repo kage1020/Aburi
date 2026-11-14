@@ -19,6 +19,9 @@ packages/types/src/generated/
 # Turborepo
 .turbo/
 
+# wrangler dev's bundles and local state
+.wrangler/
+
 # Test coverage
 coverage/
 
