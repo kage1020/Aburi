@@ -9,7 +9,7 @@ import type {
   SourceFile,
   VocabRegistry,
 } from "@aburi/types"
-import { CoreError } from "../errors"
+import { CoreError, REPORT_BUG } from "../errors"
 import { buildComponentAttribution } from "./attribute"
 import type { DiscoveredFile } from "./discover"
 import { buildDropCFilter } from "./drop-c"
@@ -152,7 +152,7 @@ export function createFileExtractor(job: ExtractionJob, plugins: ExtractionPlugi
   }
 }
 
-export async function loadSourceFile(
+async function loadSourceFile(
   workspaceRoot: string,
   discovered: DiscoveredFile,
 ): Promise<SourceFile> {
@@ -167,8 +167,7 @@ export function normalizeLineTerminators(content: string): string {
 
 function unknownFile(fileId: number, count: number): CoreError {
   return new CoreError(
-    `Internal error: asked to extract file ${fileId} of a scan that discovered ${count}\n` +
-      "This is a bug in Aburi — please report it at https://github.com/aburi-dev/Aburi/issues.",
+    `Internal error: asked to extract file ${fileId} of a scan that discovered ${count}\n${REPORT_BUG}`,
     { code: "scan-file-unknown" },
   )
 }

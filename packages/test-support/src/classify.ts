@@ -22,7 +22,7 @@ export function importEdge(
   return { symbols: [], line: 1, dynamic: false, ...overrides }
 }
 
-export function makeOwner(overrides: Partial<OwnerSummary> = {}): OwnerSummary {
+function makeOwner(overrides: Partial<OwnerSummary> = {}): OwnerSummary {
   return {
     id: symbolId("ts:test.ts#Owner"),
     kind: "function",

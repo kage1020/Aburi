@@ -116,14 +116,14 @@ export async function scanRevisions(
       )
     }
     if (report.irPath === null) {
-      throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
+      throw new CliError(`Scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
     }
     return sayPlainFileLinks({ side: "base", ref: spec.base }, await readIR(report.irPath))
   }
   const readHead = async (report: ScanReport): Promise<IR> => {
     reportScanIncidents(report, warn, labelFor({ side: "head" }), said)
     if (report.irPath === null) {
-      throw new CliError("scan for head ref produced no IR file.", "runtime-error")
+      throw new CliError("Scan for head ref produced no IR file.", "runtime-error")
     }
     return sayPlainFileLinks({ side: "head" }, await readIR(report.irPath))
   }

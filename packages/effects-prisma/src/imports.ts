@@ -4,11 +4,9 @@ import { EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 
 const PRISMA_CLIENT_MODULES_LIST = ["@prisma/client", "@prisma/client/edge"] as const
 
-export type PrismaClientModule = (typeof PRISMA_CLIENT_MODULES_LIST)[number]
+type PrismaClientModule = (typeof PRISMA_CLIENT_MODULES_LIST)[number]
 
-export const PRISMA_CLIENT_MODULES: ReadonlySet<PrismaClientModule> = new Set(
-  PRISMA_CLIENT_MODULES_LIST,
-)
+const PRISMA_CLIENT_MODULES: ReadonlySet<PrismaClientModule> = new Set(PRISMA_CLIENT_MODULES_LIST)
 
 function isPrismaClientModule(source: string): boolean {
   return (PRISMA_CLIENT_MODULES as ReadonlySet<string>).has(source)
