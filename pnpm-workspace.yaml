@@ -8,8 +8,6 @@ packages:
 allowBuilds:
   esbuild: true
 
-engineStrict: true
-
 catalog:
   '@changesets/cli': ^3.0.3
   '@types/node': ^26.6.5
