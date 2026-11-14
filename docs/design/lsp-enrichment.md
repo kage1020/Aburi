@@ -1,6 +1,6 @@
 # LSP Enrichment
 
-Specification of the optional Language Server Protocol enrichment pass that refines Aburi's Tree-sitter-derived IR — filling in `SourceRange.startColumn` / `endColumn`, resolving typed method dispatch (`this.*` / `super.*` / interface receivers), and reading the `@throws` tags of the member a `this.*` / `super.*` call reaches — without changing IR shape, ordering, or any fingerprint value.
+Specification of the optional Language Server Protocol enrichment pass that refines Aburi's Tree-sitter-derived IR — filling in `SourceRange.startColumn` / `endColumn`, resolving typed method dispatch (`this.*` / `super.*`, and interface receivers once that lands), and reading the `@throws` tags of the member a `this.*` / `super.*` call reaches — without changing IR shape, ordering, or any fingerprint value.
 
 References:
 - [`overview.md`](./overview.md) §2 — the "Parser layer" decision row that adopts `Tree-sitter core, always resident + optional LSP enrichment` and rejects LSP-only for CI-stability reasons; §4 — the extraction pipeline placement (`tree-sitter parse (+ LSP enrich if available)`)
@@ -18,7 +18,7 @@ References:
 
 Aburi's Tree-sitter tier produces a complete, deterministic IR without any language server. This document specifies the **optional** LSP enrichment pass that refines four aspects of that IR:
 
-1. `Call.resolved` for shapes the untyped tier leaves `null` — `this.*` / `super.*` calls whose receiver class is resolvable through the type system, and interface-typed receivers with a single implementer
+1. `Call.resolved` for shapes the untyped tier leaves `null` — `this.*` / `super.*` calls whose receiver class is resolvable through the type system, and, planned (§4.2), interface-typed receivers with a single implementer
 2. `SourceRange.startColumn` / `SourceRange.endColumn` — populated from `textDocument/documentSymbol`; currently emitted as `null` by the language plugin
 3. `Signature.inferredThrows` — a new optional array of the types named by the `@throws` tags of the members a Symbol's `this.*` / `super.*` calls reach, read from the hover on each such call that produced a hint (distinct from `Signature.throws`, which stays reserved for explicit `throw` statements + `@throws` JSDoc)
 4. `CallEdge.confidence` — monotone-upward promotion from the untyped tier value to `high` / `medium` per [`call-resolution.md`](./call-resolution.md) §7.2
@@ -78,14 +78,14 @@ One server process per language covers the whole run. Per-file open/close cycles
 
 ### 4.2 Request-to-IR-field mapping
 
-Every LSP request the pass issues, the IR field it enriches, and the confidence the enriched value carries:
+Every LSP request the pass issues, the IR field it enriches, and the confidence the enriched value carries. The `typeDefinition` and `implementation` rows are planned with [`call-resolution.md`](./call-resolution.md) §5.3: the client advertises both capabilities at `initialize`, but the pass issues neither request yet, so no interface-typed call is resolved.
 
 | LSP request | Position input | Response consumed | IR field enriched | Confidence |
 |---|---|---|---|---|
 | `textDocument/documentSymbol` | file URI | `DocumentSymbol[].range` and `.selectionRange` (character offsets) | `SourceRange.startColumn`, `SourceRange.endColumn` | n/a (columns are not confidence-scored) |
-| `textDocument/hover` | call site of `this.<m>` / `super.<m>` / `<receiver>.<m>` | receiver type text | `receiverType(callSite)` fed to [`call-resolution.md`](./call-resolution.md) §5.2 / §5.3 | `high` for direct class dispatch, `medium` for walked hierarchy ([`call-resolution.md`](./call-resolution.md) §7.2) |
-| `textDocument/typeDefinition` | receiver position of an interface-typed call | destination symbol URI + range | resolves receiver to interface declaration for [`call-resolution.md`](./call-resolution.md) §5.3 lookup | `medium` (interface dispatch) |
-| `textDocument/implementation` | interface declaration URI | array of implementer URIs | `implementers(interfaceName)` for [`call-resolution.md`](./call-resolution.md) §5.3 | `medium` when there is exactly one implementer; unresolved (no promotion) on multi-implementer cases (the framework plugin hook that would narrow them, [`call-resolution.md`](./call-resolution.md) §7.4, is not implemented) |
+| `textDocument/hover` | call site of `this.<m>` / `super.<m>` | receiver type text | `receiverType(callSite)` fed to [`call-resolution.md`](./call-resolution.md) §5.2 | `high` for direct class dispatch, `medium` for walked hierarchy ([`call-resolution.md`](./call-resolution.md) §7.2) |
+| `textDocument/typeDefinition` (planned) | receiver position of an interface-typed call | destination symbol URI + range | resolves receiver to interface declaration for [`call-resolution.md`](./call-resolution.md) §5.3 lookup | `medium` (interface dispatch) |
+| `textDocument/implementation` (planned) | interface declaration URI | array of implementer URIs | `implementers(interfaceName)` for [`call-resolution.md`](./call-resolution.md) §5.3 | `medium` when there is exactly one implementer; unresolved (no promotion) on multi-implementer cases (the framework plugin hook that would narrow them, [`call-resolution.md`](./call-resolution.md) §7.4, is not implemented) |
 | `textDocument/hover`, the same answer as the receiver row's | call site of `this.<m>` / `super.<m>`, read only when that hover produced a hint | the `@throws` tags of the hovered member's JSDoc | append to `Signature.inferredThrows` (§7.1) | n/a (`Signature.inferredThrows` is `string[]` with no per-entry confidence) |
 
 How the answers are read, in the shapes typescript-language-server sends them:
@@ -114,7 +114,7 @@ Requests explicitly NOT used by this pass:
 
 - `didOpen` carries the LSP `languageId` the file's extension names: `.ts` / `.mts` / `.cts` → `typescript`, `.tsx` → `typescriptreact`, `.js` / `.mjs` / `.cjs` → `javascript`, `.jsx` → `javascriptreact`. One IR language covers several of these (the TypeScript plugin's `ts` takes all eight extensions), and a server parses a document by the id it was opened under, so the IR language id alone would open a `.tsx` file without JSX. A file whose extension names none of them is opened under its IR language id, except that `ts` becomes `typescript`.
 - After `didOpen` for a file, the pass issues one `documentSymbol` request per file, awaited as a single round-trip.
-- All hover / typeDefinition / implementation requests for that file's call sites are fanned out with `Promise.all` under a concurrency cap of `lsp.servers.<lang>.concurrency` (default `8`).
+- All hover requests for that file's call sites are fanned out with `Promise.all` under a concurrency cap of `lsp.servers.<lang>.concurrency` (default `8`).
 - The pass MUST NOT batch across files. Each file goes `didOpen → drain requests → didClose` as a discrete unit. Rationale: per-file fallback (§6.1) needs a clear boundary, and per-file bounded memory keeps large monorepos tractable.
 
 ### 4.4 Timeouts
@@ -146,7 +146,7 @@ Viewed from the IR side, the pass writes to exactly the following fields. Nothin
 |---|---|---|---|
 | `SourceRange.startColumn` / `endColumn` | `null` (hard-coded in the current TS extractor) | 1-based columns from the `documentSymbol` entry: `endColumn` is its range's end, and `startColumn` its range's start, or for a decorated declaration the column after its decorators, found in the file's text (§4.2) | no confidence field |
 | `Call.resolved` for `this.*` / `super.*` | `null` | Symbol id when class hierarchy is resolvable | `null` → `high`, an inherited member included: a hint does not record how far the lookup walked, so [`call-resolution.md`](./call-resolution.md) §7.2's `medium` for a walked hierarchy is not applied |
-| `Call.resolved` for interface-typed receivers | `null` | single implementer's Symbol id | `null` → `medium` |
+| `Call.resolved` for interface-typed receivers (planned, §4.2) | `null` | single implementer's Symbol id | `null` → `medium` |
 | `CallEdge.confidence` for calls already resolved by the untyped tier | untyped-tier value ([`call-resolution.md`](./call-resolution.md) §7.2) | may be lifted per [`call-resolution.md`](./call-resolution.md) §7.2 | monotone upward only |
 | `Signature.inferredThrows` (optional field, §7.1) | absent from the JSON | array of throws inferred from called signatures' declared throws | recorded on the `Signature`; MUST NOT be merged into `Signature.throws` |
 
@@ -332,7 +332,7 @@ The pass is a pure function of `(SymbolCandidate[], lspConfig, serverResponses)`
 Concrete rules:
 
 1. Every LSP response for a file is captured **before** any IR field is written — held as issued, against the identity of the job that issued it, `(Symbol id, call-site line, call target)`. This mirrors [`call-resolution.md`](./call-resolution.md) §5.5; there is no cache that outlives the file. A per-call-site *output* of the pass — a receiver hint (§5) — is keyed by `(file, line, target)`, never by `(file, line)`: one line holds as many call sites as it has calls, and a hint filed without the target is spent on whichever of them the resolver reaches. The pass declines to request a hint it could not key honestly: a `this.*` target of more than two segments, where the position searched for is not the position of the callee.
-2. Ambiguity (multi-result `textDocument/implementation`, multi-result `textDocument/typeDefinition`) is resolved by lexicographic tiebreak on destination Symbol id. In the multi-implementer case for `textDocument/implementation`, the pass **does not** apply the tiebreak — it leaves `Call.resolved` at `null` (matches [`call-resolution.md`](./call-resolution.md) §5.3 semantics: pick a single implementer only when there is exactly one; the framework hook that would narrow the set, `call-resolution.md` §7.4, is planned and not implemented).
+2. Once the planned interface dispatch issues them (§4.2), ambiguity (multi-result `textDocument/implementation`, multi-result `textDocument/typeDefinition`) is resolved by lexicographic tiebreak on destination Symbol id. In the multi-implementer case for `textDocument/implementation`, the pass **does not** apply the tiebreak — it leaves `Call.resolved` at `null` (matches [`call-resolution.md`](./call-resolution.md) §5.3 semantics: pick a single implementer only when there is exactly one; the framework hook that would narrow the set, `call-resolution.md` §7.4, is planned and not implemented).
 3. Parallel LSP workers (from §4.3 concurrency) answer in nondeterministic wall-clock order but their held responses are consumed in a fixed order — Symbol id ascending, then call-site line ascending, then call target ascending — when writing to `SymbolCandidate` records. Consumption starts only once every worker for the file has stopped: a write issued from inside a worker takes its order from the server's pace, which is what this rule denies it. Where two entries would write the same call site, the first in that order wins. This rule governs *what* is written and in *which order*; which jobs get far enough to be written at all is the per-file budget's question, and §6.1 owns it.
 4. Cold-cache warm-up differences between runs are irrelevant because the pass does not use per-response timing as a signal.
 5. Silent retries with exponential backoff are prohibited. A request either succeeds within `requestTimeoutMs` or triggers per-request fallback. Retry-on-load would make outcomes depend on machine load.
@@ -351,7 +351,7 @@ Concrete rules:
 
 - LE4: `this.foo()` in class `C` with method `foo` in the same file → `Call.resolved = C.foo`'s Symbol id, `CallEdge.confidence = high`. Matches [`call-resolution.md`](./call-resolution.md) test CR16.
 - LE4a (generic owners and static members): `this.count()` inside `class Store<T>` resolves to `Store.count`, and `this.create()` inside a static method resolves to `Factory::create`, from the hover text the server actually sends. In a class with both an instance and a static member of one name, a static method's call resolves to the static and an instance method's to the instance member. With only the other kind declared, or the caller's kind present only as a field with no Symbol (`run = makeFn()` beside `static run()`), the call gets no hint and `hintsRejected.memberNotFound` increments. A field holding a call handed a function (`search = debounce((q) => {}, 300)` beside `static search()`) is a member of the caller's kind ([`lang-plugin.md`](./lang-plugin.md) LP20f1), so `this.search()` is hinted to it and not to the static; that member is an empty body and dropped, so the hint counts under `hintsRejected.targetDropped`. A call the class Symbol itself holds resolves to the side it is written on, the class declaring both: one in a `static {}` block or a static field's initializer to the static, one in an instance field's initializer to the instance member. With that side present only as a field with no Symbol (`found = this.find(q)` beside `find = pick()` and `static find()`), it gets no hint and `memberNotFound` increments, as a member's call does. A class Symbol's call with no side recorded resolves when the class declares one kind of the name, and gets no hint, counted the same way, when it declares both.
-- LE5: interface-typed receiver with exactly one implementer → `Call.resolved` = implementer's method Symbol id, `CallEdge.confidence = medium`. Matches [`call-resolution.md`](./call-resolution.md) test CR19.
+- LE5 (planned, with the interface dispatch of §4.2): interface-typed receiver with exactly one implementer → `Call.resolved` = implementer's method Symbol id, `CallEdge.confidence = medium`. Matches [`call-resolution.md`](./call-resolution.md) test CR19.
 - LE6: file with no `this.*`, no interface-typed receivers, and all calls already resolved by the untyped tier → LSP pass is a no-op on every IR value in that file (only `SourceRange` columns change).
 
 ### 11.3 Fallback — LE7..LE8, LE19..LE23
