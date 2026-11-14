@@ -55,7 +55,7 @@ updates:
           - vue
           - "@biomejs/*"
           - "@modelcontextprotocol/*"
-          # A production dependency only of test-support, which hands it to the suites.
+          # A peer of test-support, which its suites provide; tooling takes it.
           - vitest
         update-types:
           - minor

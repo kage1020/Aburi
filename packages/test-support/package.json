@@ -14,11 +14,14 @@
   "dependencies": {
     "@aburi/schema": "workspace:*",
     "@aburi/types": "workspace:*",
-    "ajv": "catalog:",
-    "vitest": "catalog:"
+    "ajv": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "vitest": "catalog:"
   }
 }
