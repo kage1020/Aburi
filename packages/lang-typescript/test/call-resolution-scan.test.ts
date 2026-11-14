@@ -67,14 +67,21 @@ describe("scan — calls through a default import", () => {
     })
   })
 
-  it("reaches a default export written as a call handed a function", async () => {
+  it("reaches a default export written as a call, handed a function or not", async () => {
     const result = await callsFromMain(
-      { "src/handler.ts": "export default withAuth(async (req: unknown) => {\n  save(req)\n})\n" },
-      ['import handler from "./handler"'],
-      ["handler({})"],
+      {
+        "src/handler.ts": "export default withAuth(async (req: unknown) => {\n  save(req)\n})\n",
+        "src/wrapped.ts":
+          "function Page() { return 2 }\nfunction withAuth<T>(c: T): T { return c }\nexport default withAuth(Page)\n",
+      },
+      ['import handler from "./handler"', 'import Page from "./wrapped"'],
+      ["handler({})", "Page()"],
     )
     expect(result).toEqual({
-      resolved: [["handler", "ts:src/handler.ts#<default>"]],
+      resolved: [
+        ["handler", "ts:src/handler.ts#<default>"],
+        ["Page", "ts:src/wrapped.ts#<default>"],
+      ],
       unresolved: [],
     })
   })
@@ -128,8 +135,6 @@ describe("scan — calls through a default import", () => {
   it("leaves the default exports import scope does not reach unresolved, as known limits, over a namesake", async () => {
     const result = await callsFromMain(
       {
-        "src/wrapped.ts":
-          "function Page() { return 2 }\nfunction withAuth<T>(c: T): T { return c }\nexport default withAuth(Page)\n",
         "src/anon-class.ts": "export default class {\n  static run() { return 3 }\n}\n",
         "src/namesake.ts": "export class Anon {\n  run() { return 5 }\n}\n",
         "src/impl.ts": "export default function impl() { return 4 }\n",
@@ -137,14 +142,13 @@ describe("scan — calls through a default import", () => {
         "src/renamed-barrel.ts": 'export { default as impl } from "./impl"\n',
       },
       [
-        'import Page from "./wrapped"',
         'import Anon from "./anon-class"',
         'import viaBarrel from "./barrel"',
         'import { impl } from "./renamed-barrel"',
       ],
-      ["Page()", "Anon.run()", "viaBarrel()", "impl()"],
+      ["Anon.run()", "viaBarrel()", "impl()"],
     )
-    const targets = ["Page", "Anon.run", "viaBarrel", "impl"]
+    const targets = ["Anon.run", "viaBarrel", "impl"]
     expect(result).toEqual({
       resolved: targets.map((target) => [target, null]),
       unresolved: targets.map((target) => [target, "no-match"]),

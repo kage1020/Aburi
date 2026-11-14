@@ -79,17 +79,19 @@ describe("a generator function is a function wherever one is read", () => {
       "export const w = wrap(function* () { yield fetchPage() })",
       "ts:src/a.ts#w",
       "call-argument-function",
+      ["wrap", "fetchPage"],
     ],
     [
       "a registration is handed",
       "app.use(function* (ctx: any, next: any) { yield fetchPage() })",
       "ts:src/a.ts#app__use__d0",
       "inline-handler",
+      ["fetchPage"],
     ],
-  ])("walks a generator %s as its body", async (_site, source, id, evidence) => {
+  ])("walks a generator %s as its body", async (_site, source, id, evidence, calls) => {
     const symbol = await symbolOf(source, id)
 
     expect(symbol.derivedBy).toContain(evidence)
-    expect(await callsOf(source, id)).toEqual(["fetchPage"])
+    expect(await callsOf(source, id)).toEqual(calls)
   })
 })

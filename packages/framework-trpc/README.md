@@ -66,9 +66,11 @@ Not classified today:
 - A procedure written inside a router's object literal
   (`router({ byId: publicProcedure.query(…) })`). `@aburi/lang-typescript`
   gives an object handed to a call no member Symbols, so there is no Symbol to
-  classify, and the resolver is in no Symbol either. The router itself is
-  classified. Declare the procedure as a `const` and name it in the router to
-  give it a Symbol.
+  classify. The router is classified, and it walks its whole call, so the
+  procedure's resolver is the router's: its calls, rules and effects are on the
+  router, and an edit to it is a logic change to the router. Declare the
+  procedure as a `const` and name it in the router to give it a Symbol of its
+  own.
 - What is built on a base procedure whose name is neither `procedure` nor ends
   in `Procedure` (`const base = t.procedure`, then `base.query(fn)` or
   `base.use(x)`). `base` itself is classified, but the plugin reads one

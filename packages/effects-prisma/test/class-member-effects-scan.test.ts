@@ -280,3 +280,32 @@ describe("scan — a class a binding holds", () => {
     expect(shapeOf("Registry")).toEqual(shapeOf("Named"))
   })
 })
+
+describe("scan — a class handed to a call", () => {
+  it("puts its methods' writes on the const the call initialises", async () => {
+    await workspace.writeSource(
+      "src/a.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "const prisma = new PrismaClient()",
+        "",
+        "export const Audited = withAudit(class {",
+        "  reset() {",
+        "    prisma.user.deleteMany()",
+        "  }",
+        "})",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+
+    expect(result.ir.symbols.map((s) => s.id)).toEqual([
+      "ts:src/a.ts#Audited",
+      "ts:src/a.ts#prisma",
+    ])
+    expect(symbolById(result, "ts:src/a.ts#Audited").effects).toMatchObject([
+      { id: "db.write", target: "prisma.user.deleteMany", line: 6 },
+    ])
+  })
+})

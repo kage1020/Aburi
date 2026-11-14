@@ -95,7 +95,7 @@ describe("scan — a tRPC server laid out as create-t3-app writes it", () => {
     ])
   })
 
-  it("keeps a procedure's resolver as its body, so its calls are the procedure's", async () => {
+  it("walks a procedure's chain and its resolver, so their calls are the procedure's", async () => {
     await workspace.writeSource(
       "src/server.ts",
       [
@@ -109,7 +109,46 @@ describe("scan — a tRPC server laid out as create-t3-app writes it", () => {
     const byId = symbolNamed({ ir: await scanWorkspace() }, "byId")
 
     expect(byId.extKind).toBe("framework:trpc:procedure")
-    expect(byId.calls.map((call) => call.target)).toEqual(["ctx.db.user.findUnique"])
+    expect(byId.calls.map((call) => call.target)).toEqual([
+      "publicProcedure.input.query",
+      "publicProcedure.input",
+      "z.object",
+      "z.string",
+      "ctx.db.user.findUnique",
+    ])
+  })
+})
+
+describe("scan — a procedure written inside a router", () => {
+  it("is walked as part of the router, which carries its resolver's calls and rules", async () => {
+    await workspace.writeSource(
+      "src/server.ts",
+      [
+        SERVER_IMPORT,
+        "export const postRouter = t.router({",
+        "  byId: publicProcedure.input(z.string()).query(({ ctx, input }) => {",
+        '    if (!input) throw new TRPCError({ code: "BAD_REQUEST" })',
+        "    return ctx.db.post.findUnique({ where: { id: input } })",
+        "  }),",
+        "})",
+      ].join("\n"),
+    )
+
+    const ir = await scanWorkspace()
+    const postRouter = symbolNamed({ ir }, "postRouter")
+
+    expect(classifiedIn(ir, "src/server.ts")).toEqual([
+      "postRouter framework:trpc:router high framework:trpc:router:t.router",
+    ])
+    expect(postRouter.rules.map((rule) => rule.type)).toEqual(["guard", "throw"])
+    expect(postRouter.calls.map((call) => call.target)).toEqual([
+      "t.router",
+      "publicProcedure.input.query",
+      "publicProcedure.input",
+      "z.string",
+      "TRPCError",
+      "ctx.db.post.findUnique",
+    ])
   })
 })
 

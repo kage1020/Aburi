@@ -116,28 +116,37 @@ describe("a module's top-level statements", () => {
 })
 
 describe("a function a const's initializer or a default export runs in place", () => {
+  // The call that runs the function names none, as it does written as a statement of `<module>`.
   it.each([
-    ["a const", "export const h = (() => { q() })()", "h", "export-keyword"],
+    ["a const", "export const h = (() => { q() })()", "h", "export-keyword", ["<computed>", "q"]],
     [
       "a const that calls through an index on its result",
       'export const h = (() => { q() })()["run"]()',
       "h",
       "export-keyword",
+      ["<computed>.run", "<computed>", "q"],
     ],
     [
       "a const that awaits it",
       "export const h = await (async () => { q() })()",
       "h",
       "export-keyword",
+      ["<computed>", "q"],
     ],
-    ["a default export", "export default (async () => { q() })()", "<default>", "export-default"],
-  ])("is the body of %s", async (_label, source, name, exported) => {
+    [
+      "a default export",
+      "export default (async () => { q() })()",
+      "<default>",
+      "export-default",
+      ["<computed>", "q"],
+    ],
+  ])("is the body of %s", async (_label, source, name, exported, calls) => {
     const id = `ts:src/a.ts#${name}`
     const symbol = await symbolOf(source, id)
 
     expect(symbol.kind).toBe("const")
     expect(symbol.derivedBy).toEqual(["invoked-function", exported])
-    expect(await callsOf(source, id)).toEqual(["q"])
+    expect(await callsOf(source, id)).toEqual(calls)
     expect(await idsOf(source)).toEqual([id])
   })
 
@@ -152,6 +161,11 @@ describe("a function a const's initializer or a default export runs in place", (
       "call-argument-function",
       "export-keyword",
     ])
-    expect(await callsOf(source, "ts:src/a.ts#h")).toEqual(["q", "r"])
+    expect(await callsOf(source, "ts:src/a.ts#h")).toEqual([
+      "<computed>.then",
+      "<computed>",
+      "q",
+      "r",
+    ])
   })
 })

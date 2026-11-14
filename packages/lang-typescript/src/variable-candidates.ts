@@ -111,7 +111,7 @@ function makeVariableCandidate(
     ]
   }
   const { bodies, evidence } =
-    initializer === null ? { bodies: [], evidence: [] } : callFunctions(initializer)
+    initializer === null ? { bodies: [], evidence: [] } : callFunctions(initializer, initializer)
   return [
     {
       id,

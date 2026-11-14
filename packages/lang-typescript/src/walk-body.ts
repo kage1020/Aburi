@@ -21,24 +21,56 @@ import { conditionText, isTrivialExpr, LOOP_KINDS, makeRule, ruleText } from "./
 export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>): BodyExtraction {
   const rules: Rule[] = []
   const calls: CallCandidate[] = []
-  for (const body of bodyNodesOf(symbol)) {
-    const owner = body.type === "class_body" ? body.parent : null
-    if (owner !== null) {
-      visitOwnClassBody(owner, body, rules, calls)
-      continue
-    }
-    if (body.type === "object") {
-      visitOwnObjectBody(body, rules, calls)
-      continue
-    }
-    const parameters = body.parent?.childForFieldName("parameters") ?? null
-    if (parameters !== null) visitParameterDefaults(parameters, rules, calls)
-    if (isConciseBody(body)) visitConciseBody(body, rules, calls)
-    else visitNode(body, rules, calls)
+  const bodies = bodyNodesOf(symbol)
+  const holds = (outer: Node, inner: Node) => outer.id !== inner.id && isAncestorOf(outer, inner)
+  for (const body of bodies) {
+    if (bodies.some((other) => holds(other, body))) continue
+    const held = bodies.filter((other) => holds(body, other))
+    if (held.length === 0) visitRoot(body, rules, calls)
+    else visitHolding(body, held, rules, calls)
   }
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)
   return { rules, calls }
+}
+
+function visitRoot(body: Node, rules: Rule[], calls: CallCandidate[]): void {
+  const owner = body.type === "class_body" ? body.parent : null
+  if (owner !== null) {
+    visitOwnClassBody(owner, body, rules, calls)
+    return
+  }
+  if (body.type === "object") {
+    visitOwnObjectBody(body, rules, calls)
+    return
+  }
+  const parameters = parametersOf(body)
+  if (parameters !== null) visitParameterDefaults(parameters, rules, calls)
+  if (isConciseBody(body)) visitConciseBody(body, rules, calls)
+  else visitNode(body, rules, calls)
+}
+
+// A body held by another is read as a function of its own where it is written, so the calls on a
+// line keep the order they are written in.
+function visitHolding(
+  node: Node,
+  held: readonly Node[],
+  rules: Rule[],
+  calls: CallCandidate[],
+): void {
+  if (isCall(node)) recordCall(node, calls)
+  for (const part of node.namedChildren) {
+    if (part === null || held.some((body) => parametersOf(body)?.id === part.id)) continue
+    const body = held.find((candidate) => candidate.id === part.id)
+    if (body !== undefined) visitRoot(body, rules, calls)
+    else if (held.some((candidate) => isAncestorOf(part, candidate))) {
+      visitHolding(part, held, rules, calls)
+    } else visitNode(part, rules, calls)
+  }
+}
+
+function parametersOf(body: Node): Node | null {
+  return body.parent?.childForFieldName("parameters") ?? null
 }
 
 function visitParameterDefaults(parameters: Node, rules: Rule[], calls: CallCandidate[]): void {

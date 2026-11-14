@@ -90,7 +90,12 @@ export interface CallFunctions {
   evidence: string[]
 }
 
-export function callFunctions(value: Node): CallFunctions {
+/**
+ * The bodies of a declaration whose value is a call, `holder` being the node that holds the value:
+ * the holder first, since the call runs where it is written, then the functions it is handed or
+ * invokes, which the walk reads in place as functions of their own.
+ */
+export function callFunctions(value: Node, holder: Node): CallFunctions {
   const unwrapped = unwrapValue(value)
   const awaited = unwrapped.type === "await_expression"
   const operand = awaited ? firstNonCommentChild(unwrapped) : unwrapped
@@ -101,7 +106,7 @@ export function callFunctions(value: Node): CallFunctions {
   const invoked = invokedBody(call)
   const handed = awaited ? [] : inlineHandlers(call)
   return {
-    bodies: invoked === null ? handed : [invoked, ...handed],
+    bodies: [holder, ...(invoked === null ? [] : [invoked]), ...handed],
     evidence: [
       ...(invoked === null ? [] : [INVOKED_FUNCTION_DERIVED_BY]),
       ...(handed.length === 0 ? [] : [CALL_ARGUMENT_FUNCTION_DERIVED_BY]),

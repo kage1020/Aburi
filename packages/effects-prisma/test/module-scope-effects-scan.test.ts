@@ -45,6 +45,28 @@ describe("scan — a write a module makes when it is imported", () => {
     expect(result.ir.symbols.map((s) => s.id)).not.toContain("ts:src/app.ts#<module>")
   })
 
+  it("is the const's that the write initialises, as it is the module's written alone", async () => {
+    await workspace.writeSource(
+      "src/reset.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "const prisma = new PrismaClient()",
+        "export const deleted = await prisma.user.deleteMany({})",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWith(workspace.root, {
+      languages: [langTypescriptPlugin],
+      effects: [prismaEffectsPlugin],
+    })
+
+    expect(symbolById(result, "ts:src/reset.ts#deleted").effects).toMatchObject([
+      { id: "db.write", target: "prisma.user.deleteMany", line: 3 },
+    ])
+    expect(result.ir.symbols.map((s) => s.id)).not.toContain("ts:src/reset.ts#<module>")
+  })
+
   it("is its call's own when the method is one a router registers through", async () => {
     await workspace.writeSource(
       "src/cleanup.ts",
