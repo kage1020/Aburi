@@ -191,6 +191,8 @@ Rationale: `ir-schema.md` §4 explicitly documents the glob form without a langu
 
 ## 10. Configuration surface
 
+> **Status**: planned, not available. `schema/aburi.config.v1.json` has no `crossLanguage` key, and its `additionalProperties: false` refuses a config that writes one (exit 2). The keys below land with the cross-language recognizer (§4.1), as an additive change to the config schema.
+
 Multi-language monorepos require exactly two new optional config knobs. Everything else derives from the per-plugin configuration that already exists.
 
 ```jsonc

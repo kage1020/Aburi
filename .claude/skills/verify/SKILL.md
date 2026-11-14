@@ -1,14 +1,15 @@
 ---
 name: verify
-description: Run Aburi's four CI checks (Biome, typecheck, tests, build) the way CI does and read the result honestly. Use before committing, before opening a PR, or when asked to "check", "verify" or "make sure it's green".
+description: Run Aburi's five CI checks (Biome, hygiene, typecheck, tests, build) the way CI does and read the result honestly. Use before committing, before opening a PR, or when asked to "check", "verify" or "make sure it's green".
 ---
 
 # Verify the workspace
 
-CI runs the same four commands on Ubuntu, macOS and Windows. Run them from the repository root:
+CI runs the same five commands on Ubuntu, macOS and Windows. Run them from the repository root:
 
 ```bash
 pnpm check                                  # Biome lint + format (pnpm format writes fixes)
+pnpm hygiene                                # no citations of design docs, spec ids or issues
 pnpm turbo run typecheck --force
 pnpm turbo run test --force --continue
 pnpm turbo run build --force

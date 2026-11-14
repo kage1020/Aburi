@@ -117,12 +117,14 @@ Drizzle's — so only the splitting rule is shared.
 
 **Import them from the `/plugin-input` subpath, not the package root.** The root
 barrel compiles the plugin JSON Schema with ajv at module scope. The subpath is a
-separate chunk whose only import is a type, so evaluating it runs none of that —
-which is what keeps a schema compilation off a classifier's startup path.
+separate chunk that imports nothing but `@aburi/types` (its types and the
+`PLUGIN_SCHEMA_URL` constant), so evaluating it runs none of that — which is
+what keeps a schema compilation off a classifier's startup path.
 
 The subpath bounds what gets *evaluated*, not what gets *installed*: depending on
 this package still puts `ajv` and `jsonc-parser` in the dependency tree. That was
-the accepted trade for not publishing a separate package for two functions.
+the accepted trade for not publishing a separate package for a module of guards
+and readers.
 
 ## Key scan (`@aburi/plugin-registry/repeated-keys`)
 

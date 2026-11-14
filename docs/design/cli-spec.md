@@ -55,13 +55,13 @@ The log level is resolved in this order, the first one set winning:
 A `--log-level` value other than the four levels exits `2`. An `ABURI_LOG_LEVEL` value other than
 them is ignored, as if the variable were unset.
 
-Top-level only:
+Global as well, before the command or after it:
 | Option | Short | Meaning |
 |---|---|---|
 | `--version` | `-v` | Show version |
 
-Of the options the CLI declares, the global `--log-level` and those of `init`, `scan`, `diff` and
-`explain`, one that takes a value takes one. Given
+Of the options the CLI declares, the global `--log-level` and those of `init`, `scan`, `diff`,
+`explain` and `vocab`, one that takes a value takes one. Given
 twice — `--config a.json --config b.json`, or `--format json --format=md` — the command exits 2
 before it reads or writes anything, naming the option and both values (`--config is given more than
 once ("a.json", then "b.json"): pass one`), the same value twice included, and a second value the
@@ -109,7 +109,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 
 ### 4.4 When the File Already Exists
 
-- Without `--force` → exit with an error (exit 2): `Use --force or specify another path`
+- Without `--force` → exit with an error (exit 2): `<path> already exists. Use --force to overwrite or pass --output <path> to write elsewhere.`
 - With `--force` → overwrite; warning goes to stderr
 - When a **directory** stands at the path, neither applies: nothing overwrites one, so the answer
   names it and asks for a file path instead — the same sentence the write itself gives (§4.5).
@@ -711,7 +711,7 @@ When scanning the base ref for `aburi diff <base>..<head>`, Aburi **shares the h
 - A **relative plugin ref** (`./plugins/x.mjs`) in that config resolves against the head's workspace root, not the worktree, for the same reason: the ref belongs to the head's plugin set, and a commit that adds a plugin file would otherwise make the base scan fail to load a config the head reads fine. Everything else inside the config — `ignore`, `components[].roots` — keeps resolving against the scan's own workspace root, which for the base scan is the worktree, because those name *sources* and the base's sources are what the worktree holds
 - **Known limitation**: when the base ref's sources cannot be extracted with the head's plugins (e.g. the base uses syntax from an older framework version and the head's framework plugin only supports the newer one), parsing/extraction may fail
   - This is a consequence of the "IR generator is pinned to the head environment" design
-  - On failure, the affected file is skipped with a warning log
+  - A file the head's language plugin refuses to parse is withdrawn with a `warn:` line and leaves the exit code alone; one whose extraction throws is withdrawn as `extraction-failed`, which makes the base scan exit `3` and so gates the diff (§5.4, §6.5)
 - The request "apply the base ref's contemporaneous plugin set" is under consideration as `--base-plugins <path>` for a future release (see the [roadmap](../roadmap.md)). The two scans would then no longer load one plugin set, and the `pluginOptions` line (§5.6) would be said by each, labelled by side
 
 #### 6.4.2 GitHub Actions Guidance
@@ -748,8 +748,8 @@ So each side lists its tracked links with `git ls-files -z --stage` — at the h
 | code | Meaning |
 |---|---|
 | 0 | Diff computed successfully (regardless of whether differences exist) |
-| 1 | Computation error (invalid IR, git error, an output the disk refused) |
-| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing, or either beside a ref spec; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on; an option that takes one value given twice, or a path given empty — §3) |
+| 1 | Computation error (git error, an output the disk refused) |
+| 2 | Argument error (`<base>..<head>` syntax violation; an `--base`/`--head` IR file that cannot be read, is not JSON, or fails the IR's `$schema` or integrity check; one of `--base/--head` missing, or either beside a ref spec; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on; an option that takes one value given twice, or a path given empty — §3) |
 | 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
 
 The second cause is about greenness, not about counts. A file withdrawn during extraction is recorded in
@@ -1449,6 +1449,7 @@ is written. CI mode changes neither.
 | `NO_COLOR` | Set to a non-blank value, no colour on stderr (§10.1) |
 | `FORCE_COLOR` | Empty, `1`, `true`, `2` or `3`: colour on stderr even off a terminal and in CI mode; any other value, no colour (§10.1). `--no-color` wins over it |
 | `CI` | If set, CI mode (§12) |
+| `TERM` | `dumb`: stderr is treated as no terminal — no progress line, and no colour unless `FORCE_COLOR` asks for it (§10.1, §10.2) |
 
 Precedence: CLI flags > environment variables > config file.
 

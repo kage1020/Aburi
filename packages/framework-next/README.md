@@ -73,7 +73,7 @@ App Router convention names (`app/orders/actions.ts`) is not classified.
 ## Install
 
 ```bash
-pnpm add @aburi/framework-next
+pnpm add -D @aburi/framework-next
 ```
 
 ## Usage

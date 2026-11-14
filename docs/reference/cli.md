@@ -46,7 +46,7 @@ working directory.
 |---|---|
 | `0` | Success, no gate tripped. |
 | `1` | Runtime failure: an I/O error (a write the disk refused to an output file says which command and which output; one refused on stdout or stderr lets the run finish and clean up, then names the stream on the other: `aburi: could not write to stdout: EBADF: bad file descriptor, write`; a file or directory the scan may not read is named), an unexpected exception, `explain` found no match, or `vocab who-owns` found no owner. |
-| `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on, a config that loads no language plugin. |
+| `2` | Bad invocation: an unknown flag, an option that takes one value given twice, an empty path, a missing input file, a malformed IR file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve, an output path a file already stands on, a config that loads no language plugin. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. `vocab` exits `3` for a plugin that fails to load too. |
 
 CI gates on `3`. A reader that stops early does not change the code:
@@ -60,6 +60,7 @@ CI gates on `3`. A reader that stops early does not change the code:
 | `ABURI_LOG_LEVEL` | The same as `--log-level`, which wins over it. A value other than the four levels is ignored. |
 | `CI` | CI mode: no progress line, no colour unless `FORCE_COLOR` is set, and `aburi scan` behaves as under `--no-timestamp`. The same as `--ci`. |
 | `NO_COLOR` | Set to anything but blanks, no colour. |
+| `TERM` | `dumb`: stderr counts as no terminal, so no progress line and no colour unless `FORCE_COLOR` is set. |
 | `FORCE_COLOR` | Empty, `1`, `true`, `2` or `3`: colour even when stderr is not a terminal, and in CI mode. Any other value, `0` and `false` among them, turns it off; the value is read as Node reads it, case and blanks included. It wins over `NO_COLOR`, and `--no-color` wins over it. It never brings the progress line, which is drawn only on a terminal outside CI mode. |
 
 ## Config discovery
@@ -216,7 +217,7 @@ The paths *inside* that config still resolve per scan: `ignore` and
 `components[].roots` are matched against each revision's own workspace root, so
 for the base that is the temporary worktree. Plugin refs are the
 exception. A relative one (`./plugins/x.mjs`) belongs to the plugin set, which
-[comes from the head](https://aburi.dev/extend/architecture) along with
+[comes from the head](../extend/architecture.md) along with
 `node_modules`, so it is loaded from your working tree for both scans. An
 absolute one (`/opt/plugins/x.mjs`) names the same file for both scans,
 whichever workspace root each has.
@@ -272,7 +273,7 @@ went:
 > ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report, the same diff without a size cap, is `diff.full.md` beside `diff.md`.
 ```
 
-The sections that survive are always the important ones: API changes go last, Syntax-only first.
+The sections that survive are always the important ones: API changes go last, Test files first, then Syntax-only.
 `diff.json` is never capped, so nothing is lost from the artefact you can query. When the cap
 changed anything, the uncapped report is written beside the capped one as `diff.full.md`, which
 is what the note points at. Like `diff.json` and `diff.md`, one left from an earlier run is
@@ -282,7 +283,7 @@ The CLI has no cap unless you pass one: omitting `--max-bytes` writes the whole 
 `--max-bytes 0` is not the way to say that — it exits `2`, along with every other value that is
 not a positive integer.
 
-The [GitHub Action](https://aburi.dev/guide/ci-integration) passes `65507` for you —
+The [GitHub Action](../guide/ci-integration.md) passes `65507` for you —
 65536 less the hidden marker it prepends — so you only reach for this flag to choose a smaller
 comment. There, `max-bytes: 0` *is* the spelling for no cap: the action input takes it and passes
 no flag at all.
@@ -363,7 +364,7 @@ turn a regression into a green pipeline.
 
 ### `--fail-on-scope`
 
-A Symbol of a file your config's [`testFiles`](https://aburi.dev/guide/configuration#mark-test-code)
+A Symbol of a file your config's [`testFiles`](../guide/configuration.md#mark-test-code)
 names is test code. `diff.md` lists its changes in a folded `🧪 Test files` section at the end,
 and `--fail-on-scope non-test` leaves them out of the gate, so deleting a fixture does not fail
 the build:

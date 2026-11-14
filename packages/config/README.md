@@ -46,12 +46,16 @@ const config = await readConfigFile("./aburi.json")
 ```
 
 Errors surface as `ConfigError` with a stable `code` field so callers can
-distinguish (for example) `parse-error` from `schema-violation` without parsing
-ajv message strings.
+distinguish (for example) `config-parse-failed` (not valid JSONC) from
+`config-invalid` (a schema violation or a repeated key) without parsing ajv
+message strings. The others are `config-read-failed`, `config-not-found`, and,
+with the offending string on `value`, `duplicate-component-id`,
+`duplicate-hint-name` and `reserved-namespace`.
 
 ## Framework hints
 
-`config.frameworkHints[].vocab[].extKind` values written as
+`extKind` values in `config.frameworkHints[].decorators` and
+`config.frameworkHints[].classNamePatterns` rules written as
 `framework:<vendor>:<rest>` are automatically rewritten to
 `framework:hint:<vendor>:<rest>` by the loader — the `hint` segment is inserted
 at position 2 to reserve the namespace for user-declared vocab, so a hint can

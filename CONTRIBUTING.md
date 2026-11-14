@@ -20,12 +20,13 @@ pnpm install
 
 ```bash
 pnpm check       # Biome lint + format check (pnpm format to write fixes)
+pnpm hygiene     # no citations of design docs, spec ids or issues in code
 pnpm typecheck   # tsc --noEmit across packages (turbo)
 pnpm test        # Vitest across packages
 pnpm build       # tsdown across packages
 ```
 
-All four must pass before a pull request can merge — CI runs them on Ubuntu,
+All five must pass before a pull request can merge — CI runs them on Ubuntu,
 macOS, and Windows.
 
 ## Workflow

@@ -51,8 +51,8 @@ Keeping the responsibilities narrow lets a new language addition focus solely on
 3. For each file matching the language:
      a. plugin.parseFile(file) → ParseResult { tree, errors, imports }
      b. plugin.extractSymbols(tree, ctx) → SymbolCandidate[]
-     c. For each SymbolCandidate:
-          plugin.walkBody(symbol, ctx) → BodyExtraction { rules, calls, returns }
+     c. For each SymbolCandidate that no drop rule takes (§5.3):
+          plugin.walkBody(symbol, ctx) → BodyExtraction { rules, calls }
           plugin.normalizeAst(symbol) → string  (syntax fingerprint input)
      d. plugin.releaseTree?(tree) — on every way out of a–c, including a throw
    plugin.createImportResolver?() runs at most once, the first time the core
@@ -60,7 +60,7 @@ Keeping the responsibilities narrow lets a new language addition focus solely on
 4. After the scan's last plugin call, plugin.cleanup?() is called
 ```
 
-The core then performs effect classification, drop-list application, and fingerprint computation.
+Around these calls the core decides drops, classifies effects and computes fingerprints; §5.3 has the order, a dropped Symbol never reaching `walkBody`.
 
 `init` and `cleanup` bracket one scan, for every plugin it loads: language, framework and effects
 plugins alike. They are what a plugin holding something for the length of a scan opens and closes
@@ -94,7 +94,7 @@ it with, such as a parser running as a process of its own ([`plugin-process.md`]
 
 ## 4. Interface
 
-The actual types are defined in the `types` package of `@aburi/core`. This document shows the signatures as a contract.
+The actual types are defined in `@aburi/types`. This document shows the signatures as a contract.
 
 ### 4.1 `LanguagePlugin`
 
@@ -204,7 +204,7 @@ A brand can be asserted rather than constructed, so the type is a contract, not 
 
 A plugin that has real column information may write it; nothing forbids that. The in-tree TypeScript plugin deliberately does not, so that every column in an Aburi IR comes from `textDocument/documentSymbol` ([lsp-enrichment.md](./lsp-enrichment.md) §4.2) and one convention about what a column counts. Be aware that a published column is not durable: the enrichment pass overwrites both keys on every Symbol it matches (§5), so a plugin-written column survives only where the LSP tier produced nothing — which is where it is least likely to be checked.
 
-When the plugin chooses an `extKind` from its own declarations, the chosen value must fall under manifest.provides.extKinds or extKindPrefixes. The registry detects violations at startup.
+When the plugin chooses an `extKind` from its own declarations, the chosen value must fall under manifest.provides.extKinds or extKindPrefixes. Nothing checks it at startup: the core checks each Symbol's `extKind` as the Symbol is extracted, against the plugin that assigned it, so under `strict` an undeclared value ends the run (`vocab-undeclared`, exit 3) and otherwise it is recorded as discovered ([`config.md`](./config.md) §10).
 
 #### 4.3.1 One entity, several declarations
 
@@ -455,7 +455,7 @@ The in-tree TypeScript plugin finds the class `this` is bound to as LP20n does (
 interface ExtractionContext {
   file: SourceFile
   registry: VocabRegistry                      // ext-vocab §7
-  config: AburiConfig
+  config: Config
 }
 
 interface WalkContext extends ExtractionContext {
@@ -482,12 +482,14 @@ interface DropHint {
 
 Example: for TypeScript's `export type X = Y`, return `{ reason: "type alias", category: "B" }`.
 
+The core does not read `category`. Every hint is a Symbol-level drop (drop-list §4): the Symbol stays in the IR with `dropped: true`, `reason` as its `dropReason` and zeroed fingerprints, and `walkBody` is not called for it, so a `"C"` hint drops the Symbol exactly as a `"B"` one does. Call-level (Category C) drops come from `dropCallees`, `config.suppress` and the core's list, never from this hint.
+
 ### 4.7 `PluginContext`
 
 ```ts
 interface PluginContext {
   registry: VocabRegistry
-  config: AburiConfig
+  config: Config
   workspaceRoot: string                        // absolute path (used by the plugin to initialize its parser)
   log: Logger
 }
@@ -632,25 +634,30 @@ An inline function is left out, since its body is the registration's own and its
 plugin.parseFile()                              [lang]
   ↓
 plugin.extractSymbols()                         [lang]
-  ↓
+  ↓  for each Symbol:
 framework plugin classifySymbol()               [framework]
   ↓
+core decides the Symbol drop: core rules,       [core, framework, lang]
+then each framework plugin's symbolDropHint(),
+then the language plugin's
+  ↓  a dropped Symbol stops here: no walkBody, no fingerprints
 plugin.walkBody()                               [lang]
   ↓
 effect plugin classify() for each call          [effects]
+(after the Category C call drop)
   ↓
 plugin.normalizeAst()                           [lang]
   ↓
-core applies the drop list / computes fingerprints
-  ↓
+core computes fingerprints
+  ↓  after the last Symbol:
 plugin.releaseTree()                            [lang, called by the core — §8.1]
   ↓
-core assembles the IR
+core assembles the IR: call resolution, then effect propagation, which recomputes `logic`
 ```
 
 ## 6. Capabilities
 
-`LanguageCapabilities` is a flag set through which the plugin declares "what is expressible in my language". The core and other plugins use it for branching.
+`LanguageCapabilities` is a flag set through which the plugin declares "what is expressible in my language". It is descriptive only: neither the core nor the CLI reads any of its flags today, so a plugin's answers change nothing about a scan.
 
 ```ts
 interface LanguageCapabilities {
@@ -670,7 +677,7 @@ interface LanguageCapabilities {
 
 For the runtime resource budget (`wasmHeapPerWorkerMB`), the source-of-truth is the **`capabilities` of the plugin manifest**, not the runtime interface. The CLI reads the manifest to size its parser pool, so it is not duplicated at runtime (see §8.1 / cli-spec.md §14.2).
 
-If a framework plugin requires decorator-based extraction from a language with `hasDecorators: false`, the core aborts with an error at startup.
+No check pairs the flags with the framework plugins either: a framework plugin that classifies by decorators, loaded beside a language with `hasDecorators: false`, is not refused at startup, and simply finds no decorator to classify.
 
 ## 7. Error Handling
 

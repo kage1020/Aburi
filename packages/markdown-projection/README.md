@@ -14,11 +14,14 @@ snapshot-test outputs without stubbing side effects.
 | `projectDiff(diff, { maxBytes?, fullReportLocation?, statuses? })` | Review-facing PR summary (added / removed / changed / moved with confidence badges), optionally capped to a byte budget; `fullReportLocation` names where the uncapped report is, for the note a capped one carries; `statuses` lists only the Symbol changes of those statuses, with a note saying how many it left out, and throws `RangeError` for an empty list or a value that is no status | `.aburi/diff.md`, PR comment |
 | `projectSymbolExplain(symbol)` | Per-Symbol detail (rules / effects / calls / dropped fold-out) | `aburi explain` stdout |
 
-Also exports the `formatFailOnClause` / `formatFailOnTriggered` helpers that
-render `--fail-on` clauses and triggered outcomes into review-facing Markdown.
-The CLI's stderr-facing phrasing (`formatTriggered`) is a separate helper
-exported from `@aburi/cli` — the two are intentionally distinct so the
-Markdown side stays projection-only and the CLI side stays terminal-friendly.
+Also exports a small gate over a diff's `summary` counts: a `FailOnClause` is a
+status, bare (any at all) or with a `>` / `>=` / `==` / `<=` threshold
+(written `changed:>=3`); `evaluateFailOn(clause, summary, droppedToggledBreakdown?)`
+evaluates one, and `formatFailOnClause` / `formatFailOnTriggered` word it. It is
+not the CLI's `--fail-on`, which `@aburi/cli` parses and evaluates itself
+(`evaluateFailOn` and `formatTriggered` there): that grammar takes `>N`
+thresholds only, adds the delta axes (`api-changed`, `logic-changed`, …) and
+`--fail-on-scope`, and counts the diff's Symbol entries rather than the summary.
 
 ## Install
 

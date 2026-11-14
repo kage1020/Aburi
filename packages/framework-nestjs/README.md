@@ -24,7 +24,7 @@ drop path so route handlers always survive into the IR.
 ## Install
 
 ```bash
-pnpm add @aburi/framework-nestjs
+pnpm add -D @aburi/framework-nestjs
 ```
 
 ## Usage
