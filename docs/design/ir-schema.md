@@ -325,9 +325,9 @@ The core entity of the review unit.
 
 ### 5.1 `kind` (core enum)
 
-`"function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor"`
+`"function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor" | "call"`
 
-`module` is the kind of `<module>` (§3.3) and of nothing else.
+`module` is the kind of `<module>` (§3.3) and of nothing else. `call` is the kind of a module-level registration call a language plugin promotes to a Symbol of its own (`app.get("/x", handler)`), whose qualified name is built from the receiver, the method, the route path or argument names, and an ordinal.
 
 Anything outside the core enum is expressed via `extKind`. A consumer may treat an unknown `kind` as an error (= strict enum).
 
@@ -373,10 +373,11 @@ A string array indicating why this symbol was extracted in this form. Each entry
 
 - `<rule>` — a core extraction rule (`branch-condition`, `throw-statement`, `export-keyword`)
 - `framework:<name>:<role>` — determined by a framework plugin (`framework:nestjs:controller`)
-- `effects-plugin:<name>:<action>` — determined by an effect plugin (`effects-plugin:prisma:write`)
 - `convention:<name>` — determined by a naming/structural convention (`convention:service-suffix`)
 
 An empty array means "picked up automatically by the core extraction path".
+
+An effect plugin's evidence is not among them: it is the single `derivedBy` of the Effect it classified (§9), spelled `effects-plugin:<name>:<action>` (`effects-plugin:prisma:write`), because it is evidence for one call rather than for the Symbol ([`effect-plugin.md`](./effect-plugin.md) §11.3).
 
 The export entries — `export-keyword`, `export-default` and `export-clause:<name>` ([`lang-plugin.md`](./lang-plugin.md) LP6a–LP6c) — say which names the module exports the Symbol under, and the names are an input of the `api` fingerprint ([`fingerprint.md`](./fingerprint.md) §3.8). No fingerprint input is built from any other entry, though some reach a fingerprint by what they steer: `re-export` drops a Symbol, which zeroes all three, and `ambient-declaration`, `object-literal-initializer` and `export-default` steer call resolution, which decides the effects `logic` propagates.
 
@@ -497,7 +498,8 @@ The result of side-effect detection.
   "target": "prisma.invoice.create",          // required, callee string
   "line": 75,                                 // required
   "plugin": "effects-prisma",                 // required, detection source
-  "confidence": "high"                        // required, same enum as Symbol
+  "confidence": "high",                       // required, same enum as Symbol
+  "derivedBy": "effects-plugin:prisma:write"  // required, the plugin's evidence for this call
 }
 ```
 
@@ -567,11 +569,11 @@ A call that does not qualify as an effect.
 {
   "target": "pricing.calculateTotal",         // required
   "line": 70,                                 // required
-  "resolved": null                            // optional, resolved symbol id
+  "resolved": null                            // required, resolved symbol id or null
 }
 ```
 
-`resolved` is filled in by the call-resolution feature (separate document). `null` while unresolved.
+`resolved` is filled in by the call-resolution feature (separate document). The key is always present, `null` while unresolved.
 
 `target` is the callee as the language plugin normalized it ([`lang-plugin.md`](./lang-plugin.md)
 §4.4), and one segment spelling is reserved: **`<computed>`** — exported as
@@ -597,7 +599,7 @@ An edge between symbols or between components. `aburi scan` writes two kinds: Sy
   "to":   "pricing",
   "via":  "import",                           // required, enum
   "direction": "outbound",                    // required, enum
-  "effect": null                              // optional, related effect tag
+  "effect": null                              // required, related effect tag or null
 }
 ```
 
@@ -715,7 +717,7 @@ An invariant violation is a **fatal error**, not a warning.
 | Renaming a field | breaking |
 | Changing array-ordering rules | breaking |
 
-Because consumers may treat unknown `kind` values as errors, additions to the `kind` enum are also treated as breaking. `extKind` / `derivedBy` / `effects[].id` (x- extensions) / `via` are close to free-form strings, so additions are unrestricted.
+Because consumers may treat unknown `kind` values as errors, additions to the `kind` enum are also treated as breaking. `call` (§5.1) is the exception v1 made: it was added within v1, as an additive change, for registration calls. `extKind` / `derivedBy` / `effects[].id` (x- extensions) are close to free-form strings, so additions are unrestricted. `via` is not: the schema closes it with an `enum` (§11.1), so a value added to it is held to the same rule as `kind`.
 
 ### 15.3 Freezing the core effect vocabulary
 
@@ -731,7 +733,7 @@ Whether the promotion is worth doing in v2 at all is open. The §1.1 reader rule
 
 - **Split `stats.skippedFiles[].reason: "unroutable"` into the two things it means.** Today it covers both "no loaded plugin claims this extension" and "this name holds `:` or `#`, so nothing in it can be given a Symbol id". The two want different fixes — a plugin, and a rename — and the skip detail is currently what tells them apart. A distinct value (`unnameable`, say) would put the distinction where a machine reads it.
 
-  Not v1: `reason` is a closed `enum` here and, by `$ref`, in `aburi.diff.v1.json`, so a document carrying a new value is rejected by any validating reader. §15.2 permits enum additions "only where consumers tolerate unknowns", and this is the same condition the `kind` enum fails — Aburi's own CLI maps the reason through a table that is total over the union by design.
+  Not v1: `reason` is a closed `enum` here and, as an inline copy (its `SkipReason`), in `aburi.diff.v1.json`, so a document carrying a new value is rejected by any validating reader. §15.2 permits enum additions "only where consumers tolerate unknowns", and this is the same condition the `kind` enum fails — Aburi's own CLI maps the reason through a table that is total over the union by design.
 
 - **Give a Document path a way to spell a backslash.** A filename may contain one on any POSIX filesystem, and #10 refuses the character outright because `/` is the only separator a Document path has — so such a file is not merely unnameable by a Symbol id, it is unrecordable, and the scan has to drop it from `totalFiles` and report it out of band. An escape (`\\` for the literal, say) would let it be counted and skipped like any other loss.
 

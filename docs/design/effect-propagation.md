@@ -126,7 +126,7 @@ Worked example (two-hop propagation):
     "plugin": "effects-prisma",
     "confidence": "medium",              // combined per §5.3
     "propagated": true,
-    "derivedFrom": ["ts:./repo.ts#Repo.save"],   // = B, the direct callee
+    "derivedFrom": ["ts:repo.ts#Repo.save"],     // = B, the direct callee
     "derivedBy": "effects-plugin:prisma:write"   // preserved from C's local classification
   }
 ]
@@ -228,7 +228,7 @@ Alternative rejected — exclude propagated effects from `logic` fingerprint inp
 
 ## 9. Diff Implications
 
-Propagation adds no new value to the diff `status` enum. [`diff-algorithm.md`](./diff-algorithm.md) §10.1 declares any addition to `{ added, removed, changed, moved, moved+changed, dropped-toggled }` a breaking change; propagation-only differences are surfaced through the existing `changed` status.
+Propagation adds no new value to the diff `status` enum. [`diff-algorithm.md`](./diff-algorithm.md) §10.1 declares any addition to `{ added, removed, changed, moved, moved+changed, dropped-toggled, unknown }` a breaking change; propagation-only differences are surfaced through the existing `changed` status.
 
 A "propagated-only change" — the callee gained (or lost) an effect while the caller's own body is untouched — flows through the pipeline as follows:
 
@@ -240,7 +240,7 @@ Example — two diff scenarios:
 
 | Scenario | Callee change | Caller status | Caller `delta` | Rendered as |
 |---|---|---|---|---|
-| Local addition | Callee's own body gained a `db.write` line | `changed` | `delta.logicChanged: true`, `delta.effects.added` has one entry, `propagated: false` | "Logic change — added `db.write` on `prisma.invoice.create`" |
+| Local addition | Callee's own body gained a `db.write` line | `changed` | `delta.logicChanged: true`, `delta.effects.added` has one entry, with no `propagated` key (§5.1) | "Logic change — added `db.write` on `prisma.invoice.create`" |
 | Propagated addition | Callee (or a further downstream Symbol) gained a `db.write`; caller body unchanged | `changed` | `delta.logicChanged: true`, `delta.effects.added` has one entry, `propagated: true`, `derivedFrom: [<callee>]` | "Logic change — propagated `db.write` from `<callee>`" |
 | Propagated removal | Callee lost a `db.write` (removed the underlying call); caller body unchanged | `changed` | `delta.logicChanged: true`, `delta.effects.removed` has one entry, `propagated: true`, `derivedFrom: [<callee>]` | "Logic change — no longer propagates `db.write` from `<callee>`" |
 

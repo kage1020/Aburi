@@ -879,8 +879,8 @@ Component changed: billing
 ```
 delta.signature = {
   inputs: { added: [...], removed: [...], modified: [...] },
-  outputs: { added: [...], removed: [...] },
-  throws:  { added: [...], removed: [...] },
+  outputs: { added: [...], removed: [...], modified: [] },
+  throws:  { added: [...], removed: [...], modified: [] },
   asyncChanged: bool,
   generatorChanged: bool,
   typeParametersChanged: bool
@@ -1057,11 +1057,11 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
   "generator": { "name": "aburi", "version": "1.0.0" },
   "base": {
     "ref": "main",                                   // git ref or "ir-base.json"
-    "irSchema": "aburi.ir.v1.json"
+    "irSchema": "https://aburi.dev/schema/aburi.ir.v1.json"   // the IR's own $schema
   },
   "head": {
     "ref": "HEAD",
-    "irSchema": "aburi.ir.v1.json"
+    "irSchema": "https://aburi.dev/schema/aburi.ir.v1.json"
   },
   "summary": {
     "added":           5,
@@ -1102,6 +1102,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
     "removed": [ /* Dependency[] */ ],
     "unknown": [ /* {dependency, absentFrom, lostFiles} — see §6.2.1 */ ]
   },
+  "slices": [ /* {id: "slice:<anchor>", members: [<anchor>, ...]} — see slice-view.md */ ],
   "notCompared": [ /* {path, basePath?, baseReason, headReason} — see §6.3 */ ]
 }
 ```

@@ -240,7 +240,7 @@ When not specified explicitly, the core Component autodetect infers them from `p
 }
 ```
 
-Each field has the same shape as [`ir-schema.md`](./ir-schema.md) §4. **However, `languages` may be omitted on the config side** (when omitted, autodetect fills it in). `name` may also be omitted on the config side, in which case the autodetect result (`package.json#name`, etc.) is used. In the schema, both are required on the IR Component; the config Component is lenient.
+Each field has the same shape as [`ir-schema.md`](./ir-schema.md) §4. **However, `languages` and `name` may be omitted on the config side.** Autodetect fills in neither: an omitted `name` is the entry's `id`, and an omitted or empty `languages` is `["ts"]`. In the schema, both are required on the IR Component; the config Component is lenient.
 
 A `publicApi` entry is carried into the IR as written, in NFC, so one the IR schema refuses is refused here, with exit 2 naming the component, before anything is scanned: an entry holding a backslash, which this schema admits and the IR's does not. A root the IR cannot record is refused the same way.
 
@@ -255,12 +255,12 @@ passes silently into the IR, because the detector itself records ids no plugin p
 
 ### 6.1 Merge Rules
 
-Components explicitly declared in the config **replace** the autodetect results (no merging):
+Components explicitly declared in the config **replace** the autodetect results as a whole (no merging):
 
-- The config contains component A's id → the autodetect result with the same id is discarded and the config is adopted
-- The config does not contain component A's id → the autodetect result is adopted as-is
+- A non-empty `components[]` → autodetect does not run at all; the IR holds exactly the declared Components, and a package the list leaves out is in none
+- An absent or empty `components[]` → the autodetect result is adopted as-is
 
-No ad-hoc merge is provided for "I only want to tweak part of the autodetect result". A component you want to modify must be written out explicitly.
+No ad-hoc merge is provided for "I only want to tweak part of the autodetect result". Once one component is declared, every component the IR should hold must be written out explicitly.
 
 ## 7. `suppress` / `keep` (drop-list Extension)
 
@@ -414,7 +414,7 @@ Currently only `dir` is supported.
 
 "Declared" means claimed by the plugin that emitted it, directly or through a prefix it owns: an id another plugin owns is as undeclared as one nobody does. The core effect ids ([`ir-schema.md`](./ir-schema.md)) belong to no plugin and pass whoever emits them. An extKind is charged to the framework plugin that assigned it, or to the language plugin when no framework replaced its own.
 
-The CI default is `true`; use `false` or the CLI's `--discover` when you want discovery in local development.
+The default is `true` in CI and outside it alike; use `false` or the CLI's `--discover` when you want discovery in local development.
 
 When both are specified, the CLI flag overrides the config.
 
@@ -438,6 +438,45 @@ that and a clean run, which is where the answer depends on the repository.
 
 No CLI flag mirrors it. A coverage floor is a property of the workspace rather than of one
 invocation, and a flag would need the key in the config anyway for the CI run to be reproducible.
+
+## 10.2 `classifyTimeoutMs`
+
+```jsonc
+{ "classifyTimeoutMs": 200 }
+```
+
+- Default `50`; an integer from `10` to `5000`
+- The per-call budget for an effect plugin's `classify()`, one value shared by every plugin
+- A call that runs past it keeps its classification: the overrun is recorded in
+  `stats.effectClassifyTimeouts[]` and counted in one warning, and nothing else in the Document
+  changes ([`effect-plugin.md`](./effect-plugin.md) §5.1.1). Raise it to 200-500 for an effect
+  plugin that parses SQL or runs heavy regular expressions
+
+## 10.3 `lsp`
+
+```jsonc
+{
+  "lsp": {
+    "enabled": false,
+    "servers": {
+      "ts": { "command": "typescript-language-server", "args": ["--stdio"] }
+    }
+  }
+}
+```
+
+- Optional LSP enrichment, off by default. `lsp.enabled` is the master switch; `false` makes the
+  pass a no-op whatever `servers` holds, and so does a language with no `servers` entry
+- `lsp.servers` is keyed by a loaded language plugin's language id (`ts` for
+  `@aburi/lang-typescript`, which covers `.js` / `.jsx` / `.tsx` too). A key that names no loaded
+  plugin is never looked up, and the scan warns about it
+- Each server entry takes `command` (required), `args`, `initializeTimeoutMs`,
+  `requestTimeoutMs`, `fileBudgetMs`, `concurrency` and `initializationOptions`, the last
+  forwarded to the server verbatim
+- `aburi scan --lsp` / `--no-lsp` override `lsp.enabled` (§11)
+
+[`lsp-enrichment.md`](./lsp-enrichment.md) §12 is the full reference: the defaults, what each
+budget bounds and how a missing or failing server falls back.
 
 ## 11. Overrides from the CLI
 
