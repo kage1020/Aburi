@@ -1,3 +1,7 @@
+---
+description: "Write an Aburi plugin, a language to parse, a framework to recognise or effects to detect, then register, test and publish it."
+---
+
 # Plugin development
 
 A plugin teaches Aburi something it does not already know: a language to parse,

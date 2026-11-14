@@ -1,4 +1,8 @@
-# AI coding agents
+---
+description: "Aburi MCP server: lets an AI coding agent such as Claude Code ask what its edits did, what a component exposes and what a function reaches."
+---
+
+# MCP server for AI coding agents
 
 `@aburi/mcp` puts Aburi behind the [Model Context Protocol](https://modelcontextprotocol.io), so
 an agent such as Claude Code can ask what its edits did, what a component exposes, or what one

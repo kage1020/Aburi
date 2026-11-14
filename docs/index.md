@@ -1,5 +1,6 @@
 ---
 layout: home
+title: Semantic code review for pull requests
 
 hero:
   name: Aburi
