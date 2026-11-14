@@ -26,7 +26,7 @@
     "generatedAt": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO 8601 UTC. Excluded from fingerprint. Class B: --no-timestamp omits the key entirely rather than emitting null, so a committed IR carries no producer clock at all."
+      "description": "ISO 8601 UTC, reserved for the producer's clock. Excluded from fingerprint. No writer emits it today, so the key is absent. Class B: a producer that records a clock omits the key rather than emitting null when there is none, and drops it from an IR it commits."
     },
     "workspace": { "$ref": "#/$defs/Workspace" },
     "components": {
@@ -163,7 +163,7 @@
         },
         "lspEnrichment": {
           "$ref": "#/$defs/LspEnrichmentStats",
-          "description": "Bookkeeping from the LSP enrichment pass. Class B: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured. Presence is how a reader tells \"ran and enriched nothing\" apart from \"never ran\"."
+          "description": "Bookkeeping from the LSP enrichment pass. Class B: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured, lsp.enabled is not true, or lsp names no servers. Presence is how a reader tells \"ran and enriched nothing\" apart from \"never ran\"."
         },
         "callResolution": {
           "$ref": "#/$defs/CallResolutionStats",
