@@ -30,6 +30,7 @@ export interface ExtractFilesInput extends ExtractionJob, ExtractionPlugins {
 export async function extractFiles(input: ExtractFilesInput): Promise<ExtractedFiles> {
   const job: ExtractionJob = {
     workspaceRoot: input.workspaceRoot,
+    ...(input.installedRoot === undefined ? {} : { installedRoot: input.installedRoot }),
     files: input.files,
     config: input.config,
     components: input.components,

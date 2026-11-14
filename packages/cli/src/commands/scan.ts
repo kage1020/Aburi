@@ -72,6 +72,8 @@ export interface ScanOptions {
   configPath?: string
   pinnedConfig?: PinnedConfig
   pluginRefRoot?: string
+  /** Absolute: the checkout whose installed dependencies stand in for the workspace's, which has none. */
+  installedRoot?: string
   outputDir?: string
   format?: "json" | "md" | "both"
   ignore?: readonly string[]
@@ -137,6 +139,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   try {
     scanResult = await scan({
       workspaceRoot,
+      ...(options.installedRoot === undefined ? {} : { installedRoot: options.installedRoot }),
       config,
       languages: plugins.languages,
       frameworks: plugins.frameworks,

@@ -65,6 +65,11 @@ export type ScanProgress =
 
 export interface ScanInput {
   workspaceRoot: string
+  /**
+   * Absolute: the checkout of the same repository whose installed dependencies stand in for the
+   * workspace's, when the workspace is a checkout made without them.
+   */
+  installedRoot?: string
   config: Config
   languages: readonly LanguagePlugin[]
   frameworks: readonly FrameworkPlugin[]
@@ -120,6 +125,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   const extracted = await extractFiles({
     workspaceRoot: input.workspaceRoot,
+    ...(input.installedRoot === undefined ? {} : { installedRoot: input.installedRoot }),
     files: discovered.files,
     config: input.config,
     components: input.components ?? [],
