@@ -39,7 +39,7 @@
   "devDependencies": {
     "@aburi/schema": "workspace:*",
     "@types/node": "catalog:",
-    "json-schema-to-typescript": "catalog:",
+    "json-schema-to-typescript": "^16.0.0",
     "tsdown": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

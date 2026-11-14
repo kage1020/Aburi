@@ -5,6 +5,5 @@
     "noEmit": true
   },
   "files": [],
-  "include": [],
-  "exclude": ["node_modules", "dist", "out", "coverage"]
+  "include": []
 }

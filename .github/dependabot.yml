@@ -15,7 +15,7 @@ updates:
     # group's members released together clear it together; security updates do not wait.
     cooldown:
       default-days: 7
-    # The groups alone can hold six open pull requests; majors arrive one per pull request.
+    # The groups alone can hold seven open pull requests; majors arrive one per pull request.
     open-pull-requests-limit: 10
     groups:
       # Each vscode-languageserver-protocol release pins the exact vscode-jsonrpc it was built on.
@@ -39,15 +39,38 @@ updates:
       biome:
         patterns:
           - "@biomejs/*"
+      # The server the package ships and the client its tests drive it with speak one protocol.
+      mcp-sdk:
+        patterns:
+          - "@modelcontextprotocol/*"
+      # A dependency lands in every group it matches, so the catch-alls leave out the named groups'.
       runtime:
         dependency-type: production
-        # A production dependency only of test-support, which hands it to the suites.
         exclude-patterns:
+          - vscode-jsonrpc
+          - vscode-languageserver-protocol
+          - web-tree-sitter
+          - "@vscode/tree-sitter-wasm"
+          - vitepress
+          - vue
+          - "@biomejs/*"
+          - "@modelcontextprotocol/*"
+          # A production dependency only of test-support, which hands it to the suites.
           - vitest
         update-types:
           - minor
           - patch
       tooling:
+        dependency-type: development
+        exclude-patterns:
+          - vscode-jsonrpc
+          - vscode-languageserver-protocol
+          - web-tree-sitter
+          - "@vscode/tree-sitter-wasm"
+          - vitepress
+          - vue
+          - "@biomejs/*"
+          - "@modelcontextprotocol/*"
         update-types:
           - minor
           - patch

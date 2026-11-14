@@ -23,7 +23,6 @@
     "hygiene": "node scripts/check-references.mjs",
     "format": "biome check . --write",
     "changeset": "changeset",
-    "version-packages": "changeset version",
     "release": "pnpm typecheck && pnpm test && pnpm build && changeset publish"
   },
   "devDependencies": {
@@ -32,11 +31,7 @@
     "@aburi/lang-typescript": "workspace:*",
     "@biomejs/biome": "^2.6.3",
     "@changesets/cli": "catalog:",
-    "ajv": "catalog:",
-    "json-schema-to-typescript": "catalog:",
     "oxc-parser": "^0.158.0",
-    "tsdown": "catalog:",
-    "tsx": "catalog:",
     "turbo": "^2.11.10",
     "typescript": "catalog:",
     "vitest": "catalog:"

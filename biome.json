@@ -12,7 +12,6 @@
       "!**/dist",
       "!**/out",
       "!**/coverage",
-      "!**/.tsbuildinfo",
       "!**/.turbo",
       "!**/src/generated",
       "!pnpm-lock.yaml",
