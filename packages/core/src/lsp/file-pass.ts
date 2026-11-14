@@ -68,11 +68,11 @@ export async function enrichLanguageFiles(input: LanguageFilesInput): Promise<vo
     try {
       const opened = await client.didOpen(uri, lspLanguageId(read.fsPath), read.content, fileBudget)
       if (isLspFailure(opened)) {
-        logger.warn?.(`[aburi:lsp] didOpen failed for ${file} (${failureReason(opened)})`)
+        logger.warn(`[aburi:lsp] didOpen failed for ${file} (${failureReason(opened)})`)
         fileFellBack = true
       }
     } catch (error) {
-      logger.warn?.(`[aburi:lsp] didOpen failed for ${file}: ${errorMessage(error)}`)
+      logger.warn(`[aburi:lsp] didOpen failed for ${file}: ${errorMessage(error)}`)
       fileFellBack = true
     }
 
@@ -110,7 +110,7 @@ export async function enrichLanguageFiles(input: LanguageFilesInput): Promise<vo
           try {
             applyHover(job, hover, input.receiverHints, input.workingById, stats)
           } catch (error) {
-            logger.debug?.(
+            logger.debug(
               `[aburi:lsp] applying hover for ${file}:${job.callLine} threw: ${errorMessage(error)}`,
             )
           }
@@ -121,17 +121,17 @@ export async function enrichLanguageFiles(input: LanguageFilesInput): Promise<vo
     try {
       const closed = await client.didClose(uri, requestTimeout)
       if (isLspFailure(closed)) {
-        logger.debug?.(`[aburi:lsp] didClose failed for ${file} (${failureReason(closed)})`)
+        logger.debug(`[aburi:lsp] didClose failed for ${file} (${failureReason(closed)})`)
       }
     } catch (error) {
-      logger.debug?.(`[aburi:lsp] didClose failed for ${file}: ${errorMessage(error)}`)
+      logger.debug(`[aburi:lsp] didClose failed for ${file}: ${errorMessage(error)}`)
     }
 
     if (fileFellBack) stats.filesFellBack += 1
     else stats.filesEnriched += 1
     if (fallback.onFileClose(file, input.language, fileFellBack).escalate) {
       stats.languagesDisabled.add(input.language)
-      logger.warn?.(
+      logger.warn(
         `[aburi:lsp] disabling LSP for ${input.language} after 5 consecutive file fallbacks`,
       )
       return
