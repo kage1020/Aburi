@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url"
 import { gitTestEnv } from "@aburi/test-support"
 import { beforeAll } from "vitest"
 
-export const CLI_BIN = fileURLToPath(new URL("../../dist/bin/aburi.mjs", import.meta.url))
+export const CLI_BIN: string = fileURLToPath(new URL("../../dist/bin/aburi.mjs", import.meta.url))
 
 export function useBuiltBin(): void {
   beforeAll(() => {

@@ -132,7 +132,9 @@ const CHARGE = "aaaaaaaaaaa4"
 const TOTAL = "aaaaaaaaaaa5"
 
 /** Owners whose members paired, each in a shape that leaves the owner unpaired. */
-export const UNSETTLED_OWNERS = {
+export const UNSETTLED_OWNERS: Readonly<
+  Record<"split" | "hoisted" | "renamed" | "nested" | "merged" | "joined", Revision>
+> = {
   split: {
     base: [
       bare("src/old.ts", "Invoice"),
@@ -192,7 +194,7 @@ export const UNSETTLED_OWNERS = {
       guarded("src/new.ts", "Billing.total", TOTAL, "function"),
     ],
   },
-} satisfies Record<string, Revision>
+}
 
 export function dropped(file: string, name: string, kind: IRSymbol["kind"] = "class"): IRSymbol {
   return makeSymbol({

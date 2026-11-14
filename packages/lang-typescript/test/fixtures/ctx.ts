@@ -17,7 +17,7 @@ import {
 } from "../../src/index"
 
 /** A literal backslash, so a fixture can spell an escape without the test file's own escaping. */
-export const BACKSLASH = String.fromCharCode(92)
+export const BACKSLASH: string = String.fromCharCode(92)
 
 const DEFAULT_PATH = "src/a.ts"
 
@@ -28,21 +28,27 @@ export function requireTree(tree: Tree | null): Tree {
   return tree
 }
 
-export function parseSource(source: string, path = DEFAULT_PATH): Promise<ParseResult<Tree>> {
+export function parseSource(
+  source: string,
+  path: string = DEFAULT_PATH,
+): Promise<ParseResult<Tree>> {
   return parseTypescriptFile({ path: relativePath(path), content: source })
 }
 
 /** The edges and diagnostics a parse produced, which is all an import test reads. */
 export async function importsOf(
   source: string,
-  path = DEFAULT_PATH,
+  path: string = DEFAULT_PATH,
 ): Promise<{ errors: ParseError[]; imports: ImportEdge[] }> {
   const result = await parseSource(source, path)
   return { errors: result.errors, imports: result.imports }
 }
 
 /** Every diagnostic a parse produced, as `line:column message`. */
-export async function parseErrorsOf(source: string, path = DEFAULT_PATH): Promise<string[]> {
+export async function parseErrorsOf(
+  source: string,
+  path: string = DEFAULT_PATH,
+): Promise<string[]> {
   const { errors } = await parseSource(source, path)
   return errors.map((e) => `${e.line}:${e.column} ${e.message}`)
 }
@@ -53,13 +59,13 @@ export function emptySpecifierErrors(errors: readonly ParseError[]): ParseError[
 
 export async function symbolsOf(
   source: string,
-  path = DEFAULT_PATH,
+  path: string = DEFAULT_PATH,
 ): Promise<SymbolCandidate<Node>[]> {
   const result = await parseSource(source, path)
   return extractSymbols(requireTree(result.tree), makeExtractionCtx(path, source))
 }
 
-export async function idsOf(source: string, path = DEFAULT_PATH): Promise<string[]> {
+export async function idsOf(source: string, path: string = DEFAULT_PATH): Promise<string[]> {
   return (await symbolsOf(source, path)).map((s) => s.id)
 }
 
@@ -67,7 +73,7 @@ export async function idsOf(source: string, path = DEFAULT_PATH): Promise<string
 export async function symbolOf(
   source: string,
   id: string,
-  path = DEFAULT_PATH,
+  path: string = DEFAULT_PATH,
 ): Promise<SymbolCandidate<Node>> {
   return requireSymbol(await symbolsOf(source, path), id)
 }
@@ -91,14 +97,18 @@ export function byId(symbols: SymbolCandidate<Node>[], suffix: string): SymbolCa
   return match
 }
 
-export function normalizedOf(source: string, id: string, path = DEFAULT_PATH): Promise<string> {
+export function normalizedOf(
+  source: string,
+  id: string,
+  path: string = DEFAULT_PATH,
+): Promise<string> {
   return symbolOf(source, id, path).then(normalizeAst)
 }
 
 /** What a walk of every Symbol the fixture declares found, keyed by the Symbol's id. */
 export async function walksOf(
   source: string,
-  path = DEFAULT_PATH,
+  path: string = DEFAULT_PATH,
 ): Promise<Map<string, BodyExtraction>> {
   const result = await parseSource(source, path)
   const ctx = makeExtractionCtx(path, source)
@@ -109,7 +119,7 @@ export async function walksOf(
 export async function walkOf(
   source: string,
   id: string,
-  path = DEFAULT_PATH,
+  path: string = DEFAULT_PATH,
 ): Promise<BodyExtraction> {
   const walk = (await walksOf(source, path)).get(id)
   if (walk === undefined) throw new Error(`no Symbol ${id} in fixture`)
@@ -119,14 +129,18 @@ export async function walkOf(
 /** Walk the first Symbol extraction answers, for a fixture that declares exactly one. */
 export async function walkFirstSymbol(
   source: string,
-  path = DEFAULT_PATH,
+  path: string = DEFAULT_PATH,
 ): Promise<BodyExtraction> {
   const [walk] = (await walksOf(source, path)).values()
   if (walk === undefined) throw new Error("no symbols in fixture")
   return walk
 }
 
-export async function callsOf(source: string, id: string, path = DEFAULT_PATH): Promise<string[]> {
+export async function callsOf(
+  source: string,
+  id: string,
+  path: string = DEFAULT_PATH,
+): Promise<string[]> {
   return (await walkOf(source, id, path)).calls.map((c) => c.target)
 }
 

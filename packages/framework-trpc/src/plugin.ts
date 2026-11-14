@@ -10,7 +10,7 @@ import { classifyTrpcSymbol } from "./classify"
 import { frameworkTrpcManifest } from "./manifest"
 
 class TrpcFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
-  readonly manifest = frameworkTrpcManifest
+  readonly manifest: typeof frameworkTrpcManifest = frameworkTrpcManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -23,5 +23,5 @@ class TrpcFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 }
 
 /** Singleton so `manifest` identity is stable for consumers comparing against the constant. */
-export const trpcFrameworkPlugin = new TrpcFrameworkPlugin()
+export const trpcFrameworkPlugin: TrpcFrameworkPlugin = new TrpcFrameworkPlugin()
 export { TrpcFrameworkPlugin }

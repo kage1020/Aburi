@@ -10,7 +10,7 @@ import { classifyNextSymbol } from "./classify"
 import { frameworkNextManifest } from "./manifest"
 
 class NextFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
-  readonly manifest = frameworkNextManifest
+  readonly manifest: typeof frameworkNextManifest = frameworkNextManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -23,6 +23,6 @@ class NextFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 }
 
 /** Singleton so `manifest` identity is stable for consumers comparing against the constant. */
-export const nextFrameworkPlugin = new NextFrameworkPlugin()
+export const nextFrameworkPlugin: NextFrameworkPlugin = new NextFrameworkPlugin()
 
 export { NextFrameworkPlugin }

@@ -10,7 +10,7 @@ import { classifyNestjsSymbol } from "./classify"
 import { frameworkNestjsManifest } from "./manifest"
 
 class NestjsFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
-  readonly manifest = frameworkNestjsManifest
+  readonly manifest: typeof frameworkNestjsManifest = frameworkNestjsManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -23,6 +23,6 @@ class NestjsFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 }
 
 /** Singleton so `manifest` identity is stable for consumers comparing against the constant. */
-export const nestjsFrameworkPlugin = new NestjsFrameworkPlugin()
+export const nestjsFrameworkPlugin: NestjsFrameworkPlugin = new NestjsFrameworkPlugin()
 
 export { NestjsFrameworkPlugin }

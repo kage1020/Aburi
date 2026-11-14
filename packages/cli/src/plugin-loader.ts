@@ -11,13 +11,13 @@ import type {
 import { assertNever, CliError, errorMessage } from "./errors"
 import { pluginForDetectorId } from "./plugin-catalog"
 
-const PLUGIN_FIELDS = {
+export type PluginField = keyof LoadedPlugins & keyof Config
+
+const PLUGIN_FIELDS: Readonly<Record<PluginField, PluginManifest["type"]>> = {
   languages: "lang",
   frameworks: "framework",
   effects: "effects",
-} as const satisfies Record<keyof LoadedPlugins & keyof Config, PluginManifest["type"]>
-
-export type PluginField = keyof typeof PLUGIN_FIELDS
+}
 
 export interface LoadedPlugins {
   languages: LanguagePlugin[]

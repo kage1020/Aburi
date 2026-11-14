@@ -10,7 +10,7 @@ import { classifyPrismaCall } from "./classify"
 import { effectsPrismaManifest } from "./manifest"
 
 class PrismaEffectsPlugin implements EffectPlugin {
-  readonly manifest = effectsPrismaManifest
+  readonly manifest: typeof effectsPrismaManifest = effectsPrismaManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -19,7 +19,6 @@ class PrismaEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Left unannotated so the manifest literals stay visible. */
-export const prismaEffectsPlugin = new PrismaEffectsPlugin()
+export const prismaEffectsPlugin: PrismaEffectsPlugin = new PrismaEffectsPlugin()
 
 export { PrismaEffectsPlugin }

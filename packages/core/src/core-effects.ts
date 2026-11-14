@@ -27,7 +27,7 @@ export const CORE_EFFECTS = [
   { id: "env.write", description: "Environment variable written" },
   { id: "process.exit", description: "Process exit" },
   { id: "process.signal", description: "Process signal sent or handled" },
-] as const satisfies readonly CoreEffect[]
+] as const
 
 export type CoreEffectId = (typeof CORE_EFFECTS)[number]["id"]
 

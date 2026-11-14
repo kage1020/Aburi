@@ -9,7 +9,7 @@ import { classifyNestCall } from "./classify"
 import { effectsNestManifest } from "./manifest"
 
 class NestEffectsPlugin implements EffectPlugin {
-  readonly manifest = effectsNestManifest
+  readonly manifest: typeof effectsNestManifest = effectsNestManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -18,7 +18,6 @@ class NestEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Left unannotated so the manifest literals stay visible. */
-export const nestEffectsPlugin = new NestEffectsPlugin()
+export const nestEffectsPlugin: NestEffectsPlugin = new NestEffectsPlugin()
 
 export { NestEffectsPlugin }

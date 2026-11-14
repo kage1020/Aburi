@@ -26,7 +26,11 @@ export function makeRule(
   }
 }
 
-export function ruleText(node: Node, from = node.startIndex, to = node.endIndex): string {
+export function ruleText(
+  node: Node,
+  from: number = node.startIndex,
+  to: number = node.endIndex,
+): string {
   const source = node.text
   const base = node.startIndex
   if (!source.includes("/")) return normalizeRuleText(source.slice(from - base, to - base))

@@ -22,7 +22,7 @@ import { createTsconfigResolver } from "./tsconfig-paths"
 import { walkBody } from "./walk-body"
 
 class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
-  readonly manifest = langTypescriptManifest
+  readonly manifest: typeof langTypescriptManifest = langTypescriptManifest
   readonly fileExtensions: string[] = [...TYPESCRIPT_FILE_EXTENSIONS]
   readonly capabilities: LanguageCapabilities = {
     hasDecorators: true,
@@ -70,6 +70,6 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   }
 }
 
-export const langTypescriptPlugin = new LangTypescriptPlugin() satisfies LanguagePlugin<Tree, Node>
+export const langTypescriptPlugin: LangTypescriptPlugin = new LangTypescriptPlugin()
 
 export { LangTypescriptPlugin }

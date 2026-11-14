@@ -11,7 +11,7 @@ export const DEFAULT_HEAP_PER_WORKER_MB = 256
  * Less source than this for each worker, and starting one, which loads every plugin again, costs
  * more than the extraction it takes off the others.
  */
-export const BYTES_PER_WORKER = 256 * 1024
+export const BYTES_PER_WORKER: number = 256 * 1024
 
 export interface ParserSizing {
   /** `--concurrency`, or undefined for the default. */

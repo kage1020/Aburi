@@ -1,7 +1,7 @@
-import MarkdownIt, { type Token } from "markdown-it"
+import MarkdownIt, { type MarkdownIt as MarkdownItInstance, type Token } from "markdown-it"
 
 /** `html: true`, as GitHub drops an unknown tag like `<T>`; escaped, it would decode back and hide that loss. */
-export const commonMark = new MarkdownIt({ html: true })
+export const commonMark: MarkdownItInstance = new MarkdownIt({ html: true })
 
 /** What a reader sees of one run of inline Markdown, and what each code span in it holds. */
 export interface Inline {

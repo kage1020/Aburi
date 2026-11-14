@@ -4,7 +4,7 @@ export default defineConfig({
   entry: ["src/index.ts", "src/bin/aburi-mcp.ts"],
   format: ["esm"],
   outDir: "dist",
-  dts: { isolatedDeclarations: false },
+  dts: true,
   clean: true,
   sourcemap: false,
   minify: true,

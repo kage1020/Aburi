@@ -10,7 +10,7 @@ import { classifyTrpcCall } from "./classify"
 import { effectsTrpcManifest } from "./manifest"
 
 class TrpcEffectsPlugin implements EffectPlugin {
-  readonly manifest = effectsTrpcManifest
+  readonly manifest: typeof effectsTrpcManifest = effectsTrpcManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -19,7 +19,6 @@ class TrpcEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Left unannotated so the manifest literals stay visible. */
-export const trpcEffectsPlugin = new TrpcEffectsPlugin()
+export const trpcEffectsPlugin: TrpcEffectsPlugin = new TrpcEffectsPlugin()
 
 export { TrpcEffectsPlugin }

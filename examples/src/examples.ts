@@ -2,7 +2,7 @@ import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-export const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url))
+export const PACKAGE_ROOT: string = fileURLToPath(new URL("..", import.meta.url))
 
 const NOT_EXAMPLES = new Set(["dist", "node_modules", "src", "test"])
 

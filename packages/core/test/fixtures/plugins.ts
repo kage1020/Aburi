@@ -17,6 +17,7 @@ import {
   type FrameworkPlugin,
   type ImportEdge,
   type LangManifest,
+  type LanguageCapabilities,
   type LanguagePlugin,
   type ParsedTree,
   type ParseError,
@@ -163,9 +164,9 @@ export interface Script {
 
 /** A `.stub` language that spends the time it is told to and logs every call it receives. */
 export class ScriptedLanguagePlugin implements LanguagePlugin {
-  readonly manifest = langManifest()
-  readonly fileExtensions = [".stub"]
-  readonly capabilities = NO_LANGUAGE_CAPABILITIES
+  readonly manifest: LangManifest = langManifest()
+  readonly fileExtensions: string[] = [".stub"]
+  readonly capabilities: Readonly<LanguageCapabilities> = NO_LANGUAGE_CAPABILITIES
   readonly released: ParsedTree[] = []
   readonly order: string[] = []
   handedOut: ParsedTree | null = null
