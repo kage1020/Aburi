@@ -238,3 +238,37 @@ describe("scan — a call through the name of a dropped class", () => {
     })
   })
 })
+
+describe("scan — a call through a tsconfig path alias", () => {
+  it("reaches the Symbol the alias names, and buckets what it cannot reach by where it led", async () => {
+    const result = await callsFromMain(
+      {
+        "tsconfig.json": JSON.stringify({
+          compilerOptions: {
+            paths: { "@app/billing": ["libs/billing/src/index.ts"], "@lib/*": ["libs/*/src"] },
+          },
+        }),
+        "libs/billing/src/index.ts": "export function formatInvoice() { return 1 }\n",
+        "libs/tax/src/index.ts": "export class Tax { static rate() { return 2 } }\n",
+      },
+      [
+        'import { formatInvoice, missing as gone } from "@app/billing"',
+        'import * as tax from "@lib/tax"',
+        'import { sortBy } from "lodash"',
+      ],
+      ["formatInvoice()", "tax.Tax.rate()", "gone()", "sortBy()"],
+    )
+    expect(result).toEqual({
+      resolved: [
+        ["formatInvoice", "ts:libs/billing/src/index.ts#formatInvoice"],
+        ["tax.Tax.rate", "ts:libs/tax/src/index.ts#Tax::rate"],
+        ["gone", null],
+        ["sortBy", null],
+      ],
+      unresolved: [
+        ["gone", "no-match"],
+        ["sortBy", "external"],
+      ],
+    })
+  })
+})

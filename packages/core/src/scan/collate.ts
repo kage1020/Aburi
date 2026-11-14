@@ -43,6 +43,8 @@ export interface ExtractedFiles {
   dynamicCallSites: Set<string>
   declinedCalls: DeclinedCall[]
   thisBindings: ThisBindingSites
+  /** By importing file, then by bare specifier: the paths its language maps the specifier to. */
+  specifierPaths: Map<string, ReadonlyMap<string, readonly string[]>>
 }
 
 type Ran = Extract<FileOutcome, { kind: "ran" }>
@@ -72,6 +74,7 @@ export class ExtractionCollator {
     dynamicCallSites: new Set(),
     declinedCalls: [],
     thisBindings: this.#thisBindings,
+    specifierPaths: new Map(),
   }
   readonly #onceSeen = new Set<string>()
   readonly #resolverLinesSaid = new Set<string>()
@@ -264,6 +267,9 @@ export class ExtractionCollator {
         for (const key of result.dynamicCallSites) out.dynamicCallSites.add(key)
         out.declinedCalls.push(...result.declinedCalls)
         for (const [key, binding] of result.thisBindings) this.#thisBindings[binding].add(key)
+        if (result.specifierPaths.length > 0) {
+          out.specifierPaths.set(result.path, new Map(result.specifierPaths))
+        }
         return
       }
       default:

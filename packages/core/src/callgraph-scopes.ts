@@ -43,6 +43,9 @@ export interface ResolutionRun {
   table: SymbolTable
   extensions: readonly string[]
   relativeTargets: Map<string, string | null>
+  /** By importing file, then by bare specifier: the paths its language maps the specifier to. */
+  specifierPaths: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>
+  mappedTargets: Map<string, string | null>
 }
 
 export interface ResolveTargetContext {
@@ -177,7 +180,7 @@ function importedNamesOf(
       if (edge.namespaceBinding !== head) continue
       renamed = true
       const [first, ...rest] = tail
-      const file = relativeTargetOf(ctx, edge)
+      const file = importTargetOf(ctx, edge)
       if (first !== undefined && file !== null) names.push({ file, name: first, rest })
       continue
     }
@@ -186,7 +189,7 @@ function importedNamesOf(
       const { imported, local } = splitAliasedImportName(raw)
       if (local !== head) continue
       if (imported !== local) renamed = true
-      const file = relativeTargetOf(ctx, edge)
+      const file = importTargetOf(ctx, edge)
       if (file === null) continue
       if (imported !== DEFAULT_EXPORT_NAME) names.push({ file, name: imported, rest: tail })
       else for (const name of defaultExportsOf(ctx, file)) names.push({ file, name, rest: tail })
@@ -195,8 +198,38 @@ function importedNamesOf(
   return { names, renamed }
 }
 
-function relativeTargetOf(ctx: ResolveTargetContext, edge: ImportEdge): string | null {
-  return isRelativeSpecifier(edge.source) ? resolveRelativeSpecifierOnce(ctx, edge.source) : null
+function importTargetOf(ctx: ResolveTargetContext, edge: ImportEdge): string | null {
+  return isRelativeSpecifier(edge.source)
+    ? resolveRelativeSpecifierOnce(ctx, edge.source)
+    : mappedTargetOf(ctx.run, ctx.caller, edge.source)
+}
+
+const NO_FILES: ReadonlySet<string> = new Set()
+
+/** The first path the caller's language maps a bare specifier to that is a file with Symbols. */
+export function mappedTargetOf(
+  run: ResolutionRun,
+  caller: Pick<IRSymbol, "language" | "source">,
+  specifier: string,
+): string | null {
+  const paths = run.specifierPaths.get(caller.source.file)?.get(specifier)
+  if (paths === undefined) return null
+  const key = `${caller.language}\0${caller.source.file}\0${specifier}`
+  const cached = run.mappedTargets.get(key)
+  if (cached !== undefined) return cached
+  const knownFiles = run.table.filesByLanguage.get(caller.language) ?? NO_FILES
+  let resolved: string | null = null
+  for (const path of paths) {
+    resolved = resolveRelativeSpecifier({
+      fromDirectory: "",
+      specifier: path,
+      extensions: run.extensions,
+      knownFiles,
+    })
+    if (resolved !== null) break
+  }
+  run.mappedTargets.set(key, resolved)
+  return resolved
 }
 
 function defaultExportsOf(ctx: ResolveTargetContext, file: string): string[] {
