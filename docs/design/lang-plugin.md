@@ -791,6 +791,8 @@ So a per-node question must be asked of the node, never of its container:
 
 Reading the container is right when the container is what the question is about: every member of a class body, every argument of a call. It is the *per-node* use that has to be avoided. When a per-node question can only be answered by the container — whether a class of a namespace's name is declared in the same statement list — read the container once per tree and remember what it holds, keyed by the container, so every later node is answered by a lookup instead of another read of the list.
 
+A walk that visits every node of a subtree, as `normalizeAst` does, pays for a wrapper per node it is handed, anonymous tokens included, and most of what it reads of most nodes is their type. It goes through a `TreeCursor` instead: the cursor reads the current node's type id, field id and missing flag without building a node, and the grammar names the type and says whether it is named, once per type id. Only what the cursor cannot say is asked of a node: whether it is an extra, asked only of the types that can be one (the grammar's extras and the `ERROR` nodes error recovery inserts), and the text of a leaf that carries its spelling.
+
 ## 9. Verifiable Properties (Test Criteria)
 
 Every language plugin must pass the following tests.
