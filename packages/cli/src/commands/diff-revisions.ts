@@ -138,7 +138,11 @@ export async function scanRevisions(
     worktreeAdded = true
     plainLinks.base = await plainFileLinks(await listIndex(git, worktreeDir), worktreeDir)
     const base: SideScan = {
-      options: optionsFor(worktreeDir, resolve(tempParent, "base-out")),
+      // The worktree is made without dependencies, so the head's installed ones stand in for them.
+      options: {
+        ...optionsFor(worktreeDir, resolve(tempParent, "base-out")),
+        installedRoot: headWorkspaceRoot,
+      },
       read: readBase,
       ...reportOf("base", context.progress),
     }

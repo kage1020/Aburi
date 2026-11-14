@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile, realpath } from "node:fs/promises"
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { AsyncMemo, describeJsonType, describeThrown, errorCode, stripUtf8Bom } from "@aburi/core"
 import type { ImportResolver, ImportResolverContext } from "@aburi/types"
@@ -6,6 +6,7 @@ import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
 
 const CONFIG_FILE_NAMES = ["tsconfig.json", "jsconfig.json"]
 const CONFIG_DIR = `\${configDir}`
+const NODE_MODULES = "node_modules"
 // EISDIR is what a `node_modules/<package>` candidate of `locateExtended` gives.
 const ABSENT_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR", "EISDIR"])
 
@@ -47,6 +48,9 @@ interface ConfigReader {
   read(path: string): Promise<RawConfig | null>
   warn(message: string): void
   display(path: string): string
+  readonly root: string
+  /** The checkout whose installed dependencies stand in for the workspace's, when it has none. */
+  readonly installedRoot: string | null
 }
 
 export function createTsconfigResolver(ctx: ImportResolverContext): ImportResolver {
@@ -57,7 +61,14 @@ export function createTsconfigResolver(ctx: ImportResolverContext): ImportResolv
   const warned = new Set<string>()
 
   const reader: ConfigReader = {
-    read: (path) => reads.get(path, () => readConfig(path, reader)),
+    root,
+    installedRoot: ctx.installedRoot === undefined ? null : resolve(ctx.installedRoot),
+    // Keyed by where links lead, so a config reached both through a link and by its own path is
+    // read, and warned about, once.
+    async read(path) {
+      const real = await realConfigPath(path)
+      return reads.get(real, () => readConfig(real, reader))
+    },
     warn(message) {
       if (warned.has(message)) return
       warned.add(message)
@@ -216,29 +227,76 @@ async function compilerPaths(
 }
 
 // A package's `package.json` `exports` and `tsconfig` fields are not read, so a package that
-// exposes its config only through them is not found.
+// exposes its config only through them is not found. A package's config is read where its links
+// lead, as `tsc` reads it, so a workspace package linked into `node_modules` is read as its sources.
 async function locateExtended(
   entry: string,
   dir: string,
   reader: ConfigReader,
 ): Promise<string | null> {
-  const relativeEntry = entry.startsWith("./") || entry.startsWith("../") || isAbsolute(entry)
-  const candidates: string[] = []
-  if (relativeEntry) {
+  if (entry.startsWith("./") || entry.startsWith("../") || isAbsolute(entry)) {
     const path = resolve(dir, entry)
-    candidates.push(path)
-    if (extname(path) !== ".json") candidates.push(`${path}.json`)
-  } else {
-    for (let at = dir; ; at = dirname(at)) {
-      const path = join(at, "node_modules", entry)
-      candidates.push(path, `${path}.json`, join(path, "tsconfig.json"))
-      if (dirname(at) === at) break
-    }
+    const candidates = extname(path) === ".json" ? [path] : [path, `${path}.json`]
+    const found = await firstConfig(candidates, reader)
+    const { installedRoot } = reader
+    if (found !== null || installedRoot === null) return found
+    const dependencies = candidates
+      .map((candidate) => relative(reader.root, candidate))
+      .filter(throughNodeModules)
+      .map((rel) => resolve(installedRoot, rel))
+    return installedConfig(await firstConfig(dependencies, reader), reader, false)
   }
+  const found = await firstConfig(packageCandidates(entry, dir), reader)
+  if (found !== null) return realConfigPath(found)
+  if (reader.installedRoot === null) return null
+  const installedDir = resolve(reader.installedRoot, relative(reader.root, dir))
+  const installed = await firstConfig(packageCandidates(entry, installedDir), reader)
+  return installedConfig(installed, reader, true)
+}
+
+function packageCandidates(entry: string, dir: string): string[] {
+  const candidates: string[] = []
+  for (let at = dir; ; at = dirname(at)) {
+    const path = join(at, NODE_MODULES, entry)
+    candidates.push(path, `${path}.json`, join(path, "tsconfig.json"))
+    if (dirname(at) === at) return candidates
+  }
+}
+
+async function firstConfig(
+  candidates: readonly string[],
+  reader: ConfigReader,
+): Promise<string | null> {
   for (const candidate of candidates) {
     if ((await reader.read(candidate)) !== null) return candidate
   }
   return null
+}
+
+// A file of the installed checkout's own sources is read in the workspace, whose revision of it is
+// the one being scanned; a dependency the workspace has no copy of is read as installed.
+async function installedConfig(
+  found: string | null,
+  reader: ConfigReader,
+  followLinks: boolean,
+): Promise<string | null> {
+  if (found === null || reader.installedRoot === null) return null
+  const real = await realConfigPath(found)
+  const own = relative(reader.installedRoot, real)
+  if (!throughNodeModules(own)) {
+    const copy = resolve(reader.root, own)
+    if ((await reader.read(copy)) !== null) return copy
+  }
+  return followLinks ? real : found
+}
+
+// A path that does not resolve is read as it stands, which says why.
+function realConfigPath(path: string): Promise<string> {
+  return realpath(path).catch(() => path)
+}
+
+function throughNodeModules(relativePath: string): boolean {
+  return relativePath.split(sep).includes(NODE_MODULES)
 }
 
 function buildMapping(options: CompilerPaths, leafDir: string): PathMapping {

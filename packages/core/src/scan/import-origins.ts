@@ -32,6 +32,7 @@ type Language = LanguagePlugin<unknown, unknown>
 
 export interface ImportOriginsInput {
   workspaceRoot: string
+  installedRoot?: string
   files: readonly DiscoveredFile[]
   router: LanguageRouter
   loadSource(file: DiscoveredFile): Promise<SourceFile>
@@ -161,6 +162,9 @@ export class ImportOrigins {
     try {
       created = language.createImportResolver({
         workspaceRoot: this.#input.workspaceRoot,
+        ...(this.#input.installedRoot === undefined
+          ? {}
+          : { installedRoot: this.#input.installedRoot }),
         log: eventLogger((level, message, meta) =>
           this.#input.record({
             kind: "resolver-log",

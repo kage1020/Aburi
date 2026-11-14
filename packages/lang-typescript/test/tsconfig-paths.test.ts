@@ -1,6 +1,6 @@
 import { mkdir, symlink } from "node:fs/promises"
 import { join } from "node:path"
-import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
+import { linkDirectory, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { langTypescriptPlugin } from "../src/index"
 
@@ -16,8 +16,12 @@ async function write(files: Files): Promise<void> {
   }
 }
 
-function resolverAt(workspaceRoot: string, logger = recordingLogger()) {
-  const resolver = langTypescriptPlugin.createImportResolver({ workspaceRoot, log: logger })
+function resolverAt(workspaceRoot: string, logger = recordingLogger(), installedRoot?: string) {
+  const resolver = langTypescriptPlugin.createImportResolver({
+    workspaceRoot,
+    ...(installedRoot === undefined ? {} : { installedRoot }),
+    log: logger,
+  })
   return (specifier: string, fromFile = "src/main.ts") => resolver.resolve(specifier, fromFile)
 }
 
@@ -313,4 +317,111 @@ describe("the TypeScript import resolver — a config it cannot use", () => {
       expect(logger.warnings).toEqual([`tsconfig.json ${problem}.`])
     },
   )
+})
+
+// `base` is a checkout made without its dependencies, as the base of a refspec diff is; `head` is
+// the checkout they are installed in, with a workspace package linked into its `node_modules`.
+describe("the TypeScript import resolver — a checkout without its dependencies installed", () => {
+  const LINKED = "@repo/tsconfig/base.json"
+  const REGISTRY = "@tsconfig/shared"
+
+  async function installHead(files: Files = {}): Promise<void> {
+    await write({
+      "head/packages/tsconfig/base.json": paths({ "@a": [`\${configDir}/from-head`] }),
+      "head/node_modules/@tsconfig/shared/tsconfig.json": paths({
+        "@a": [`\${configDir}/from-registry`],
+      }),
+      ...files,
+    })
+    await mkdir(join(workspace.root, "head/node_modules/@repo"), { recursive: true })
+    await linkDirectory(
+      join(workspace.root, "head/packages/tsconfig"),
+      join(workspace.root, "head/node_modules/@repo/tsconfig"),
+    )
+  }
+
+  const baseResolver = (logger = recordingLogger()) =>
+    resolverAt(join(workspace.root, "base"), logger, join(workspace.root, "head"))
+
+  it.each<[string, string, Files, string[]]>([
+    [
+      "a workspace package the installed checkout links, from the workspace's own copy",
+      LINKED,
+      { "base/packages/tsconfig/base.json": paths({ "@a": [`\${configDir}/from-base`] }) },
+      ["apps/web/from-base"],
+    ],
+    [
+      "a linked workspace package the workspace has no copy of, as the installed checkout has it",
+      LINKED,
+      {},
+      ["apps/web/from-head"],
+    ],
+    ["a package installed from a registry, as installed", REGISTRY, {}, ["apps/web/from-registry"]],
+    [
+      "a path into `node_modules`, as installed",
+      "../../node_modules/@tsconfig/shared/tsconfig.json",
+      {},
+      ["apps/web/from-registry"],
+    ],
+    [
+      "a package the workspace has installed itself, over the installed checkout's",
+      REGISTRY,
+      {
+        "base/node_modules/@tsconfig/shared/tsconfig.json": paths({
+          "@a": [`\${configDir}/from-own-install`],
+        }),
+      },
+      ["apps/web/from-own-install"],
+    ],
+  ])("reads %s", async (_case, entry, files, expected) => {
+    const logger = recordingLogger()
+    await installHead({ ...files, "base/apps/web/tsconfig.json": { extends: entry } })
+
+    expect(await baseResolver(logger)("@a", "apps/web/src/page.ts")).toEqual(expected)
+    expect(logger.warnings).toEqual([])
+  })
+
+  it("does not look in the installed checkout for a config of the workspace's own it lacks", async () => {
+    const logger = recordingLogger()
+    await installHead({
+      "head/tsconfig.base.json": paths({ "@a": ["from-head"] }),
+      "base/apps/web/tsconfig.json": { extends: "../../tsconfig.base.json" },
+    })
+
+    expect(await baseResolver(logger)("@a", "apps/web/src/page.ts")).toEqual([])
+    expect(logger.warnings).toEqual([
+      'apps/web/tsconfig.json extends "../../tsconfig.base.json", but no config file was found ' +
+        "for it, so the path aliases it would supply are not resolved.",
+    ])
+  })
+
+  it("reads a linked package's config where the link leads, in either checkout alike", async () => {
+    const config = { extends: LINKED }
+    const own = paths({ "@a": ["./src/a"] })
+    await installHead({
+      "head/packages/tsconfig/base.json": own,
+      "head/apps/web/tsconfig.json": config,
+      "base/packages/tsconfig/base.json": own,
+      "base/apps/web/tsconfig.json": config,
+    })
+    const expected = ["packages/tsconfig/src/a"]
+
+    expect(await resolverAt(join(workspace.root, "head"))("@a", "apps/web/x.ts")).toEqual(expected)
+    expect(await baseResolver()("@a", "apps/web/x.ts")).toEqual(expected)
+  })
+
+  it("warns once about a linked config that is not JSON, by the name of its sources", async () => {
+    const logger = recordingLogger()
+    await installHead({
+      "head/packages/tsconfig/base.json": "{",
+      "head/apps/web/tsconfig.json": { extends: LINKED },
+    })
+
+    expect(await resolverAt(join(workspace.root, "head"), logger)("@a", "apps/web/x.ts")).toEqual(
+      [],
+    )
+    expect(logger.warnings).toEqual([
+      expect.stringMatching(/^packages\/tsconfig\/base\.json is not valid JSON/),
+    ])
+  })
 })
