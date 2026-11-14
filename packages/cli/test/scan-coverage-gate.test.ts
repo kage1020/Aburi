@@ -2,10 +2,11 @@ import { resolve } from "node:path"
 import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, runScan, type ScanReport } from "../src"
-import { runCliIn } from "./run-cli"
+import { capturedLog, runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
 
 const workspace = useScratchWorkspace("scan-coverage")
+const logged = capturedLog()
 
 async function scanStubs(
   files: readonly string[],
@@ -15,6 +16,7 @@ async function scanStubs(
   const log = recordingLogger()
   const report = await runScan({
     cwd: workspace.root,
+    log: logged.write,
     outputDir: resolve(workspace.root, "out"),
     format: "json",
     incidents: { warn: log.warn },

@@ -5,10 +5,12 @@ import type { Symbol as IRSymbol, SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CliError, EXIT, runExplain } from "../src"
 import { symbolFor, writeScannedWorkspace } from "./ir-documents"
+import { capturedLog } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
 import { defaultOutput, writeFileAt } from "./workspace"
 
 const workspace = useScratchWorkspace("explain-output")
+const logged = capturedLog()
 
 const GET_USER = symbolFor("ts:src/a.ts#getUser")
 const GET_USERS = symbolFor("ts:src/b.ts#getUsers")
@@ -16,7 +18,13 @@ const GET_USERS = symbolFor("ts:src/b.ts#getUsers")
 async function explainInto(argument: string, outputPath: string) {
   await writeScannedWorkspace(workspace.root, { symbols: [GET_USER, GET_USERS] })
   await writeFileAt(workspace.root, "src/a.ts", "export function getUser() {}\n")
-  return runExplain({ cwd: workspace.root, argument, noRescan: true, outputPath })
+  return runExplain({
+    cwd: workspace.root,
+    log: logged.write,
+    argument,
+    noRescan: true,
+    outputPath,
+  })
 }
 
 describe("aburi explain --output", () => {
@@ -40,6 +48,7 @@ describe("aburi explain --output", () => {
 
     const outcome = await runExplain({
       cwd: workspace.root,
+      log: logged.write,
       argument: "src/route.ts",
       outputPath: output,
       noRescan: true,
@@ -54,6 +63,7 @@ describe("aburi explain --output", () => {
 
     const outcome = await runExplain({
       cwd: workspace.root,
+      log: logged.write,
       argument: "ok_stub",
       outputPath: "answer.md",
       warn: () => {},
@@ -95,6 +105,7 @@ describe("aburi explain — the calls an effect plugin declined", () => {
 
     const outcome = await runExplain({
       cwd: workspace.root,
+      log: logged.write,
       argument: GET_USER.id,
       noRescan: true,
     })

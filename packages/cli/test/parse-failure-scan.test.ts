@@ -2,7 +2,7 @@ import { resolve } from "node:path"
 import { useScratchWorkspace } from "@aburi/test-support"
 import { beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runScan } from "../src"
-import { runCliIn } from "./run-cli"
+import { capturedLog, runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
 
 const workspace = useScratchWorkspace("parse-failure")
@@ -13,8 +13,10 @@ beforeEach(async () => {
 
 describe("aburi scan — files the language plugin refused", () => {
   it("names them in skipped and counts them apart from the file that kept its warnings, exiting 0", async () => {
+    const log = capturedLog()
     const report = await runScan({
       cwd: workspace.root,
+      log: log.write,
       outputDir: resolve(workspace.root, "out"),
       format: "json",
     })
@@ -31,6 +33,10 @@ describe("aburi scan — files the language plugin refused", () => {
       totalFiles: 4,
       exitCode: EXIT.SUCCESS,
     })
+    expect(log.lines.filter((line) => line.startsWith("warn: Skipped "))).toEqual([
+      "warn: Skipped bad.stub: parse reported a non-recoverable error at 12:4 — unterminated string\n",
+      "warn: Skipped notree.stub: the language plugin returned no tree\n",
+    ])
   })
 
   it("gives the withdrawals their own stderr line, apart from the recoverable count", async () => {

@@ -12,7 +12,7 @@ import {
   runScan,
   type ScanOptions,
 } from "../src"
-import { runCliIn } from "./run-cli"
+import { capturedLog, runCliIn } from "./run-cli"
 import {
   defaultOutput,
   listTree,
@@ -24,6 +24,7 @@ import {
 } from "./workspace"
 
 const workspace = useScratchWorkspace("scan")
+const logged = capturedLog()
 
 beforeEach(async () => {
   await writeTypeScriptWorkspace(workspace.root, "scan-fixture")
@@ -32,6 +33,7 @@ beforeEach(async () => {
 function scan(options: Omit<ScanOptions, "cwd" | "outputDir"> = {}) {
   return runScan({
     cwd: workspace.root,
+    log: logged.write,
     outputDir: defaultOutput(workspace.root),
     format: "json",
     ...options,

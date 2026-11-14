@@ -5,16 +5,22 @@ import { describe, expect, it } from "vitest"
 import { DEFAULT_OUTPUT_DIRNAME, EXIT, IR_JSON_FILENAME, runExplain, runScan } from "../src"
 import { pathExists } from "../src/fs-probe"
 import { symbolFor, writeScannedWorkspace } from "./ir-documents"
-import { runCliIn } from "./run-cli"
+import { capturedLog, runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
 import { defaultOutput, TYPESCRIPT, writeConfig } from "./workspace"
 
 const workspace = useScratchWorkspace("explain-scan")
+const logged = capturedLog()
 
 async function explainAfterScan(files: readonly string[], argument: string) {
   await writeStubWorkspace(workspace.root, files)
   const log = recordingLogger()
-  const outcome = await runExplain({ cwd: workspace.root, argument, warn: log.warn })
+  const outcome = await runExplain({
+    cwd: workspace.root,
+    log: logged.write,
+    argument,
+    warn: log.warn,
+  })
   return { outcome, said: log.warnings.join("\n") }
 }
 
@@ -76,9 +82,13 @@ describe("aburi explain with no IR on disk — the scan it runs", () => {
 
   it("writes its IR beside the Markdown an earlier scan wrote, and removes none of it", async () => {
     await writeStubWorkspace(workspace.root, ["ok.stub"])
-    const scanned = await runScan({ cwd: workspace.root, format: "md" })
+    const scanned = await runScan({ cwd: workspace.root, log: logged.write, format: "md" })
 
-    const outcome = await runExplain({ cwd: workspace.root, argument: "ok_stub" })
+    const outcome = await runExplain({
+      cwd: workspace.root,
+      log: logged.write,
+      argument: "ok_stub",
+    })
 
     expect(outcome.kind).toBe("single")
     expect(await pathExists(defaultOutput(workspace.root, IR_JSON_FILENAME))).toBe(true)
@@ -104,6 +114,7 @@ describe("aburi explain with an IR on disk", () => {
     await writeStubWorkspace(workspace.root, ["boom.stub", "ok.stub"])
     await runScan({
       cwd: workspace.root,
+      log: logged.write,
       outputDir: resolve(workspace.root, outputDir),
       format: "json",
     })
@@ -119,11 +130,12 @@ describe("aburi explain --no-rescan after aburi scan --format md", () => {
   it("finds no IR rather than answering from the one an earlier scan wrote", async () => {
     await writeStubWorkspace(workspace.root, ["old.stub"])
     await runScan({ cwd: workspace.root })
-    const lookUp = () => runExplain({ cwd: workspace.root, argument: "old_stub", noRescan: true })
+    const lookUp = () =>
+      runExplain({ cwd: workspace.root, log: logged.write, argument: "old_stub", noRescan: true })
     expect((await lookUp()).kind).toBe("single")
     await rename(resolve(workspace.root, "old.stub"), resolve(workspace.root, "new.stub"))
 
-    await runScan({ cwd: workspace.root, format: "md" })
+    await runScan({ cwd: workspace.root, log: logged.write, format: "md" })
 
     await expect(lookUp()).rejects.toThrow("No IR file at")
   })
@@ -144,7 +156,13 @@ describe("aburi explain --debug-resolution", () => {
     async (options, refusal) => {
       await writeScannedWorkspace(workspace.root, { symbols: [] })
       await expect(
-        runExplain({ cwd: workspace.root, argument: "x", debugResolution: true, ...options }),
+        runExplain({
+          cwd: workspace.root,
+          log: logged.write,
+          argument: "x",
+          debugResolution: true,
+          ...options,
+        }),
       ).rejects.toThrow(refusal)
     },
   )
@@ -155,6 +173,7 @@ describe("aburi explain --debug-resolution", () => {
 
     const outcome = await runExplain({
       cwd: workspace.root,
+      log: logged.write,
       argument: "ts:src/a.ts#getUser",
       debugResolution: true,
     })
