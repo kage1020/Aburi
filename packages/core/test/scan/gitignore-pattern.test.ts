@@ -1,3 +1,4 @@
+import { costGrowth } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { MAX_RULE_LENGTH, parseGitignore, type Verdict } from "../../src/scan/gitignore-pattern"
 
@@ -251,27 +252,39 @@ describe("brackets", () => {
 })
 
 describe("what a match costs", () => {
-  // Backtracking takes seconds to minutes over each of these; the abort pruning takes about a
-  // millisecond, and the bound leaves room for a slow runner.
-  const BOUND_MS = 250
+  // Without the abort pruning, each rule costs time exponential in its runs of `*` or `**/`: going
+  // from three runs to six multiplies it by hundreds, and git's pruning without ours still takes 50
+  // times as long over twelve runs of `**/` as over six. Pruned, doubling the runs leaves the cost
+  // about where it was, on a fast runner or a busy one.
+  const MAX_GROWTH = 10
 
-  it.each([
-    ["a run of `**/`", `${"**/".repeat(12)}z`, `${"d/".repeat(25)}y`],
+  it.each<[string, (runs: number) => [rule: string, path: string], number]>([
+    ["a run of `**/`", (runs) => [`${"**/".repeat(runs)}z`, `${"d/".repeat(25)}y`], 6],
+    ["`*a` repeated in a basename rule", (runs) => [`${"*a".repeat(runs)}*b`, "a".repeat(40)], 3],
     [
-      "a run of `**/` that git itself takes seconds over",
-      `${"**/".repeat(24)}z`,
-      `${"d/".repeat(25)}y`,
+      "`*a` repeated in a path rule",
+      (runs) => [`x/${"*a".repeat(runs)}*b`, `x/${"a".repeat(40)}`],
+      3,
     ],
-    ["`*a` repeated in a basename rule", `${"*a".repeat(12)}*b`, "a".repeat(40)],
-    ["`*a` repeated in a path rule", `x/${"*a".repeat(12)}*b`, `x/${"a".repeat(40)}`],
     [
-      "a rule of the longest length read, one recursion per `*`",
-      `${"*a".repeat(MAX_RULE_LENGTH / 2 - 1)}*b`,
-      "a".repeat(MAX_RULE_LENGTH),
+      "a rule up to the longest length read, one recursion per `*`",
+      (runs) => [`${"*a".repeat(runs)}*b`, "a".repeat(MAX_RULE_LENGTH)],
+      MAX_RULE_LENGTH / 4 - 1,
     ],
-  ])("decides %s within the bound", (_label, rule, path) => {
-    const started = performance.now()
-    expect(verdicts(`${rule}\n`, [path])).toEqual(["none"])
-    expect(performance.now() - started).toBeLessThan(BOUND_MS)
+  ])("decides %s at a cost that does not grow with its runs", (_label, shape, runs) => {
+    const decider = (count: number): (() => void) => {
+      const [rule, path] = shape(count)
+      const rules = parseGitignore(Buffer.from(`${rule}\n`, "utf8"))
+      if (!("decide" in rules)) throw new Error(`${rule} was refused`)
+      expect(rules.decide(path, false)).toBe("none")
+      return () => rules.decide(path, false)
+    }
+
+    const { median, ratios } = costGrowth(decider(runs), decider(runs * 2))
+
+    expect(
+      median,
+      `cost ratios at twice the runs: ${ratios.map((r) => r.toFixed(1)).join(", ")}`,
+    ).toBeLessThan(MAX_GROWTH)
   })
 })
