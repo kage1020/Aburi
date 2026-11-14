@@ -273,7 +273,7 @@ went:
 > ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report, the same diff without a size cap, is `diff.full.md` beside `diff.md`.
 ```
 
-The sections that survive are always the important ones: API changes go last, Syntax-only first.
+The sections that survive are always the important ones: API changes go last, Test files first, then Syntax-only.
 `diff.json` is never capped, so nothing is lost from the artefact you can query. When the cap
 changed anything, the uncapped report is written beside the capped one as `diff.full.md`, which
 is what the note points at. Like `diff.json` and `diff.md`, one left from an earlier run is

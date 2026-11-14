@@ -129,7 +129,7 @@ which says why, and the exit code is the CLI's (§9 of cli-spec). A run that ans
 exited non-zero answers: a scan that withdrew a file (`3`), a `diff` whose `failOn` tripped (`3`),
 an `explain` with several candidates (`2`). A `scan` or a `component` the call names
 that does not exist fails too, listing the ones that do; a `diff` `symbol` no Slice holds fails
-naming that Symbol alone, since the Slices' members are the diff's to list.
+naming that Symbol alone.
 
 ## 4. Verifiable Properties
 

@@ -79,6 +79,10 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
   // Resource limits for parsing/extraction
   "maxFileSizeBytes": 2097152,        // 2 MB (default); files exceeding this are skipped
   "parseTimeoutMs": 5000,             // per-file parse+extract+walk budget (default 5s); an over-budget file is skipped whole — lang-plugin.md §7.1.2
+  "classifyTimeoutMs": 50,            // per-call budget for an effect plugin's classify() (default 50 ms) — §10.2
+
+  // Optional LSP enrichment, off by default — §10.3
+  "lsp": { "enabled": false },
 
   // Coverage floor — absent by default
   "minParsedFileRatio": 0.9           // exit 3 when fewer than 90% of discovered files were parsed — cli-spec.md §5.7

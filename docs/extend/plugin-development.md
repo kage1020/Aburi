@@ -301,6 +301,8 @@ class MyFrameworkPlugin implements FrameworkPlugin {
     const names = importedNames(ctx.imports, ctx.file.path)
     let confidence: Confidence = "high"
     const hit = candidate.decorators.find((d) => {
+      // A qualified `@ui.Widget` is found under its name here; to check its provenance, resolve
+      // the qualifier through `ImportEdge.namespaceBinding`, as framework-nestjs does.
       const origin = names.get(d.name)
       // No edge mentions it: nothing to resolve, so the written name stands.
       if (origin === undefined) return d.name === "Widget"
@@ -406,8 +408,9 @@ Classifies a `CallCandidate` into a core effect vocabulary
 import { defineEffectsManifest } from "@aburi/plugin-registry/plugin-input"
 import type { EffectClassification, EffectDecline, EffectPlugin } from "@aburi/types"
 
-// An effects manifest that declares no effect ids of its own and one derivedBy prefix.
-// Write the manifest out in full, as for the other plugin types, to declare `x-` effects.
+// An effects manifest that declares no effect ids of its own and one derivedBy prefix, at
+// version "0.0.0". Write the manifest out in full, as for the other plugin types, to declare
+// `x-` effects or a version of your own.
 export const myEffectsManifest = defineEffectsManifest("effects-mytool", "effects-plugin:mytool")
 
 class MyEffectsPlugin implements EffectPlugin {
