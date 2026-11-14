@@ -129,7 +129,7 @@ describe("the aburi MCP server", () => {
 
   it("answers scan, workspace and component with what aburi scan prints and writes", async () => {
     await writeRepository(workspace)
-    const alone = await aburi(workspace.root, ["scan", "--output-dir", cli.root])
+    const alone = await aburi(workspace.root, ["scan", "--output-dir", cli.root, "--quiet"])
     const client = await connected()
 
     const scanned = await call(client, "scan")
@@ -137,7 +137,7 @@ describe("the aburi MCP server", () => {
     expect(scanned.structured.scan).toBe("scan-1")
     expect(scanned.structured.components).toEqual(["api", "web"])
     expect(scanned.structured.runs.map((run) => run.bin)).toEqual([BUNDLED_BIN])
-    expect(scanned.text.split("\n").slice(0, 2)).toEqual(alone.stdout.split("\n").slice(0, 2))
+    expect(scanned.text).toBe(alone.stdout)
 
     const overview = await call(client, "workspace", { scan: "scan-1" })
     expect(overview.text).toBe(await readFile(join(cli.root, "workspace.md"), "utf8"))

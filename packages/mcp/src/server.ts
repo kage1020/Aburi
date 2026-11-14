@@ -116,7 +116,7 @@ export function createAburiServer(options: AburiServerOptions): AburiServer {
 
   const scanTree = async (signal: AbortSignal): Promise<Scan | CallToolResult> => {
     const output = outputDirectory("scan")
-    const scanned = await run(["scan", "--output-dir", output, ...config], signal)
+    const scanned = await run(["scan", "--output-dir", output, "--quiet", ...config], signal)
     const read = await componentsOf(scanned, output, signal)
     if (!("components" in read)) {
       await remove(output)
