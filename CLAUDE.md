@@ -99,6 +99,9 @@ whole pipeline, and its tests run against its own built bin.
 - `.gitattributes` forces LF: Biome is configured for LF and Windows checkouts would otherwise fail it.
 - `declarationMap` stays off: turning it on makes rolldown-plugin-dts enable sourcemaps for every
   tsdown build and ships ~1.6 MB of `.map` files.
+- `isolatedDeclarations` is on for every package, tests included: it is what makes tsdown emit
+  declarations with Oxc instead of the deprecated tsgo generator, so an export needs an explicit
+  type wherever it is not a literal.
 - The docs deploy runs Wrangler through `pnpm dlx`. `cloudflare/wrangler-action` installs it with npm,
   which fails on the docs package's `workspace:` dependencies.
 - The docs site ships with a release, not a merge (`release.yml` calls `docs.yml`).

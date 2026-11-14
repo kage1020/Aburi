@@ -232,7 +232,9 @@ plugin error exits 3 before anything is written, so the step also needs a non-em
 ([`scripts/report-paths.mjs`](https://github.com/aburi-dev/Aburi/blob/main/packages/github-action/scripts/report-paths.mjs)).
 That check means "this run wrote it" because `aburi diff` removes the reports an earlier run left
 before it compares anything. A path it does set is absolute, resolved from `working-directory`, so
-an absolute `output-dir` reaches the comment step as itself.
+an absolute `output-dir` reaches the comment step as itself. An `output-dir` holding a line break
+sets no path and fails the step with exit 1: each line the script writes is a `$GITHUB_OUTPUT`
+entry, so such a path would add one.
 
 ## 5. The comment
 
