@@ -293,6 +293,77 @@ describe("scan — what a const's initializer makes it", () => {
   })
 })
 
+describe("scan — the middleware a procedure runs", () => {
+  async function middlewareOf(initializer: string): Promise<readonly string[] | undefined> {
+    await workspace.writeSource(
+      "src/server.ts",
+      [SERVER_IMPORT, `export const subject = ${initializer}`].join("\n"),
+    )
+    return symbolNamed({ ir: await scanWorkspace() }, "subject").middleware
+  }
+
+  it.each([
+    ["what a procedure's own use is handed", "t.procedure.use(isAuthed).query(list)", ["isAuthed"]],
+    [
+      "every use on its chain, in the order they run",
+      "t.procedure.use(timing).input(schema).use(isAuthed).mutation(save)",
+      ["timing", "isAuthed"],
+    ],
+    [
+      "a factory with its arguments, and a member path",
+      `t.procedure.use(requireRole('admin')).use(auth.required).query(list)`,
+      [`requireRole("admin")`, "auth.required"],
+    ],
+    [
+      "middleware behind a type assertion",
+      "t.procedure.use(isAuthed as Middleware).query(list)",
+      ["isAuthed"],
+    ],
+    [
+      "the builder concat joins, where it joins it",
+      "publicProcedure.use(timing).concat(authedProcedure).query(list)",
+      ["timing", "authedProcedure"],
+    ],
+    ["what a base procedure adds", "t.procedure.use(isAuthed)", ["isAuthed"]],
+    [
+      "only what a base procedure adds to the one it extends",
+      "protectedProcedure.use(isAdmin)",
+      ["isAdmin"],
+    ],
+  ])("records %s", async (_label, initializer, middleware) => {
+    expect(await middlewareOf(initializer)).toEqual(middleware)
+  })
+
+  it.each([
+    ["a procedure built on a base procedure", "protectedProcedure.query(list)"],
+    [
+      "a procedure whose middleware is an inline function",
+      "t.procedure.use(({ ctx, next }) => next({ ctx })).query(list)",
+    ],
+    ["the instance's procedure", "t.procedure"],
+    ["a middleware", "t.middleware(async ({ next }) => next())"],
+  ])("leaves the field out for %s", async (_label, initializer) => {
+    expect(await middlewareOf(initializer)).toBeUndefined()
+  })
+
+  it("names middleware the same however the chain is wrapped and commented", async () => {
+    const wrapped = await middlewareOf(
+      [
+        "t.procedure",
+        "  // the gate",
+        "  .use(",
+        "    requireRole( /* the role */ 'admin' ),",
+        "  )",
+        "  .use(auth",
+        "    .required)",
+        "  .query(list)",
+      ].join("\n"),
+    )
+
+    expect(wrapped).toEqual([`requireRole("admin")`, "auth.required"])
+  })
+})
+
 describe("scan — the confidence a file's imports give", () => {
   it.each([
     ["@trpc/server", `import { initTRPC } from "@trpc/server"`, "high"],

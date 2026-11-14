@@ -346,8 +346,10 @@ Contracts:
   `middleware`: what the registration runs before its handler, in order, named
   from the syntax tree by the same rule as `derivedBy`. The pipeline writes it to
   `Symbol.middleware`, which the logic fingerprint reads, so a removed
-  authorization step is a logic change the report names. Leave inline functions
-  out: their bodies are already the Symbol's.
+  authorization step is a logic change the report names. Hand the arguments
+  that are middleware to `middlewareNames(nodes)` from `@aburi/core`, which
+  names them as `framework-express` and `framework-trpc` do and leaves inline
+  functions out: their bodies are already the Symbol's.
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
   `extKindPrefixes` / `derivedByPrefixes`.
 - Match a decorator on the name it was **imported** under, not the one the source

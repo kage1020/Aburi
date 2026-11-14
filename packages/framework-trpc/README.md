@@ -61,6 +61,28 @@ written in it are the procedure's: with
 [`@aburi/effects-prisma`](../effects-prisma/README.md), a mutation whose
 resolver calls `prisma.user.create(…)` carries `db.write`.
 
+A procedure or base procedure also names its middleware, which `@aburi/core`
+writes to the Symbol's `middleware` and the logic fingerprint reads, so a
+procedure that loses `.use(isAuthed)` is a logic change the report names
+(`- middleware removed: isAuthed`) rather than a reformat, and two `.use` calls
+swapped are one with `reordered: true`. The names are what each `.use(…)` on
+the declaration's own chain is handed and the builder each `.concat(…)` joins,
+whose middleware runs where the call is written, in the order they run:
+`t.procedure.use(timing).use(isAuthed).query(fn)` names `timing` and
+`isAuthed`. An inline middleware is left out, since its body is the Symbol's
+own and already read. Each entry is named from the syntax tree as
+[`@aburi/framework-express`](../framework-express/README.md) names its
+middleware, so line breaks, comments and quote style do not reach it:
+`isAuthed`, `auth.required`, `requireRole("admin")` for `requireRole('admin')`,
+`rateLimit(…)` for `rateLimit({ max: 10 })`, and `<computed>` for anything no
+name spells.
+
+The middleware a base procedure adds is named on the base procedure, not on
+what is built from it. `protectedProcedure.query(fn)` names none, and removing
+`.use(isAuthed)` from `protectedProcedure = t.procedure.use(isAuthed)` is a
+logic change to `protectedProcedure` alone: the plugin reads one declaration at
+a time, so it cannot follow `protectedProcedure` to the chain that built it.
+
 Not classified today:
 
 - A procedure written inside a router's object literal
