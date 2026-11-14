@@ -49,7 +49,7 @@ status and delta for each from there.
 | `@aburi/config` | Loading and validating `aburi.json`. |
 | `@aburi/core` | Symbol ids, canonical JSON, IR invariants, autodetect, and the scan pipeline. |
 | `@aburi/diff` | The five-stage matcher, statuses, and deltas. |
-| `@aburi/markdown-projection` | Every Markdown view, and the `--fail-on` formatter. |
+| `@aburi/markdown-projection` | Every Markdown view, and fail-on clause helpers of its own (the CLI's `--fail-on` lives in `@aburi/cli`). |
 | `@aburi/cli` | The five commands, git worktree handling, and exit codes. |
 | `@aburi/github-action` | A composite action wrapping the CLI, with marker-based comment upsert. |
 | `@aburi/mcp` | An MCP server whose tools answer from runs of the CLI. |

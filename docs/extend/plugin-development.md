@@ -84,10 +84,16 @@ computes a normalised AST string for fingerprinting.
 import { makeLanguageId } from "@aburi/core"
 import {
   type BodyExtraction,
+  type DropHint,
+  type ExtractionContext,
   type LangManifest,
   type LanguagePlugin,
+  type ParsedTree,
   type ParseResult,
   PLUGIN_SCHEMA_URL,
+  type SourceFile,
+  type SymbolCandidate,
+  type WalkContext,
 } from "@aburi/types"
 
 export const myLangManifest: LangManifest = {
@@ -119,25 +125,25 @@ class MyLangPlugin implements LanguagePlugin {
 
   async init() {}
 
-  async parseFile(file): Promise<ParseResult> {
+  async parseFile(file: SourceFile): Promise<ParseResult> {
     // Return { tree, errors, imports }. `tree` is opaque to the pipeline.
   }
 
-  extractSymbols(tree, ctx) {
+  extractSymbols(tree: ParsedTree, ctx: ExtractionContext): SymbolCandidate[] {
     // Return SymbolCandidate<Node>[]. Every id must start with `<language>:`.
   }
 
-  walkBody(symbol, ctx): BodyExtraction {
+  walkBody(symbol: SymbolCandidate, ctx: WalkContext): BodyExtraction {
     return { rules: [], calls: [] }
   }
 
-  normalizeAst(symbol) {
+  normalizeAst(symbol: SymbolCandidate): string {
     // Canonical AST string. Whitespace / comment insensitive. Identifiers, literals,
     // operators, keywords and modifiers preserved (fingerprint.md §5.1).
     return ""
   }
 
-  symbolDropHint(symbol, ctx) {
+  symbolDropHint(symbol: SymbolCandidate, ctx: ExtractionContext): DropHint | null {
     // Optional: language-specific drop candidates the shape-only core rules
     // cannot judge (e.g. `{}` empty body detection).
     return null
@@ -270,6 +276,7 @@ import type {
   FrameworkClassifyContext,
   FrameworkPlugin,
   ImportEdge,
+  SymbolCandidate,
   SymbolClassification,
 } from "@aburi/types"
 
@@ -297,7 +304,10 @@ class MyFrameworkPlugin implements FrameworkPlugin {
 
   async init() {}
 
-  classifySymbol(candidate, ctx: FrameworkClassifyContext): SymbolClassification | null {
+  classifySymbol(
+    candidate: SymbolCandidate,
+    ctx: FrameworkClassifyContext,
+  ): SymbolClassification | null {
     const names = importedNames(ctx.imports, ctx.file.path)
     let confidence: Confidence = "high"
     const hit = candidate.decorators.find((d) => {
@@ -406,7 +416,13 @@ Classifies a `CallCandidate` into a core effect vocabulary
 
 ```ts
 import { defineEffectsManifest } from "@aburi/plugin-registry/plugin-input"
-import type { EffectClassification, EffectDecline, EffectPlugin } from "@aburi/types"
+import type {
+  CallCandidate,
+  ClassifyContext,
+  EffectClassification,
+  EffectDecline,
+  EffectPlugin,
+} from "@aburi/types"
 
 // An effects manifest that declares no effect ids of its own and one derivedBy prefix, at
 // version "0.0.0". Write the manifest out in full, as for the other plugin types, to declare
@@ -418,7 +434,7 @@ class MyEffectsPlugin implements EffectPlugin {
 
   async init() {}
 
-  classify(call, ctx): EffectClassification | EffectDecline | null {
+  classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | EffectDecline | null {
     // Keep it pure: no I/O, no state, no async. The per-call budget is 50ms
     // by default and stateful classifiers are the reason it exists.
     if (!looksLikeMyEffect(call, ctx)) return null

@@ -377,7 +377,7 @@ A Symbol with a boundary decorator is kept, as it is from every Category-B rule.
 ### 8.4 Collisions
 
 - Multiple entries with the same `name` → config validation error
-- Two entries whose extKinds name the same vendor (`framework:acme:*`) derive the same `framework:hint:acme` → the registry refuses the later one at startup (extension-vocab §6.1)
+- Two entries whose owned prefixes are equal or nested → the registry refuses the later one at startup (extension-vocab §6.1). An entry owns its extKind without the last segment, under `framework:hint:`: `framework:acme:controller` owns `framework:hint:acme`, so two three-segment extKinds of one vendor collide, while `framework:acme:sub:x` (owning `framework:hint:acme:sub`) and `framework:acme:other:y` do not
 - A plugin listed in `frameworks` already owns a namespace an entry derives (a `derivedBy` prefix) → the registry refuses the entry at startup
 
 A refused entry is a config error (exit 2) naming the entry, since the entry is what the reader has to change.

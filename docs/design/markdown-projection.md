@@ -1095,8 +1095,8 @@ Renders L2 standalone. Printed to `stdout`, or written to the path `--output` na
 - `ts:apps/billing/src/InvoiceController.ts#InvoiceController.create`
 
 ## Derived by
-- `framework:nestjs:controller`
 - `branch-condition`
+- `framework:nestjs:controller`
 - `throw-statement`
 
 ## Fingerprint
@@ -1111,7 +1111,7 @@ A framework registration that names middleware gets a `## Middleware` section be
 
 A Symbol that makes a call an effect plugin declined to classify ([`effect-plugin.md`](./effect-plugin.md) §4.5) gets a `## Declined effects` section between Effects and Calls. It has one line for each `stats.declinedCalls` entry that names the Symbol, ordered by line, then target, then plugin: `` - `client.user.byId.query` (L12) [effects-trpc]: `effects-plugin:trpc:server-file-query` ``. The call is also listed under Calls, because a declined call is still a call. The section is the Symbol's view of the IR's record, so `aburi explain --no-rescan` shows it as well.
 
-`## Boundary` holds the boundary decorators and `## Decorators` the others. `## Called by` lists the Symbols with a `call` edge to this one, by id. With `--debug-resolution`, a `## Call resolution` table follows Calls ([`cli-spec.md`](./cli-spec.md) §7). A section with nothing to show is left out, except Fingerprint.
+`## Boundary` holds the boundary decorators and `## Decorators` the others. `## Called by` lists the Symbols with a `call` edge to this one, by id. With `--debug-resolution`, a `## Call resolution` table follows Calls ([`cli-spec.md`](./cli-spec.md) §7). `## Derived by` lists the ids in code-unit order. A section with nothing to show is left out, except Fingerprint, and `## Call resolution`, which says `_(no call sites)_` for a Symbol without calls.
 
 The default output of `aburi explain` is stdout; `--output <path>` writes to a file.
 

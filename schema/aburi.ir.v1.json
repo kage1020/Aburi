@@ -163,7 +163,7 @@
         },
         "lspEnrichment": {
           "$ref": "#/$defs/LspEnrichmentStats",
-          "description": "Bookkeeping from the LSP enrichment pass. Class B: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured, lsp.enabled is not true, or lsp names no servers. Presence is how a reader tells \"ran and enriched nothing\" apart from \"never ran\"."
+          "description": "Bookkeeping from the LSP enrichment pass. Class B: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured, lsp.enabled is not true, or lsp.servers is absent. Presence is how a reader tells \"ran and enriched nothing\" apart from \"never ran\"."
         },
         "callResolution": {
           "$ref": "#/$defs/CallResolutionStats",
