@@ -22,15 +22,20 @@ Symbols are paired across base / head via cascading stages:
 5. **dropped-weak** — last-resort match for pairs where both sides are dropped
    (e.g. two empty stubs with matching qnames).
 
-Unmatched base Symbols become `removed`, unmatched head Symbols become `added`.
-Matched pairs are classified into one of five statuses per
-[`docs/design/diff-algorithm.md`](../../docs/design/diff-algorithm.md):
+Unmatched base Symbols become `removed` and unmatched head Symbols `added`,
+unless the other side never analysed the Symbol's file (`stats.skippedFiles`):
+then the Symbol is `unknown`, with `absentFrom` and the skip `reason`, rather
+than a deletion or an addition. Matched pairs are classified into one of five
+statuses per [`docs/design/diff-algorithm.md`](../../docs/design/diff-algorithm.md):
 `unchanged` / `moved` / `changed` / `moved+changed` / `dropped-toggled`
 (with `to-dropped` / `to-kept` direction).
 
-Per-Symbol delta records what specifically changed: rules array delta, effects
-array delta, calls array delta, decorators delta, signature delta, and the three
-boolean summary bits `apiChanged` / `logicChanged` / `syntaxChanged`.
+Per-Symbol delta records what specifically changed: array deltas for rules,
+effects, calls, decorators and the names the Symbol is exported under
+(`exportedAs`), a signature delta, a middleware delta when either side names
+middleware, the three fingerprint bits `apiChanged` / `logicChanged` /
+`syntaxChanged`, and `componentChanged` / `visibilityChanged` /
+`confidenceChanged` for the Symbol's Component, visibility and confidence.
 
 ## Install
 

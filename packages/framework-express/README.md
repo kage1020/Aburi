@@ -123,7 +123,7 @@ Not classified today (documented for completeness):
 ## Install
 
 ```bash
-pnpm add @aburi/framework-express
+pnpm add -D @aburi/framework-express
 ```
 
 ## Usage

@@ -104,7 +104,7 @@ result is assigned to, which an effect plugin is not handed.
 ## Install
 
 ```bash
-pnpm add @aburi/effects-trpc
+pnpm add -D @aburi/effects-trpc
 ```
 
 ## Usage

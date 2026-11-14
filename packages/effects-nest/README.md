@@ -47,7 +47,7 @@ imports it is NOT classified. Both signals required.
 ## Install
 
 ```bash
-pnpm add @aburi/effects-nest
+pnpm add -D @aburi/effects-nest
 ```
 
 ## Usage

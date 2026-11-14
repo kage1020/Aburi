@@ -11,7 +11,7 @@ Responsibilities:
   methods, interfaces, type aliases, exports).
 - **`walkBody`** — visits the body of each Symbol to collect `Rule`s (guards,
   throws, try/catch) and `CallCandidate`s.
-- **`normalizeAst`** — canonical AST string for the `logic` fingerprint (whitespace
+- **`normalizeAst`** — canonical AST string for the `syntax` fingerprint (whitespace
   / comment insensitive, identifier-preserving).
 - **`symbolDropHint`** — additional drop candidates the core's shape-only rules
   cannot judge (e.g. `{}` empty bodies).
@@ -24,7 +24,7 @@ Emits `SymbolCandidate.id` under the `ts:` language prefix per the id contract i
 ## Install
 
 ```bash
-pnpm add @aburi/lang-typescript
+pnpm add -D @aburi/lang-typescript
 ```
 
 ## Usage
