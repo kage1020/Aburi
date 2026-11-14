@@ -11,7 +11,7 @@ import { writeConfig, writeFileAt, writePackageJson } from "./workspace"
  * parse, `notree` parses to nothing, `noisy` and `warn` parse with recoverable errors, `boom`
  * throws in extraction, `odd` emits an undeclared extKind and `twin` two Symbols with one id.
  */
-export const STUB_PLUGIN = stubPluginSource({
+export const STUB_PLUGIN: string = stubPluginSource({
   ...LANG_MANIFEST,
   name: "lang-stub",
   languageId: makeLanguageId("stub"),

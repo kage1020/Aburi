@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aburi.dev/schema/aburi.config.v1.json",
   "title": "Aburi Project Config",
-  "description": "aburi.json / aburi.jsonc project configuration. All fields optional; empty config is valid (autodetect handles everything).",
+  "description": "aburi.json / aburi.jsonc project configuration. All fields optional. An empty config validates, and Components are autodetected, but plugins are not: it loads no language plugin, so a command that scans exits 2 and asks for one.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -22,7 +22,7 @@
     "respectGitignore": {
       "type": "boolean",
       "default": true,
-      "description": "Whether to merge .gitignore patterns into drop-list category A."
+      "description": "Whether files .gitignore excludes are skipped. Decided per file the way git decides it, not by adding the .gitignore lines to the drop-list category A globs, so a negation in .gitignore never brings back a file those globs excluded."
     },
     "testFiles": {
       "type": "array",
@@ -52,7 +52,7 @@
       "type": "array",
       "items": { "$ref": "#/$defs/PluginRef" },
       "uniqueItems": true,
-      "description": "Enabled framework plugins. Order has no semantic effect."
+      "description": "Enabled framework plugins. The first in this order to classify a Symbol is the one that classifies it, so the order matters where two plugins claim the same Symbol."
     },
     "effects": {
       "type": "array",
@@ -80,7 +80,7 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true,
-      "description": "Identifier prefixes or decorator names that escape drop. Wins over suppress and plugin/core drop rules."
+      "description": "Identifier prefixes that escape the drop-list category C call drop, a leading @ ignored. Wins over suppress and over plugin and core call-drop rules; Symbol and file drops are not affected."
     },
     "frameworkHints": {
       "type": "array",
@@ -226,7 +226,7 @@
         "extKind": {
           "type": "string",
           "pattern": "^framework(:[a-z][a-z0-9.-]*){2,}$",
-          "description": "Set Symbol.extKind for matching symbols. Must start with 'framework:' and have at least three segments ('framework:<vendor>:<kind>'); the loader injects 'hint' as the second segment so the resulting ownership prefix is unique per hint name. Writing 'framework:hint:*' directly is rejected at load time."
+          "description": "Set Symbol.extKind for matching symbols. Must start with 'framework:' and have at least three segments ('framework:<vendor>:<kind>'); the loader injects 'hint' as the second segment, and the hint owns the extKind without its last segment under that namespace ('framework:acme:controller' owns 'framework:hint:acme'), so two hints whose owned prefixes are equal or nested are refused at startup. Writing 'framework:hint:*' directly is rejected at load time."
         },
         "derivedBy": {
           "type": "string",

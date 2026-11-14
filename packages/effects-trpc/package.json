@@ -13,6 +13,9 @@
     "url": "git+https://github.com/aburi-dev/Aburi.git",
     "directory": "packages/effects-trpc"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

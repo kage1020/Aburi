@@ -16,15 +16,15 @@ wrong, look at the IR.
 
 ## The pipeline
 
-`aburi scan` runs nine stages. Plugins own three of them.
+`aburi scan` runs nine stages. Plugins take part in four of them.
 
 | Stage | Owner | What happens |
 |---|---|---|
 | 1. Discover | `@aburi/core` | Walk the workspace, apply `ignore` and `.gitignore`, assign files to components. |
 | 2. Parse | *language plugin* | `parseFile` produces a tree-sitter tree and the file's import edges. |
-| 3. Extract | *language plugin* | `extractSymbols` yields symbol candidates. `walkBody` collects rules and calls from each body. |
-| 4. Classify | *framework plugin*, *effects plugin* | `classifySymbol` assigns framework kinds and boundaries. `classify` turns calls into effects. |
-| 5. Drop | `@aburi/core` | Remove boilerplate: interfaces, DTOs, re-exports, empty bodies, plus whatever `suppress` names. |
+| 3. Extract | *language plugin* | `extractSymbols` yields symbol candidates. |
+| 4. Classify | *framework plugin* | `classifySymbol` assigns framework kinds and boundaries. |
+| 5. Drop and walk | `@aburi/core`, *language plugin*, *effects plugin* | Drop boilerplate symbols (interfaces, DTOs, re-exports, empty bodies) before their bodies are read. `walkBody` collects rules and calls from each kept body, the calls `suppress` and the logger lists name are dropped, and `classify` turns the rest into effects. |
 | 6. Enrich | `@aburi/core` | Only with `lsp.enabled`: ask a language server for column ranges and receiver types. |
 | 7. Resolve | `@aburi/core` | Match calls to the symbols they reach, and draw one edge from each component to every other component its files import. |
 | 8. Propagate | `@aburi/core` | Carry each effect up the resolved calls to every caller, marked as propagated. |
@@ -49,7 +49,7 @@ status and delta for each from there.
 | `@aburi/config` | Loading and validating `aburi.json`. |
 | `@aburi/core` | Symbol ids, canonical JSON, IR invariants, autodetect, and the scan pipeline. |
 | `@aburi/diff` | The five-stage matcher, statuses, and deltas. |
-| `@aburi/markdown-projection` | Every Markdown view, and the `--fail-on` formatter. |
+| `@aburi/markdown-projection` | Every Markdown view, and fail-on clause helpers of its own (the CLI's `--fail-on` lives in `@aburi/cli`). |
 | `@aburi/cli` | The five commands, git worktree handling, and exit codes. |
 | `@aburi/github-action` | A composite action wrapping the CLI, with marker-based comment upsert. |
 | `@aburi/mcp` | An MCP server whose tools answer from runs of the CLI. |

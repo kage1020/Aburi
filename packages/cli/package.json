@@ -13,6 +13,9 @@
     "url": "git+https://github.com/aburi-dev/Aburi.git",
     "directory": "packages/cli"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
@@ -67,7 +70,6 @@
     "@aburi/test-harness": "workspace:*",
     "@aburi/test-support": "workspace:*",
     "@types/node": "catalog:",
-    "ajv": "catalog:",
     "tsdown": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

@@ -97,13 +97,21 @@ export function listing(pages: readonly (readonly unknown[])[], written: Reply =
 }
 
 /** The account the default `github.token` posts as. */
-export const ACTIONS_BOT = { login: "github-actions[bot]", type: "Bot" }
+export interface CommentUser {
+  login: string
+  type: string
+}
 
-export function comment(
-  id: number,
-  body: string,
-  user: { login: string; type: string } = ACTIONS_BOT,
-) {
+export interface IssueComment {
+  id: number
+  body: string
+  html_url: string
+  user: CommentUser
+}
+
+export const ACTIONS_BOT: CommentUser = { login: "github-actions[bot]", type: "Bot" }
+
+export function comment(id: number, body: string, user: CommentUser = ACTIONS_BOT): IssueComment {
   return { id, body, html_url: `https://github.example/c/${id}`, user }
 }
 

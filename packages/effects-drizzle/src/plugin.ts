@@ -10,7 +10,7 @@ import { classifyDrizzleCall } from "./classify"
 import { effectsDrizzleManifest } from "./manifest"
 
 class DrizzleEffectsPlugin implements EffectPlugin {
-  readonly manifest = effectsDrizzleManifest
+  readonly manifest: typeof effectsDrizzleManifest = effectsDrizzleManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -19,7 +19,6 @@ class DrizzleEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Left unannotated so the manifest literals stay visible. */
-export const drizzleEffectsPlugin = new DrizzleEffectsPlugin()
+export const drizzleEffectsPlugin: DrizzleEffectsPlugin = new DrizzleEffectsPlugin()
 
 export { DrizzleEffectsPlugin }

@@ -44,7 +44,7 @@ export const CORE_IGNORE_PATTERNS: readonly string[] = [
   "**/go.sum",
 ]
 
-export const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024
+export const DEFAULT_MAX_FILE_SIZE_BYTES: number = 2 * 1024 * 1024
 
 export interface DiscoverOptions {
   workspaceRoot: string

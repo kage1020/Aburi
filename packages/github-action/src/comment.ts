@@ -5,7 +5,7 @@ const MARKER_SEPARATOR = "\n\n"
 
 export const GITHUB_COMMENT_MAX_BYTES = 65536
 
-export const ABURI_COMMENT_BODY_MAX_BYTES =
+export const ABURI_COMMENT_BODY_MAX_BYTES: number =
   GITHUB_COMMENT_MAX_BYTES - Buffer.byteLength(`${ABURI_COMMENT_MARKER}${MARKER_SEPARATOR}`, "utf8")
 
 export interface PullRequestRef {

@@ -146,7 +146,7 @@ The URL portion of `@Post('/invoices')` and the Guard of `@UseGuards(RolesGuard)
 ### 3.7 Design so that class rename does not flag every method as an API change
 
 Renaming a class such as `InvoiceService` → `BillingService` is common implementation work, but the public contract of each method (signature, decorators, return type) is unchanged.
-A class rename is **detected as `moved` in stage 4 (name+signature similarity)**, with `delta.apiChanged: false`. It is never mass-listed in the API changes section (the highest-severity section).
+The api fingerprint reads a member's `shortName` (§3.3), not its qualified name, so a method's `api` does not move with its class's name. Whether the diff pairs the rename is [`diff-algorithm.md`](./diff-algorithm.md)'s question: the class itself is not paired by name and signature, since stage 4 skips a Symbol with a null signature (§3.4.3 there), so a rename that changes its words is `added` + `removed` unless its members pair it (§3.4.8); each method pairs by the diff's own stages — on identical logic (§3.3), or by name only where the owner gate accepts the two class names (§3.4.6). A method that pairs is `moved` with `delta.apiChanged: false`, so a rename is never mass-listed in the API changes section (the highest-severity section).
 
 ### 3.8 The names a declaration is exported under
 
@@ -546,8 +546,9 @@ export function lastSegment(qname) {
 
 export function apiFingerprint(sym) {
   const decorators = [...sym.decorators].sort((a, b) => {
-    const byName = a.name.localeCompare(b.name)
-    return byName !== 0 ? byName : a.line - b.line
+    // by UTF-16 code unit (`<`), not localeCompare
+    if (a.name !== b.name) return a.name < b.name ? -1 : 1
+    return a.line - b.line
   }).map(d => ({ name: d.name, raw: canonical(d.raw), boundary: d.boundary }))
 
   const signature = sym.signature ? {
@@ -587,8 +588,11 @@ function exportName(sym, token) {
 }
 
 export function logicFingerprint(sym) {
+  const middleware = sym.middleware ?? []
   return hash({
     effects: logicEffects(sym.effects),  // id excluded (§4.5)
+    // left out rather than [] when there is none; as the IR holds it, order kept
+    ...(middleware.length > 0 ? { middleware: [...middleware] } : {}),
     rules: sym.rules.map(r => ({
       condition: r.condition !== null ? canonical(r.condition) : null,
       expr:      r.expr !== null ? canonical(r.expr) : null,

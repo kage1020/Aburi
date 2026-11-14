@@ -32,7 +32,7 @@ A suite imports its own package's `src`, every other published `@aburi/*` packag
               │               └─ @aburi/diff
               ├─ @aburi/effects-*            (types + plugin-registry)
               └─ @aburi/markdown-projection
-@aburi/cli ── config, core, diff, markdown-projection, plugin-registry   (loads plugins at runtime)
+@aburi/cli ── types, config, core, diff, markdown-projection, plugin-registry   (loads plugins at runtime)
 @aburi/github-action ── runs the CLI
 @aburi/mcp ── cli                           (runs the CLI, the workspace's own first)
 @aburi/plugin-process                       (no dependencies; drives a plugin's parser process)
@@ -51,7 +51,7 @@ Private packages:
 - `@aburi/test-harness` — the real pipeline for suites: `scanWith` (scan over a plugin lineup), `diffIRs`,
   `diffOfEditWith` (scan, edit, rescan, diff), `extractFile`, `classifyInputsAround`. It depends on core,
   diff, plugin-registry and test-support and never on a plugin (plugins are passed in), so the plugins,
-  lang-typescript and the CLI may devDepend on it; core, diff, plugin-registry and test-support may not.
+  lang-typescript, plugin-process and the CLI may devDepend on it; core, diff, plugin-registry and test-support may not.
 - `@aburi/examples` (`examples/`) — the docs Showcase; its build runs `aburi diff` over each example.
 - `@aburi/docs` (`docs/`) — the VitePress site. Its `build` builds the packages it renders first.
 - `@aburi/benchmark-public-repos` (`benchmarks/public-repos/`) — measures `scan` and `diff` on pinned
@@ -69,8 +69,9 @@ schemas) and `packages/lang-typescript/wasm/` (vendored grammars).
 A test lives in the package whose behaviour it pins and depends only on what it needs. Single-plugin scans
 live in that plugin; TypeScript-only scans and diffs in `lang-typescript`; pipeline runs across several
 plugins and the CLI in `packages/cli/test/e2e` (fixture projects in `test/e2e/projects/`). No runtime
-dependency reaches every package; `@aburi/cli`'s devDependencies do, because `test/e2e` runs the whole
-pipeline, and its tests run against its own built bin.
+dependency reaches every package. `@aburi/cli`'s devDependencies reach every plugin and every package the
+pipeline is built from (not github-action, mcp, plugin-process or changelog), because `test/e2e` runs the
+whole pipeline, and its tests run against its own built bin.
 
 - Pin behaviour, not text: no test reads repository files to check how they are written.
 - Use the real pipeline (`scanWith`) instead of re-implementing parse → extract → classify in a test.
@@ -98,6 +99,9 @@ pipeline, and its tests run against its own built bin.
 - `.gitattributes` forces LF: Biome is configured for LF and Windows checkouts would otherwise fail it.
 - `declarationMap` stays off: turning it on makes rolldown-plugin-dts enable sourcemaps for every
   tsdown build and ships ~1.6 MB of `.map` files.
+- `isolatedDeclarations` is on for every package, tests included: it is what makes tsdown emit
+  declarations with Oxc instead of the deprecated tsgo generator, so an export needs an explicit
+  type wherever it is not a literal.
 - The docs deploy runs Wrangler through `pnpm dlx`. `cloudflare/wrangler-action` installs it with npm,
   which fails on the docs package's `workspace:` dependencies.
 - The docs site ships with a release, not a merge (`release.yml` calls `docs.yml`).

@@ -19,11 +19,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v6
+        with: { version: 10 }
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: aburi-dev/Aburi/packages/github-action@v0
         with:
-          version: latest
+          cli: workspace
           fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
+
+`cli: workspace` runs the `@aburi/cli` and the plugins your project installed, which is what
+a config from `aburi init` needs: it names its plugins by package
+([Running the CLI your project installed](#running-the-cli-your-project-installed)).
 
 The action reports what merging the pull request would change on its base
 branch: `actions/checkout` checks out that merge, and the action compares it
@@ -55,9 +66,10 @@ step's `env:` instead.
 ::: tip A large pull request still gets a comment
 GitHub refuses a comment body over 65536 bytes, which is about 310 added symbols' worth of
 report. The action renders to fit rather than being refused: sections of whole symbols are cut
-to names and locations, and sections are dropped from the least important end — Syntax-only
-first, API changes last — only when that still does not fit. A note at the top names them, and
-`diff.full.md` in the uploaded artefact holds the full report. `diff.json` keeps everything. Pass
+to names and locations, and sections are dropped from the least important end — Test files
+first, then Syntax-only, API changes last — only when that still does not fit. A note at the top
+names them, and `diff.full.md`, written beside `diff.md`, holds the full report: upload the output
+directory as an artifact to keep it (the fork setup below shows the step). `diff.json` keeps everything. Pass
 `max-bytes: 0` to turn the cap off.
 :::
 
@@ -138,11 +150,20 @@ jobs:
         ${{ github.event.pull_request.head.repo.full_name == github.repository
             && github.actor != 'dependabot[bot]' }}
     steps:
-      # …checkout with fetch-depth: 0…
+      # …checkout with fetch-depth: 0, and install, as above…
       - uses: aburi-dev/Aburi/packages/github-action@v0
         with:
+          cli: workspace
           comment: ${{ env.CAN_COMMENT }}
           fail-on: "removed"
+      # The action uploads nothing itself: keep the report on the run.
+      - if: always() && hashFiles('.aburi/diff.md') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: aburi-diff
+          path: .aburi/
+          # `.aburi/` is a dot-directory, which upload-artifact leaves out unless told otherwise.
+          include-hidden-files: true
 ```
 
 That is enough on its own: the report is then the `aburi-diff` artifact on the run, for

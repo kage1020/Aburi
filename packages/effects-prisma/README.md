@@ -70,7 +70,7 @@ literal list if a house convention deserves to be in it.
 ## Install
 
 ```bash
-pnpm add @aburi/effects-prisma
+pnpm add -D @aburi/effects-prisma
 ```
 
 ## Usage

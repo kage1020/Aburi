@@ -26,9 +26,7 @@ The projection is **deterministic**: the same IR always produces the same Markdo
 │  ├─ pricing.md                      # L1 + L2
 │  └─ shared.md                       # L1 + L2
 ├─ diff.md                            # output of aburi diff
-├─ diff.full.md                       # aburi diff --max-bytes, only when the cap shortened diff.md
-└─ symbols/                           # generated individually by aburi explain (on demand)
-   └─ ts-apps-billing-src-InvoiceService-ts-InvoiceService-createInvoice.md
+└─ diff.full.md                       # aburi diff --max-bytes, only when the cap shortened diff.md
 ```
 
 - workspace.md: always a single file, and removed by an `aburi scan --format json`
@@ -40,7 +38,7 @@ The projection is **deterministic**: the same IR always produces the same Markdo
 - diff.md: generated only when `aburi diff` runs
 - diff.full.md: the same diff with no size cap, written only when `--max-bytes` changed `diff.md`
   and removed by every other `aburi diff` run (§6.4)
-- symbols/: generated only when `aburi explain` runs
+- `aburi explain` writes nothing here: it prints to stdout, or writes the path `--output` names (§7)
 
 ### 2.1 Why L2 is combined per component
 
@@ -341,6 +339,13 @@ The component's logical boundary + full details of every symbol belonging to tha
 
 - `billing` → `pricing` (via `import`)
 
+### Symbol edges
+- `ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice` → `ts:packages/pricing/src/index.ts#calculateTotal` (via `call`)
+
+## Boundary effect surface
+
+- `InvoiceController.create` — db.write(`prisma.invoice.create`), event.publish(`eventBus.emit`)
+
 ## Symbols
 
 (symbol rendering per §5.2 follows)
@@ -349,6 +354,12 @@ The component's logical boundary + full details of every symbol belonging to tha
 
 (§3.6)
 ```
+
+`### Symbol edges` lists the call edges with an end among the component's kept Symbols, after its
+component-level edges. `## Boundary effect surface` lists each kept Symbol that is a boundary — a
+boundary decorator, or a `framework:` extKind — and has effects, with those effects, a propagated
+one ending with its ``[propagated from …]`` suffix (§5.7). Each section is left out when it has
+nothing to list.
 
 ### 5.2 Symbol display
 
@@ -903,7 +914,7 @@ hold everything, and `diff.json` always does.
 The cap is honoured **section by section**, never by cutting the string. A cut at 65536 bytes
 lands inside a `<details>` block or a code fence as often as not, and what GitHub then renders is
 an open fence swallowing the rest of the report. Sections give way in ascending order of
-importance, which is the §6.1 order read from the bottom: Syntax-only first, API changes last.
+importance, which is the §6.1 order read from the bottom: Test files first, then Syntax-only, API changes last.
 
 A section can give way in two steps. The sections whose entries are whole Symbols — API changes,
 Logic changes, Added, Removed, Unknown, Moved + Changed, Confidence changes — have a **names-only form**: the same
@@ -1049,7 +1060,7 @@ caps the filtered document.
 
 ## 7. `aburi explain <id>` — single Symbol
 
-Renders L2 standalone. Written to `.aburi/symbols/<sanitized-id>.md` or to `stdout`.
+Renders L2 standalone. Printed to `stdout`, or written to the path `--output` names.
 
 ````md
 # `InvoiceService.createInvoice` *(method)*
@@ -1061,6 +1072,9 @@ Renders L2 standalone. Written to `.aburi/symbols/<sanitized-id>.md` or to `stdo
 
 ## Boundary
 `@Post('/invoices')` `@UseGuards(AuthGuard)`
+
+## Decorators
+`@Transactional()`
 
 ## Signature
 `(customerId: CustomerId, items: LineItem[]) → Promise<Invoice>` throws `CreditLimitExceeded` ⚡async
@@ -1077,11 +1091,13 @@ Renders L2 standalone. Written to `.aburi/symbols/<sanitized-id>.md` or to `stdo
 ## Calls
 - `pricing.calculateTotal` (L70)
 
+## Called by
+- `ts:apps/billing/src/InvoiceController.ts#InvoiceController.create`
+
 ## Derived by
-- `framework:nestjs:controller`
 - `branch-condition`
+- `framework:nestjs:controller`
 - `throw-statement`
-- `effects-plugin:prisma:write`
 
 ## Fingerprint
 - api: `9ee77913af43`
@@ -1094,6 +1110,8 @@ The title carries the confidence badge when the Symbol's `confidence` is not `hi
 A framework registration that names middleware gets a `## Middleware` section between Signature and Rules, holding the names in the order they run on one line, as the component page's **Middleware** line does (§5.2).
 
 A Symbol that makes a call an effect plugin declined to classify ([`effect-plugin.md`](./effect-plugin.md) §4.5) gets a `## Declined effects` section between Effects and Calls. It has one line for each `stats.declinedCalls` entry that names the Symbol, ordered by line, then target, then plugin: `` - `client.user.byId.query` (L12) [effects-trpc]: `effects-plugin:trpc:server-file-query` ``. The call is also listed under Calls, because a declined call is still a call. The section is the Symbol's view of the IR's record, so `aburi explain --no-rescan` shows it as well.
+
+`## Boundary` holds the boundary decorators and `## Decorators` the others. `## Called by` lists the Symbols with a `call` edge to this one, by id. With `--debug-resolution`, a `## Call resolution` table follows Calls ([`cli-spec.md`](./cli-spec.md) §7). `## Derived by` lists the ids in code-unit order. A section with nothing to show is left out, except Fingerprint, and `## Call resolution`, which says `_(no call sites)_` for a Symbol without calls.
 
 The default output of `aburi explain` is stdout; `--output <path>` writes to a file.
 
@@ -1111,7 +1129,7 @@ When a dropped symbol is explained:
 
 ## 8. Sanitization
 
-File names under `.aburi/symbols/<id>.md` sanitize the symbol id:
+`sanitizeSymbolId` turns a symbol id into a file name, for a caller that writes one file per Symbol. Nothing in Aburi writes such files today (`aburi explain` prints to stdout or to `--output`, §7). It sanitizes the id as follows:
 - `:` → `-`
 - `/` → `-`
 - `#` → `-`

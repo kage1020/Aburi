@@ -1,13 +1,8 @@
 import { errorFrom, relativePath } from "@aburi/test-support"
 import type { Component } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import {
-  __testing_component,
-  CoreError,
-  detectComponents,
-  makeComponentId,
-  makeLanguageId,
-} from "../src/index"
+import { resolveIdCollisions, toIdFromNpmName, toKebabCase } from "../src/component-id"
+import { CoreError, detectComponents, makeComponentId, makeLanguageId } from "../src/index"
 import { useWorkspaceTree } from "./fixtures/workspace"
 
 const tree = useWorkspaceTree("core-component-id")
@@ -32,7 +27,7 @@ describe("the id a package name yields", () => {
     ["@acme/___", ""],
     ["@acme/日本語", ""],
   ])("%j yields %j", (name, id) => {
-    expect(__testing_component.toIdFromNpmName(name)).toBe(id)
+    expect(toIdFromNpmName(name)).toBe(id)
   })
 
   it.each([
@@ -41,7 +36,7 @@ describe("the id a package name yields", () => {
     ["--billing--", "billing"],
     ["Ünïcode", "n-code"],
   ])("kebab-cases %j as %j", (input, kebab) => {
-    expect(__testing_component.toKebabCase(input)).toBe(kebab)
+    expect(toKebabCase(input)).toBe(kebab)
   })
 
   it("accepts a digit-leading package name, which npm allows", async () => {
@@ -174,7 +169,7 @@ describe("colliding ids", () => {
       description: null,
     })
 
-    expect(() => __testing_component.resolveIdCollisions([app(), app()])).toThrowError(
+    expect(() => resolveIdCollisions([app(), app()])).toThrowError(
       expect.objectContaining({ code: "component-id-collision-unresolved" }),
     )
   })

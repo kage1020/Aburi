@@ -2,7 +2,7 @@ import type { ScanProgress } from "@aburi/core"
 import { type DiffProgress, type DiffSide, SIDES } from "./commands/diff-revisions"
 import type { Terminal } from "./terminal"
 
-export function describeScanProgress(progress: ScanProgress): string {
+function describeScanProgress(progress: ScanProgress): string {
   switch (progress.phase) {
     case "discovering":
       return "discovering files…"

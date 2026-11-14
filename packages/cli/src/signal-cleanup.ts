@@ -1,10 +1,6 @@
 import { constants } from "node:os"
 
-export const FATAL_SIGNALS = [
-  "SIGINT",
-  "SIGTERM",
-  "SIGHUP",
-] as const satisfies readonly NodeJS.Signals[]
+export const FATAL_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const
 
 export type FatalSignal = (typeof FATAL_SIGNALS)[number]
 

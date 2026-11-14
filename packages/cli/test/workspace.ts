@@ -8,7 +8,7 @@ import {
   DIFF_MD_FILENAME,
 } from "../src"
 
-export const TYPESCRIPT = { languages: ["lang-typescript"] }
+export const TYPESCRIPT: { languages: string[] } = { languages: ["lang-typescript"] }
 
 /** A path under the directory a command writes to when neither a flag nor the config names one. */
 export function defaultOutput(root: string, ...segments: string[]): string {

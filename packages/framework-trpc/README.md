@@ -92,7 +92,7 @@ ending in `Procedure` (`storedProcedure.query(sql)`) is a procedure.
 ## Install
 
 ```bash
-pnpm add @aburi/framework-trpc
+pnpm add -D @aburi/framework-trpc
 ```
 
 ## Usage

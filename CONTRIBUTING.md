@@ -20,12 +20,13 @@ pnpm install
 
 ```bash
 pnpm check       # Biome lint + format check (pnpm format to write fixes)
+pnpm hygiene     # no citations of design docs, spec ids or issues in code
 pnpm typecheck   # tsc --noEmit across packages (turbo)
 pnpm test        # Vitest across packages
 pnpm build       # tsdown across packages
 ```
 
-All four must pass before a pull request can merge — CI runs them on Ubuntu,
+All five must pass before a pull request can merge — CI runs them on Ubuntu,
 macOS, and Windows.
 
 ## Workflow
@@ -41,7 +42,7 @@ macOS, and Windows.
    only when no stored fingerprint moves.
 4. Open a pull request against `main`.
 
-Two workflows then run on your pull request. CI runs the four commands above on Ubuntu, macOS
+Two workflows then run on your pull request. CI runs the five commands above on Ubuntu, macOS
 and Windows, and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml)
 builds your branch, diffs it against the pull request's base with the CLI your branch
 contains, and posts the report as a comment it rewrites on every push. Its gate

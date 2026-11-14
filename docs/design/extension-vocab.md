@@ -80,7 +80,7 @@ The manifest is the `manifest` property of the plugin object the module exports:
 
 As official npm packages these are split into two: `@aburi/effects-nest` and `@aburi/framework-nestjs`.
 
-A `type: lang` manifest also declares `languageId`, the `<language>` token every Symbol id the plugin mints opens with (`"languageId": "ts"`, [`multi-language-id.md`](./multi-language-id.md) Rule L-1). The schema makes it optional, so that a lang manifest written before the field stays a valid v1 document (§9.5), and the registry requires it of every lang manifest. Like `xPrefix` for effects plugins, it belongs to one type: an effects or framework manifest that declares one is refused.
+A `type: lang` manifest also declares `languageId`, the `<language>` token every Symbol id the plugin mints opens with (`"languageId": "ts"`, [`multi-language-id.md`](./multi-language-id.md) Rule L-1). The schema makes it optional, so that a lang manifest written before the field stays a valid v1 document (§9.5), and the registry requires it of every lang manifest. It belongs to one type: an effects or framework manifest that declares one is refused. `xPrefix` is not held to the same rule the other way: only an effects manifest's is read, and the registry ignores one on any other type rather than refusing it.
 
 ### 3.2 Individual enumeration vs prefix ownership
 
@@ -112,7 +112,7 @@ A prefix means "one or more namespace segments owned by this plugin". A plugin d
 | `provides.effects[].id` | `^x-[a-z][a-z0-9-]*:[a-z][a-z0-9.-]+$` |
 | `provides.effectPrefixes[]` | `^x-[a-z][a-z0-9-]*$` |
 | `provides.extKinds[].id` | `^[a-z][a-z0-9-]*(:[a-z][a-z0-9.-]*)+$` |
-| `provides.extKindPrefixes[]` | `^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)*$` |
+| `provides.extKindPrefixes[]` | `^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)+$` |
 | `provides.extKinds[].baseKind` | IR `SymbolKind` enum |
 | `provides.derivedByPrefixes[]` | `^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)*$` |
 | `provides.frameworks[]` | `^[a-z][a-z0-9-]*$` |
@@ -376,7 +376,7 @@ It may freely emit `framework:acme:controller` / `framework:acme:job` / `framewo
 - Covers needs like "treat `@MyDecorator` as a boundary" or "treat `class *Handler` as `framework:mycorp:handler`"
 - Specified in [`config.md`](./config.md); this document only shows the hook point
 - **A user-written `extKind: "framework:acme:controller"` is automatically converted internally to `framework:hint:acme:controller`** (details in [`config.md`](./config.md) §8.3.1). By transparently inserting `hint:` as the second segment, the core avoids namespace conflicts with an existing official npm `framework-acme` plugin
-- A user directly entering `extKind: "framework:hint:*"` is a **config validation error** (rejected by `config-check.mjs`)
+- A user directly entering `extKind: "framework:hint:*"` is a **config validation error** (rejected when the hint is loaded, by `@aburi/config`'s `framework-hints.ts`)
 - The whole of `framework:hint:*` is a **centrally reserved namespace** (§5.1); third-party npm plugins may not declare it
 - Sketch:
 

@@ -100,7 +100,7 @@ literal list if a house convention deserves to be in it.
 ## Install
 
 ```bash
-pnpm add @aburi/effects-drizzle
+pnpm add -D @aburi/effects-drizzle
 ```
 
 ## Usage

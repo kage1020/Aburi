@@ -23,7 +23,7 @@ export const FAIL_ON_STATUSES = [
   "dropped-toggled:to-dropped",
   "dropped-toggled:to-kept",
   "unknown",
-] as const satisfies readonly FailOnStatus[]
+] as const
 
 export type FailOnComparator = ">" | ">=" | "==" | "<="
 

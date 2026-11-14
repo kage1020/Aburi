@@ -23,16 +23,28 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # The CLI and the plugins your aburi.json names, from your own lockfile.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       # Moves with every 0.x release, breaking input changes included. Pin the full
       # `v<x.y.z>` instead to hold one — see Pinning below.
       - uses: aburi-dev/Aburi/packages/github-action@v0
         with:
-          version: latest
+          cli: workspace
           fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
 `fetch-depth: 0` is required so `aburi diff` can resolve the base ref locally, and so the
-action can find that base from the commit checked out.
+action can find that base from the commit checked out. `cli: workspace` runs the
+`@aburi/cli` your project installed, beside the plugins a config from `aburi init` names by
+package; the default, `cli: dlx`, needs no install step but cannot load those
+([Choosing `cli`](#choosing-cli)).
 
 ## Pinning
 
@@ -76,7 +88,7 @@ uses the alias.
 | `fail-on` | *(empty)* | Forwarded to `--fail-on`; see [the CLI reference](https://aburi.dev/reference/cli) for the grammar. Empty = report only. |
 | `fail-on-scope` | *(empty)* | Forwarded to `--fail-on-scope`: `non-test` leaves the Symbols of the config's `testFiles` out of the gate, `all` counts them. Empty passes no flag, which counts them. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.jsonc`. |
-| `output-dir` | `.aburi` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
+| `output-dir` | `.aburi` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty or hold a line break. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Directory to run the CLI from. |
 | `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). See [Choosing `cli`](#choosing-cli). |
@@ -93,8 +105,8 @@ uses the alias.
 | `diff-json-path` | Absolute path to the `diff.json` this run wrote (empty when `format=md`, or when the run stopped before writing it). Read it together with `cli-exit-code`: a run that exits 1 or 2 can leave a path to something it could not clear. |
 | `diff-md-path` | Absolute path to the `diff.md` this run wrote (empty when `format=json`, or when the run stopped before writing it). Read it together with `cli-exit-code`: a run that exits 1 or 2 can leave a path to something it could not clear. |
 | `cli-exit-code` | `0` clean · `1` runtime error · `2` input error · `3` `--fail-on` gate or plugin error. Matches [`packages/cli/src/exit-codes.ts`](../cli/src/exit-codes.ts). Set even when the run stops before the diff: `2` for a rejected input, a ref spec that cannot be read from the checkout, or a `cli: workspace` that finds no CLI to run; `1` when a setup step failed. Never empty. |
-| `comment-id` | Numeric id of the created/updated comment (empty when `comment=false`). |
-| `comment-action` | `created` / `updated` / `unchanged`. |
+| `comment-id` | Numeric id of the created/updated comment. Empty when no comment was written: `comment=false`, a run that skipped the comment step (exit 1 or 2, or no `diff.md`), or an upsert that failed. |
+| `comment-action` | `created` / `updated` / `unchanged`; empty whenever `comment-id` is. |
 
 ## Choosing `cli`
 
@@ -163,7 +175,7 @@ review that loses its comment would be the large one.
 
 The action renders the report to fit instead: it passes `--max-bytes 65507` (the limit, less the
 29-byte marker it prepends). The projection meets the budget from the least important section
-up — Syntax-only before Dropped changes, API changes last. A section whose entries are whole
+up — Test files first, then Syntax-only, then Confidence and Dropped changes, API changes last. A section whose entries are whole
 symbols (API and Logic changes, Added, Removed, Unknown, Moved + Changed, Confidence changes) is
 first cut down to one line per symbol, name and location, and any section is dropped only if it cannot fit even beside
 every more important one cut that far. The report says at

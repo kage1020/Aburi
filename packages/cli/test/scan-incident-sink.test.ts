@@ -2,10 +2,11 @@ import { resolve } from "node:path"
 import { recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, runCli, runScan, type ScanOptions } from "../src"
-import { MemStream, runCliIn } from "./run-cli"
+import { capturedLog, MemStream, runCliIn } from "./run-cli"
 import { writeStubWorkspace } from "./stub-language"
 
 const workspace = useScratchWorkspace("scan-incident-sink")
+const logged = capturedLog()
 
 const REFUSAL = "parse reported a non-recoverable error at 12:4 — unterminated string"
 const PARSE_FAILED_ADVICE =
@@ -29,6 +30,7 @@ const FOUR_KINDS_REPORTED = [
 function scanStubs(incidents?: ScanOptions["incidents"]) {
   return runScan({
     cwd: workspace.root,
+    log: logged.write,
     outputDir: resolve(workspace.root, "out"),
     format: "json",
     ...(incidents === undefined ? {} : { incidents }),
@@ -67,6 +69,7 @@ describe("runScan — LSP configuration the pass cannot act on", () => {
 
     await runScan({
       cwd: workspace.root,
+      log: logged.write,
       outputDir: resolve(workspace.root, "out"),
       format: "json",
       ...options,

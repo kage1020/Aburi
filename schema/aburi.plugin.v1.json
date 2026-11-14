@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aburi.dev/schema/aburi.plugin.v1.json",
   "title": "Aburi Plugin Manifest",
-  "description": "Plugin manifest declaring extension vocabulary contributed to Aburi. Validated at plugin load time.",
+  "description": "Plugin manifest declaring extension vocabulary contributed to Aburi. A manifest file is validated against this schema by @aburi/plugin-registry's loadPluginManifest / parsePluginManifest. At plugin load time the CLI does not apply the schema: it hands the plugin's manifest object to the registry, which checks the types of name, version and provides, reserved and per-type namespaces, xPrefix, languageId and conflicts with the manifests already registered.",
   "type": "object",
   "additionalProperties": false,
   "required": ["$schema", "engines", "name", "provides", "type", "version"],
@@ -216,7 +216,7 @@
           "type": "integer",
           "minimum": 16,
           "maximum": 4096,
-          "description": "(type=lang only) Expected WASM heap usage per parser worker in MiB. Aburi CLI multiplies this by concurrency to size the per-process budget and refuses to oversubscribe."
+          "description": "(type=lang only) Expected WASM heap usage per parser worker in MiB; 256 when absent. The CLI divides the free memory by the largest value among the loaded language plugins and caps the parser worker count, a requested --concurrency included, at the result, never below one worker."
         }
       }
     },

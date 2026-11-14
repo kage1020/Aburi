@@ -8,7 +8,7 @@ import type {
 } from "@aburi/types"
 import type { ThisBindingSites } from "../call-site"
 import { countBy } from "../collections"
-import { CoreError } from "../errors"
+import { CoreError, REPORT_BUG } from "../errors"
 import { symbolIdFile } from "../id"
 import type { ReadFile } from "../lsp"
 import type { DiscoveredFile, SkippedFile } from "./discover"
@@ -316,19 +316,16 @@ function describeIdFault(symbols: readonly IRSymbol[], path: string): FileFault 
   return null
 }
 
-const REPORT =
-  "This is a bug in Aburi — please report it at https://github.com/aburi-dev/Aburi/issues."
-
 function unhandled(what: string, value: never): CoreError {
   return new CoreError(
-    `Internal error: the scan does not handle the ${what} ${JSON.stringify(value)}\n${REPORT}`,
+    `Internal error: the scan does not handle the ${what} ${JSON.stringify(value)}\n${REPORT_BUG}`,
     { code: "scan-outcome-unhandled" },
   )
 }
 
 function outOfOrder(reached: string, expected: string): CoreError {
   return new CoreError(
-    `Internal error: the scan's extraction reached ${reached} while waiting for ${expected}\n${REPORT}`,
+    `Internal error: the scan's extraction reached ${reached} while waiting for ${expected}\n${REPORT_BUG}`,
     { code: "scan-extraction-out-of-order" },
   )
 }

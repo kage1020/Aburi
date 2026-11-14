@@ -53,9 +53,9 @@ const PRISMA_RAW_QUERY_METHODS_LIST = [
   "$runCommandRaw",
 ] as const
 
-export type PrismaRawQueryMethod = (typeof PRISMA_RAW_QUERY_METHODS_LIST)[number]
+type PrismaRawQueryMethod = (typeof PRISMA_RAW_QUERY_METHODS_LIST)[number]
 
-export const PRISMA_RAW_QUERY_METHODS: ReadonlySet<PrismaRawQueryMethod> = new Set(
+const PRISMA_RAW_QUERY_METHODS: ReadonlySet<PrismaRawQueryMethod> = new Set(
   PRISMA_RAW_QUERY_METHODS_LIST,
 )
 

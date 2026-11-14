@@ -59,7 +59,7 @@ The order of the calls, and what a failing `init` or `cleanup` does, are the lan
 
 ## 4. Interface
 
-The actual types are defined in the `types` package of `@aburi/core`. This document shows the signatures of the contract surface.
+The actual types are defined in `@aburi/types`. This document shows the signatures of the contract surface.
 
 ### 4.1 `EffectPlugin`
 
@@ -103,7 +103,7 @@ interface ClassifyContext {
   file: FileSummary                          // file information (including imports)
   language: string                           // "ts" / "py" / "rs" etc.
   registry: VocabRegistry
-  config: AburiConfig
+  config: Config
 }
 
 interface OwnerSummary {

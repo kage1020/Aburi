@@ -1,5 +1,6 @@
 import { Writable } from "node:stream"
 import { type ExitCode, runCli } from "../src"
+import type { LogWrite } from "../src/logger"
 
 export class MemStream extends Writable {
   chunks: string[] = []
@@ -60,4 +61,20 @@ export function screenOf(text: string): string {
   })
   const last = lines.pop() ?? ""
   return [...lines, ...(last.length === 0 ? [] : [last])].map((kept) => `${kept}\n`).join("")
+}
+
+/** Where a command run in process logs, so its lines stay with the test instead of on stderr. */
+export interface CapturedLog {
+  readonly lines: string[]
+  readonly write: LogWrite
+}
+
+export function capturedLog(): CapturedLog {
+  const lines: string[] = []
+  return {
+    lines,
+    write: (line) => {
+      lines.push(line)
+    },
+  }
 }

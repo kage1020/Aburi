@@ -7,7 +7,13 @@ import type {
   Symbol as IRSymbol,
   SkippedFile,
 } from "@aburi/types"
-import { DEFAULT_OUTPUT_DIRNAME, type DiffOptions, IR_JSON_FILENAME, runDiff } from "../src"
+import {
+  DEFAULT_OUTPUT_DIRNAME,
+  type DiffOptions,
+  type DiffReport,
+  IR_JSON_FILENAME,
+  runDiff,
+} from "../src"
 import { writeFileAt, writeIRs, writePackageJson } from "./workspace"
 
 /** A Symbol named after its id's last segment, declared in `file` (by default the id's file). */
@@ -82,7 +88,12 @@ export async function diffDocuments(
   base: IR,
   head: IR,
   options: Omit<DiffOptions, "cwd" | "base" | "head" | "warn"> = {},
-) {
+): Promise<{
+  report: DiffReport
+  paths: { base: string; head: string }
+  warnings: string[]
+  said: string
+}> {
   const paths = await writeIRs(root, base, head)
   const log = recordingLogger()
   const report = await runDiff({ cwd: root, ...paths, warn: log.warn, ...options })

@@ -90,7 +90,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
   const receiverHints = new Map<string, ReceiverHint>()
   const factory = input.serverFactory ?? defaultServerFactory
   const disableLanguage = (language: LanguageId, warning: string): void => {
-    logger.warn?.(warning)
+    logger.warn(warning)
     stats.languagesDisabled.add(language)
   }
 
@@ -150,7 +150,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
         language,
         `[aburi:lsp] enrichment for ${language} threw (${errorMessage(error)}); falling back to untyped tier for this language`,
       )
-      logger.debug?.(`[aburi:lsp] enrichment for ${language} threw`, {
+      logger.debug(`[aburi:lsp] enrichment for ${language} threw`, {
         language,
         error: error instanceof Error ? error.name : typeof error,
         stack: error instanceof Error ? error.stack : undefined,
@@ -240,7 +240,7 @@ async function safeShutdown(
   logger: Logger,
 ): Promise<void> {
   const stranded = (detail: string): void => {
-    logger.warn?.(
+    logger.warn(
       `[aburi:lsp] shutting down the ${language} server failed (${detail}); it may still be running`,
     )
   }

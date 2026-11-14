@@ -8,6 +8,11 @@ export default defineConfig({
   lang: "en-US",
   lastUpdated: true,
   cleanUrls: true,
+  vite: {
+    // The local search index, about 1.2 MB, is the one chunk over Vite's 500 kB default, and it
+    // loads only when the search box opens.
+    build: { chunkSizeWarningLimit: 1536 },
+  },
   sitemap: {
     hostname: "https://aburi.dev",
   },

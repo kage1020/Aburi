@@ -47,11 +47,14 @@ jobs:
           comment: ${{ env.CAN_COMMENT }}
           fail-on: "removed,dropped-toggled:to-dropped:>10"
           fail-on-scope: non-test
+          # Under the default cap by the line aburi-comment.yml puts above a report whose head has
+          # moved on, which would otherwise push a report at the cap past GitHub's comment limit.
+          max-bytes: 65300
 
       - name: Hand the comment to the companion workflow
         id: handoff
         if: >-
-          always() && hashFiles('.aburi/diff.md') != ''
+          always() && steps.aburi.outputs.diff-md-path != ''
           && steps.aburi.outputs.comment-id == ''
           && (steps.aburi.outputs.cli-exit-code == '0' || steps.aburi.outputs.cli-exit-code == '3')
         run: |
@@ -60,7 +63,7 @@ jobs:
           echo "written=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload the report
-        if: always() && hashFiles('.aburi/diff.md') != ''
+        if: always() && steps.aburi.outputs.diff-md-path != ''
         uses: actions/upload-artifact@v7
         with:
           name: aburi-diff

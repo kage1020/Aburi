@@ -25,6 +25,7 @@
     "useUnknownInCatchVariables": true,
 
     "declaration": true,
+    "isolatedDeclarations": true,
     "declarationMap": false,
     "removeComments": false,
     "newLine": "lf",

@@ -76,4 +76,17 @@ describe("report-paths.mjs", () => {
     const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "md" })
     expect(outputs).toEqual({ "diff-json-path": "", "diff-md-path": "" })
   })
+
+  it.each([["\n"], ["\r\n"], ["\r"]])(
+    "publishes no path from an output-dir holding %j, which would read as an output of its own",
+    async (lineBreak) => {
+      const { status, stdout, stderr } = await runScript("report-paths.mjs", {
+        cwd: scratch.root,
+        env: { OUTPUT_DIR: `out${lineBreak}diff-md-path=/elsewhere`, FORMAT: "both" },
+      })
+      expect(status).toBe(2)
+      expect(stdout).toBe("")
+      expect(stderr).toContain("holds a line break")
+    },
+  )
 })

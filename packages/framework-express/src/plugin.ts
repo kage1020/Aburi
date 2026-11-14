@@ -10,7 +10,7 @@ import { classifyExpressSymbol } from "./classify"
 import { frameworkExpressManifest } from "./manifest"
 
 class ExpressFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
-  readonly manifest = frameworkExpressManifest
+  readonly manifest: typeof frameworkExpressManifest = frameworkExpressManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -23,5 +23,5 @@ class ExpressFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 }
 
 /** Singleton so `manifest` identity is stable for consumers comparing against the constant. */
-export const expressFrameworkPlugin = new ExpressFrameworkPlugin()
+export const expressFrameworkPlugin: ExpressFrameworkPlugin = new ExpressFrameworkPlugin()
 export { ExpressFrameworkPlugin }

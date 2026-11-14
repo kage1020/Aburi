@@ -127,6 +127,7 @@ You need Node.js 24+ and pnpm (`corepack enable pnpm`).
 ```bash
 pnpm install
 pnpm check       # lint + format
+pnpm hygiene     # no citations of design docs, spec ids or issues in code
 pnpm typecheck
 pnpm test
 pnpm build

@@ -27,7 +27,7 @@ Aburi runs in two environments:
 | Tier | Availability | Refines |
 |---|---|---|
 | **Untyped (default)** | always | resolves by import binding + qualified-name matching over the Symbol table |
-| **LSP-enriched (optional)** | when a language server is running and available (spec: [`lsp-enrichment.md`](./lsp-enrichment.md)) | resolves method dispatch through the actual receiver type + interface implementations |
+| **LSP-enriched (optional)** | when a language server is running and available (spec: [`lsp-enrichment.md`](./lsp-enrichment.md)) | resolves `this` / `super` method dispatch through the actual receiver type; interface implementations are planned (§5.3) |
 
 The two tiers share a **single output contract** (§7). Enabling LSP MUST NOT change the shape or ordering of `calls[]`; it only lifts more `resolved: null` entries to non-null and lifts `confidence`. This preserves time-series diff stability (`overview.md` §2 — "diff stability" is non-negotiable).
 
@@ -181,8 +181,8 @@ When LSP is available, resolution runs a second pass that reads receiver types.
 
 ### 5.1 Additional inputs
 
-- `receiverType(callSite)` — the resolved type of the receiver expression at the call site (returned from the language server's `textDocument/hover` or `typeDefinition` request).
-- `implementers(interfaceName)` — the set of Symbols known to `implements`/`extends` the given interface (from `textDocument/implementation`).
+- `receiverType(callSite)` — the resolved type of the receiver expression at the call site, read from the language server's `textDocument/hover` answer for a `this` / `super` receiver (a `textDocument/typeDefinition` lookup for other receivers is planned with §5.3).
+- `implementers(interfaceName)` — the set of Symbols known to `implements`/`extends` the given interface (from `textDocument/implementation`; planned with §5.3, the pass issues no such request yet).
 
 The exact protocol subset used, plus fallback and timeout policy, is specified in [`lsp-enrichment.md`](./lsp-enrichment.md) §4. This document only names the two capabilities and treats them as inputs.
 
@@ -199,10 +199,12 @@ A hint the resolver declines — one whose receiver kind is not the one its call
 
 ### 5.3 Interface-typed receivers
 
+> **Status**: planned. The LSP pass issues no `textDocument/typeDefinition` or `textDocument/implementation` request yet and hands the resolver no implementers, so every interface-typed call stays `null`, whatever number of classes implements the interface. The rules below are what it will do.
+
 For `repo.save(...)` where `repo`'s LSP type is `IRepository`:
 - Look up `implementers(IRepository)` — the set of implementing classes.
 - If it is a **single class**, `resolved` = that class's `.save` Symbol, `confidence = medium`.
-- If it is **multiple classes** and DI wiring is knowable via the framework plugin (`framework:nestjs:provider` binding), the framework plugin may supply the chosen implementer via a hook (§7.4); use its answer with `confidence = medium`.
+- If it is **multiple classes** and DI wiring is knowable via the framework plugin (`framework:nestjs:provider` binding), the framework plugin would supply the chosen implementer via a hook (§7.4, planned); until that hook exists the call stays `null`.
 - If ambiguous, `resolved` stays `null` — do not silently pick one.
 
 ### 5.4 Untyped result preservation
@@ -263,8 +265,8 @@ The edge's `confidence` is the resolution confidence at the moment of resolution
 | §4.6 workspace scope (unique) | `low` |
 | §5.2 LSP `this`/`super` direct | `high` |
 | §5.2 LSP walked hierarchy | `medium` |
-| §5.3 LSP interface with single impl | `medium` |
-| §5.3 LSP interface with DI-resolved impl | `medium` |
+| §5.3 LSP interface with single impl (planned) | `medium` |
+| §5.3 LSP interface with DI-resolved impl (planned, §7.4) | `medium` |
 
 Effect propagation must respect edge confidence when combining propagated effect confidence — see [`effect-propagation.md`](./effect-propagation.md) §5.3.
 
@@ -272,7 +274,9 @@ Effect propagation must respect edge confidence when combining propagated effect
 
 An edge whose `from` and `to` differ in the `<language>:` prefix is a **cross-language call**. The untyped tier of this document does not resolve cross-language calls; they are the concern of `multi-language-id.md` (Later phase). Until that design lands, the resolver emits `null` for any candidate whose only match crosses language boundaries.
 
-### 7.4 Framework-plugin hook (optional)
+### 7.4 Framework-plugin hook (planned)
+
+> **Status**: not implemented. No plugin interface in `@aburi/types` declares `resolveDispatch` and the core asks no plugin; an interface-typed call stays `null` (§5.3, itself planned). The design below is what the hook will be.
 
 For §5.3, framework plugins may register a `resolveDispatch(interfaceName, callerComponent) → SymbolId | null` hook. When registered:
 - The core queries plugins in config order; first non-null wins (same convention as effect plugins per [`effect-plugin.md`](./effect-plugin.md) §5.1).
@@ -399,9 +403,9 @@ Every implementation of the resolver must pass the following.
 | CR16 | `this.foo()` in class C with method `foo` | `resolved` = `C.foo`, confidence `high` |
 | CR17 | `this.foo()` inherited from parent class B | `resolved` = `B.foo`, confidence `medium` |
 | CR18 | `super.foo()` | `resolved` = parent's `foo` Symbol, confidence `high` |
-| CR19 | interface-typed receiver with single implementer | `resolved` = implementer's method, confidence `medium` |
+| CR19 | interface-typed receiver with single implementer (planned, §5.3) | `resolved` = implementer's method, confidence `medium` |
 | CR20 | interface-typed receiver with multiple implementers, no framework hook | `resolved` = `null` |
-| CR21 | interface-typed receiver, framework plugin's `resolveDispatch` returns a Symbol id | `resolved` = that id, confidence `medium` |
+| CR21 | interface-typed receiver, framework plugin's `resolveDispatch` returns a Symbol id (planned, §7.4) | `resolved` = that id, confidence `medium` |
 | CR22 | untyped tier already resolved → LSP tier leaves it alone | unchanged |
 
 ### 10.3 Determinism

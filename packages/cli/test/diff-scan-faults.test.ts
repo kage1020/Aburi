@@ -2,10 +2,12 @@ import { resolve } from "node:path"
 import { git, recordingLogger, useScratchWorkspace } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { EXIT, formatFailOnMessage, IR_JSON_FILENAME, runDiff, runScan } from "../src"
+import { capturedLog } from "./run-cli"
 import { writeStubRepository, writeStubWorkspace } from "./stub-language"
 import { writeFileAt } from "./workspace"
 
 const workspace = useScratchWorkspace("diff-scan-faults")
+const logged = capturedLog()
 
 async function diffRevisions(
   files: { base: readonly string[]; head: readonly string[] },
@@ -15,6 +17,7 @@ async function diffRevisions(
   const log = recordingLogger()
   const report = await runDiff({
     cwd: workspace.root,
+    log: logged.write,
     refSpec: options.refSpec ?? "main..HEAD",
     outputDir: resolve(workspace.root, "out"),
     warn: log.warn,
@@ -34,6 +37,7 @@ describe("aburi diff — the two scans it ran", () => {
 
     await runDiff({
       cwd: workspace.root,
+      log: logged.write,
       refSpec: "main..v1.1.0",
       outputDir: resolve(workspace.root, "out"),
       warn: log.warn,
@@ -220,6 +224,7 @@ describe("aburi diff — why each faulted scan did not exit clean", () => {
 
       const report = await runDiff({
         cwd: workspace.root,
+        log: logged.write,
         refSpec: "main..HEAD",
         outputDir: resolve(workspace.root, "out"),
         warn: log.warn,
@@ -238,7 +243,7 @@ describe("aburi diff --base/--head — faults the documents remember", () => {
   async function scanInto(directory: string, files: readonly string[]): Promise<string> {
     await writeStubWorkspace(directory, files)
     const outputDir = resolve(directory, "out")
-    await runScan({ cwd: directory, outputDir, format: "json" })
+    await runScan({ cwd: directory, log: logged.write, outputDir, format: "json" })
     return resolve(outputDir, IR_JSON_FILENAME)
   }
 
@@ -246,6 +251,7 @@ describe("aburi diff --base/--head — faults the documents remember", () => {
     const log = recordingLogger()
     const report = await runDiff({
       cwd: workspace.root,
+      log: logged.write,
       base,
       head,
       outputDir: resolve(workspace.root, "diff-out"),

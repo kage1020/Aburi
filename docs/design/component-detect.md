@@ -404,7 +404,7 @@ Implementation guidance:
 | CD9 | `dependencies: {"@nestjs/core": "..."}` | frameworks = ["nestjs"] |
 | CD10 | `packages/a/package.json#exports: {".": "./src/index.ts"}`, or the same at the workspace root | publicApi = ["packages/a/src/index.ts"], or ["src/index.ts"] |
 | CD11 | Autodetect finds nothing and there is no package.json | id = directory name (kebab-case), name = directory name |
-| CD12 | config.components overrides after autodetect | config wins ([`config.md`](./config.md) §6.1) |
+| CD12 | a non-empty config.components | autodetect does not run; the IR holds exactly the declared Components ([`config.md`](./config.md) §6.1) |
 | CD13 | Both pnpm and nx detect the same workspace | Deduped into 1 Component |
 | CD14 | `packages: [".", "packages/*"]` on a tree that also holds `src/` and `a/b/c/d/` | 2 Components: the workspace root (`roots: ["."]`) and the package |
 | CD15 | `packages: ["packages/*"]` where `packages/dist/` holds no manifest | `packages/dist` is not a Component |

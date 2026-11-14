@@ -2,7 +2,7 @@ import { type FrameworkManifest, PLUGIN_SCHEMA_URL } from "@aburi/types"
 
 export const NEXT_DERIVED_BY_PREFIX = "framework:next"
 
-export const frameworkNextManifest = {
+export const frameworkNextManifest: FrameworkManifest = {
   $schema: PLUGIN_SCHEMA_URL,
   name: "framework-next",
   version: "0.0.0",
@@ -60,4 +60,4 @@ export const frameworkNextManifest = {
     // Matches the identifier `@aburi/core`'s Component autodetect uses for the `next` dependency.
     frameworks: ["nextjs"],
   },
-} as const satisfies FrameworkManifest
+}

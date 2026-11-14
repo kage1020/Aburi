@@ -5,7 +5,7 @@ import { wrappedFunctions } from "./call-symbols"
 
 const CONSTRUCTION_SEGMENT = "constructor"
 
-export function memberNameSegment(member: Node): string | null {
+function memberNameSegment(member: Node): string | null {
   return writtenNameSegment(member, member.childForFieldName("name"))
 }
 

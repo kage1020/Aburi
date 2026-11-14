@@ -92,7 +92,7 @@ Not classified today (documented for completeness):
 ## Install
 
 ```bash
-pnpm add @aburi/framework-react
+pnpm add -D @aburi/framework-react
 ```
 
 ## Usage
@@ -104,8 +104,10 @@ import { reactFrameworkPlugin } from "@aburi/framework-react"
 The plugin's `provides.frameworks: ["react"]` matches `@aburi/core`'s Component
 autodetect against a workspace `react` npm dependency. Adding
 `"@aburi/framework-react"` to `aburi.json`'s `frameworks` array wires it into
-the scan pipeline; the `aburi init --with-suggestions` output includes it
-automatically when a React dependency is detected.
+the scan pipeline. `aburi init` writes it there (as `framework-react`) when it
+detects a React dependency, and with `--with-suggestions` adds a
+`// Suggested install: pnpm add -D @aburi/framework-react` comment while the
+package is not installed.
 
 ## See also
 

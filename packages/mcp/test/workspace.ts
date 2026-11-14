@@ -64,7 +64,7 @@ export async function installWorkspaceCli(
 }
 
 /** The bin of the `@aburi/cli` this package depends on. */
-export const BUNDLED_BIN = (() => {
+export const BUNDLED_BIN: string = (() => {
   const manifest = createRequire(import.meta.url).resolve("@aburi/cli/package.json")
   const { bin } = createRequire(import.meta.url)(manifest) as { bin: { aburi: string } }
   return resolve(dirname(manifest), bin.aburi)

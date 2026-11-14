@@ -8,11 +8,9 @@ import { EFFECTS_NEST_PLUGIN_NAME } from "./constants"
 
 const NEST_EMITTER_MODULES_LIST = ["@nestjs/event-emitter", "eventemitter2"] as const
 
-export type NestEmitterModule = (typeof NEST_EMITTER_MODULES_LIST)[number]
+type NestEmitterModule = (typeof NEST_EMITTER_MODULES_LIST)[number]
 
-export const NEST_EMITTER_MODULES: ReadonlySet<NestEmitterModule> = new Set(
-  NEST_EMITTER_MODULES_LIST,
-)
+const NEST_EMITTER_MODULES: ReadonlySet<NestEmitterModule> = new Set(NEST_EMITTER_MODULES_LIST)
 
 function isNestEmitterModule(source: string): boolean {
   return (NEST_EMITTER_MODULES as ReadonlySet<string>).has(source)

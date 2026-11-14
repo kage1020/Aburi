@@ -10,9 +10,11 @@ Language-agnostic foundation for every downstream Aburi package:
 - **Autodetect** — workspace root (marker files), package manager
   (`pnpm-lock.yaml` / `bun.lockb` / …), and JS/TS Components (package.json
   `name` / `exports` / framework-driven dependency inference).
-- **Scan orchestration** — discover → route → parse → classify → walk-body →
-  drop → fingerprint → integrity check. Handles the per-call classify budget,
-  drop categories A / B / C, and IR assembly with schema-conformant ordering.
+- **Scan orchestration** — per file, discover → route → parse → extract → classify
+  Symbol → drop → walk-body → classify calls → normalize; then, over the whole workspace, LSP
+  enrichment → call resolution → effect propagation → logic fingerprint → integrity check.
+  Handles the per-call classify budget, drop categories A / B / C, and IR assembly with
+  schema-conformant ordering.
 
 The scanner drives every registered `LanguagePlugin` / `FrameworkPlugin` /
 `EffectPlugin` through a single deterministic pipeline; ordering / integrity is

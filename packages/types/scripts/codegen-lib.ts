@@ -7,10 +7,10 @@ import { compile, type Options as JstOptions } from "json-schema-to-typescript"
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PKG_ROOT = resolve(HERE, "..")
 
-export const SCHEMA_DIR = dirname(
+export const SCHEMA_DIR: string = dirname(
   createRequire(import.meta.url).resolve("@aburi/schema/aburi.ir.v1.json"),
 )
-export const OUT_DIR = join(PKG_ROOT, "src", "generated")
+export const OUT_DIR: string = join(PKG_ROOT, "src", "generated")
 
 export interface SchemaEntry {
   schema: string

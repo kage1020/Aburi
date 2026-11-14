@@ -36,11 +36,12 @@ prefixing a marker, and never decides what is worth failing on — `--fail-on` i
 | `token` | `github.token` | Token for the comment API. |
 | `node-version` / `pnpm-version` | `24` / `10` | Toolchain for `cli: dlx` only. |
 
-Three input values are validated up front rather than at the point of use — `format`, `cli` and
-`comment` — because each of them has a wrong value that otherwise runs green and does nothing
-(`comment: yes` is the sharp one: every non-`true` value reads as false, silently). A rejected
-input is exit 2 from the first step, which is what "your invocation is wrong" means in
-`cli-spec.md` §9.
+Five input values are validated up front rather than at the point of use: `format`, `cli` and
+`comment`, because each of them has a wrong value that otherwise runs green and does nothing
+(`comment: yes` is the sharp one: every non-`true` value reads as false, silently), and
+`max-bytes` (a non-negative integer, or empty) and `output-dir` (not empty, and holding no line
+break, since the action names its reports in `$GITHUB_OUTPUT` lines). A rejected input is exit 2
+from the first step, which is what "your invocation is wrong" means in `cli-spec.md` §9.
 
 **No description may hold a GitHub expression.** The runner parses a manifest's descriptions and
 defaults as templates, with a context set that does not include `github`, so an expression written
@@ -231,13 +232,20 @@ plugin error exits 3 before anything is written, so the step also needs a non-em
 ([`scripts/report-paths.mjs`](https://github.com/aburi-dev/Aburi/blob/main/packages/github-action/scripts/report-paths.mjs)).
 That check means "this run wrote it" because `aburi diff` removes the reports an earlier run left
 before it compares anything. A path it does set is absolute, resolved from `working-directory`, so
-an absolute `output-dir` reaches the comment step as itself.
+an absolute `output-dir` reaches the comment step as itself. A resolved path holding a line break,
+which a working directory can still bring after the input check, sets no path and fails the step
+with exit 1: each line the script writes is a `$GITHUB_OUTPUT` entry, so such a path would add one.
 
 ## 5. The comment
 
 One comment per pull request, found by the marker `<!-- aburi:diff-comment -->` and rewritten in
 place, so a pushed branch does not accumulate a column of reports. A body identical to what is
 already there is left alone (`unchanged`), which keeps a re-run from notifying everyone again.
+
+The step's outputs say what it did: `comment-id`, the comment's numeric id, and `comment-action`,
+`created`, `updated` or `unchanged`. Both are empty when no comment was written — under
+`comment: false`, when the step was skipped (§4), and when the upsert failed — which is how the
+fork hand-off of §5.1 tells "nothing posted" from a comment that is there.
 
 The comment meant is the one Aburi wrote: its body opens with the marker, and its author is the
 account the token posts as. A personal token names that account through `GET /user`; an
@@ -337,9 +345,10 @@ and which it dropped ([`markdown-projection.md`](./markdown-projection.md)
 Markdown beside it as `diff.full.md`, which the note names: an upload of the output directory, as
 `aburi.yml` does with its `aburi-diff` artifact, keeps everything the comment could not.
 
-The budget is `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`, and the manifest's default copies
-the number: a marker of a different length moves the budget, and a manifest still passing the old
-one is either 29 bytes short or 29 bytes over.
+The budget is `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`, and
+`scripts/resolve-max-bytes.mjs` copies the number as its `DEFAULT_BUDGET`, the value an empty
+`max-bytes` (the manifest's default) stands for: a marker of a different length moves the budget,
+and a script still passing the old one is either 29 bytes short or 29 bytes over.
 
 The decision lives in [`scripts/resolve-max-bytes.mjs`](https://github.com/aburi-dev/Aburi/blob/main/packages/github-action/scripts/resolve-max-bytes.mjs)
 rather than in a branch inside the step, for the reason the CLI resolver does (§3.2): a `run:`
@@ -368,9 +377,9 @@ Four details are deliberate:
   `EPIPE` of its next write, which under `pipefail` turns a successful match into a failed
   pipeline once the help text outgrows the pipe buffer.
 - **`format: json` caps nothing.** That run writes no `diff.md`, so there is no document to fit
-  and no reason to spend a probe. The CLI says the same thing from its end, with a warning rather
-  than an error: the action passes the flag without consulting `format`, and an input error there
-  would fail every `format: json` user.
+  and no reason to spend a probe: the script reads `format` and passes no flag. The CLI says the
+  same thing from its end, with a warning rather than an error, so a caller that passes
+  `--max-bytes` without consulting `format` is not failed for it.
 
 Both ends of the upsert still measure before they write — `scripts/upsert-comment.mjs` with exit 2
 and a one-line annotation, `upsertPullRequestComment` by throwing. Neither can re-render a finished

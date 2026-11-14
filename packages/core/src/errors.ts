@@ -53,3 +53,7 @@ export class CoreError extends Error {
     this.violations = detail.violations
   }
 }
+
+/** The line an internal error ends with, under the message saying what broke. */
+export const REPORT_BUG =
+  "This is a bug in Aburi — please report it at https://github.com/aburi-dev/Aburi/issues."

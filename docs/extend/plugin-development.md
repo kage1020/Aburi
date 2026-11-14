@@ -84,10 +84,16 @@ computes a normalised AST string for fingerprinting.
 import { makeLanguageId } from "@aburi/core"
 import {
   type BodyExtraction,
+  type DropHint,
+  type ExtractionContext,
   type LangManifest,
   type LanguagePlugin,
+  type ParsedTree,
   type ParseResult,
   PLUGIN_SCHEMA_URL,
+  type SourceFile,
+  type SymbolCandidate,
+  type WalkContext,
 } from "@aburi/types"
 
 export const myLangManifest: LangManifest = {
@@ -114,30 +120,30 @@ export const myLangManifest: LangManifest = {
 
 class MyLangPlugin implements LanguagePlugin {
   readonly manifest = myLangManifest
-  readonly fileExtensions = [".my"] as const
+  readonly fileExtensions = [".my"]
   readonly capabilities = { /* boolean matrix */ }
 
   async init() {}
 
-  async parseFile(file): Promise<ParseResult> {
+  async parseFile(file: SourceFile): Promise<ParseResult> {
     // Return { tree, errors, imports }. `tree` is opaque to the pipeline.
   }
 
-  extractSymbols(tree, ctx) {
+  extractSymbols(tree: ParsedTree, ctx: ExtractionContext): SymbolCandidate[] {
     // Return SymbolCandidate<Node>[]. Every id must start with `<language>:`.
   }
 
-  walkBody(symbol, ctx): BodyExtraction {
+  walkBody(symbol: SymbolCandidate, ctx: WalkContext): BodyExtraction {
     return { rules: [], calls: [] }
   }
 
-  normalizeAst(symbol) {
+  normalizeAst(symbol: SymbolCandidate): string {
     // Canonical AST string. Whitespace / comment insensitive. Identifiers, literals,
     // operators, keywords and modifiers preserved (fingerprint.md §5.1).
     return ""
   }
 
-  symbolDropHint(symbol, ctx) {
+  symbolDropHint(symbol: SymbolCandidate, ctx: ExtractionContext): DropHint | null {
     // Optional: language-specific drop candidates the shape-only core rules
     // cannot judge (e.g. `{}` empty body detection).
     return null
@@ -172,9 +178,11 @@ Contracts to know:
   re-export. Leave `origins` out: the scan sets it and drops one you return. To
   map bare specifiers such as path aliases to workspace files, implement
   `createImportResolver`.
-- `symbolDropHint` returns `{ reason, category: "B" | "C" }` or `null`. Category
-  B drops keep the Symbol out of the IR, so use it for genuine boilerplate.
-  Category C keeps the Symbol and prunes its calls.
+- `symbolDropHint` returns `{ reason, category: "B" | "C" }` or `null`. Any
+  hint drops the Symbol: it stays in the IR with `dropped: true` and `reason` as
+  its `dropReason`, its body is not walked, and it carries no rules, effects or
+  calls. The core does not read `category`, so `"C"` drops exactly as `"B"`
+  does; write `"B"`, and use the hint for genuine boilerplate.
 - A syntax error is not a reason to give up: return the tree you built and add a
   `recoverable: true` error. The file is extracted as usual.
 - Refuse a file by adding an error with `recoverable: false`, or by returning
@@ -263,7 +271,14 @@ overrides decorator boundaries.
 ```ts
 import { DEFAULT_EXPORT_NAME, splitAliasedImportName } from "@aburi/core"
 import { assertImportBinding, assertImportEdgeSource } from "@aburi/plugin-registry/plugin-input"
-import type { Confidence, FrameworkClassifyContext, ImportEdge, SymbolClassification } from "@aburi/types"
+import type {
+  Confidence,
+  FrameworkClassifyContext,
+  FrameworkPlugin,
+  ImportEdge,
+  SymbolCandidate,
+  SymbolClassification,
+} from "@aburi/types"
 
 /** Written identifier → the exported name it resolves to, and whether you own the module. */
 function importedNames(imports: readonly ImportEdge[], filePath: string) {
@@ -289,10 +304,15 @@ class MyFrameworkPlugin implements FrameworkPlugin {
 
   async init() {}
 
-  classifySymbol(candidate, ctx: FrameworkClassifyContext): SymbolClassification | null {
+  classifySymbol(
+    candidate: SymbolCandidate,
+    ctx: FrameworkClassifyContext,
+  ): SymbolClassification | null {
     const names = importedNames(ctx.imports, ctx.file.path)
     let confidence: Confidence = "high"
     const hit = candidate.decorators.find((d) => {
+      // A qualified `@ui.Widget` is found under its name here; to check its provenance, resolve
+      // the qualifier through `ImportEdge.namespaceBinding`, as framework-nestjs does.
       const origin = names.get(d.name)
       // No edge mentions it: nothing to resolve, so the written name stands.
       if (origin === undefined) return d.name === "Widget"
@@ -309,9 +329,9 @@ class MyFrameworkPlugin implements FrameworkPlugin {
     return {
       extKind: "framework:mytool:widget",
       derivedBy: "framework:mytool:widget",
-      // Keyed on the name the source wrote, which is what the pipeline matches against
-      // `Decorator.name`. Optional: flip boundary flag for specific decorators.
-      decoratorBoundaries: { [hit.name]: true },
+      // Keyed on the decorator as the source wrote it: `name`, or `qualifier.name` for a
+      // qualified one (`@ui.Widget`). Optional: flip boundary flag for specific decorators.
+      decoratorBoundaries: { [hit.qualifier === undefined ? hit.name : `${hit.qualifier}.${hit.name}`]: true },
       // Omit the key for `high`: the pipeline reads an absent `confidence` as exactly that.
       ...(confidence === "high" ? {} : { confidence }),
     }
@@ -395,14 +415,26 @@ Classifies a `CallCandidate` into a core effect vocabulary
 `fs.read` / `fs.write` / …).
 
 ```ts
-import type { EffectClassification, EffectDecline, EffectPlugin } from "@aburi/types"
+import { defineEffectsManifest } from "@aburi/plugin-registry/plugin-input"
+import type {
+  CallCandidate,
+  ClassifyContext,
+  EffectClassification,
+  EffectDecline,
+  EffectPlugin,
+} from "@aburi/types"
+
+// An effects manifest that declares no effect ids of its own and one derivedBy prefix, at
+// version "0.0.0". Write the manifest out in full, as for the other plugin types, to declare
+// `x-` effects or a version of your own.
+export const myEffectsManifest = defineEffectsManifest("effects-mytool", "effects-plugin:mytool")
 
 class MyEffectsPlugin implements EffectPlugin {
   readonly manifest = myEffectsManifest
 
   async init() {}
 
-  classify(call, ctx): EffectClassification | EffectDecline | null {
+  classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | EffectDecline | null {
     // Keep it pure: no I/O, no state, no async. The per-call budget is 50ms
     // by default and stateful classifiers are the reason it exists.
     if (!looksLikeMyEffect(call, ctx)) return null
@@ -505,6 +537,15 @@ Contracts:
   }
   ```
 
+  The same module packages the two steps the first-party effects plugins share.
+  `matchesModuleOrSubpath(...roots)` returns the predicate `hasMatchingImport`
+  takes, true for a root itself and for any subpath under it
+  (`matchesModuleOrSubpath("mytool")` matches `mytool` and `mytool/client`).
+  `receiverConfidence(clientSegment, call, maxArguments, namesClient)` is the
+  tier above in one call: `medium` for a dynamic receiver or more than
+  `maxArguments` arguments, `high` when `namesClient(clientSegment)` holds, and
+  `medium` otherwise.
+
   Import the dedicated `/plugin-input` subpath rather than the package root,
   which would pull the manifest validator and its schema compilation into your
   classifier's startup path.
@@ -543,8 +584,9 @@ package name.
 The list a plugin appears in must match its manifest `type`, or the loader fails
 the run.
 
-Your module must export the plugin as a default export, a `plugin` export, or
-any top-level export whose value has a `manifest` field. The first hit wins.
+Your module must export the plugin object as a default export, a `plugin` export, or
+any top-level export whose value has a `manifest` field. The first hit wins. A
+top-level `manifest` export on its own is not a plugin and is not read.
 
 ## Options
 
@@ -592,5 +634,6 @@ instead of recording the same failure against every file.
   scope, or none at all. The loader accepts both.
 - Follow the workspace tsdown / tsconfig config so the plugin ships ESM
   (`.mjs` + `.d.mts`).
-- Include `manifest` in the top-level exports so the loader's fallback hunt
-  finds it.
+- Export the plugin object itself, by default or under any name: the loader
+  takes the first export carrying a `manifest` field, and a bare `manifest`
+  export carries none.

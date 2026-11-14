@@ -11,7 +11,9 @@ Shared TypeScript types for the Aburi ecosystem. Two flavours:
   that the schemas cannot express — richer generic and function signatures that
   make the plugin contracts type-safe.
 
-Every other `@aburi/*` package depends on this one. Its runtime code is a few
+Every `@aburi/*` package that reads or writes these documents or implements a
+plugin depends on this one; `@aburi/github-action` and `@aburi/mcp`, which run the
+CLI, and `@aburi/plugin-process` do not. Its runtime code is a few
 constants and small helpers, among them the `$schema` URL each kind of document
 is written with (`IR_SCHEMA_URL`, `DIFF_SCHEMA_URL`, `CONFIG_SCHEMA_URL`,
 `PLUGIN_SCHEMA_URL`) and `isIRSchemaURL`, which accepts every `$schema` an IR v1

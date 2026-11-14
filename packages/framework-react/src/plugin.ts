@@ -10,7 +10,7 @@ import { classifyReactSymbol } from "./classify"
 import { frameworkReactManifest } from "./manifest"
 
 class ReactFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
-  readonly manifest = frameworkReactManifest
+  readonly manifest: typeof frameworkReactManifest = frameworkReactManifest
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -23,6 +23,6 @@ class ReactFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 }
 
 /** Singleton so `manifest` identity is stable for consumers comparing against the constant. */
-export const reactFrameworkPlugin = new ReactFrameworkPlugin()
+export const reactFrameworkPlugin: ReactFrameworkPlugin = new ReactFrameworkPlugin()
 
 export { ReactFrameworkPlugin }
