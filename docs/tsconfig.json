@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig.json",
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["worker/**/*", "test/**/*", ".vitepress/head.ts"],
+  "exclude": ["node_modules", ".vitepress/dist"]
+}
