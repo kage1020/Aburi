@@ -93,8 +93,8 @@ describe("scan — a function a const or a default export hands to a wrapping ca
 
     expect(row.extKind).toBe("framework:react:memo")
     expect(row.rules.map((r) => r.type)).toEqual(["guard", "throw", "return"])
-    expect(row.calls.map((c) => c.target)).toEqual(["Error", "track"])
+    expect(row.calls.map((c) => c.target)).toEqual(["memo", "Error", "track"])
     expect(input.extKind).toBe("framework:react:forward-ref")
-    expect(input.calls.map((c) => c.target)).toEqual(["useFocus"])
+    expect(input.calls.map((c) => c.target)).toEqual(["forwardRef", "useFocus"])
   })
 })

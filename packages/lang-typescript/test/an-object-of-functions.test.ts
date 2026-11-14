@@ -360,16 +360,22 @@ describe("a member's drop hint is a method's", () => {
 
 describe("what an object member does not reach", () => {
   it.each([
-    ["an object handed to a call", "export const c = Object.freeze({ m() { q() } })", "c"],
-    ["an object in an array", "export const routes = [{ handler() { q() } }]", "routes"],
+    [
+      "an object handed to a call",
+      "export const c = Object.freeze({ m() { q() } })",
+      "c",
+      ["Object.freeze", "q"],
+    ],
+    ["an object in an array", "export const routes = [{ handler() { q() } }]", "routes", []],
     [
       "an object a destructuring declaration reads",
       "export const { m } = { m: () => { q() } }",
       "m",
+      [],
     ],
-  ])("declares no member for %s", async (_label, source, name) => {
+  ])("declares no member for %s", async (_label, source, name, calls) => {
     expect(await idsOf(source)).toEqual([`ts:src/a.ts#${name}`])
-    expect(await callsOf(source, `ts:src/a.ts#${name}`)).toEqual([])
+    expect(await callsOf(source, `ts:src/a.ts#${name}`)).toEqual(calls)
   })
 
   it("declares nothing for an object that is the default export", async () => {

@@ -372,8 +372,9 @@ Contracts:
   read through `as`, `satisfies`, `!` and parentheses. It returns `null` for a
   name with no initializer of its own (`declare const Ctx: Context<string>`,
   `let x`) and for one a destructuring pattern binds. A default export written
-  as a call handed a function (`export default memo(function Row() { … })`) is
-  a `const` named `<default>` whose `fullNode` is the `export_statement`; for it
+  as a call (`export default memo(function Row() { … })`,
+  `export default defineConfig({ … })`) is a `const` named `<default>` whose
+  `fullNode` is the `export_statement`; for it
   the same call returns the statement's value, read through the same wrappers.
   All three come from `@aburi/core`. Searching the whole statement for its first call finds one
   that may belong to another name.

@@ -115,7 +115,7 @@ describe("merged declarations are one Symbol", () => {
         "export class A { m() {} }",
         "export interface I {}",
         "app.get('/x', () => {})",
-        "export const w = withAuth(() => {})",
+        "export const w = withAuth(handler)",
         "export const o = { m() {}, f: () => {}, get g() { return 1 } }",
       ].join("\n"),
     )

@@ -153,6 +153,7 @@ describe("scan — a function a const hands its call is not shadowed", () => {
 
     expect(symbol.signature).toBeNull()
     expect(symbol.calls.map((c) => [c.target, c.resolved])).toEqual([
+      ["withAuth", null],
       ["save", "ts:src/repo.ts#save"],
     ])
     expect(symbol.effects.map((e) => e.id)).toEqual(["db.write"])

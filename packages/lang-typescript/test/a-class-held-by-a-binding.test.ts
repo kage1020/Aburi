@@ -188,10 +188,10 @@ describe("a call into a class a binding holds", () => {
 })
 
 describe("a class no binding holds directly is not one", () => {
-  it("leaves a class handed to a call a const", async () => {
+  it("leaves a class handed to a call a const, which walks the class with the call", async () => {
     const source = "export const A = mixin(class { m() { run() } })"
 
-    expect(await shapeOf(source)).toEqual([["A", "const", "public", []]])
+    expect(await shapeOf(source)).toEqual([["A", "const", "public", ["mixin", "run"]]])
   })
 
   it("leaves a class held inside a function to the function's walk", async () => {
