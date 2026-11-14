@@ -13,6 +13,7 @@ const fn = (body: string) => `export function f(a: any, b: any, x: any, v: any) 
 describe("normalizeAst — what a formatter or a reviewer's eye would not call a change", () => {
   it.each([
     ["a comment in the body", fn("return 1"), fn("/* note */ return 1")],
+    ["an HTML-like comment in the body", fn("return 1"), fn("\n<!-- note\nreturn 1")],
     [
       "whitespace and indentation",
       "export function f(){return 1}",
