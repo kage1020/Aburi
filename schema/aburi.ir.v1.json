@@ -238,7 +238,7 @@
         "external": {
           "type": "integer",
           "minimum": 0,
-          "description": "The callee is bound by an import whose specifier is not relative — a bare package specifier, a path alias, or a workspace package."
+          "description": "The callee is bound by an import whose specifier is not relative and that the language maps to no file the scan has Symbols in — a bare package specifier, a workspace package, or a path alias that names no such file."
         },
         "dynamic": {
           "type": "integer",

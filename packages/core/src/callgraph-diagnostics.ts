@@ -18,6 +18,8 @@ interface ClassifyUnresolvedInput {
   imports: readonly ImportEdge[]
   trace: ResolutionTrace
   dynamicReceiver: boolean
+  /** Whether a bare specifier the caller's file imports leads to a file with Symbols. */
+  reachesWorkspace?: (specifier: string) => boolean
 }
 
 export function classifyUnresolved(input: ClassifyUnresolvedInput): UnresolvedCallDiagnostic {
@@ -39,19 +41,26 @@ export function classifyUnresolved(input: ClassifyUnresolvedInput): UnresolvedCa
       candidates: [...input.trace.ambiguousCandidates].sort(compareCodeUnit),
     }
   }
-  if (bindsToExternalImport(input.target, input.imports)) {
+  if (bindsToExternalImport(input.target, input.imports, input.reachesWorkspace ?? NOWHERE)) {
     return { ...base, bucket: "external", candidates: [] }
   }
   return { ...base, bucket: "no-match", candidates: [] }
 }
 
-function bindsToExternalImport(target: string, imports: readonly ImportEdge[]): boolean {
+const NOWHERE = (): boolean => false
+
+function bindsToExternalImport(
+  target: string,
+  imports: readonly ImportEdge[],
+  reachesWorkspace: (specifier: string) => boolean,
+): boolean {
   const [head] = splitTargetSegments(target)
   if (head === undefined) return false
   return imports.some(
     (edge) =>
       !edge.dynamic &&
       !isRelativeSpecifier(edge.source) &&
+      !reachesWorkspace(edge.source) &&
       (edge.symbols === "*"
         ? edge.namespaceBinding === head
         : edge.symbols.some((raw) => splitAliasedImportName(raw).local === head)),

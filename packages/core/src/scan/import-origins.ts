@@ -46,6 +46,9 @@ interface Hop {
 /** Where a specifier leads: a workspace file, out of the workspace, or nowhere the resolver could say. */
 type Target = { readonly file: string } | "outside" | "fault"
 
+/** A bare specifier a file imports through and the paths its language maps it to, in order. */
+export type SpecifierPaths = readonly [specifier: string, paths: readonly string[]]
+
 const NAMESPACE = "*"
 
 // Only the names decorators bind are followed: an origin for every import would parse most of the
@@ -57,6 +60,7 @@ export class ImportOrigins {
   readonly #resolvers = new Map<Language, ImportResolver | "none" | "fault">()
   readonly #edges = new AsyncMemo<string, readonly ImportEdge[]>()
   readonly #targets = new AsyncMemo<string, Target>()
+  readonly #mapped = new AsyncMemo<string, readonly string[] | "fault">()
 
   constructor(input: ImportOriginsInput) {
     this.#input = input
@@ -89,6 +93,23 @@ export class ImportOrigins {
     })
   }
 
+  /** What the file's language maps each bare specifier it imports names through to. */
+  async mapSpecifiers(
+    fromFile: string,
+    imports: readonly ImportEdge[],
+  ): Promise<readonly SpecifierPaths[]> {
+    const out: SpecifierPaths[] = []
+    const asked = new Set<string>()
+    for (const { source, symbols, dynamic } of imports) {
+      if (dynamic || isRelativeSpecifier(source) || asked.has(source)) continue
+      if (symbols !== "*" && symbols.length === 0) continue
+      asked.add(source)
+      const paths = await this.#mappedPaths(fromFile, source)
+      if (paths !== "fault" && paths.length > 0) out.push([source, paths])
+    }
+    return out
+  }
+
   async #externalOrigin(fromFile: string, specifier: string, name: string): Promise<string | null> {
     const visited = new Set<string>()
     let hop: Hop = { source: specifier, imported: name }
@@ -117,26 +138,38 @@ export class ImportOrigins {
 
   async #resolveTarget(fromFile: string, specifier: string): Promise<Target> {
     if (isRelativeSpecifier(specifier)) return this.#fileOrOutside(dirname(fromFile), specifier)
-    const language = this.#input.router.route(fromFile)
-    if (language === null) return "outside"
-    const resolver = this.#resolverFor(language)
-    if (resolver === "none") return "outside"
-    if (resolver === "fault") return "fault"
-    try {
-      for (const path of await resolver.resolve(specifier, fromFile)) {
-        const found = typeof path === "string" ? this.#probe("", toNfc(path)) : null
-        if (found !== null) return { file: found }
-      }
-    } catch (error) {
-      this.#fault(
-        language,
-        `its import resolver threw on "${specifier}" in ${fromFile}`,
-        error,
-        targetResolvedOnce(fromFile, specifier),
-      )
-      return "fault"
+    const paths = await this.#mappedPaths(fromFile, specifier)
+    if (paths === "fault") return "fault"
+    for (const path of paths) {
+      const found = this.#probe("", path)
+      if (found !== null) return { file: found }
     }
     return "outside"
+  }
+
+  #mappedPaths(fromFile: string, specifier: string): Promise<readonly string[] | "fault"> {
+    return this.#mapped.get(`${fromFile}\0${specifier}`, async () => {
+      const language = this.#input.router.route(fromFile)
+      if (language === null) return []
+      const resolver = this.#resolverFor(language)
+      if (resolver === "none") return []
+      if (resolver === "fault") return "fault"
+      try {
+        const paths: unknown = await resolver.resolve(specifier, fromFile)
+        if (!Array.isArray(paths)) {
+          throw new TypeError(`expected a list of paths, got ${describeJsonType(paths)}`)
+        }
+        return paths.filter((path): path is string => typeof path === "string").map(toNfc)
+      } catch (error) {
+        this.#fault(
+          language,
+          `its import resolver threw on "${specifier}" in ${fromFile}`,
+          error,
+          targetResolvedOnce(fromFile, specifier),
+        )
+        return "fault"
+      }
+    })
   }
 
   #fileOrOutside(fromDirectory: string, specifier: string): Target {
