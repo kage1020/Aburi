@@ -1,7 +1,10 @@
 import {
   asSyntaxNode,
+  calleeName,
+  chainCalls,
   declaratorValue,
   lastQnameSegment,
+  middlewareNames,
   type SyntaxNode,
   unwrapValue,
   writtenChildren,
@@ -22,6 +25,8 @@ type TrpcRole = TrpcExtKind extends `${typeof TRPC_DERIVED_BY_PREFIX}:${infer Ro
 const ROUTER_FACTORIES: ReadonlySet<string> = new Set(["router", "createTRPCRouter"])
 const PROCEDURE_TERMINALS: ReadonlySet<string> = new Set(["query", "mutation", "subscription"])
 const BUILDER_STEPS: ReadonlySet<string> = new Set(["use", "input", "output", "meta", "concat"])
+// `concat` hands over another builder, whose middleware runs where the call is written.
+const MIDDLEWARE_STEPS: ReadonlySet<string> = new Set(["use", "concat"])
 const RESOLVER_TYPES: ReadonlySet<string> = new Set([
   "arrow_function",
   "function_expression",
@@ -46,13 +51,25 @@ export function classifyTrpcSymbol(
   const importsTrpc = hasTrpcServerImport(ctx.imports)
   const role = chain === null ? null : roleOf(chain, importsTrpc)
   if (chain === null || role === null) return null
+  const middleware = BUILDS_A_PROCEDURE.has(role) ? chainMiddleware(chain.call) : []
   return {
     extKind: `${TRPC_DERIVED_BY_PREFIX}:${role}` satisfies TrpcExtKind,
     derivedBy: `${TRPC_DERIVED_BY_PREFIX}:${role}:${chain.name}`,
     // Most of these names are tRPC's conventions rather than its exports, so only the import
     // makes them tRPC's.
     confidence: importsTrpc ? "high" : "medium",
+    ...(middleware.length > 0 ? { middleware } : {}),
   }
+}
+
+const BUILDS_A_PROCEDURE: ReadonlySet<TrpcRole> = new Set(["procedure", "base-procedure"])
+
+function chainMiddleware(call: SyntaxNode | null): string[] {
+  if (call === null) return []
+  const steps = chainCalls(call)
+    .toReversed()
+    .filter((step) => MIDDLEWARE_STEPS.has(calleeName(step)?.leaf ?? ""))
+  return middlewareNames(steps.flatMap(argumentsOf))
 }
 
 function roleOf(chain: Chain, importsTrpc: boolean): TrpcRole | null {

@@ -97,6 +97,7 @@ export {
   type ServerFactory,
   withHintUsage,
 } from "./lsp"
+export { middlewareNames } from "./middleware-names"
 export { compareBy, compareCodeUnit, stringArraysEqual } from "./order"
 export {
   type PropagateInput,
