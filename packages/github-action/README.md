@@ -88,7 +88,7 @@ uses the alias.
 | `fail-on` | *(empty)* | Forwarded to `--fail-on`; see [the CLI reference](https://aburi.dev/reference/cli) for the grammar. Empty = report only. |
 | `fail-on-scope` | *(empty)* | Forwarded to `--fail-on-scope`: `non-test` leaves the Symbols of the config's `testFiles` out of the gate, `all` counts them. Empty passes no flag, which counts them. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.jsonc`. |
-| `output-dir` | `.aburi` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
+| `output-dir` | `.aburi` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty or hold a line break. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Directory to run the CLI from. |
 | `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). See [Choosing `cli`](#choosing-cli). |

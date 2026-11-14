@@ -161,6 +161,9 @@ runs:
         if [ -z "$OUTPUT_DIR" ]; then
           refuse "output-dir must not be empty."
         fi
+        case "$OUTPUT_DIR" in
+          *$'\n'*|*$'\r'*) refuse "output-dir must not hold a line break." ;;
+        esac
 
     - name: "Setup pnpm"
       if: inputs.cli == 'dlx'

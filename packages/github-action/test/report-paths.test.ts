@@ -77,20 +77,16 @@ describe("report-paths.mjs", () => {
     expect(outputs).toEqual({ "diff-json-path": "", "diff-md-path": "" })
   })
 
-  // Windows refuses a directory name holding a line break, so only a POSIX runner can write one.
-  it.skipIf(process.platform === "win32")(
-    "publishes no path from an output-dir holding a line break, which would read as an output of its own",
-    async () => {
-      const cwd = scratch.root
-      const outputDir = "out\ndiff-md-path=/elsewhere"
-      await writeReports(join(cwd, outputDir), [DIFF_JSON_FILENAME, DIFF_MD_FILENAME])
+  it.each([["\n"], ["\r\n"], ["\r"]])(
+    "publishes no path from an output-dir holding %j, which would read as an output of its own",
+    async (lineBreak) => {
       const { status, stdout, stderr } = await runScript("report-paths.mjs", {
-        cwd,
-        env: { OUTPUT_DIR: outputDir, FORMAT: "both" },
+        cwd: scratch.root,
+        env: { OUTPUT_DIR: `out${lineBreak}diff-md-path=/elsewhere`, FORMAT: "both" },
       })
       expect(status).toBe(2)
       expect(stdout).toBe("")
-      expect(stderr).toContain("output-dir holds a line break")
+      expect(stderr).toContain("holds a line break")
     },
   )
 })

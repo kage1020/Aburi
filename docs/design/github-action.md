@@ -39,9 +39,9 @@ prefixing a marker, and never decides what is worth failing on — `--fail-on` i
 Five input values are validated up front rather than at the point of use: `format`, `cli` and
 `comment`, because each of them has a wrong value that otherwise runs green and does nothing
 (`comment: yes` is the sharp one: every non-`true` value reads as false, silently), and
-`max-bytes` (a non-negative integer, or empty) and `output-dir` (not empty). A rejected
-input is exit 2 from the first step, which is what "your invocation is wrong" means in
-`cli-spec.md` §9.
+`max-bytes` (a non-negative integer, or empty) and `output-dir` (not empty, and holding no line
+break, since the action names its reports in `$GITHUB_OUTPUT` lines). A rejected input is exit 2
+from the first step, which is what "your invocation is wrong" means in `cli-spec.md` §9.
 
 **No description may hold a GitHub expression.** The runner parses a manifest's descriptions and
 defaults as templates, with a context set that does not include `github`, so an expression written
@@ -232,9 +232,9 @@ plugin error exits 3 before anything is written, so the step also needs a non-em
 ([`scripts/report-paths.mjs`](https://github.com/aburi-dev/Aburi/blob/main/packages/github-action/scripts/report-paths.mjs)).
 That check means "this run wrote it" because `aburi diff` removes the reports an earlier run left
 before it compares anything. A path it does set is absolute, resolved from `working-directory`, so
-an absolute `output-dir` reaches the comment step as itself. An `output-dir` holding a line break
-sets no path and fails the step with exit 1: each line the script writes is a `$GITHUB_OUTPUT`
-entry, so such a path would add one.
+an absolute `output-dir` reaches the comment step as itself. A resolved path holding a line break,
+which a working directory can still bring after the input check, sets no path and fails the step
+with exit 1: each line the script writes is a `$GITHUB_OUTPUT` entry, so such a path would add one.
 
 ## 5. The comment
 
