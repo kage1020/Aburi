@@ -38,22 +38,20 @@ function assetsOf(site: Record<string, Asset>) {
           }),
         )
       }
-      return Promise.resolve(
-        new Response(body, {
-          headers: { "Content-Type": asset.type, ...asset.headers },
-        }),
-      )
+      const etag = `"${pathname}"`
+      const headers = { "Content-Type": asset.type, ETag: etag, ...asset.headers }
+      if (request.headers.get("If-None-Match") === etag) {
+        return Promise.resolve(new Response(null, { status: 304, headers }))
+      }
+      return Promise.resolve(new Response(body, { headers }))
     },
   }
 }
 
-function get(path: string, accept?: string, method = "GET") {
+function get(path: string, accept?: string, method = "GET", extra: Record<string, string> = {}) {
   const assets = assetsOf(SITE)
-  const headers = accept === undefined ? undefined : { Accept: accept }
-  const request = new Request(`https://aburi.dev${path}`, {
-    method,
-    ...(headers && { headers }),
-  })
+  const headers = accept === undefined ? extra : { ...extra, Accept: accept }
+  const request = new Request(`https://aburi.dev${path}`, { method, headers })
   return { response: worker.fetch(request, { ASSETS: assets }), assets }
 }
 
@@ -103,6 +101,16 @@ describe("a request that asks for Markdown", () => {
   it("by HEAD carries the Markdown headers and no body", async () => {
     const response = await get("/guide/page", MARKDOWN, "HEAD").response
     expect(response.status).toBe(200)
+    expect(response.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8")
+    expect(response.headers.get("Vary")).toBe("Accept")
+    expect(await response.text()).toBe("")
+  })
+
+  it("revalidating its cached copy is answered 304 with the Markdown headers", async () => {
+    const response = await get("/guide/page", MARKDOWN, "GET", {
+      "If-None-Match": '"/guide/page.md"',
+    }).response
+    expect(response.status).toBe(304)
     expect(response.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8")
     expect(response.headers.get("Vary")).toBe("Accept")
     expect(await response.text()).toBe("")

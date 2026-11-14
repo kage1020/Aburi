@@ -20,10 +20,10 @@ export default {
     }
 
     const markdown = await env.ASSETS.fetch(new Request(new URL(twin, url), request))
-    if (markdown.ok) {
+    if (markdown.ok || markdown.status === 304) {
       const headers = new Headers(markdown.headers)
       headers.set("Content-Type", MARKDOWN_TYPE)
-      return varyOnAccept(new Response(markdown.body, { status: 200, headers }))
+      return varyOnAccept(new Response(markdown.body, { status: markdown.status, headers }))
     }
     await markdown.body?.cancel()
 
