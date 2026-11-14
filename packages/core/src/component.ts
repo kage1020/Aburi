@@ -6,8 +6,6 @@ import {
   decideName,
   declaredNames,
   resolveIdCollisions,
-  toIdFromNpmName,
-  toKebabCase,
 } from "./component-id"
 import { countLanguagesPerRoot } from "./component-languages"
 import {
@@ -132,12 +130,4 @@ async function buildComponent(
   if (publicApi.entries.length > 0) component.publicApi = publicApi.entries
   if (frameworks.length > 0) component.frameworks = frameworks
   return { component, root: entry.relativeRoot, ignored: publicApi.ignored }
-}
-
-export const __testing = {
-  toIdFromNpmName,
-  toKebabCase,
-  collectFrameworks,
-  collectPublicApi,
-  resolveIdCollisions,
 }

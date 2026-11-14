@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { __testing_component, detectComponents, type IgnoredPublicApiReason } from "../src/index"
+import { collectFrameworks, collectPublicApi } from "../src/component-manifest"
+import { detectComponents, type IgnoredPublicApiReason } from "../src/index"
 import { useWorkspaceTree } from "./fixtures/workspace"
 
 const tree = useWorkspaceTree("core-component")
@@ -137,7 +138,7 @@ describe("frameworks from package.json dependencies", () => {
     ],
     ["no dependency blocks", {}, []],
   ])("reads %s", (_case, manifest, frameworks) => {
-    expect(__testing_component.collectFrameworks({ name: "pkg", ...manifest })).toEqual(frameworks)
+    expect(collectFrameworks({ name: "pkg", ...manifest })).toEqual(frameworks)
   })
 })
 
@@ -145,7 +146,7 @@ describe("the public API from package.json", () => {
   const decomposed = "café".normalize("NFD")
   const composed = decomposed.normalize("NFC")
   const collect = (manifest: Record<string, unknown>, root = ".") =>
-    __testing_component.collectPublicApi({ name: "lib", ...manifest }, root)
+    collectPublicApi({ name: "lib", ...manifest }, root)
 
   it.each<[string, Record<string, unknown>, string[]]>([
     [
