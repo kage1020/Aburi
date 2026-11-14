@@ -6,7 +6,7 @@ import type {
   ParseError,
   ThisBinding,
 } from "@aburi/types"
-import type { ThisBindingSites } from "../call-site"
+import type { ReceiverTypes, ThisBindingSites } from "../call-site"
 import { countBy } from "../collections"
 import { CoreError } from "../errors"
 import { symbolIdFile } from "../id"
@@ -43,6 +43,7 @@ export interface ExtractedFiles {
   dynamicCallSites: Set<string>
   declinedCalls: DeclinedCall[]
   thisBindings: ThisBindingSites
+  receiverTypes: ReceiverTypes
 }
 
 type Ran = Extract<FileOutcome, { kind: "ran" }>
@@ -58,6 +59,7 @@ export class ExtractionCollator {
     class: new Set(),
     instance: new Set(),
   }
+  readonly #receiverTypes = new Map<string, string | null>()
   readonly #out: ExtractedFiles = {
     symbols: [],
     skipped: [],
@@ -72,6 +74,7 @@ export class ExtractionCollator {
     dynamicCallSites: new Set(),
     declinedCalls: [],
     thisBindings: this.#thisBindings,
+    receiverTypes: this.#receiverTypes,
   }
   readonly #onceSeen = new Set<string>()
   readonly #resolverLinesSaid = new Set<string>()
@@ -264,6 +267,10 @@ export class ExtractionCollator {
         for (const key of result.dynamicCallSites) out.dynamicCallSites.add(key)
         out.declinedCalls.push(...result.declinedCalls)
         for (const [key, binding] of result.thisBindings) this.#thisBindings[binding].add(key)
+        for (const [key, type] of result.receiverTypes) {
+          const seen = this.#receiverTypes.get(key)
+          this.#receiverTypes.set(key, seen === undefined || seen === type ? type : null)
+        }
         return
       }
       default:

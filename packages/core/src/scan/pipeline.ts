@@ -18,7 +18,7 @@ import type {
   VocabRegistry,
   WalkContext,
 } from "@aburi/types"
-import type { CallSiteBinding } from "../call-site"
+import type { CallReceiverType, CallSiteBinding } from "../call-site"
 import { assertIdLanguage, buildDroppedSymbol, buildKeptSymbol } from "./build-symbol"
 import { type ClassifyCallsInput, classifyCalls } from "./classify-calls"
 import { decideDropReason, mergeFrameworkClassification } from "./classify-symbol"
@@ -42,6 +42,7 @@ export interface ExtractedFile extends FileOutcomeCommon {
   dynamicCallSites: readonly string[]
   declinedCalls: readonly DeclinedCall[]
   thisBindings: readonly CallSiteBinding[]
+  receiverTypes: readonly CallReceiverType[]
   /** What withdraws the file although nothing threw; its `symbols` are then empty. */
   fault: FileFault | null
 }
@@ -139,6 +140,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         dynamicCallSites: [],
         declinedCalls: [],
         thisBindings: [],
+        receiverTypes: [],
         fault: {
           code: candidates.code,
           message: `${candidates.message}. ctx.file.path holds this file's path already spelled for the Document, so this is a path the language plugin built`,
@@ -158,6 +160,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     const dynamicCallSites: string[] = []
     const declinedCalls: DeclinedCall[] = []
     const thisBindings: CallSiteBinding[] = []
+    const receiverTypes: CallReceiverType[] = []
 
     const frameworkCtx: FrameworkClassifyContext = { ...extractCtx, imports }
 
@@ -220,10 +223,12 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         dynamicCallSites: fileDynamicCallSites,
         declinedCalls: fileDeclinedCalls,
         thisBindings: fileThisBindings,
+        receiverTypes: fileReceiverTypes,
       } = classifyCalls(classifyCallsInput)
       dynamicCallSites.push(...fileDynamicCallSites)
       declinedCalls.push(...fileDeclinedCalls)
       thisBindings.push(...fileThisBindings)
+      receiverTypes.push(...fileReceiverTypes)
 
       const normalized = language.normalizeAst(candidate)
       symbols.push(
@@ -253,6 +258,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       dynamicCallSites,
       declinedCalls,
       thisBindings,
+      receiverTypes,
       fault: null,
     }
   } finally {

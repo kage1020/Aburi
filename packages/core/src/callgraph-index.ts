@@ -8,6 +8,7 @@ type ByName = ReadonlyMap<string, readonly IRSymbol[]>
 
 export interface SymbolTable {
   keptSymbolIds: ReadonlySet<SymbolId>
+  keptById: ReadonlyMap<SymbolId, IRSymbol>
   topLevelByFile: ReadonlyMap<FilePath, ByName>
   memberOwnersByFile: ReadonlyMap<FilePath, ReadonlySet<string>>
   filesByLanguage: ReadonlyMap<Language, ReadonlySet<FilePath>>
@@ -26,6 +27,7 @@ export function buildSymbolTable(symbols: readonly IRSymbol[]): SymbolTable {
     )
   return {
     keptSymbolIds: new Set(kept.map((symbol) => symbol.id)),
+    keptById: new Map(kept.map((symbol) => [symbol.id, symbol])),
     topLevelByFile: mapValues(topLevelPerFile(kept), byName),
     // Dropping a declaration keeps it out of `resolved`, not out of what its name means.
     memberOwnersByFile: mapValues(
