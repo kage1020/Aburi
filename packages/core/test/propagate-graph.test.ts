@@ -1,3 +1,4 @@
+import { costGrowth } from "@aburi/test-support"
 import type { Confidence, SymbolId } from "@aburi/types"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { CallEdge } from "../src/callgraph"
@@ -53,6 +54,7 @@ describe("reverseTopoOrder", () => {
 const SCALE = 8
 const MAX_RATIO = 40
 const OBVIOUS_RATIO = 60
+const SAMPLE_MS = 100
 const TIMEOUT_MS = 300_000
 
 const idOf = (i: number): string => `ts:src/m${String(i).padStart(6, "0")}.ts#f`
@@ -80,12 +82,6 @@ function ringGraph(total: number): PropagateInput {
   return { symbols, edges }
 }
 
-function meanCost(input: PropagateInput, reps: number): number {
-  const started = performance.now()
-  for (let i = 0; i < reps; i++) propagateEffects(input)
-  return (performance.now() - started) / reps
-}
-
 describe.each<[string, (total: number) => PropagateInput, number]>([
   ["mostly singleton SCCs", chainsGraph, 10_000],
   ["one cycle", ringGraph, 2_000],
@@ -98,29 +94,12 @@ describe.each<[string, (total: number) => PropagateInput, number]>([
   }, TIMEOUT_MS)
 
   it("grows with the log of the graph, not with its square", { timeout: TIMEOUT_MS }, () => {
-    meanCost(small, 2)
+    const { median, ratios } = costGrowth(
+      () => propagateEffects(small),
+      () => propagateEffects(large),
+      { rounds: 4, sampleMs: SAMPLE_MS, retryAt: OBVIOUS_RATIO },
+    )
 
-    const ratios: number[] = []
-    for (let round = 0; round < 4; round++) {
-      const largeFirst = round % 2 === 0
-      const measure = (): number => {
-        const first = largeFirst ? meanCost(large, 1) : meanCost(small, SCALE)
-        const second = largeFirst ? meanCost(small, SCALE) : meanCost(large, 1)
-        return largeFirst ? first / second : second / first
-      }
-
-      let ratio = measure()
-      if (ratio >= OBVIOUS_RATIO) {
-        ratio = measure()
-        expect(ratio, `round ${round} cost ratio at ${SCALE}x the symbols, twice`).toBeLessThan(
-          OBVIOUS_RATIO,
-        )
-      }
-      ratios.push(ratio)
-    }
-
-    const sorted = [...ratios].sort((a, b) => a - b)
-    const median = ((sorted[1] as number) + (sorted[2] as number)) / 2
     expect(
       median,
       `cost ratios at ${SCALE}x the symbols: ${ratios.map((r) => r.toFixed(1)).join(", ")}`,
