@@ -18,7 +18,13 @@ import type {
   SymbolCandidate,
   VocabRegistry,
 } from "@aburi/types"
-import { type CallSiteBinding, isThisBinding, makeCallSiteKey } from "../call-site"
+import {
+  type CallReceiverType,
+  type CallSiteBinding,
+  isThisBinding,
+  makeCallSiteKey,
+  makeSymbolCallKey,
+} from "../call-site"
 import { CoreError } from "../errors"
 import type { DropCFilter } from "./drop-c"
 import { normalizeCallStrings } from "./normalize"
@@ -56,12 +62,14 @@ export function classifyCalls(input: ClassifyCallsInput): {
   dynamicCallSites: string[]
   declinedCalls: DeclinedCall[]
   thisBindings: CallSiteBinding[]
+  receiverTypes: CallReceiverType[]
 } {
   const classifiedEffects: Effect[] = []
   const survivingCalls: Call[] = []
   const dynamicCallSites: string[] = []
   const declinedCalls: DeclinedCall[] = []
   const thisBindings: CallSiteBinding[] = []
+  const receiverTypes: CallReceiverType[] = []
   const owner: OwnerSummary = {
     id: input.candidate.id,
     kind: input.candidate.kind,
@@ -134,6 +142,12 @@ export function classifyCalls(input: ClassifyCallsInput): {
       const key = makeCallSiteKey(input.file.path, call.line, call.target)
       if (call.dynamicReceiver === true) dynamicCallSites.push(key)
       if (isThisBinding(call.thisBinding)) thisBindings.push([key, call.thisBinding])
+      if (typeof call.receiverType === "string" && call.receiverType.length > 0) {
+        receiverTypes.push([
+          makeSymbolCallKey(input.candidate.id, call.line, call.target),
+          call.receiverType,
+        ])
+      }
     }
   }
 
@@ -144,6 +158,7 @@ export function classifyCalls(input: ClassifyCallsInput): {
     calls: survivingCalls,
     dynamicCallSites,
     thisBindings,
+    receiverTypes,
     declinedCalls,
   }
 }

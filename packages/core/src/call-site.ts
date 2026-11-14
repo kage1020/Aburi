@@ -14,6 +14,20 @@ export function makeCallSiteKey(file: string, line: number, target: string): str
   return [file, line, target].join(CALL_SITE_KEY_SEPARATOR)
 }
 
+// A key within the calling Symbol, where `this` and every field it holds are one.
+export function makeSymbolCallKey(symbol: string, line: number, target: string): string {
+  return [symbol, line, target].join(CALL_SITE_KEY_SEPARATOR)
+}
+
+/** A call's `makeSymbolCallKey` and the named type its receiver is declared with. */
+export type CallReceiverType = readonly [key: string, type: string]
+
+/**
+ * The declared type of each call's receiver, by `makeSymbolCallKey`. A key whose calls name
+ * different types gets `null`: which call each type was written for is lost.
+ */
+export type ReceiverTypes = ReadonlyMap<string, string | null>
+
 export function receiverHead(target: string): string | undefined {
   return target.split(".").find((segment) => segment.length > 0)
 }

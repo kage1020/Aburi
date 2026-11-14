@@ -45,6 +45,7 @@ The resolver runs after all files have been parsed and `Symbol[]` is available. 
 | `call` | `walkBody` `CallCandidate` | provides `target`, `line`, `argumentCount`, `inAwait`, `inNew`, `literalArgs` |
 | `importTable` | `parseFile().imports` | per-file `ImportEdge[]` (`lang-plugin.md` §4.2) — the resolver reads this to know what a bare identifier binds to |
 | `localScope` | derived per Symbol | in-file local declarations shadowing imports / module-level names |
+| `receiverType` | `walkBody` `CallCandidate` | the named type a receiver is declared with, where the language plugin reads one off the source (`lang-plugin.md` LP20n); read by §4.7.1 |
 | `receiverTypes` | LSP layer only | actual type at each call receiver — absent in the untyped tier |
 
 The **caller's file path** is the anchor; resolution is always evaluated in the frame of one call site inside one Symbol.
@@ -173,7 +174,17 @@ The language plugin's `normalizeCallee` produces some targets that never resolve
 | `new <ClassName>()` receiver in a chain | `new` produces an instance; only the class is resolvable, method dispatch off it is not |
 | method chains on non-identifier receivers (`getRepo().save`) | receiver is an expression result, not a name |
 
-For `this` and `super`, the untyped tier writes `null` with `confidence = medium`; the LSP tier can promote these to real ids (§5.2).
+For `this` and `super`, the untyped tier writes `null` with `confidence = medium`; the LSP tier can promote these to real ids (§5.2). A call through a field of `this` that is declared with a named type is resolved through that type instead (§4.7.1).
+
+#### 4.7.1 A receiver of a declared type
+
+`this.repo.find(id)` beside `constructor(private readonly repo: UserRepository)` names its receiver's type in the source, and the language plugin reports it as the call's `receiverType`. A call that steps 1–5 leave unresolved and that no LSP hint resolves (§5) is resolved through that type:
+
+1. The type's name is bound as a target's leading identifier is in steps 2 and 3: a top-level Symbol of the caller's file, or a name an import binds, a dotted name (`repos.UserRepository`) composing past it. Steps 4 and 5 are not searched, since a type the file does not bind is not one the resolver can see.
+2. The name must bind a class, and the class must declare the member the call's last segment names, as an instance member: `UserRepository.find`, never the static `UserRepository::find`, since the receiver is a value of the type.
+3. `resolved` = that member, `confidence = medium`: the value can be a subclass's, as a provider registered with another class or a test double is, whose override is then the member that runs.
+
+The LSP hint goes first so that a language server's reading of the receiver is the one that stands where it has one. An interface-typed field binds no class and stays unresolved here; it is §5.3's. A field the class does not declare with a named type carries no `receiverType` (an unannotated, union-typed or inherited field), so its calls stay unresolved, bucketed `dynamic` (§8.1). The type is read per call within the calling Symbol, so two calls with one target on one line of one Symbol that name different types are resolved through neither.
 
 ## 5. LSP-Enriched Resolution Rules
 
@@ -261,6 +272,7 @@ The edge's `confidence` is the resolution confidence at the moment of resolution
 | §4.4 import scope | `high` |
 | §4.5 component scope (unique) | `medium` |
 | §4.6 workspace scope (unique) | `low` |
+| §4.7.1 declared receiver type | `medium` |
 | §5.2 LSP `this`/`super` direct | `high` |
 | §5.2 LSP walked hierarchy | `medium` |
 | §5.3 LSP interface with single impl | `medium` |
@@ -292,7 +304,7 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 |---|---|---|
 | `local-scope` | resolved to a local variable / parameter | `callback(x)` inside `foo(callback: () => void)` |
 | `external` | resolved to a bare specifier import | `lodash.sortBy(...)` |
-| `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint | `getRepo().save(...)`, `items[0].save(...)` |
+| `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint and no declared type that resolves it (§4.7.1) | `getRepo().save(...)`, `items[0].save(...)` |
 | `ambiguous` | multiple candidates | two `User.save` in different components with no explicit import |
 | `no-match` | no candidate found | typo, a member the declaration a call is bound to does not declare, or callee not in workspace and not imported |
 
@@ -390,6 +402,7 @@ Every implementation of the resolver must pass the following.
 | CR12 | qualified workspace-scope (no import, unique globally) | `resolved` = that Symbol id, confidence `low` |
 | CR13 | ambiguous qualified name (two matches) | `resolved` = `null`, confidence `medium` |
 | CR14 | `this.<method>` in untyped mode | `resolved` = `null`, confidence `medium` |
+| CR14a | `this.repo.find()` beside `constructor(private readonly repo: UserRepository)`, the class imported or declared in the caller's file, in untyped mode | `resolved` = `UserRepository.find`, the instance member, confidence `medium`. `null`, bucketed `dynamic`, when the type is an interface, when the class does not declare `find` itself, when the file binds no such name, and for an unannotated, union-typed or inherited field. With an LSP hint for the call, the hint's answer |
 | CR15 | `new <ClassName>()` where class is imported | `resolved` = the class Symbol id, confidence `high` |
 
 ### 10.2 LSP-tier resolution

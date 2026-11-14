@@ -238,3 +238,51 @@ describe("scan — a call through the name of a dropped class", () => {
     })
   })
 })
+
+describe("scan — a call through a field of a declared type", () => {
+  it("reaches the member of the class the field is declared with, and only of a class", async () => {
+    await workspace.writeSource(
+      "src/repo.ts",
+      [
+        "export class UserRepository {",
+        "  find(id: string) { return id }",
+        "}",
+        "export interface Store { find(id: string): string }",
+        "",
+      ].join("\n"),
+    )
+    await workspace.writeSource(
+      "src/service.ts",
+      [
+        'import { type Store, UserRepository } from "./repo"',
+        "export class Base { protected inherited: UserRepository = new UserRepository() }",
+        "export class UserService extends Base {",
+        "  private untyped",
+        "  private either: UserRepository | null = null",
+        "  constructor(private readonly repo: UserRepository, private store: Store) {",
+        "    super()",
+        "    this.untyped = repo",
+        "  }",
+        "  byId(id: string) {",
+        "    this.repo.find(id)",
+        "    this.untyped.find(id)",
+        "    this.either.find(id)",
+        "    this.inherited.find(id)",
+        "    this.store.find(id)",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const { ir } = await scanTypeScript(workspace.root)
+    const byId = ir.symbols.find((s) => s.id === "ts:src/service.ts#UserService.byId")
+    expect(byId?.calls.map((call) => [call.target, call.resolved])).toEqual([
+      ["this.repo.find", "ts:src/repo.ts#UserRepository.find"],
+      ["this.untyped.find", null],
+      ["this.either.find", null],
+      ["this.inherited.find", null],
+      ["this.store.find", null],
+    ])
+  })
+})
